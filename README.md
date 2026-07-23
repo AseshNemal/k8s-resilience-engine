@@ -102,7 +102,7 @@ The system is divided into four independently evaluatable research components.
 
 - **Name:** A.D. Perera
 - **Registration Number:** IT23236400
-- **Component Folder:** `app/engine/workflow_discovery/`
+- **Component Folder:** `app/engine/workflow_dependency_modeling/`
 
 ### Main Responsibility
 
@@ -192,7 +192,7 @@ Combines business workflow definitions with runtime distributed traces to identi
 
 - **Name:** P.A.M. Minara
 - **Registration Number:** IT23154476
-- **Component Folder:** `app/engine/deployment_graph/`
+- **Component Folder:** `app/engine/deployment_topology_modeling/`
 
 ### Main Responsibility
 
@@ -331,7 +331,7 @@ Validates the gap between declared Kubernetes deployment intent and actual runti
 
 - **Name:** K.V.D.Y.R. Karawita
 - **Registration Number:** IT23236882
-- **Component Folder:** `app/engine/risk_prediction/`
+- **Component Folder:** `app/engine/failure_impact_prediction/`
 
 ### Main Responsibility
 
@@ -426,7 +426,7 @@ Introduces a deterministic cross-layer graph simulation method that converts ser
 
 - **Name:** L.A. Nemal
 - **Registration Number:** IT23236264
-- **Component Folder:** `app/engine/recommendation_validation/`
+- **Component Folder:** `app/engine/recommendation_evaluation_validation/`
 
 ### Main Responsibility
 
@@ -636,14 +636,14 @@ k8s-resilience-engine/
 │   │       └── client.py
 │   │
 │   └── engine/
-│       ├── workflow_discovery/
+│       ├── workflow_dependency_modeling/
 │       │   ├── service.py
 │       │   ├── trace_parser.py
 │       │   ├── dependency_classifier.py
 │       │   ├── graph_builder.py
 │       │   └── evaluator.py
 │       │
-│       ├── deployment_graph/
+│       ├── deployment_topology_modeling/
 │       │   ├── service.py
 │       │   ├── manifest_parser.py
 │       │   ├── cluster_collector.py
@@ -651,7 +651,7 @@ k8s-resilience-engine/
 │       │   ├── concentration.py
 │       │   └── drift_analyzer.py
 │       │
-│       ├── risk_prediction/
+│       ├── failure_impact_prediction/
 │       │   ├── service.py
 │       │   ├── cross_layer_graph.py
 │       │   ├── node_failure_simulator.py
@@ -659,7 +659,7 @@ k8s-resilience-engine/
 │       │   ├── workflow_survival.py
 │       │   └── blast_radius.py
 │       │
-│       └── recommendation_validation/
+│       └── recommendation_evaluation_validation/
 │           ├── service.py
 │           ├── candidate_generator.py
 │           ├── virtual_model.py
@@ -670,10 +670,10 @@ k8s-resilience-engine/
 │           └── validation.py
 │
 ├── tests/
-│   ├── workflow_discovery/
-│   ├── deployment_graph/
-│   ├── risk_prediction/
-│   └── recommendation_validation/
+│   ├── workflow_dependency_modeling/
+│   ├── deployment_topology_modeling/
+│   ├── failure_impact_prediction/
+│   └── recommendation_evaluation_validation/
 │
 ├── sample_data/
 │   ├── workflow.json
@@ -686,7 +686,7 @@ k8s-resilience-engine/
 │   ├── baseline/
 │   ├── node_failures/
 │   ├── placement_drift/
-│   └── recommendation_validation/
+│   └── recommendation_evaluation_validation/
 │
 ├── deploy/
 │   └── kubernetes/
