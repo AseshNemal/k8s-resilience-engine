@@ -1,0 +1,28 @@
+{# Shared partial macro: collapsible raw-JSON viewer.
+   Import with:
+   {% from "partials/raw_json_panel.html" import raw_json_panel %}
+   {{ raw_json_panel("workflow-raw-json", "View Raw WorkflowGraph") }}
+
+   Page JS must call ResilienceUi.initJsonPanel(panelElement, data) to fill it in,
+   where panelElement = document.getElementById(panel_id). #}
+{% macro raw_json_panel(panel_id, label="View Raw Data") %}
+<div class="json-panel" id="{{ panel_id }}">
+    <button
+        type="button"
+        class="json-panel__toggle"
+        data-role="json-toggle"
+        aria-expanded="false"
+    >
+        <span data-role="json-toggle-label">{{ label }}</span>
+        <span aria-hidden="true">▾</span>
+    </button>
+    <div class="json-panel__body">
+        <div class="json-panel__actions">
+            <button type="button" class="secondary-button" data-role="json-copy">
+                Copy JSON
+            </button>
+        </div>
+        <pre data-role="json-content" tabindex="0"></pre>
+    </div>
+</div>
+{% endmacro %}

@@ -1,0 +1,64 @@
+/*
+ * Shared design tokens for the K8s Resilience Engine dashboard.
+ * SHARED FILE — changes require team review.
+ */
+
+:root {
+    --color-primary: #2563eb;
+    --color-primary-dark: #1d4ed8;
+    --color-secondary: #0891b2;
+
+    --color-success: #16a34a;
+    --color-warning: #d97706;
+    --color-danger: #dc2626;
+    --color-info: #0284c7;
+
+    --color-sidebar: #0f172a;
+    --color-sidebar-hover: #1e293b;
+    --color-sidebar-muted: #94a3b8;
+
+    --color-page: #f1f5f9;
+    --color-surface: #ffffff;
+    --color-surface-soft: #f8fafc;
+    --color-border: #e2e8f0;
+
+    --color-text: #0f172a;
+    --color-text-muted: #64748b;
+
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+
+    --radius-small: 6px;
+    --radius-medium: 10px;
+    --radius-large: 14px;
+
+    --shadow-card:
+        0 1px 3px rgba(15, 23, 42, 0.08),
+        0 1px 2px rgba(15, 23, 42, 0.04);
+
+    /* Icon-badge / pill tints — soft background + saturated foreground. */
+    --tint-blue-bg: #dbeafe;
+    --tint-blue-fg: #1d4ed8;
+    --tint-teal-bg: #cffafe;
+    --tint-teal-fg: #0e7490;
+    --tint-red-bg: #fee2e2;
+    --tint-red-fg: #b91c1c;
+    --tint-purple-bg: #ede9fe;
+    --tint-purple-fg: #6d28d9;
+    --tint-green-bg: #dcfce7;
+    --tint-green-fg: #15803d;
+    --tint-amber-bg: #fef3c7;
+    --tint-amber-fg: #b45309;
+
+    --sidebar-width: 264px;
+    --sidebar-width-collapsed: 76px;
+    --topbar-height: 64px;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+    --font-mono: "SFMono-Regular", ui-monospace, "SF Mono", Menlo, Consolas,
+        "Liberation Mono", monospace;
+}

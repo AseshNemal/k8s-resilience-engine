@@ -605,17 +605,56 @@ k8s-resilience-engine/
 │   │   ├── recommendations.py
 │   │   └── validations.py
 │   │
+│   ├── web/                          # HTML page routers — render templates only
+│   │   ├── templates.py              # shared Jinja2Templates instance
+│   │   ├── dashboard.py               (GET /)
+│   │   ├── workflows.py               (GET /components/workflows)
+│   │   ├── deployments.py             (GET /components/deployments)
+│   │   ├── failure_impacts.py         (GET /components/failure-impacts)
+│   │   └── recommendations.py         (GET /components/recommendations)
+│   │
 │   ├── templates/
-│   │   ├── dashboard.html
-│   │   ├── workflows.html
-│   │   ├── deployments.html
-│   │   ├── risks.html
-│   │   ├── recommendations.html
-│   │   └── validations.html
+│   │   ├── base.html                 # shell: sidebar + topbar + content block
+│   │   ├── dashboard.html            # Overview page
+│   │   ├── partials/
+│   │   │   ├── sidebar.html
+│   │   │   ├── topbar.html
+│   │   │   ├── icons.html            # shared inline-SVG icon library
+│   │   │   ├── metric_card.html
+│   │   │   ├── status_badge.html
+│   │   │   ├── loading_state.html
+│   │   │   ├── empty_state.html
+│   │   │   └── raw_json_panel.html
+│   │   └── components/
+│   │       ├── workflows.html
+│   │       ├── deployments.html
+│   │       ├── failure_impacts.html
+│   │       └── recommendations.html
 │   │
 │   ├── static/
 │   │   ├── css/
-│   │   └── js/
+│   │   │   ├── variables.css         # design tokens (colors, spacing, tints)
+│   │   │   ├── reset.css
+│   │   │   ├── layout.css            # sidebar/topbar shell, collapse behaviour
+│   │   │   ├── components.css        # cards, badges, tables, icon-badges
+│   │   │   ├── dashboard.css
+│   │   │   └── pages/
+│   │   │       ├── workflows.css
+│   │   │       ├── deployments.css
+│   │   │       ├── failure_impacts.css
+│   │   │       └── recommendations.css
+│   │   ├── js/
+│   │   │   ├── api.js                # shared fetch helper
+│   │   │   ├── ui.js                 # state rendering, formatting, JSON panel
+│   │   │   ├── app.js                # sidebar drawer/collapse, health badge
+│   │   │   └── components/
+│   │   │       ├── dashboard.js
+│   │   │       ├── workflows.js
+│   │   │       ├── deployments.js
+│   │   │       ├── failure_impacts.js
+│   │   │       └── recommendations.js
+│   │   └── img/
+│   │       └── logo.png
 │   │
 │   ├── core/
 │   │   ├── config.py
@@ -642,44 +681,40 @@ k8s-resilience-engine/
 │   │       └── client.py
 │   │
 │   └── engine/
-│       ├── workflow_dependency_modeling/
-│       │   ├── service.py
-│       │   ├── trace_parser.py
-│       │   ├── dependency_classifier.py
-│       │   ├── graph_builder.py
-│       │   └── evaluator.py
+│       ├── workflow_dependency_modeling/       # Member 1 — stub only
+│       │   ├── service.py                      # get_sample_workflow()
+│       │   ├── trace_reader.py
+│       │   ├── interaction_extractor.py
+│       │   └── graph_builder.py
 │       │
-│       ├── deployment_topology_modeling/
-│       │   ├── service.py
+│       ├── deployment_topology_modeling/       # Member 2 — stub only
+│       │   ├── service.py                      # get_sample_deployment()
 │       │   ├── manifest_parser.py
-│       │   ├── cluster_collector.py
-│       │   ├── graph_builder.py
-│       │   ├── concentration.py
-│       │   └── drift_analyzer.py
+│       │   ├── cluster_state_parser.py
+│       │   ├── ownership_resolver.py
+│       │   └── concentration_analyzer.py
 │       │
-│       ├── failure_impact_prediction/
-│       │   ├── service.py
-│       │   ├── cross_layer_graph.py
+│       ├── failure_impact_prediction/          # Member 3 — stub only
+│       │   ├── service.py                      # get_sample_failure_impact()
 │       │   ├── node_failure_simulator.py
 │       │   ├── service_survival.py
 │       │   ├── workflow_survival.py
 │       │   └── blast_radius.py
 │       │
-│       └── recommendation_evaluation_validation/
-│           ├── service.py
+│       └── recommendation_evaluation_validation/  # Member 4 — real prototype logic
+│           ├── service.py                      # evaluate_first_recommendation()
 │           ├── candidate_generator.py
 │           ├── virtual_model.py
 │           ├── simulator.py
-│           ├── feasibility.py
-│           ├── ranking.py
-│           ├── yaml_generator.py
-│           └── validation.py
+│           ├── feasibility_analyzer.py
+│           ├── metrics.py
+│           └── simulation_result.py
 │
 ├── tests/
-│   ├── workflow_dependency_modeling/
-│   ├── deployment_topology_modeling/
-│   ├── failure_impact_prediction/
+│   ├── test_sample_endpoints.py
+│   ├── test_component_pages.py
 │   └── recommendation_evaluation_validation/
+│       └── test_topology_spread.py
 │
 ├── sample_data/
 │   ├── workflow.json
@@ -698,7 +733,9 @@ k8s-resilience-engine/
 │   └── kubernetes/
 │
 ├── docs/
-│   └── TAF-J26-SE-311.pdf
+│   ├── TAF-J26-SE-311.pdf
+│   ├── PROJECT_CONTEXT.md
+│   └── COMPONENT_INTERFACE_OWNERSHIP.md
 │
 ├── requirements.txt
 ├── .env.example
@@ -838,36 +875,77 @@ Real Member 4 output
 
 # Running the Application
 
-## Create a virtual environment
+Requires Python 3.11+ (developed against 3.13).
+
+## macOS
 
 ```bash
+# 1. Clone and enter the repo
+git clone <repo-url>
+cd k8s-resilience-engine
+
+# 2. Create and activate a virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Run the app (auto-reloads on file changes)
+uvicorn app.main:app --reload
+
+# 5. Run the test suite
+python -m pytest -v
 ```
 
-Windows:
+## Windows
+
+PowerShell:
 
 ```powershell
-.venv\Scripts\activate
-```
+# 1. Clone and enter the repo
+git clone <repo-url>
+cd k8s-resilience-engine
 
-## Install dependencies
+# 2. Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 
-```bash
+# 3. Install dependencies
 pip install -r requirements.txt
-```
 
-## Run FastAPI
-
-```bash
+# 4. Run the app (auto-reloads on file changes)
 uvicorn app.main:app --reload
+
+# 5. Run the test suite
+python -m pytest -v
 ```
 
-Open:
+If PowerShell blocks the activation script (`running scripts is disabled on this system`), run
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first, or activate from Command
+Prompt instead with `.venv\Scripts\activate.bat`.
+
+## Open the app
 
 - Dashboard: `http://127.0.0.1:8000`
-- API documentation: `http://127.0.0.1:8000/docs`
+- Component pages: `http://127.0.0.1:8000/components/workflows` (and `/deployments`,
+  `/failure-impacts`, `/recommendations`)
+- API documentation (Swagger UI): `http://127.0.0.1:8000/docs`
 - Health endpoint: `http://127.0.0.1:8000/api/health`
+
+Stop the server with `Ctrl+C`. Deactivate the virtual environment with `deactivate` (same
+command on macOS and Windows).
+
+## Deployment
+
+There is no deployment pipeline yet — `deploy/kubernetes/` is currently an empty placeholder
+folder, and no `Dockerfile` exists in this repo. Right now the only supported way to run the
+app is the local development server above (`uvicorn app.main:app --reload`), which is
+sufficient for research demonstrations and supervisor presentations.
+
+Containerizing the app and writing real Kubernetes manifests for `deploy/kubernetes/` is
+future work — see [Development Phases](#development-phases) and the per-member "First"
+checklists earlier in this document.
 
 ---
 
@@ -881,6 +959,24 @@ Open:
 | GET | `/api/failure-impacts` | Member 3 |
 | POST | `/api/recommendations` | Member 4 |
 | GET | `/api/validations` | Member 4 |
+
+Currently these are served as `/api/workflows/sample`, `/api/deployments/sample`, etc. — the
+`/sample` suffix will drop once each component returns request-driven output instead of a
+fixture.
+
+# Web Page Routes
+
+| Route | Renders |
+|---|---|
+| `GET /` | Overview dashboard |
+| `GET /components/workflows` | Workflow Dependency Modeling |
+| `GET /components/deployments` | Deployment Topology Modeling |
+| `GET /components/failure-impacts` | Failure Impact Prediction |
+| `GET /components/recommendations` | Recommendation Evaluation and Validation |
+
+Each page fetches its component's `/sample` endpoint client-side and renders it into cards,
+tables, and visualizations — raw JSON stays available behind a collapsible panel. See
+`docs/COMPONENT_INTERFACE_OWNERSHIP.md` for which files each member owns in this UI layer.
 
 ---
 
@@ -920,13 +1016,17 @@ Shared changes should be reviewed before merging.
 - [x] Folder structure finalized
 - [x] FastAPI and Jinja2 skeleton completed
 - [x] Shared schemas completed
-- [ ] Sample JSON files completed (only `workflow.json` so far)
+- [x] Sample JSON files completed (all five contracts)
 - [x] Mock API routes completed
 - [x] Dashboard prototype completed
-- [ ] Member 1 component completed
-- [ ] Member 2 component completed
-- [ ] Member 3 component completed
-- [ ] Member 4 component completed
+- [x] Full research-dashboard UI completed (Overview + 4 component pages, shared
+      design system, icon library, collapsible sidebar) — still rendering sample data only
+- [ ] Member 1 component completed (engine service is still a fixture loader)
+- [ ] Member 2 component completed (engine service is still a fixture loader)
+- [ ] Member 3 component completed (engine service is still a fixture loader)
+- [ ] Member 4 component completed (topology-spread candidate generation, feasibility
+      checking, and concentration metrics are real; ranking, YAML generation, and
+      post-deployment validation are still unbuilt)
 - [ ] Full integration completed
 - [ ] Controlled experiments completed
 - [ ] Final validation completed

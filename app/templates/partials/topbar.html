@@ -1,0 +1,26 @@
+{# Shared partial — team review required. Expects `page_title` in context. #}
+{% from "partials/icons.html" import icon %}
+<header class="topbar">
+    <div style="display:flex; align-items:center; gap: var(--space-sm); min-width:0;">
+        <button
+            type="button"
+            class="nav-toggle"
+            data-role="nav-toggle"
+            aria-label="Toggle navigation"
+            aria-expanded="false"
+            aria-controls="primary-sidebar"
+        >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+        </button>
+        <h1 class="topbar__title">{{ page_title }}</h1>
+    </div>
+
+    <div class="topbar__meta">
+        <span class="pill-badge pill-badge--blue">{{ icon("flask", 14) }} Research Environment</span>
+        <span class="pill-badge pill-badge--teal">{{ icon("database", 14) }} Sample Data</span>
+        <span class="pill-badge pill-badge--muted" data-role="health-badge">Checking system…</span>
+        <span class="topbar__refreshed" data-role="last-refreshed"></span>
+    </div>
+</header>

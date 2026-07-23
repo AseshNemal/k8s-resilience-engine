@@ -1,0 +1,122 @@
+/*
+ * Recommendation Evaluation and Validation page styles.
+ * Owned by: Member 4 (L.A. Nemal).
+ */
+
+.candidate-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-large);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-card);
+    padding: var(--space-lg);
+}
+
+.candidate-card + .candidate-card {
+    margin-top: var(--space-md);
+}
+
+.candidate-card--selected {
+    border-color: var(--color-primary);
+    border-width: 2px;
+}
+
+.candidate-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.candidate-card__title {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.candidate-card__target {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-top: 2px;
+}
+
+.candidate-card__stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-md);
+    margin-top: var(--space-md);
+}
+
+.candidate-card__before-after {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-top: var(--space-md);
+    font-size: 13px;
+}
+
+.candidate-card__stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-text-muted);
+}
+
+.candidate-card__stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    margin-top: 2px;
+}
+
+.placement-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+}
+
+.placement-compare__column-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-sm);
+}
+
+.placement-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    font-size: 13px;
+    font-family: var(--font-mono);
+}
+
+.placement-row + .placement-row {
+    margin-top: 6px;
+}
+
+.validation-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+}
+
+.yaml-placeholder {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--color-text-muted);
+    background: var(--color-surface-soft);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-medium);
+    padding: var(--space-md);
+    line-height: 1.7;
+}
+
+@media (max-width: 768px) {
+    .candidate-card__stats,
+    .placement-compare,
+    .validation-compare {
+        grid-template-columns: 1fr;
+    }
+}

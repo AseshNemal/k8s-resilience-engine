@@ -1,0 +1,5 @@
+{# Shared partial. Usage: {% include "partials/status_badge.html" with context %}
+   Expects `badge_variant` (success|warning|danger|info|muted) and `badge_text`. #}
+<span class="status-badge status-badge--{{ badge_variant | default('muted') }}">
+    {{ badge_text }}
+</span>

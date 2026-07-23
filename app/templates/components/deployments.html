@@ -1,0 +1,102 @@
+{# Deployment Topology Modeling page. Owned by: Member 2 (P.A.M. Minara). #}
+{% extends "base.html" %}
+{% from "partials/metric_card.html" import metric_card %}
+{% from "partials/loading_state.html" import loading_state %}
+{% from "partials/raw_json_panel.html" import raw_json_panel %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2 class="page-header__title">Deployment Topology Modeling</h2>
+    <p class="page-header__subtitle">
+        Inspect actual pod placement and identify service exposure across worker nodes and zones.
+    </p>
+    <div class="page-header__meta">
+        <span class="component-owner">Owner: <strong>Member 2</strong></span>
+        <span class="contract-chip">In: Kubernetes Manifests</span>
+        <span class="contract-chip">In: Live Cluster State</span>
+        <span class="contract-chip contract-chip--out">Out: DeploymentGraph</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot">Sample Data</span>
+        <button type="button" class="secondary-button" data-role="reload-button">
+            Reload Sample Data
+        </button>
+    </div>
+</div>
+
+<div data-role="page-region">
+    {{ loading_state("Loading sample DeploymentGraph…") }}
+</div>
+
+<template data-role="page-template">
+    <section class="metric-grid" aria-label="Deployment metrics">
+        {{ metric_card("deployment-node-count", "Total Nodes", icon_name="server", icon_color="blue") }}
+        {{ metric_card("deployment-service-count", "Total Services", icon_name="topology", icon_color="teal") }}
+        {{ metric_card("deployment-ready-pods", "Ready Pods", icon_name="check-circle", icon_color="green") }}
+        {{ metric_card("deployment-highest-concentration", "Highest Replica Concentration", icon_name="gauge", icon_color="red") }}
+    </section>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Zone Topology</h3>
+        <span class="section-header__note">Nodes grouped by zone, with assigned pods</span>
+    </div>
+    <div class="zone-grid" data-role="deployment-zone-grid"></div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Placement Concentration</h3>
+    </div>
+    <div class="card">
+        <div class="concentration-panel" data-role="deployment-concentration-panel"></div>
+        <p class="ui-note" style="margin-top: var(--space-md);">
+            These are interface display thresholds and not final research classification thresholds.
+        </p>
+    </div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Service Placement</h3>
+    </div>
+    <div class="card">
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Service</th>
+                        <th scope="col">Declared</th>
+                        <th scope="col">Ready</th>
+                        <th scope="col">Nodes Used</th>
+                        <th scope="col">Concentration</th>
+                        <th scope="col">Exposure</th>
+                    </tr>
+                </thead>
+                <tbody data-role="deployment-service-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div data-role="deployment-warning-region"></div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Raw Data</h3>
+    </div>
+    {{ raw_json_panel("deployment-raw-json", "View Raw DeploymentGraph") }}
+
+    <div class="section-header">
+        <h3 class="section-header__title">Future Work</h3>
+    </div>
+    <div class="card">
+        <ul class="future-work-list">
+            <li>Connect to a live Kubernetes cluster</li>
+            <li>Compare declared versus actual placement over time</li>
+            <li>Placement drift timeline across deploys and reschedules</li>
+            <li>Failure-domain labels beyond zone (rack, region)</li>
+            <li>Scaling event history</li>
+        </ul>
+    </div>
+</template>
+{% endblock %}
+
+{% block page_js %}
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}" defer></script>
+{% endblock %}

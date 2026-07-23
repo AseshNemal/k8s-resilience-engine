@@ -1,0 +1,315 @@
+/*
+ * Application shell: sidebar + topbar + content. SHARED FILE — team review.
+ */
+
+.app-shell {
+    min-height: 100vh;
+}
+
+/* Sidebar — fixed to the viewport (not a grid/sticky item, to avoid grid
+   stretch sizing fighting with position:sticky's containing-block rules). */
+.sidebar {
+    background: var(--color-sidebar);
+    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-lg) var(--space-md);
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    overflow-y: auto;
+    z-index: 10;
+}
+
+.sidebar__brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--color-sidebar-hover);
+}
+
+.sidebar__brand-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    flex-shrink: 0;
+}
+
+.sidebar__brand-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.sidebar__brand-text {
+    min-width: 0;
+    overflow: hidden;
+}
+
+.sidebar__brand-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.sidebar__brand-subtitle {
+    font-size: 11px;
+    color: var(--color-sidebar-muted);
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
+.sidebar__nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: var(--space-lg);
+    flex: 1;
+}
+
+.sidebar__link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 10px var(--space-md);
+    border-radius: var(--radius-small);
+    color: #cbd5e1;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.sidebar__link:hover {
+    background: var(--color-sidebar-hover);
+    color: #ffffff;
+    text-decoration: none;
+}
+
+.sidebar__link.is-active {
+    background: var(--color-primary);
+    color: #ffffff;
+}
+
+.sidebar__link-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--color-sidebar-muted);
+}
+
+.sidebar__link.is-active .sidebar__link-icon {
+    color: #dbeafe;
+}
+
+.sidebar__link-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar__footer {
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--color-sidebar-hover);
+    font-size: 11px;
+    color: var(--color-sidebar-muted);
+}
+
+.sidebar__project-id {
+    font-family: var(--font-mono);
+    color: #cbd5e1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar__collapse-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    margin-top: auto;
+    padding: 8px var(--space-md);
+    border-radius: var(--radius-small);
+    border: none;
+    background: transparent;
+    color: var(--color-sidebar-muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.sidebar__collapse-btn:hover {
+    background: var(--color-sidebar-hover);
+    color: #ffffff;
+}
+
+.sidebar__collapse-btn svg {
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+}
+
+/* Content column — offset by the fixed sidebar's width. */
+.content {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin-left: var(--sidebar-width);
+    transition: margin-left 0.15s ease;
+}
+
+/* Topbar */
+.topbar {
+    height: var(--topbar-height);
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding: 0 var(--space-lg);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+
+.topbar__title {
+    font-size: 16px;
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.topbar__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-shrink: 0;
+}
+
+.topbar__refreshed {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.page {
+    padding: var(--space-lg);
+    max-width: 1280px;
+    width: 100%;
+}
+
+/* Mobile nav toggle (hidden on desktop) */
+.nav-toggle {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    padding: 6px 10px;
+    color: var(--color-text);
+}
+
+.sidebar__backdrop {
+    display: none;
+}
+
+@media (max-width: 1024px) {
+    :root {
+        --sidebar-width: 220px;
+    }
+}
+
+/* Collapse-to-icon-only sidebar — desktop only. Toggled via a `sidebar-collapsed`
+   class on <body> so both the fixed sidebar and the content offset react together. */
+@media (min-width: 769px) {
+    body.sidebar-collapsed .sidebar {
+        width: var(--sidebar-width-collapsed);
+        padding-left: var(--space-sm);
+        padding-right: var(--space-sm);
+    }
+
+    body.sidebar-collapsed .content {
+        margin-left: var(--sidebar-width-collapsed);
+    }
+
+    body.sidebar-collapsed .sidebar__brand {
+        justify-content: center;
+    }
+
+    body.sidebar-collapsed .sidebar__brand-text,
+    body.sidebar-collapsed .sidebar__link-label,
+    body.sidebar-collapsed .sidebar__footer,
+    body.sidebar-collapsed .sidebar__collapse-btn-label {
+        display: none;
+    }
+
+    body.sidebar-collapsed .sidebar__link {
+        justify-content: center;
+    }
+
+    body.sidebar-collapsed .sidebar__collapse-btn {
+        justify-content: center;
+    }
+
+    body.sidebar-collapsed .sidebar__collapse-btn svg {
+        transform: rotate(180deg);
+    }
+}
+
+@media (max-width: 768px) {
+    .content {
+        margin-left: 0;
+    }
+
+    .sidebar {
+        width: 264px;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        z-index: 40;
+    }
+
+    .sidebar.is-open {
+        transform: translateX(0);
+    }
+
+    .sidebar__backdrop.is-open {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.5);
+        z-index: 30;
+    }
+
+    .nav-toggle {
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .sidebar__collapse-btn {
+        display: none;
+    }
+
+    .page {
+        padding: var(--space-md);
+    }
+
+    /* Let the badge row wrap instead of forcing page-wide horizontal scroll. */
+    .topbar {
+        height: auto;
+        flex-wrap: wrap;
+        row-gap: var(--space-sm);
+        padding: var(--space-sm) var(--space-md);
+    }
+
+    .topbar__meta {
+        flex-wrap: wrap;
+        row-gap: var(--space-xs);
+        width: 100%;
+    }
+}

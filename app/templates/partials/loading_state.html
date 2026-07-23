@@ -1,0 +1,12 @@
+{# Shared partial macro: initial server-rendered loading skeleton for a data region.
+   Import with:
+   {% from "partials/loading_state.html" import loading_state %}
+   {{ loading_state("Loading sample WorkflowGraph…") }} #}
+{% macro loading_state(message="Loading sample data…") %}
+<div class="loading-skeleton" role="status" aria-live="polite" aria-busy="true">
+    <span class="is-hidden">{{ message }}</span>
+    <div class="skeleton-bar skeleton-bar--wide"></div>
+    <div class="skeleton-bar skeleton-bar--tall"></div>
+    <div class="skeleton-bar"></div>
+</div>
+{% endmacro %}

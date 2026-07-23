@@ -1,0 +1,116 @@
+{# Workflow Dependency Modeling page. Owned by: Member 1 (A.D. Perera). #}
+{% extends "base.html" %}
+{% from "partials/metric_card.html" import metric_card %}
+{% from "partials/loading_state.html" import loading_state %}
+{% from "partials/raw_json_panel.html" import raw_json_panel %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2 class="page-header__title">Workflow Dependency Modeling</h2>
+    <p class="page-header__subtitle">
+        Identify mandatory and optional service dependencies using workflow definitions
+        and distributed traces.
+    </p>
+    <div class="page-header__meta">
+        <span class="component-owner">Owner: <strong>Member 1</strong></span>
+        <span class="contract-chip">In: Workflow Definition</span>
+        <span class="contract-chip">In: Distributed Traces</span>
+        <span class="contract-chip contract-chip--out">Out: WorkflowGraph</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot">Sample Data</span>
+        <button type="button" class="secondary-button" data-role="reload-button">
+            Reload Sample Data
+        </button>
+    </div>
+</div>
+
+<div data-role="page-region">
+    {{ loading_state("Loading sample WorkflowGraph…") }}
+</div>
+
+<template data-role="page-template">
+    <section class="metric-grid" aria-label="Workflow metrics">
+        {{ metric_card("workflow-id", "Workflow ID", icon_name="workflow", icon_color="blue") }}
+        {{ metric_card("workflow-criticality", "Criticality", hint="Higher means more business-critical", icon_name="percent", icon_color="teal") }}
+        {{ metric_card("workflow-mandatory-count", "Mandatory Services", icon_name="list-checks", icon_color="purple") }}
+        {{ metric_card("workflow-optional-count", "Optional Services", icon_name="layers", icon_color="amber") }}
+        {{ metric_card("workflow-edge-count", "Dependency Edges", icon_name="share", icon_color="green") }}
+    </section>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Dependency Graph</h3>
+        <span class="section-header__note">Entry service → mandatory chain → optional branch</span>
+    </div>
+    <div class="card">
+        <div data-role="workflow-graph"></div>
+        <div class="graph-legend">
+            <span class="graph-legend__item">
+                <span class="graph-legend__swatch graph-legend__swatch--entry"></span> Entry service
+            </span>
+            <span class="graph-legend__item">
+                <span class="graph-legend__swatch graph-legend__swatch--mandatory"></span> Mandatory service
+            </span>
+            <span class="graph-legend__item">
+                <span class="graph-legend__swatch graph-legend__swatch--optional"></span> Optional service
+            </span>
+        </div>
+    </div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Service Classification</h3>
+    </div>
+    <div class="grid-2">
+        <div class="card">
+            <div class="section-header__title" style="margin-bottom: var(--space-sm);">Mandatory</div>
+            <div class="service-list" data-role="workflow-mandatory-list"></div>
+        </div>
+        <div class="card">
+            <div class="section-header__title" style="margin-bottom: var(--space-sm);">Optional</div>
+            <div class="service-list" data-role="workflow-optional-list"></div>
+        </div>
+    </div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Dependency Edges</h3>
+        <span class="section-header__note">Path type is a UI classification, not a research prediction</span>
+    </div>
+    <div class="card">
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Source</th>
+                        <th scope="col">Target</th>
+                        <th scope="col">Type</th>
+                    </tr>
+                </thead>
+                <tbody data-role="workflow-edge-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Raw Data</h3>
+    </div>
+    {{ raw_json_panel("workflow-raw-json", "View Raw WorkflowGraph") }}
+
+    <div class="section-header">
+        <h3 class="section-header__title">Future Work</h3>
+    </div>
+    <div class="card">
+        <ul class="future-work-list">
+            <li>Jaeger trace selector for choosing which recorded run to analyze</li>
+            <li>Workflow selection across multiple business workflows</li>
+            <li>Mandatory dependency confidence scoring from trace evidence</li>
+            <li>Interactive, zoomable dependency graph</li>
+        </ul>
+    </div>
+</template>
+{% endblock %}
+
+{% block page_js %}
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}" defer></script>
+{% endblock %}

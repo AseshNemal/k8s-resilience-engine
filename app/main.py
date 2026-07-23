@@ -1,9 +1,7 @@
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from app.api import (
     deployments,
@@ -12,6 +10,13 @@ from app.api import (
     recommendations,
     validations,
     workflows,
+)
+from app.web import (
+    dashboard,
+    deployments as web_deployments,
+    failure_impacts as web_failure_impacts,
+    recommendations as web_recommendations,
+    workflows as web_workflows,
 )
 
 
@@ -32,10 +37,7 @@ app.mount(
     name="static",
 )
 
-templates = Jinja2Templates(
-    directory=str(BASE_DIR / "templates")
-)
-
+# JSON API routers
 app.include_router(health.router)
 app.include_router(workflows.router)
 app.include_router(deployments.router)
@@ -43,13 +45,9 @@ app.include_router(failure_impacts.router)
 app.include_router(recommendations.router)
 app.include_router(validations.router)
 
-
-@app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard.html",
-        context={
-            "page_title": "K8s Resilience Engine",
-        },
-    )
+# HTML page routers (app/web/) — render templates only, no research logic.
+app.include_router(dashboard.router)
+app.include_router(web_workflows.router)
+app.include_router(web_deployments.router)
+app.include_router(web_failure_impacts.router)
+app.include_router(web_recommendations.router)

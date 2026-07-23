@@ -1,0 +1,27 @@
+{# Shared partial macro. Import with:
+   {% from "partials/metric_card.html" import metric_card %}
+   {{ metric_card("checkout-criticality", "Criticality", hint="Sample workflow", icon_name="percent", icon_color="blue") }}
+
+   `metric_id` is written to data-metric so page JS can find and fill the value.
+   `icon_name` is a name from partials/icons.html; `icon_color` is one of the
+   icon-badge tint variants (blue/teal/red/purple/green/amber). Both optional —
+   omit for a plain card with no icon badge. #}
+{% from "partials/icons.html" import icon %}
+{% macro metric_card(metric_id, label, hint="", variant="", icon_name="", icon_color="blue") %}
+<div class="metric-card {{ "metric-card--" + variant if variant }}">
+    {% if icon_name %}
+    <div class="metric-card__top">
+        <span class="icon-badge icon-badge--{{ icon_color }}">{{ icon(icon_name, 18) }}</span>
+    </div>
+    <div class="metric-card__body">
+    {% endif %}
+        <div class="metric-card__label">{{ label }}</div>
+        <div class="metric-card__value" data-metric="{{ metric_id }}">—</div>
+        {% if hint %}
+        <div class="metric-card__hint">{{ hint }}</div>
+        {% endif %}
+    {% if icon_name %}
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}

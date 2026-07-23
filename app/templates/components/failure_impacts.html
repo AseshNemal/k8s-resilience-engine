@@ -1,0 +1,143 @@
+{# Failure Impact Prediction page. Owned by: Member 3 (K.V.D.Y.R. Karawita). #}
+{% extends "base.html" %}
+{% from "partials/metric_card.html" import metric_card %}
+{% from "partials/loading_state.html" import loading_state %}
+{% from "partials/raw_json_panel.html" import raw_json_panel %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/failure_impacts.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2 class="page-header__title">Failure Impact Prediction</h2>
+    <p class="page-header__subtitle">
+        Predict service and workflow disruption after a selected Kubernetes worker-node failure.
+    </p>
+    <div class="page-header__meta">
+        <span class="component-owner">Owner: <strong>Member 3</strong></span>
+        <span class="contract-chip">In: WorkflowGraph</span>
+        <span class="contract-chip">In: DeploymentGraph</span>
+        <span class="contract-chip">In: Failed Node</span>
+        <span class="contract-chip contract-chip--out">Out: FailureImpactReport</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot">Sample Data</span>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: var(--space-lg);">
+    <div class="scenario-panel">
+        <div>
+            <div class="section-header__title" style="margin-bottom: 4px;">Failure Scenario</div>
+            <div class="scenario-panel__detail">
+                Selected worker node: <span class="scenario-panel__node" data-metric="scenario-node">node-1</span>
+            </div>
+            <p class="ui-note" style="margin-top: 4px;">
+                Sample mode — this reloads sample FailureImpactReport data, not a live cluster failure.
+            </p>
+        </div>
+        <button type="button" class="action-button" data-role="reload-button">
+            Run Sample Simulation
+        </button>
+    </div>
+</div>
+
+<div data-role="page-region">
+    {{ loading_state("Loading sample FailureImpactReport…") }}
+</div>
+
+<template data-role="page-template">
+    <section class="metric-grid" aria-label="Failure impact metrics">
+        {{ metric_card("impact-failed-node", "Failed Node", icon_name="node", icon_color="red") }}
+        {{ metric_card("impact-blast-radius", "Blast Radius", icon_name="target", icon_color="red") }}
+        {{ metric_card("impact-survivability", "Survivability", icon_name="trend-down", icon_color="amber") }}
+        {{ metric_card("impact-failed-workflow-count", "Failed Workflows", icon_name="alert", icon_color="purple") }}
+    </section>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Impact Comparison</h3>
+    </div>
+    <div class="card impact-compare">
+        <div class="impact-stat">
+            <div class="impact-stat__value" data-metric="impact-blast-radius-large" style="color: var(--color-danger);"></div>
+            <div class="impact-stat__label">Workflow Blast Radius</div>
+            <div class="progress-bar" style="margin-top: var(--space-sm);">
+                <div class="progress-bar__fill progress-bar__fill--danger" data-role="impact-blast-radius-bar"></div>
+            </div>
+            <div class="status-badge status-badge--danger impact-stat__tag" data-role="impact-blast-radius-tag"></div>
+        </div>
+        <div class="impact-stat">
+            <div class="impact-stat__value" data-metric="impact-survivability-large" style="color: var(--color-success);"></div>
+            <div class="impact-stat__label">Workflow Survivability</div>
+            <div class="progress-bar" style="margin-top: var(--space-sm);">
+                <div class="progress-bar__fill progress-bar__fill--success" data-role="impact-survivability-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Failure Chain</h3>
+        <span class="section-header__note">Derived by matching deployment pods to the failed node</span>
+    </div>
+    <div class="card">
+        <div class="failure-chain" data-role="failure-chain"></div>
+    </div>
+
+    <div class="grid-2" style="margin-top: var(--space-md);">
+        <div class="card">
+            <div class="section-header__title" style="margin-bottom: var(--space-sm);">Failed Services</div>
+            <div class="service-list" data-role="impact-failed-services"></div>
+        </div>
+        <div class="card">
+            <div class="section-header__title" style="margin-bottom: var(--space-sm);">Failed Workflows</div>
+            <div class="service-list" data-role="impact-failed-workflows"></div>
+        </div>
+    </div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Root Causes</h3>
+    </div>
+    <div class="card" data-role="impact-root-causes"></div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Node Risk Ranking</h3>
+        <span class="section-header__note">Risk labels are interface classifications</span>
+    </div>
+    <div class="card">
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Rank</th>
+                        <th scope="col">Node</th>
+                        <th scope="col">Blast Radius</th>
+                        <th scope="col">Risk</th>
+                    </tr>
+                </thead>
+                <tbody data-role="impact-node-ranking-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Raw Data</h3>
+    </div>
+    {{ raw_json_panel("impact-raw-json", "View Raw FailureImpactReport") }}
+
+    <div class="section-header">
+        <h3 class="section-header__title">Future Work</h3>
+    </div>
+    <div class="card">
+        <ul class="future-work-list">
+            <li>Worker-node selector to choose which node to simulate</li>
+            <li>Interactive cross-layer graph view</li>
+            <li>Compare blast radius across all nodes at once</li>
+            <li>Chaos-injection result comparison</li>
+            <li>Prediction accuracy tracking against observed outcomes</li>
+        </ul>
+    </div>
+</template>
+{% endblock %}
+
+{% block page_js %}
+<script src="{{ url_for('static', path='/js/components/failure_impacts.js') }}" defer></script>
+{% endblock %}

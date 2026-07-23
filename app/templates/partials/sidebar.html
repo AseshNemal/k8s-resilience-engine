@@ -1,0 +1,68 @@
+{# Shared partial — team review required. Expects `active_page` in context. #}
+{% from "partials/icons.html" import icon %}
+<div class="sidebar__backdrop" data-role="sidebar-backdrop"></div>
+<aside class="sidebar" data-role="sidebar" id="primary-sidebar">
+    <div class="sidebar__brand">
+        <span class="sidebar__brand-icon">
+            <img src="{{ url_for('static', path='/img/logo.png') }}" alt="" width="34" height="34">
+        </span>
+        <div class="sidebar__brand-text">
+            <div class="sidebar__brand-title">K8s Resilience Engine</div>
+            <div class="sidebar__brand-subtitle">Dependency-Aware Risk Assessment</div>
+        </div>
+    </div>
+
+    <nav class="sidebar__nav" aria-label="Primary">
+        <a
+            class="sidebar__link {{ 'is-active' if active_page == 'overview' else '' }}"
+            href="/"
+        >
+            <span class="sidebar__link-icon">{{ icon("home", 18) }}</span>
+            <span class="sidebar__link-label">Overview</span>
+        </a>
+        <a
+            class="sidebar__link {{ 'is-active' if active_page == 'workflows' else '' }}"
+            href="/components/workflows"
+        >
+            <span class="sidebar__link-icon">{{ icon("workflow", 18) }}</span>
+            <span class="sidebar__link-label">Workflow Dependencies</span>
+        </a>
+        <a
+            class="sidebar__link {{ 'is-active' if active_page == 'deployments' else '' }}"
+            href="/components/deployments"
+        >
+            <span class="sidebar__link-icon">{{ icon("topology", 18) }}</span>
+            <span class="sidebar__link-label">Deployment Topology</span>
+        </a>
+        <a
+            class="sidebar__link {{ 'is-active' if active_page == 'failure_impacts' else '' }}"
+            href="/components/failure-impacts"
+        >
+            <span class="sidebar__link-icon">{{ icon("alert", 18) }}</span>
+            <span class="sidebar__link-label">Failure Impact</span>
+        </a>
+        <a
+            class="sidebar__link {{ 'is-active' if active_page == 'recommendations' else '' }}"
+            href="/components/recommendations"
+        >
+            <span class="sidebar__link-icon">{{ icon("shield-check", 18) }}</span>
+            <span class="sidebar__link-label">Recommendations</span>
+        </a>
+
+        <button
+            type="button"
+            class="sidebar__collapse-btn"
+            data-role="sidebar-collapse-toggle"
+            aria-expanded="true"
+            aria-controls="primary-sidebar"
+        >
+            <span data-role="sidebar-collapse-icon">{{ icon("collapse", 18) }}</span>
+            <span class="sidebar__collapse-btn-label" data-role="sidebar-collapse-label">Collapse</span>
+        </button>
+    </nav>
+
+    <div class="sidebar__footer">
+        Project ID
+        <div class="sidebar__project-id">J26-SE-311</div>
+    </div>
+</aside>

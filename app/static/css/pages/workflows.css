@@ -1,0 +1,106 @@
+/*
+ * Workflow Dependency Modeling page styles.
+ * Owned by: Member 1 (A.D. Perera).
+ */
+
+.graph-flow {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+}
+
+.graph-flow__node {
+    padding: 10px var(--space-md);
+    border-radius: var(--radius-medium);
+    font-weight: 600;
+    font-size: 13px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-soft);
+}
+
+.graph-flow__node--entry {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.graph-flow__node--mandatory {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+    color: #ffffff;
+}
+
+.graph-flow__node--optional {
+    border-style: dashed;
+    color: var(--color-text-muted);
+}
+
+.graph-flow__arrow {
+    padding: 4px 0 4px var(--space-lg);
+    color: var(--color-text-muted);
+    font-size: 13px;
+}
+
+.graph-flow__optional-branch {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px dashed var(--color-border);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.graph-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    margin-top: var(--space-md);
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.graph-legend__item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.graph-legend__swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.graph-legend__swatch--entry {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+}
+
+.graph-legend__swatch--mandatory {
+    background: var(--color-primary);
+}
+
+.graph-legend__swatch--optional {
+    background: var(--color-surface-soft);
+    border: 1px dashed var(--color-border);
+}
+
+.service-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.future-work-list {
+    display: grid;
+    gap: var(--space-sm);
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.future-work-list li::before {
+    content: "\2192 ";
+    color: var(--color-primary);
+}

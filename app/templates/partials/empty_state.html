@@ -1,0 +1,9 @@
+{# Shared partial macro. Import with:
+   {% from "partials/empty_state.html" import empty_state %}
+   {{ empty_state("No workflow data yet.") }} #}
+{% macro empty_state(message="No data available yet.", title="No data available") %}
+<div class="state empty-state" role="status">
+    <p class="state__title">{{ title }}</p>
+    <p>{{ message }}</p>
+</div>
+{% endmacro %}

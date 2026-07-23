@@ -1,0 +1,79 @@
+/*
+ * Failure Impact Prediction page styles.
+ * Owned by: Member 3 (K.V.D.Y.R. Karawita).
+ */
+
+.scenario-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+}
+
+.scenario-panel__detail {
+    font-size: 13px;
+}
+
+.scenario-panel__node {
+    font-family: var(--font-mono);
+    font-weight: 700;
+}
+
+.impact-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+}
+
+.impact-stat {
+    text-align: center;
+}
+
+.impact-stat__value {
+    font-size: 34px;
+    font-weight: 700;
+}
+
+.impact-stat__label {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-top: 4px;
+}
+
+.impact-stat__tag {
+    margin-top: var(--space-sm);
+}
+
+.failure-chain {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.failure-chain__step {
+    padding: 10px var(--space-md);
+    border-radius: var(--radius-medium);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-soft);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.failure-chain__step--origin {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.failure-chain__arrow {
+    padding: 4px 0 4px var(--space-lg);
+    color: var(--color-text-muted);
+    font-size: 13px;
+}
+
+@media (max-width: 768px) {
+    .impact-compare {
+        grid-template-columns: 1fr;
+    }
+}
