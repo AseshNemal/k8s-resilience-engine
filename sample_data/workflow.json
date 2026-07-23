@@ -1,0 +1,26 @@
+{
+  "workflowId": "checkout",
+  "criticality": 0.9,
+  "mandatoryServices": [
+    "cartservice",
+    "checkoutservice",
+    "paymentservice"
+  ],
+  "optionalServices": [
+    "emailservice"
+  ],
+  "edges": [
+    {
+      "source": "frontend",
+      "target": "cartservice"
+    },
+    {
+      "source": "cartservice",
+      "target": "checkoutservice"
+    },
+    {
+      "source": "checkoutservice",
+      "target": "paymentservice"
+    }
+  ]
+}

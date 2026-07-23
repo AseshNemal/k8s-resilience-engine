@@ -569,16 +569,20 @@ RecommendationReport + ValidationReport
 
 ## Shared Models
 
-Recommended shared models:
+Shared models (implemented in `app/shared/schemas/`):
 
 ```text
 app/shared/schemas/
+├── base.py            # APIModel base (camelCase alias generator)
 ├── workflow.py
 ├── deployment.py
-├── risk.py
+├── failure_impact.py
 ├── recommendation.py
 └── validation.py
 ```
+
+`app/shared/sample_loader.py` loads fixture JSON from `sample_data/` and validates it
+against these schemas for the mock API routes.
 
 No member should independently change these shared schemas without team agreement.
 
@@ -597,7 +601,7 @@ k8s-resilience-engine/
 │   │   ├── health.py
 │   │   ├── workflows.py
 │   │   ├── deployments.py
-│   │   ├── risks.py
+│   │   ├── failure_impacts.py
 │   │   ├── recommendations.py
 │   │   └── validations.py
 │   │
@@ -619,10 +623,12 @@ k8s-resilience-engine/
 │   │
 │   ├── shared/
 │   │   ├── enums.py
+│   │   ├── sample_loader.py
 │   │   └── schemas/
+│   │       ├── base.py
 │   │       ├── workflow.py
 │   │       ├── deployment.py
-│   │       ├── risk.py
+│   │       ├── failure_impact.py
 │   │       ├── recommendation.py
 │   │       └── validation.py
 │   │
@@ -678,7 +684,7 @@ k8s-resilience-engine/
 ├── sample_data/
 │   ├── workflow.json
 │   ├── deployment.json
-│   ├── risk.json
+│   ├── failure_impact.json
 │   ├── recommendation.json
 │   └── validation.json
 │
@@ -690,6 +696,9 @@ k8s-resilience-engine/
 │
 ├── deploy/
 │   └── kubernetes/
+│
+├── docs/
+│   └── TAF-J26-SE-311.pdf
 │
 ├── requirements.txt
 ├── .env.example
@@ -869,7 +878,7 @@ Open:
 | GET | `/api/health` | Shared |
 | GET | `/api/workflows` | Member 1 |
 | GET | `/api/deployments` | Member 2 |
-| GET | `/api/risks` | Member 3 |
+| GET | `/api/failure-impacts` | Member 3 |
 | POST | `/api/recommendations` | Member 4 |
 | GET | `/api/validations` | Member 4 |
 
@@ -908,12 +917,12 @@ Shared changes should be reviewed before merging.
 
 - [x] Complete system architecture agreed
 - [x] Shared repository created
-- [ ] Folder structure finalized
-- [ ] FastAPI and Jinja2 skeleton completed
-- [ ] Shared schemas completed
-- [ ] Sample JSON files completed
-- [ ] Mock API routes completed
-- [ ] Dashboard prototype completed
+- [x] Folder structure finalized
+- [x] FastAPI and Jinja2 skeleton completed
+- [x] Shared schemas completed
+- [ ] Sample JSON files completed (only `workflow.json` so far)
+- [x] Mock API routes completed
+- [x] Dashboard prototype completed
 - [ ] Member 1 component completed
 - [ ] Member 2 component completed
 - [ ] Member 3 component completed
