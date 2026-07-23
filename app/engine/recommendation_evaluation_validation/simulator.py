@@ -5,6 +5,8 @@ def simulate_topology_spread(
     deployment: DeploymentGraph,
     service_name: str,
 ) -> DeploymentGraph:
+    """Distribute a service's ready pods across available nodes."""
+
     service = next(
         (
             item
@@ -17,13 +19,24 @@ def simulate_topology_spread(
     if service is None:
         raise ValueError(f"Service not found: {service_name}")
 
-    if len(deployment.nodes) < 2:
+    if not deployment.nodes:
+        raise ValueError("No available nodes found.")
+
+    ready_pods = [
+        pod
+        for pod in service.pods
+        if pod.ready
+    ]
+
+    if not ready_pods:
         raise ValueError(
-            "Topology spread requires more than one available node."
+            f"No ready pods found for service: {service_name}"
         )
 
-    for index, pod in enumerate(service.pods):
-        target_node = deployment.nodes[index % len(deployment.nodes)]
+    for index, pod in enumerate(ready_pods):
+        target_node = deployment.nodes[
+            index % len(deployment.nodes)
+        ]
 
         pod.node = target_node.name
         pod.zone = target_node.zone
