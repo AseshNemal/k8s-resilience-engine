@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>{{ page_title }}</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', path='/css/style.css') }}"
+    >
+
+    <script
+        src="{{ url_for('static', path='/js/dashboard.js') }}"
+        defer
+    ></script>
+</head>
+
+<body>
+    <header>
+        <h1>K8s Resilience Engine</h1>
+        <p>Dependency-aware Kubernetes resilience analysis</p>
+
+        <span id="system-status">
+            Checking system...
+        </span>
+    </header>
+
+    <main>
+        <h2>Research Components</h2>
+
+        <section class="component-grid">
+            <article>
+                <h3>Workflow Dependency Modeling</h3>
+                <p>Member 1</p>
+                <a href="/api/workflows/sample">
+                    View sample output
+                </a>
+            </article>
+
+            <article>
+                <h3>Deployment Topology Modeling</h3>
+                <p>Member 2</p>
+                <a href="/api/deployments/sample">
+                    View sample output
+                </a>
+            </article>
+
+            <article>
+                <h3>Failure Impact Prediction</h3>
+                <p>Member 3</p>
+                <a href="/api/failure-impacts/sample">
+                    View sample output
+                </a>
+            </article>
+
+            <article>
+                <h3>Recommendation Evaluation and Validation</h3>
+                <p>Member 4</p>
+                <a href="/api/recommendations/sample">
+                    View sample output
+                </a>
+            </article>
+        </section>
+    </main>
+</body>
+</html>
