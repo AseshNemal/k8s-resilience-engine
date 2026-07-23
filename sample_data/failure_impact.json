@@ -1,0 +1,26 @@
+{
+  "workflowId": "checkout",
+  "failedNode": "node-1",
+  "blastRadius": 60,
+  "survivability": 40,
+  "failedServices": [
+    "paymentservice"
+  ],
+  "failedWorkflows": [
+    "checkout"
+  ],
+  "rootCauses": [
+    {
+      "type": "REPLICA_CONCENTRATION",
+      "service": "paymentservice",
+      "failureDomain": "node-1",
+      "concentration": 0.67
+    }
+  ],
+  "nodeRiskRanking": [
+    {
+      "node": "node-1",
+      "blastRadius": 60
+    }
+  ]
+}

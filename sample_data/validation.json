@@ -1,0 +1,7 @@
+{
+  "recommendationId": "rec-001",
+  "predictedBlastRadius": 15,
+  "observedBlastRadius": 20,
+  "predictionError": 5,
+  "validated": true
+}

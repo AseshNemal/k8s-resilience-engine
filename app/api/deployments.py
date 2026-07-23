@@ -1,40 +1,21 @@
 from fastapi import APIRouter
 
+from app.engine.deployment_topology_modeling.service import (
+    get_sample_deployment,
+)
+from app.shared.schemas.deployment import DeploymentGraph
+
+
 router = APIRouter(
     prefix="/api/deployments",
     tags=["Deployment Topology Modeling"],
 )
 
 
-@router.get("/sample")
-def get_sample_deployment() -> dict:
-    return {
-        "nodes": [
-            {"name": "node-1", "zone": "zone-a"},
-            {"name": "node-2", "zone": "zone-a"},
-            {"name": "node-3", "zone": "zone-b"},
-        ],
-        "services": [
-            {
-                "name": "paymentservice",
-                "declaredReplicas": 3,
-                "pods": [
-                    {
-                        "name": "payment-1",
-                        "node": "node-1",
-                        "ready": True,
-                    },
-                    {
-                        "name": "payment-2",
-                        "node": "node-1",
-                        "ready": True,
-                    },
-                    {
-                        "name": "payment-3",
-                        "node": "node-2",
-                        "ready": True,
-                    },
-                ],
-            }
-        ],
-    }
+@router.get(
+    "/sample",
+    response_model=DeploymentGraph,
+    response_model_by_alias=True,
+)
+def read_sample_deployment() -> DeploymentGraph:
+    return get_sample_deployment()

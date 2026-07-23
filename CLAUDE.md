@@ -20,16 +20,19 @@ task breakdowns live in `README.md` — read it before working on any `app/engin
 
 This is an early-stage scaffold, not a working system yet:
 
-- All `app/engine/*/service.py` files are empty stubs — no algorithms are implemented.
-- `app/api/*.py` route handlers currently return hardcoded sample dicts (matching the
-  planned JSON contracts from the README) instead of calling engine services.
-- `app/api/recommendations.py` is an empty file, but `app/main.py` already imports it and
-  calls `app.include_router(recommendations.router)` — the app will fail to start until
-  this router is implemented.
-- `app/core/`, `app/shared/schemas/`, and `app/integrations/*` are empty placeholders
-  (no config, logging, Pydantic schemas, or Kubernetes/Jaeger/Prometheus clients exist yet).
-- No test suite, sample_data JSON fixtures, or Kubernetes manifests exist yet, despite being
-  described in the README's planned repository structure.
+- Every `app/engine/*/service.py` currently only has a `get_sample_*` function that loads a
+  fixture from `sample_data/*.json` and validates it against the matching
+  `app/shared/schemas/` model — no real algorithms (trace parsing, graph building, node-failure
+  simulation, candidate ranking, etc.) are implemented yet.
+- `app/api/*.py` route handlers are wired end-to-end (router → engine `get_sample_*` service →
+  `sample_loader` → schema-validated response), but every response is still the same fixture
+  data regardless of input — there's no request-driven behavior yet.
+- `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
+  deployment, failure_impact, recommendation, validation). `app/core/` and
+  `app/integrations/*` are still empty placeholders (no config, logging, or
+  Kubernetes/Jaeger/Prometheus clients exist yet).
+- `tests/test_sample_endpoints.py` smoke-tests that every `/api/*/sample` endpoint returns
+  200 with a JSON body — it does not assert on response shape/values yet.
 
 When asked to "run the app" or "add tests", check whether the relevant piece has actually
 been built yet rather than assuming the README's planned structure is already in place.
@@ -45,9 +48,10 @@ pip install -r requirements.txt
 # Run the app (dashboard at /, docs at /docs, health at /api/health)
 uvicorn app.main:app --reload
 
-# Tests (pytest is in requirements.txt; no tests exist yet)
-pytest
-pytest tests/path/to/test_file.py::test_name   # single test, once tests exist
+# Tests — use `python -m pytest`, not bare `pytest`: there's no pytest.ini/pyproject.toml,
+# so plain `pytest` won't put the project root on sys.path and `import app` will fail.
+python -m pytest
+python -m pytest tests/test_sample_endpoints.py::test_sample_endpoint_returns_success  # single test
 ```
 
 There is no configured linter, formatter, or `pyproject.toml`/`pytest.ini` in this repo yet.

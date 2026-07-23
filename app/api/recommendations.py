@@ -1,27 +1,21 @@
 from fastapi import APIRouter
 
+from app.engine.recommendation_evaluation_validation.service import (
+    get_sample_recommendation,
+)
+from app.shared.schemas.recommendation import RecommendationReport
+
+
 router = APIRouter(
     prefix="/api/recommendations",
-    tags=["Recommendation Evaluation and Validation"],
+    tags=["Recommendation Evaluation"],
 )
 
 
-@router.get("/sample")
-def get_sample_recommendation() -> dict:
-    return {
-        "workflowId": "checkout",
-        "recommendations": [
-            {
-                "id": "rec-001",
-                "type": "TOPOLOGY_SPREAD",
-                "service": "paymentservice",
-                "feasible": True,
-                "predictedBlastRadius": 15,
-                "riskReduction": 45,
-                "resourceCost": "LOW",
-                "confidence": 0.88,
-                "score": 0.86,
-            }
-        ],
-        "selectedRecommendationId": "rec-001",
-    }
+@router.get(
+    "/sample",
+    response_model=RecommendationReport,
+    response_model_by_alias=True,
+)
+def read_sample_recommendation() -> RecommendationReport:
+    return get_sample_recommendation()

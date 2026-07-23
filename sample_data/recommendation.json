@@ -1,0 +1,17 @@
+{
+  "workflowId": "checkout",
+  "recommendations": [
+    {
+      "id": "rec-001",
+      "type": "TOPOLOGY_SPREAD",
+      "service": "paymentservice",
+      "feasible": true,
+      "predictedBlastRadius": 15,
+      "riskReduction": 45,
+      "resourceCost": "LOW",
+      "confidence": 0.88,
+      "score": 0.86
+    }
+  ],
+  "selectedRecommendationId": "rec-001"
+}

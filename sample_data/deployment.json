@@ -1,0 +1,53 @@
+{
+  "nodes": [
+    {
+      "name": "node-1",
+      "zone": "zone-a",
+      "cpuAvailable": 4,
+      "memoryAvailable": 8
+    },
+    {
+      "name": "node-2",
+      "zone": "zone-a",
+      "cpuAvailable": 4,
+      "memoryAvailable": 8
+    },
+    {
+      "name": "node-3",
+      "zone": "zone-b",
+      "cpuAvailable": 4,
+      "memoryAvailable": 8
+    }
+  ],
+  "services": [
+    {
+      "name": "paymentservice",
+      "declaredReplicas": 3,
+      "readyReplicas": 3,
+      "replicaConcentration": 0.67,
+      "pods": [
+        {
+          "name": "payment-1",
+          "node": "node-1",
+          "zone": "zone-a",
+          "ready": true,
+          "restartCount": 0
+        },
+        {
+          "name": "payment-2",
+          "node": "node-1",
+          "zone": "zone-a",
+          "ready": true,
+          "restartCount": 0
+        },
+        {
+          "name": "payment-3",
+          "node": "node-2",
+          "zone": "zone-a",
+          "ready": true,
+          "restartCount": 0
+        }
+      ]
+    }
+  ]
+}
