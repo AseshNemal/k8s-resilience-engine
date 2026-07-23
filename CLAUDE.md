@@ -14,19 +14,28 @@ The system models the chain: `Workflow → Service → Pod → Node → Failure 
 
 This is a 4-person team project split into four independently-owned research components
 (see "Component Ownership" below). Full research context, data contracts, and per-component
-task breakdowns live in `README.md` — read it before working on any `app/engine/*` component.
+task breakdowns live in `README.md` and `docs/PROJECT_CONTEXT.md` — read them before working
+on any `app/engine/*` component. `AGENTS.md` carries the same architecture rules for
+non-Claude coding agents; keep it in sync with this file.
 
 ## Current State
 
 This is an early-stage scaffold, not a working system yet:
 
-- Every `app/engine/*/service.py` currently only has a `get_sample_*` function that loads a
-  fixture from `sample_data/*.json` and validates it against the matching
+- Members 1–3's `app/engine/*/service.py` currently only have a `get_sample_*` function that
+  loads a fixture from `sample_data/*.json` and validates it against the matching
   `app/shared/schemas/` model — no real algorithms (trace parsing, graph building, node-failure
-  simulation, candidate ranking, etc.) are implemented yet.
+  simulation, etc.) are implemented yet for those three components.
+- Member 4's `app/engine/recommendation_evaluation_validation/` has real logic beyond the
+  fixture: `candidate_generator.py` turns `REPLICA_CONCENTRATION` root causes into
+  `TOPOLOGY_SPREAD` candidates, `feasibility_analyzer.py` checks replica/node minimums,
+  `metrics.py` computes replica concentration, `simulator.py` + `virtual_model.py` run the
+  what-if simulation on a deep-copied `DeploymentGraph` (never mutating the original), and
+  `service.py` ties them together as `evaluate_first_recommendation()` → `SimulationResult`.
+  Ranking, YAML generation, and calling Member 3's evaluator are still unbuilt.
 - `app/api/*.py` route handlers are wired end-to-end (router → engine `get_sample_*` service →
-  `sample_loader` → schema-validated response), but every response is still the same fixture
-  data regardless of input — there's no request-driven behavior yet.
+  `sample_loader` → schema-validated response) for the `/sample` endpoints, but every response
+  is still the same fixture data regardless of input — there's no request-driven behavior yet.
 - `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
   deployment, failure_impact, recommendation, validation). `app/core/` and
   `app/integrations/*` are still empty placeholders (no config, logging, or
@@ -79,8 +88,8 @@ pipeline of four sequential components:
 
 Each component is a strict pipeline stage — component N only consumes the prior component's
 JSON output, never reaches backward into its internals. Shared Pydantic contracts for these
-JSON payloads belong in `app/shared/schemas/` (`workflow.py`, `deployment.py`, `risk.py`,
-`recommendation.py`, `validation.py` — not yet created).
+JSON payloads live in `app/shared/schemas/` (`base.py`, `workflow.py`, `deployment.py`,
+`failure_impact.py`, `recommendation.py`, `validation.py`), loaded via `app/shared/sample_loader.py`.
 
 Supporting layers:
 - `app/api/` — one FastAPI router per component, mounted with a `/api/<component>` prefix in
@@ -97,11 +106,23 @@ names/registration numbers and task lists). Do not implement another member's en
 component's algorithm without coordinating — use mock/sample JSON matching the shared
 contract instead when integrating against an unfinished upstream component.
 
-## Team Rules (from README)
+## Team Rules (from README / docs/PROJECT_CONTEXT.md)
 
-- Do not change shared schemas (`app/shared/schemas/`) without team agreement.
+- Do not change shared schemas (`app/shared/schemas/`) without team agreement. Same goes for
+  `app/main.py`, common configuration, global dependencies, cross-component signatures, and
+  metric definitions — each member can freely change their own engine folder, API route,
+  template/JS, and tests, but the shared surface needs team sign-off.
 - Keep integration code (`app/integrations/`) separate from research algorithms (`app/engine/`).
-- Use mock data when another component's real output isn't ready yet.
+- Use mock/sample JSON when another component's real output isn't ready yet.
+- Never mutate the original `DeploymentGraph` during what-if simulation — always operate on a
+  deep copy (see `virtual_model.py`'s `create_virtual_deployment`).
+- Do not duplicate another member's research algorithm — call their component's public
+  `service.py` interface instead (e.g. Member 4 should call Member 3's evaluator for
+  blast-radius recalculation rather than reimplementing it).
+- Keep algorithms deterministic and explainable; avoid ML unless there's a justified dataset
+  and research question.
+- Use `pytest.approx` (not exact equality) for any calculated floating-point assertion.
 - Keep thresholds configurable rather than hardcoded.
 - Never apply Kubernetes recommendations automatically — always require developer approval
   before an `apply` step.
+- Don't claim experimental validation before controlled experiments are actually run.
