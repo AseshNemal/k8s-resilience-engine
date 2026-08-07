@@ -1,0 +1,266 @@
+{
+  "data": [
+    {
+      "traceID": "trace-checkout-001",
+      "spans": [
+        {
+          "traceID": "trace-checkout-001",
+          "spanID": "s-co1-01",
+          "operationName": "checkout.initiate",
+          "references": [],
+          "startTime": 1700000000000000,
+          "duration": 245000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST"   },
+            { "key": "http.status_code", "type": "int64",  "value": 200      },
+            { "key": "http.url",         "type": "string", "value": "/checkout" },
+            { "key": "error",            "type": "bool",   "value": false    }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-checkout-001",
+          "spanID": "s-co1-02",
+          "operationName": "cart.getItems",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-001", "spanID": "s-co1-01" }
+          ],
+          "startTime": 1700000000005000,
+          "duration": 28000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "GET" },
+            { "key": "http.status_code", "type": "int64",  "value": 200  },
+            { "key": "error",            "type": "bool",   "value": false }
+          ],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-checkout-001",
+          "spanID": "s-co1-03",
+          "operationName": "checkout.placeOrder",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-001", "spanID": "s-co1-02" }
+          ],
+          "startTime": 1700000000035000,
+          "duration": 195000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64",  "value": 200   },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-checkout-001",
+          "spanID": "s-co1-04",
+          "operationName": "payment.charge",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-001", "spanID": "s-co1-03" }
+          ],
+          "startTime": 1700000000040000,
+          "duration": 150000,
+          "tags": [
+            { "key": "http.method",      "type": "string",   "value": "POST"  },
+            { "key": "http.status_code", "type": "int64",    "value": 200     },
+            { "key": "payment.amount",   "type": "float64",  "value": 99.99   },
+            { "key": "error",            "type": "bool",     "value": false   }
+          ],
+          "processID": "p4"
+        },
+        {
+          "traceID": "trace-checkout-001",
+          "spanID": "s-co1-05",
+          "operationName": "email.sendConfirmation",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-001", "spanID": "s-co1-03" }
+          ],
+          "startTime": 1700000000200000,
+          "duration": 35000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64",  "value": 200   },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p5"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend",        "tags": [] },
+        "p2": { "serviceName": "cartservice",     "tags": [] },
+        "p3": { "serviceName": "checkoutservice", "tags": [] },
+        "p4": { "serviceName": "paymentservice",  "tags": [] },
+        "p5": { "serviceName": "emailservice",    "tags": [] }
+      },
+      "warnings": null
+    },
+    {
+      "traceID": "trace-checkout-002",
+      "spans": [
+        {
+          "traceID": "trace-checkout-002",
+          "spanID": "s-co2-01",
+          "operationName": "checkout.initiate",
+          "references": [],
+          "startTime": 1700000001000000,
+          "duration": 210000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST"   },
+            { "key": "http.status_code", "type": "int64",  "value": 200      },
+            { "key": "http.url",         "type": "string", "value": "/checkout" },
+            { "key": "error",            "type": "bool",   "value": false    }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-checkout-002",
+          "spanID": "s-co2-02",
+          "operationName": "cart.getItems",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-002", "spanID": "s-co2-01" }
+          ],
+          "startTime": 1700000001006000,
+          "duration": 31000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "GET"  },
+            { "key": "http.status_code", "type": "int64",  "value": 200    },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-checkout-002",
+          "spanID": "s-co2-03",
+          "operationName": "checkout.placeOrder",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-002", "spanID": "s-co2-02" }
+          ],
+          "startTime": 1700000001039000,
+          "duration": 160000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64",  "value": 200   },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-checkout-002",
+          "spanID": "s-co2-04",
+          "operationName": "payment.charge",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-002", "spanID": "s-co2-03" }
+          ],
+          "startTime": 1700000001045000,
+          "duration": 140000,
+          "tags": [
+            { "key": "http.method",      "type": "string",  "value": "POST"  },
+            { "key": "http.status_code", "type": "int64",   "value": 200     },
+            { "key": "payment.amount",   "type": "float64", "value": 149.00  },
+            { "key": "error",            "type": "bool",    "value": false   }
+          ],
+          "processID": "p4"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend",        "tags": [] },
+        "p2": { "serviceName": "cartservice",     "tags": [] },
+        "p3": { "serviceName": "checkoutservice", "tags": [] },
+        "p4": { "serviceName": "paymentservice",  "tags": [] }
+      },
+      "warnings": null
+    },
+    {
+      "traceID": "trace-checkout-003",
+      "spans": [
+        {
+          "traceID": "trace-checkout-003",
+          "spanID": "s-co3-01",
+          "operationName": "checkout.initiate",
+          "references": [],
+          "startTime": 1700000002000000,
+          "duration": 238000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST"   },
+            { "key": "http.status_code", "type": "int64",  "value": 200      },
+            { "key": "http.url",         "type": "string", "value": "/checkout" },
+            { "key": "error",            "type": "bool",   "value": false    }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-checkout-003",
+          "spanID": "s-co3-02",
+          "operationName": "cart.getItems",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-003", "spanID": "s-co3-01" }
+          ],
+          "startTime": 1700000002004000,
+          "duration": 25000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "GET"  },
+            { "key": "http.status_code", "type": "int64",  "value": 200    },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-checkout-003",
+          "spanID": "s-co3-03",
+          "operationName": "checkout.placeOrder",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-003", "spanID": "s-co3-02" }
+          ],
+          "startTime": 1700000002030000,
+          "duration": 200000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64",  "value": 200   },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-checkout-003",
+          "spanID": "s-co3-04",
+          "operationName": "payment.charge",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-003", "spanID": "s-co3-03" }
+          ],
+          "startTime": 1700000002036000,
+          "duration": 155000,
+          "tags": [
+            { "key": "http.method",      "type": "string",  "value": "POST"  },
+            { "key": "http.status_code", "type": "int64",   "value": 200     },
+            { "key": "payment.amount",   "type": "float64", "value": 59.99   },
+            { "key": "error",            "type": "bool",    "value": false   }
+          ],
+          "processID": "p4"
+        },
+        {
+          "traceID": "trace-checkout-003",
+          "spanID": "s-co3-05",
+          "operationName": "email.sendConfirmation",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-checkout-003", "spanID": "s-co3-03" }
+          ],
+          "startTime": 1700000002200000,
+          "duration": 42000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64",  "value": 200   },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p5"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend",        "tags": [] },
+        "p2": { "serviceName": "cartservice",     "tags": [] },
+        "p3": { "serviceName": "checkoutservice", "tags": [] },
+        "p4": { "serviceName": "paymentservice",  "tags": [] },
+        "p5": { "serviceName": "emailservice",    "tags": [] }
+      },
+      "warnings": null
+    }
+  ]
+}
