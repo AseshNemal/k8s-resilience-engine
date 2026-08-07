@@ -1,0 +1,218 @@
+{
+  "data": [
+    {
+      "traceID": "trace-refund-001",
+      "spans": [
+        {
+          "traceID": "trace-refund-001",
+          "spanID": "s-rf1-01",
+          "operationName": "refund.initiate",
+          "references": [],
+          "startTime": 1700000010000000,
+          "duration": 320000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST"    },
+            { "key": "http.status_code", "type": "int64",  "value": 200       },
+            { "key": "http.url",         "type": "string", "value": "/refund" },
+            { "key": "error",            "type": "bool",   "value": false     }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-refund-001",
+          "spanID": "s-rf1-02",
+          "operationName": "order.getById",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-001", "spanID": "s-rf1-01" }
+          ],
+          "startTime": 1700000010008000,
+          "duration": 45000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "GET"  },
+            { "key": "http.status_code", "type": "int64",  "value": 200    },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-refund-001",
+          "spanID": "s-rf1-03",
+          "operationName": "payment.reversal",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-001", "spanID": "s-rf1-02" }
+          ],
+          "startTime": 1700000010055000,
+          "duration": 200000,
+          "tags": [
+            { "key": "http.method",       "type": "string",  "value": "POST"   },
+            { "key": "http.status_code",  "type": "int64",   "value": 200      },
+            { "key": "payment.amount",    "type": "float64", "value": 99.99    },
+            { "key": "refund.reason",     "type": "string",  "value": "customer_request" },
+            { "key": "error",             "type": "bool",    "value": false    }
+          ],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-refund-001",
+          "spanID": "s-rf1-04",
+          "operationName": "notification.sendRefundConfirm",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-001", "spanID": "s-rf1-03" }
+          ],
+          "startTime": 1700000010260000,
+          "duration": 40000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64",  "value": 200   },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p4"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend",             "tags": [] },
+        "p2": { "serviceName": "orderservice",         "tags": [] },
+        "p3": { "serviceName": "paymentservice",       "tags": [] },
+        "p4": { "serviceName": "notificationservice",  "tags": [] }
+      },
+      "warnings": null
+    },
+    {
+      "traceID": "trace-refund-002",
+      "spans": [
+        {
+          "traceID": "trace-refund-002",
+          "spanID": "s-rf2-01",
+          "operationName": "refund.initiate",
+          "references": [],
+          "startTime": 1700000011000000,
+          "duration": 290000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST"    },
+            { "key": "http.status_code", "type": "int64",  "value": 200       },
+            { "key": "http.url",         "type": "string", "value": "/refund" },
+            { "key": "error",            "type": "bool",   "value": false     }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-refund-002",
+          "spanID": "s-rf2-02",
+          "operationName": "order.getById",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-002", "spanID": "s-rf2-01" }
+          ],
+          "startTime": 1700000011007000,
+          "duration": 50000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "GET"  },
+            { "key": "http.status_code", "type": "int64",  "value": 200    },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-refund-002",
+          "spanID": "s-rf2-03",
+          "operationName": "payment.reversal",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-002", "spanID": "s-rf2-02" }
+          ],
+          "startTime": 1700000011059000,
+          "duration": 185000,
+          "tags": [
+            { "key": "http.method",       "type": "string",  "value": "POST"   },
+            { "key": "http.status_code",  "type": "int64",   "value": 200      },
+            { "key": "payment.amount",    "type": "float64", "value": 149.00   },
+            { "key": "refund.reason",     "type": "string",  "value": "item_not_received" },
+            { "key": "error",             "type": "bool",    "value": false    }
+          ],
+          "processID": "p3"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend",       "tags": [] },
+        "p2": { "serviceName": "orderservice",   "tags": [] },
+        "p3": { "serviceName": "paymentservice", "tags": [] }
+      },
+      "warnings": null
+    },
+    {
+      "traceID": "trace-refund-003",
+      "spans": [
+        {
+          "traceID": "trace-refund-003",
+          "spanID": "s-rf3-01",
+          "operationName": "refund.initiate",
+          "references": [],
+          "startTime": 1700000012000000,
+          "duration": 310000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST"    },
+            { "key": "http.status_code", "type": "int64",  "value": 200       },
+            { "key": "http.url",         "type": "string", "value": "/refund" },
+            { "key": "error",            "type": "bool",   "value": false     }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-refund-003",
+          "spanID": "s-rf3-02",
+          "operationName": "order.getById",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-003", "spanID": "s-rf3-01" }
+          ],
+          "startTime": 1700000012009000,
+          "duration": 48000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "GET"  },
+            { "key": "http.status_code", "type": "int64",  "value": 200    },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-refund-003",
+          "spanID": "s-rf3-03",
+          "operationName": "payment.reversal",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-003", "spanID": "s-rf3-02" }
+          ],
+          "startTime": 1700000012059000,
+          "duration": 195000,
+          "tags": [
+            { "key": "http.method",       "type": "string",  "value": "POST"   },
+            { "key": "http.status_code",  "type": "int64",   "value": 200      },
+            { "key": "payment.amount",    "type": "float64", "value": 59.99    },
+            { "key": "refund.reason",     "type": "string",  "value": "defective_item" },
+            { "key": "error",             "type": "bool",    "value": false    }
+          ],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-refund-003",
+          "spanID": "s-rf3-04",
+          "operationName": "notification.sendRefundConfirm",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-refund-003", "spanID": "s-rf3-03" }
+          ],
+          "startTime": 1700000012260000,
+          "duration": 38000,
+          "tags": [
+            { "key": "http.method",      "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64",  "value": 200   },
+            { "key": "error",            "type": "bool",   "value": false  }
+          ],
+          "processID": "p4"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend",            "tags": [] },
+        "p2": { "serviceName": "orderservice",        "tags": [] },
+        "p3": { "serviceName": "paymentservice",      "tags": [] },
+        "p4": { "serviceName": "notificationservice", "tags": [] }
+      },
+      "warnings": null
+    }
+  ]
+}
