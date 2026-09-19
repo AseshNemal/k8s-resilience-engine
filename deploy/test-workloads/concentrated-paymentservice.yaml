@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paymentservice
+  namespace: resilience-test
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: paymentservice
+  template:
+    metadata:
+      labels:
+        app: paymentservice
+    spec:
+      nodeSelector:
+        research-node: worker-1
+      containers:
+        - name: paymentservice
+          image: nginx:alpine
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paymentservice
+  namespace: resilience-test
+spec:
+  selector:
+    app: paymentservice
+  ports:
+    - port: 80
+      targetPort: 80

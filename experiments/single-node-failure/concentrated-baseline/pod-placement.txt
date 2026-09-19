@@ -1,0 +1,4 @@
+NAME                              READY   STATUS    RESTARTS   AGE   IP           NODE                         NOMINATED NODE   READINESS GATES
+paymentservice-74d644658f-rmmc5   1/1     Running   0          84m   10.244.3.2   resilience-research-worker   <none>           <none>
+paymentservice-74d644658f-rw5hq   1/1     Running   0          84m   10.244.3.3   resilience-research-worker   <none>           <none>
+paymentservice-74d644658f-tgzzd   1/1     Running   0          84m   10.244.3.4   resilience-research-worker   <none>           <none>

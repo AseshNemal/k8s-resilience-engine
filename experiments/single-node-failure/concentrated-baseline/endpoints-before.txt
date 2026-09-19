@@ -1,0 +1,2 @@
+NAME                   ADDRESSTYPE   PORTS   ENDPOINTS                          AGE
+paymentservice-pvr6x   IPv4          80      10.244.3.3,10.244.3.4,10.244.3.2   88m
