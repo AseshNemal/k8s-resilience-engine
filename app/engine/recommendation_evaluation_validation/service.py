@@ -1,4 +1,5 @@
-from app.engine.recommendation_evaluation_validation.candidate_generator import (
+from app.engine.recommendation_evaluation_validation.candidate_generation import (
+    CandidateContextBuilder,
     generate_candidates,
 )
 from app.engine.recommendation_evaluation_validation.feasibility_analyzer import (
@@ -43,7 +44,8 @@ def evaluate_first_recommendation(
 ) -> SimulationResult:
     """Generate and simulate the first supported recommendation."""
 
-    candidates = generate_candidates(failure_impact)
+    context = CandidateContextBuilder.build(deployment, failure_impact)
+    candidates = generate_candidates(context)
 
     if not candidates:
         raise ValueError("No recommendation candidates generated.")
