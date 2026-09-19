@@ -1,0 +1,5 @@
+NAME                                STATUS   ROLES           AGE    VERSION   HOSTNAME                            RESEARCH-NODE
+resilience-research-control-plane   Ready    control-plane   105m   v1.37.0   resilience-research-control-plane   
+resilience-research-worker          Ready    <none>          105m   v1.37.0   resilience-research-worker          worker-1
+resilience-research-worker2         Ready    <none>          105m   v1.37.0   resilience-research-worker2         worker-2
+resilience-research-worker3         Ready    <none>          105m   v1.37.0   resilience-research-worker3         worker-3

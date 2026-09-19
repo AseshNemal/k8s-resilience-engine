@@ -1,0 +1,69 @@
+apiVersion: v1
+items:
+- addressType: IPv4
+  apiVersion: discovery.k8s.io/v1
+  endpoints:
+  - addresses:
+    - 10.244.3.3
+    conditions:
+      ready: false
+      serving: false
+      terminating: false
+    nodeName: resilience-research-worker
+    targetRef:
+      kind: Pod
+      name: paymentservice-74d644658f-rw5hq
+      namespace: resilience-test
+      uid: d9acf915-0b34-4f3a-bbc8-073e293c3eef
+  - addresses:
+    - 10.244.3.4
+    conditions:
+      ready: false
+      serving: false
+      terminating: false
+    nodeName: resilience-research-worker
+    targetRef:
+      kind: Pod
+      name: paymentservice-74d644658f-tgzzd
+      namespace: resilience-test
+      uid: 8751445c-6e8e-4d7e-a067-ab9d43986d46
+  - addresses:
+    - 10.244.3.2
+    conditions:
+      ready: false
+      serving: false
+      terminating: false
+    nodeName: resilience-research-worker
+    targetRef:
+      kind: Pod
+      name: paymentservice-74d644658f-rmmc5
+      namespace: resilience-test
+      uid: 867bfbfa-8913-4233-b507-71e899bb23c3
+  kind: EndpointSlice
+  metadata:
+    annotations:
+      endpoints.kubernetes.io/last-change-trigger-time: "2026-09-18T16:36:39Z"
+    creationTimestamp: "2026-09-18T15:06:43Z"
+    generateName: paymentservice-
+    generation: 6
+    labels:
+      endpointslice.kubernetes.io/managed-by: endpointslice-controller.k8s.io
+      kubernetes.io/service-name: paymentservice
+    name: paymentservice-pvr6x
+    namespace: resilience-test
+    ownerReferences:
+    - apiVersion: v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: Service
+      name: paymentservice
+      uid: e582a09a-cdf3-42b7-b9af-b2a4afb352dd
+    resourceVersion: "6322"
+    uid: 6584301f-2029-4689-bf75-130f66a3e74a
+  ports:
+  - name: ""
+    port: 80
+    protocol: TCP
+kind: List
+metadata:
+  resourceVersion: ""
