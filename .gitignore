@@ -1,1 +1,9 @@
 *.pyc
+
+# Local environment configuration
+.env
+
+# Local SQLite database (data/.gitkeep keeps the directory tracked)
+data/*.db
+data/*.db-wal
+data/*.db-shm
