@@ -1,0 +1,7 @@
+# Optional: only needed when DATABASE_URL points at PostgreSQL
+# (server/centralized mode). SQLite (the local default) needs none of this.
+#
+# Installs the base app requirements plus the PostgreSQL driver in one shot:
+#   pip install -r requirements-postgres.txt
+-r requirements.txt
+psycopg2-binary==2.9.13
