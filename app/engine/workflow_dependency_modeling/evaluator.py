@@ -138,6 +138,21 @@ def _compute_metrics(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class SensitivityStep:
+    """Evaluation metrics at a specific mandatory threshold."""
+
+    threshold: float
+    precision: float
+    recall: float
+    f1: float
+    edge_accuracy: float
+    mandatory_services_count: int
+    optional_services_count: int
+    mandatory_services: list[str] = field(default_factory=list)
+    optional_services: list[str] = field(default_factory=list)
+
+
 def evaluate_graph(
     generated: WorkflowGraph,
     workflow_definition: dict,
@@ -205,3 +220,52 @@ def evaluate_graph(
         false_positive_services=fp_svcs,
         false_negative_services=fn_svcs,
     )
+
+
+def run_sensitivity_analysis(
+    workflow_id: str,
+    thresholds: list[float] | None = None,
+) -> list[SensitivityStep]:
+    """Evaluate how varying the mandatory threshold affects accuracy metrics.
+
+    Args:
+        workflow_id: Benchmark workflow ID to analyze (e.g. 'checkout', 'view_product').
+        thresholds: List of threshold floats to test. Defaults to [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0].
+
+    Returns:
+        List of :class:`SensitivityStep` objects sorted by threshold ascending.
+    """
+    from app.engine.workflow_dependency_modeling.service import (
+        _DEFINITIONS_DIR,
+        get_workflow_by_id,
+    )
+
+    if thresholds is None:
+        thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+
+    def_file = _DEFINITIONS_DIR / f"{workflow_id}.json"
+    import json
+    with open(def_file, encoding="utf-8") as fh:
+        workflow_definition = json.load(fh)
+
+    steps: list[SensitivityStep] = []
+
+    for t in sorted(thresholds):
+        graph = get_workflow_by_id(workflow_id, mandatory_threshold=t)
+        eval_result = evaluate_graph(graph, workflow_definition)
+        steps.append(
+            SensitivityStep(
+                threshold=t,
+                precision=eval_result.service_metrics.precision,
+                recall=eval_result.service_metrics.recall,
+                f1=eval_result.service_metrics.f1,
+                edge_accuracy=eval_result.edge_metrics.accuracy,
+                mandatory_services_count=len(graph.mandatory_services),
+                optional_services_count=len(graph.optional_services),
+                mandatory_services=graph.mandatory_services,
+                optional_services=graph.optional_services,
+            )
+        )
+
+    return steps
+

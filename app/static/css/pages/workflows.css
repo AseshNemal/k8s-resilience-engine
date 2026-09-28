@@ -3,52 +3,110 @@
  * Owned by: Member 1 (A.D. Perera).
  */
 
-.graph-flow {
+.workflow-dag-container {
+    width: 100%;
+    min-height: 280px;
+    overflow-x: auto;
+    background: var(--color-surface-soft, #f8fafc);
+    border-radius: var(--radius-medium, 8px);
+    padding: var(--space-md, 16px);
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0;
-}
-
-.graph-flow__node {
-    padding: 10px var(--space-md);
-    border-radius: var(--radius-medium);
-    font-weight: 600;
-    font-size: 13px;
-    border: 1px solid var(--color-border);
-    background: var(--color-surface-soft);
-}
-
-.graph-flow__node--entry {
-    border-color: #bfdbfe;
-    background: #eff6ff;
-    color: #1d4ed8;
-}
-
-.graph-flow__node--mandatory {
-    border-color: var(--color-primary);
-    background: var(--color-primary);
-    color: #ffffff;
-}
-
-.graph-flow__node--optional {
-    border-style: dashed;
-    color: var(--color-text-muted);
-}
-
-.graph-flow__arrow {
-    padding: 4px 0 4px var(--space-lg);
-    color: var(--color-text-muted);
-    font-size: 13px;
-}
-
-.graph-flow__optional-branch {
-    margin-top: var(--space-md);
-    padding-top: var(--space-md);
-    border-top: 1px dashed var(--color-border);
-    display: flex;
+    justify-content: center;
     align-items: center;
-    gap: var(--space-sm);
+}
+
+.workflow-dag-svg {
+    width: 100%;
+    max-width: 1000px;
+    height: auto;
+    display: block;
+    user-select: none;
+}
+
+.dag-edge-path {
+    stroke: #94a3b8;
+    stroke-width: 2;
+    fill: none;
+    transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.dag-edge-path--mandatory {
+    stroke: #6366f1;
+}
+
+.dag-edge-path--optional {
+    stroke: #f59e0b;
+    stroke-dasharray: 5, 5;
+}
+
+.dag-edge-path.is-highlighted {
+    stroke: #2563eb !important;
+    stroke-width: 3.5 !important;
+}
+
+.dag-edge-path.is-dimmed {
+    opacity: 0.2;
+}
+
+.dag-node {
+    cursor: pointer;
+    transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.dag-node:hover {
+    transform: translateY(-2px);
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.12));
+}
+
+.dag-node.is-dimmed {
+    opacity: 0.25;
+}
+
+.dag-node-rect {
+    stroke-width: 1.5;
+    transition: stroke 0.2s ease;
+}
+
+.dag-node-rect--entry {
+    fill: #eff6ff;
+    stroke: #3b82f6;
+}
+
+.dag-node-rect--mandatory {
+    fill: #eef2ff;
+    stroke: #6366f1;
+}
+
+.dag-node-rect--optional {
+    fill: #fffbeb;
+    stroke: #f59e0b;
+    stroke-dasharray: 4, 3;
+}
+
+.dag-node-title {
+    font-size: 13px;
+    font-weight: 700;
+    fill: #0f172a;
+    font-family: inherit;
+}
+
+.dag-node-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+}
+
+.dag-node-badge--entry {
+    fill: #2563eb;
+}
+
+.dag-node-badge--mandatory {
+    fill: #4f46e5;
+}
+
+.dag-node-badge--optional {
+    fill: #b45309;
 }
 
 .graph-legend {
@@ -75,17 +133,19 @@
 
 .graph-legend__swatch--entry {
     background: #eff6ff;
-    border: 1px solid #bfdbfe;
+    border: 1.5px solid #3b82f6;
 }
 
 .graph-legend__swatch--mandatory {
-    background: var(--color-primary);
+    background: #eef2ff;
+    border: 1.5px solid #6366f1;
 }
 
 .graph-legend__swatch--optional {
-    background: var(--color-surface-soft);
-    border: 1px dashed var(--color-border);
+    background: #fffbeb;
+    border: 1.5px dashed #f59e0b;
 }
+
 
 .service-list {
     display: flex;

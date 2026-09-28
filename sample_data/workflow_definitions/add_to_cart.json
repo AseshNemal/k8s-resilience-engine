@@ -1,0 +1,19 @@
+{
+  "workflowId": "add_to_cart",
+  "description": "Cart update: verifying product availability, adding item to cart, and recalculating cart item totals.",
+  "criticality": 0.85,
+  "expectedServices": [
+    "frontend",
+    "cartservice",
+    "productcatalogservice",
+    "currencyservice"
+  ],
+  "expectedEdges": [
+    { "source": "frontend", "target": "cartservice" },
+    { "source": "frontend", "target": "productcatalogservice" },
+    { "source": "cartservice", "target": "currencyservice" }
+  ],
+  "successCondition": "cart.add_item completes with HTTP 200",
+  "entryService": "frontend",
+  "traceFile": "sample_data/traces/add_to_cart_traces.json"
+}
