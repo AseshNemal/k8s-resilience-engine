@@ -1,0 +1,11 @@
+{
+  "workflowId": "checkout",
+  "expectedServices": ["frontend", "cartservice", "checkoutservice", "paymentservice", "emailservice"],
+  "expectedEdges": [
+    {"source": "frontend", "target": "cartservice"},
+    {"source": "cartservice", "target": "checkoutservice"},
+    {"source": "checkoutservice", "target": "paymentservice"},
+    {"source": "checkoutservice", "target": "emailservice"}
+  ],
+  "synthetic": true
+}

@@ -1,0 +1,10 @@
+{
+  "workflowId": "add_to_cart",
+  "expectedServices": ["frontend", "cartservice", "productcatalogservice", "currencyservice"],
+  "expectedEdges": [
+    {"source": "frontend", "target": "cartservice"},
+    {"source": "frontend", "target": "productcatalogservice"},
+    {"source": "cartservice", "target": "currencyservice"}
+  ],
+  "synthetic": true
+}
