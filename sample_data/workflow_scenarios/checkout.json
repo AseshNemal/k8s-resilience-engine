@@ -1,0 +1,7 @@
+{
+  "workflowId": "checkout",
+  "description": "End-to-end customer checkout: cart retrieval, order placement, payment processing, and email confirmation.",
+  "criticality": 0.9,
+  "successCondition": "payment.charge completes with HTTP 200",
+  "entryService": "frontend"
+}
