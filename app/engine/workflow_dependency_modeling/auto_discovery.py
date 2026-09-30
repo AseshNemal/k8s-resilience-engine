@@ -1,8 +1,7 @@
-"""auto_discovery.py — Automated Root-Span Workflow Discovery (Member 1)
+"""Root-span candidate-operation discovery for Component 1.
 
-Enables zero-configuration discovery of business workflows directly from
-raw Jaeger distributed traces by analyzing root spans (the entry point of
-a business transaction) and their downstream causal call trees.
+Trace operations can suggest workflow candidates, but cannot supply business
+meaning, a success condition, criticality, or reference truth.
 """
 
 from __future__ import annotations
@@ -13,9 +12,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.engine.workflow_dependency_modeling.interaction_extractor import (
-    extract_interactions,
-)
 from app.engine.workflow_dependency_modeling.trace_reader import (
     Span,
     parse_spans,
@@ -172,59 +168,3 @@ def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWork
     # Sort most frequent workflows first
     results.sort(key=lambda w: w.trace_count, reverse=True)
     return results
-
-
-def build_workflow_definition_from_traces(
-    traces: list[dict[str, Any]],
-    operation_name: str,
-    criticality: float = 0.8,
-) -> dict[str, Any]:
-    """Auto-generate a workflow definition dict from traces matching an operation.
-
-    Enables zero-touch graph construction without needing any pre-existing JSON.
-
-    Args:
-        traces: Raw Jaeger trace list.
-        operation_name: Target root operation (or workflow ID).
-        criticality: Business criticality rating (0.0 to 1.0, default 0.8).
-
-    Returns:
-        Workflow definition dict containing ``workflowId``, ``criticality``,
-        ``expectedServices``, and ``expectedEdges``.
-    """
-    spans = parse_spans(traces)
-    spans_by_trace: dict[str, list[Span]] = defaultdict(list)
-    for s in spans:
-        spans_by_trace[s.trace_id].append(s)
-
-    root_spans = find_root_spans(spans_by_trace)
-
-    # Filter matching trace IDs
-    matching_trace_ids = {
-        tid
-        for tid, root in root_spans.items()
-        if root.operation_name == operation_name or _slugify(root.operation_name) == _slugify(operation_name)
-    }
-
-    matching_spans = [s for s in spans if s.trace_id in matching_trace_ids]
-    if not matching_spans:
-        # If no strict root match, use all spans
-        matching_spans = spans
-
-    interactions = extract_interactions(matching_spans)
-
-    services: set[str] = {s.service_name for s in matching_spans}
-    edges_set: set[tuple[str, str]] = set()
-
-    for interaction in interactions:
-        for edge in interaction.edges:
-            services.add(edge.source)
-            services.add(edge.target)
-            edges_set.add((edge.source, edge.target))
-
-    return {
-        "workflowId": _slugify(operation_name),
-        "criticality": criticality,
-        "expectedServices": sorted(services),
-        "expectedEdges": [{"source": src, "target": tgt} for src, tgt in sorted(edges_set)],
-    }
