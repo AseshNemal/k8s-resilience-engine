@@ -19,6 +19,9 @@ def test_list_benchmark_workflows():
     assert "view_product" in ids
     assert "add_to_cart" in ids
     assert "refund" in ids
+    assert all(item["synthetic"] is True for item in benchmarks)
+    assert all(item["referenceAvailable"] is True for item in benchmarks)
+    assert all(item["sourceKind"] == "synthetic_fixture" for item in benchmarks)
 
 
 def test_get_view_product_workflow():

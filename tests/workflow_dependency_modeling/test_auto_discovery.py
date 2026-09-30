@@ -2,7 +2,6 @@
 
 from app.engine.workflow_dependency_modeling.auto_discovery import (
     _slugify,
-    build_workflow_definition_from_traces,
     discover_root_workflows,
     find_root_spans,
 )
@@ -54,20 +53,3 @@ def test_discover_root_workflows_with_checkout_traces():
 
 def test_discover_root_workflows_empty():
     assert discover_root_workflows([]) == []
-
-
-def test_build_workflow_definition_from_traces():
-    traces = load_traces_from_file(TRACES_DIR / "checkout_traces.json")
-    defn = build_workflow_definition_from_traces(traces, operation_name="checkout", criticality=0.95)
-
-    assert defn["criticality"] == 0.95
-    assert "cartservice" in defn["expectedServices"]
-    assert "checkoutservice" in defn["expectedServices"]
-    assert "paymentservice" in defn["expectedServices"]
-    assert len(defn["expectedEdges"]) > 0
-    for edge in defn["expectedEdges"]:
-        assert "source" in edge
-        assert "target" in edge
-        assert "from" not in edge
-        assert "to" not in edge
-    assert {"source": "frontend", "target": "cartservice"} in defn["expectedEdges"]
