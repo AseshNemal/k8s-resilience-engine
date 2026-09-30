@@ -1,0 +1,6 @@
+{
+  "workflowId": "view_product",
+  "sourceKind": "synthetic_fixture",
+  "traceFile": "sample_data/traces/view_product_traces.json",
+  "synthetic": true
+}

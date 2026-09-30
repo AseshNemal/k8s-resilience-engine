@@ -1,0 +1,6 @@
+{
+  "workflowId": "refund",
+  "sourceKind": "synthetic_fixture",
+  "traceFile": "sample_data/traces/refund_traces.json",
+  "synthetic": true
+}
