@@ -1,6 +1,7 @@
 """Tests for Member 1 live Jaeger API endpoints."""
 
 from unittest.mock import patch
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -77,3 +78,15 @@ def test_read_live_workflow_api(mock_get_live):
     assert data["workflowId"] == "checkout"
     assert data["mandatoryServices"] == ["cartservice", "paymentservice"]
 
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/workflows/discover?limit=0",
+        "/api/workflows/discover?limit=5001",
+        "/api/workflows/live?criticality=1.1",
+        "/api/workflows/live?mandatory_threshold=-0.1",
+    ],
+)
+def test_live_routes_reject_out_of_range_parameters(path):
+    assert client.get(path).status_code == 422
