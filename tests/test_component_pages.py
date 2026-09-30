@@ -60,3 +60,11 @@ def test_dashboard_links_to_all_component_pages() -> None:
     assert 'href="/components/deployments"' in body
     assert 'href="/components/failure-impacts"' in body
     assert 'href="/components/recommendations"' in body
+
+
+def test_workflow_page_uses_candidate_not_validated_necessity_language() -> None:
+    response = client.get("/components/workflows")
+    assert response.status_code == 200
+    assert "High-frequency Candidates" in response.text
+    assert "Lower-frequency Candidates" in response.text
+    assert "Mandatory Services" not in response.text

@@ -213,8 +213,8 @@
             let fillColor = "#eef2ff";
             let strokeColor = "#6366f1";
             let badgeColor = "#4f46e5";
-            let badgeText = "MANDATORY";
-            let dashAttr = "";
+            let badgeText = "HIGH-FREQUENCY";
+            let dashed = false;
 
             if (isEntry && !isMandatory) {
                 fillColor = "#eff6ff";
@@ -225,13 +225,13 @@
                 fillColor = "#fffbeb";
                 strokeColor = "#f59e0b";
                 badgeColor = "#b45309";
-                badgeText = "OPTIONAL";
-                dashAttr = 'stroke-dasharray="4,3"';
+                badgeText = "LOWER-FREQUENCY";
+                dashed = true;
             } else if (isMandatory) {
                 fillColor = "#eef2ff";
                 strokeColor = "#6366f1";
                 badgeColor = "#4f46e5";
-                badgeText = "MANDATORY";
+                badgeText = "HIGH-FREQUENCY";
             } else {
                 fillColor = "#f8fafc";
                 strokeColor = "#94a3b8";
@@ -244,11 +244,34 @@
             g.setAttribute("transform", `translate(${pos.x}, ${pos.y})`);
             g.dataset.service = nodeName;
 
-            g.innerHTML = `
-                <rect width="${nodeW}" height="${nodeH}" rx="8" fill="${fillColor}" stroke="${strokeColor}" stroke-width="1.5" ${dashAttr} class="dag-node-rect"></rect>
-                <text x="12" y="20" fill="#0f172a" font-size="12" font-weight="700" font-family="system-ui, -apple-system, sans-serif">${nodeName}</text>
-                <text x="12" y="36" fill="${badgeColor}" font-size="10" font-weight="700" font-family="system-ui, -apple-system, sans-serif">${badgeText}</text>
-            `;
+            const rect = document.createElementNS(ns, "rect");
+            rect.setAttribute("width", String(nodeW));
+            rect.setAttribute("height", String(nodeH));
+            rect.setAttribute("rx", "8");
+            rect.setAttribute("fill", fillColor);
+            rect.setAttribute("stroke", strokeColor);
+            rect.setAttribute("stroke-width", "1.5");
+            rect.setAttribute("class", "dag-node-rect");
+            if (dashed) rect.setAttribute("stroke-dasharray", "4,3");
+
+            const nameText = document.createElementNS(ns, "text");
+            nameText.setAttribute("x", "12");
+            nameText.setAttribute("y", "20");
+            nameText.setAttribute("fill", "#0f172a");
+            nameText.setAttribute("font-size", "12");
+            nameText.setAttribute("font-weight", "700");
+            nameText.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
+            nameText.textContent = nodeName;
+
+            const badge = document.createElementNS(ns, "text");
+            badge.setAttribute("x", "12");
+            badge.setAttribute("y", "36");
+            badge.setAttribute("fill", badgeColor);
+            badge.setAttribute("font-size", "10");
+            badge.setAttribute("font-weight", "700");
+            badge.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
+            badge.textContent = badgeText;
+            g.append(rect, nameText, badge);
 
             // Hover interactions
             g.addEventListener("mouseenter", () => {
@@ -331,16 +354,25 @@
                 : "status-badge status-badge--muted status-badge--no-dot";
 
             const typeLabel = isMandatory
-                ? "MANDATORY (Strict Dependency)"
+                ? "HIGH-FREQUENCY CANDIDATE"
                 : isOptional
-                ? "OPTIONAL (Non-blocking Branch)"
+                ? "LOWER-FREQUENCY CANDIDATE"
                 : "OBSERVED (Not classified)";
 
-            row.innerHTML = `
-                <td><code>${edge.source}</code></td>
-                <td><code>${edge.target}</code></td>
-                <td><span class="${badgeClass}">${typeLabel}</span></td>
-            `;
+            const sourceCell = document.createElement("td");
+            const sourceCode = document.createElement("code");
+            sourceCode.textContent = edge.source;
+            sourceCell.appendChild(sourceCode);
+            const targetCell = document.createElement("td");
+            const targetCode = document.createElement("code");
+            targetCode.textContent = edge.target;
+            targetCell.appendChild(targetCode);
+            const typeCell = document.createElement("td");
+            const typeBadge = document.createElement("span");
+            typeBadge.className = badgeClass;
+            typeBadge.textContent = typeLabel;
+            typeCell.appendChild(typeBadge);
+            row.append(sourceCell, targetCell, typeCell);
 
             tbody.appendChild(row);
         });
@@ -405,7 +437,7 @@
         const note = region.querySelector('[data-role="evidence-note"]');
         note.textContent = isLive
             ? `${workflow.traceCount} matching traces from ${workflow.fetchedTraceCount} fetched (limit ${workflow.sampleLimit}). Jaeger may contain synthetic demo traces; evidence origin and execution success have not been verified. These are observed calls, with no validated dependency classification or accuracy score. Missing services may be uninstrumented.`
-            : 'Synthetic engineering fixture, not empirical benchmark evidence. The prototype currently uses reference service lists during classification. Scores compare combined service and edge sets; they do not validate mandatory classification. Research-model correction is pending.';
+            : 'Synthetic engineering fixture, not empirical benchmark evidence. Prediction uses only the scenario and trace evidence; the separate reference is loaded afterward for comparison. Frequency-based candidates do not prove logical necessity, and combined-service scores do not validate mandatory classification.';
         if (isLive) {
             setMetric(region, "workflow-criticality", "Not set");
             setMetric(region, "workflow-mandatory-count", "Not validated");
@@ -654,8 +686,8 @@
         }
         const workflowId = benchmarkSelect ? benchmarkSelect.value : "checkout";
         let markdown = `### Synthetic fixture threshold comparison: \`${workflowId}\`\n\n`;
-        markdown += 'Engineering fixture only. The classifier currently reads reference service lists. Combined-service scores do not measure mandatory classification or empirical benchmark accuracy.\n\n';
-        markdown += `| Mandatory Threshold (θ) | Precision | Recall | F1-Score | Edge Accuracy | Mandatory Count | Optional Count |\n`;
+        markdown += 'Engineering fixture only. Prediction is reference-independent, but frequency-based candidates do not prove logical necessity. Combined-service scores do not measure mandatory classification or empirical benchmark accuracy.\n\n';
+        markdown += `| Candidate Threshold (θ) | Precision | Recall | F1-Score | Edge Accuracy | High-frequency Count | Lower-frequency Count |\n`;
         markdown += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
 
         if (lastSensitivitySteps.length > 0) {
