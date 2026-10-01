@@ -30,7 +30,15 @@ from app.engine.workflow_dependency_modeling.interaction_extractor import (
     aggregate_edges,
     extract_interactions,
 )
-from app.engine.workflow_dependency_modeling.models import WorkflowScenario
+from app.engine.workflow_dependency_modeling.models import SuccessCondition, WorkflowScenario
+from app.engine.workflow_dependency_modeling.scenario_service import (
+    configure_scenario_repository,
+    create_scenario,
+    get_versioned_scenario,
+    list_versioned_scenarios,
+    scenario_etag,
+    update_scenario,
+)
 from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
 from app.integrations.jaeger.client import JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
@@ -125,7 +133,14 @@ def get_live_workflow(
         workflow_id=_slugify(operation_name),
         description="Candidate operation discovered from live trace evidence.",
         criticality=criticality,
-        success_condition="Not recorded by the legacy live endpoint.",
+        success_condition=SuccessCondition.from_mapping(
+            {
+                "protocol": "span",
+                "terminalService": service_name,
+                "operationName": operation_name,
+                "spanStatusCodes": ["UNSET", "OK"],
+            }
+        ),
         entry_service=service_name,
     )
     return build_workflow_graph(
@@ -226,6 +241,8 @@ def get_sample_workflow() -> WorkflowGraph:
 
 __all__ = [
     "build_workflow_graph",
+    "configure_scenario_repository",
+    "create_scenario",
     "discover_live_workflows",
     "evaluate_workflow_by_id",
     "get_evidence_source",
@@ -233,6 +250,10 @@ __all__ = [
     "get_live_workflow",
     "get_sample_workflow",
     "get_scenario",
+    "get_versioned_scenario",
     "get_workflow_by_id",
     "list_benchmark_workflows",
+    "list_versioned_scenarios",
+    "scenario_etag",
+    "update_scenario",
 ]
