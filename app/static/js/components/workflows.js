@@ -26,10 +26,181 @@
     const extractLiveButton = document.querySelector('[data-role="extract-live-button"]');
     const discoveredContainer = document.querySelector('[data-role="discovered-workflows-container"]');
     const discoveredSelect = document.querySelector('[data-role="discovered-workflow-select"]');
+    const useCandidateButton = document.querySelector('[data-role="use-candidate-button"]');
+    const scenarioForm = document.querySelector('[data-role="scenario-form"]');
+    const scenarioProtocol = document.querySelector('[data-role="scenario-protocol"]');
+    const scenarioStatus = document.querySelector('[data-role="scenario-form-status"]');
+    const scenarioList = document.querySelector('[data-role="scenario-registry-list"]');
+    const refreshScenariosButton = document.querySelector('[data-role="refresh-scenarios-button"]');
 
     let discoveredWorkflows = [];
     let liveMode = false;
     let renderVersion = 0;
+
+    function setScenarioStatus(message, isError = false) {
+        if (!scenarioStatus) return;
+        scenarioStatus.textContent = message;
+        scenarioStatus.style.color = isError ? "var(--color-danger, #b91c1c)" : "var(--color-text-muted)";
+    }
+
+    async function requestScenario(endpoint, options = {}) {
+        const response = await fetch(endpoint, {
+            ...options,
+            headers: {
+                Accept: "application/json",
+                ...(options.headers || {}),
+            },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.detail || `Request failed with HTTP ${response.status}`);
+        }
+        return data;
+    }
+
+    function scenarioChip(text) {
+        const chip = document.createElement("span");
+        chip.className = "contract-chip";
+        chip.textContent = text;
+        return chip;
+    }
+
+    function renderScenarioRegistry(scenarios) {
+        if (!scenarioList) return;
+        scenarioList.replaceChildren();
+        if (!scenarios.length) {
+            const empty = document.createElement("p");
+            empty.className = "muted";
+            empty.textContent = "No persisted workflow scenarios yet.";
+            scenarioList.appendChild(empty);
+            return;
+        }
+        scenarios.forEach((scenario) => {
+            const record = document.createElement("article");
+            record.className = "scenario-record";
+            const heading = document.createElement("div");
+            heading.className = "scenario-record__title";
+            const name = document.createElement("strong");
+            name.textContent = scenario.workflowId;
+            heading.append(name, scenarioChip(`v${scenario.version}`));
+            const description = document.createElement("p");
+            description.textContent = scenario.description;
+            const meta = document.createElement("div");
+            meta.className = "scenario-record__meta";
+            meta.append(
+                scenarioChip(scenario.lifecycle),
+                scenarioChip(scenario.source),
+                scenarioChip(scenario.successCondition.protocol.toUpperCase()),
+                scenarioChip(`criticality ${scenario.criticality.toFixed(2)}`)
+            );
+            record.append(heading, description, meta);
+            scenarioList.appendChild(record);
+        });
+    }
+
+    async function loadScenarioRegistry() {
+        if (!scenarioList) return;
+        try {
+            renderScenarioRegistry(await requestScenario("/api/workflows/scenarios"));
+        } catch (error) {
+            scenarioList.textContent = `Scenario registry unavailable: ${error.message}`;
+        }
+    }
+
+    function updateOutcomeGuidance() {
+        if (!scenarioProtocol || !scenarioForm) return;
+        const label = scenarioForm.querySelector('[data-role="scenario-outcomes-label"]');
+        const help = scenarioForm.querySelector('[data-role="scenario-outcomes-help"]');
+        const outcomes = scenarioForm.elements.outcomes;
+        const guidance = {
+            http: ["Accepted HTTP statuses", "Comma-separated numeric status codes.", "200"],
+            grpc: ["Accepted gRPC statuses", "Canonical names such as OK or NOT_FOUND.", "OK"],
+            span: ["Accepted span statuses", "Choose from UNSET, OK, and ERROR.", "OK"],
+        }[scenarioProtocol.value];
+        label.textContent = guidance[0];
+        help.textContent = guidance[1];
+        outcomes.value = guidance[2];
+    }
+
+    function scenarioPayload(form) {
+        const values = new FormData(form);
+        const protocol = values.get("protocol");
+        const outcomes = String(values.get("outcomes"))
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean);
+        const successCondition = {
+            protocol,
+            terminalService: String(values.get("terminalService")).trim(),
+            operationName: String(values.get("operationName")).trim(),
+        };
+        if (protocol === "http") {
+            successCondition.httpStatusCodes = outcomes.map(Number);
+        } else if (protocol === "grpc") {
+            successCondition.grpcStatusCodes = outcomes.map((value) => value.toUpperCase());
+        } else {
+            successCondition.spanStatusCodes = outcomes.map((value) => value.toUpperCase());
+        }
+        const duration = String(values.get("maxDurationMs")).trim();
+        if (duration) successCondition.maxDurationMs = Number(duration);
+        return {
+            workflowId: String(values.get("workflowId")).trim(),
+            description: String(values.get("description")).trim(),
+            criticality: Number(values.get("criticality")),
+            entryService: String(values.get("entryService")).trim(),
+            source: values.get("source"),
+            lifecycle: values.get("lifecycle"),
+            changeSummary: String(values.get("changeSummary")).trim(),
+            successCondition,
+        };
+    }
+
+    async function saveScenario(event) {
+        event.preventDefault();
+        if (!scenarioForm.reportValidity()) return;
+        const actor = String(new FormData(scenarioForm).get("actor")).trim();
+        const button = scenarioForm.querySelector('[data-role="save-scenario-button"]');
+        button.disabled = true;
+        setScenarioStatus("Saving immutable version 1…");
+        try {
+            const scenario = await requestScenario("/api/workflows/scenarios", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Actor": actor,
+                },
+                body: JSON.stringify(scenarioPayload(scenarioForm)),
+            });
+            setScenarioStatus(`Saved ${scenario.workflowId} version ${scenario.version}.`);
+            await loadScenarioRegistry();
+        } catch (error) {
+            setScenarioStatus(error.message, true);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function useDiscoveredCandidate() {
+        if (!scenarioForm || !discoveredSelect || !discoveredSelect.value) return;
+        const candidate = discoveredWorkflows.find(
+            (item) => item.operationName === discoveredSelect.value
+        );
+        if (!candidate) return;
+        const services = candidate.participatingServices || [];
+        const entryService = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
+        scenarioForm.elements.workflowId.value = candidate.operationName
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, "_")
+            .replace(/^_+|_+$/g, "")
+            .slice(0, 64);
+        scenarioForm.elements.description.value = `Discovered operation ${candidate.operationName}`;
+        scenarioForm.elements.entryService.value = entryService;
+        scenarioForm.elements.source.value = "discovered";
+        scenarioForm.elements.terminalService.value = services.at(-1) || entryService;
+        scenarioForm.elements.operationName.value = candidate.operationName;
+        scenarioForm.scrollIntoView({ behavior: "smooth", block: "start" });
+        setScenarioStatus("Candidate copied. Review the business outcome before saving.");
+    }
 
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
@@ -742,6 +913,18 @@
     if (extractLiveButton) {
         extractLiveButton.addEventListener("click", handleExtractLive);
     }
+    if (useCandidateButton) {
+        useCandidateButton.addEventListener("click", useDiscoveredCandidate);
+    }
+    if (scenarioProtocol) {
+        scenarioProtocol.addEventListener("change", updateOutcomeGuidance);
+    }
+    if (scenarioForm) {
+        scenarioForm.addEventListener("submit", saveScenario);
+    }
+    if (refreshScenariosButton) {
+        refreshScenariosButton.addEventListener("click", loadScenarioRegistry);
+    }
     if (jaegerUrlInput) {
         jaegerUrlInput.addEventListener("change", checkJaegerHealth);
     }
@@ -749,6 +932,7 @@
     document.addEventListener("DOMContentLoaded", () => {
         loadBenchmarkWorkflow();
         checkJaegerHealth();
+        loadScenarioRegistry();
         initEvaluationListeners();
         setTimeout(handleRunEvaluation, 300);
     });

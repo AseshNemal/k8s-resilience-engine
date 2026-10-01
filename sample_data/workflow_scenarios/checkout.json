@@ -2,6 +2,19 @@
   "workflowId": "checkout",
   "description": "End-to-end customer checkout: cart retrieval, order placement, payment processing, and email confirmation.",
   "criticality": 0.9,
-  "successCondition": "payment.charge completes with HTTP 200",
-  "entryService": "frontend"
+  "successCondition": {
+    "protocol": "http",
+    "terminalService": "paymentservice",
+    "operationName": "charge_credit_card",
+    "httpStatusCodes": [200],
+    "maxDurationMs": 2000,
+    "requiredAttributes": []
+  },
+  "entryService": "frontend",
+  "version": 1,
+  "lifecycle": "draft",
+  "source": "manual",
+  "createdAt": "2026-10-01T00:00:00Z",
+  "createdBy": "component-1",
+  "changeSummary": "Initial structured synthetic scenario"
 }
