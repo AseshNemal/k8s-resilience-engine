@@ -1,0 +1,10 @@
+{
+  "workflowId": "refund",
+  "expectedServices": ["frontend", "orderservice", "paymentservice", "notificationservice"],
+  "expectedEdges": [
+    {"source": "frontend", "target": "orderservice"},
+    {"source": "orderservice", "target": "paymentservice"},
+    {"source": "paymentservice", "target": "notificationservice"}
+  ],
+  "synthetic": true
+}

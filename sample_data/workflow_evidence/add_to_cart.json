@@ -1,0 +1,6 @@
+{
+  "workflowId": "add_to_cart",
+  "sourceKind": "synthetic_fixture",
+  "traceFile": "sample_data/traces/add_to_cart_traces.json",
+  "synthetic": true
+}

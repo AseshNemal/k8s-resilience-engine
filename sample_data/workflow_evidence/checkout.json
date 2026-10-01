@@ -1,0 +1,6 @@
+{
+  "workflowId": "checkout",
+  "sourceKind": "synthetic_fixture",
+  "traceFile": "sample_data/traces/checkout_traces.json",
+  "synthetic": true
+}

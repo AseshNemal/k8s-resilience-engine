@@ -1,5 +1,6 @@
 """Tests for workflow evaluation and sensitivity analysis endpoints."""
 
+import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -44,3 +45,11 @@ def test_get_sensitivity_analysis():
         assert "recall" in s
         assert "f1" in s
         assert "edgeAccuracy" in s
+
+
+@pytest.mark.parametrize("threshold", [-0.01, 1.01])
+def test_evaluation_rejects_out_of_range_threshold(threshold):
+    response = client.get(
+        f"/api/workflows/evaluation/accuracy?workflow_id=checkout&mandatory_threshold={threshold}"
+    )
+    assert response.status_code == 422

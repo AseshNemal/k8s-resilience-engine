@@ -1,0 +1,7 @@
+{
+  "workflowId": "add_to_cart",
+  "description": "Cart update: verifying product availability, adding item to cart, and recalculating cart item totals.",
+  "criticality": 0.85,
+  "successCondition": "cart.add_item completes with HTTP 200",
+  "entryService": "frontend"
+}

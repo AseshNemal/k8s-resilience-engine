@@ -1,0 +1,7 @@
+{
+  "workflowId": "refund",
+  "description": "Customer refund: order lookup, payment reversal, and refund confirmation notification.",
+  "criticality": 0.7,
+  "successCondition": "payment.reversal completes with HTTP 200",
+  "entryService": "frontend"
+}

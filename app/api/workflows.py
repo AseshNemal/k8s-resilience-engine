@@ -2,16 +2,15 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from app.engine.workflow_dependency_modeling.evaluator import (
-    evaluate_graph,
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
     discover_live_workflows,
+    evaluate_workflow_by_id,
     get_live_workflow,
     get_live_evidence,
     get_sample_workflow,
     get_workflow_by_id,
-    get_workflow_definition,
     list_benchmark_workflows,
 )
 from app.integrations.jaeger.client import DEFAULT_JAEGER_URL, JaegerClient
@@ -61,10 +60,10 @@ def read_sample_workflow() -> WorkflowGraph:
 
 @router.get(
     "/benchmarks",
-    summary="List all reference benchmark workflows",
+    summary="List separated synthetic workflow fixtures",
 )
 def get_benchmark_workflows() -> list[dict[str, Any]]:
-    """List all available reference benchmark workflows in the repository."""
+    """List scenario/evidence fixtures and whether a reference is available."""
     return list_benchmark_workflows()
 
 
@@ -76,7 +75,9 @@ def get_benchmark_workflows() -> list[dict[str, Any]]:
 )
 def read_benchmark_workflow(
     workflow_id: str,
-    mandatory_threshold: float = Query(1.0, description="Mandatory frequency threshold"),
+    mandatory_threshold: float = Query(
+        1.0, ge=0.0, le=1.0, description="Mandatory-candidate frequency threshold"
+    ),
 ) -> WorkflowGraph:
     """Build and return a WorkflowGraph for a specific benchmark workflow ID."""
     try:
@@ -87,21 +88,22 @@ def read_benchmark_workflow(
 
 @router.get(
     "/evaluation/accuracy",
-    summary="Evaluate accuracy of workflow extraction against ground-truth reference",
+    summary="Compare a fixture prediction with its separate synthetic reference",
     responses=NOT_FOUND_RESPONSE,
 )
 def evaluate_workflow_accuracy(
     workflow_id: str = Query("checkout", description="Benchmark workflow ID"),
-    mandatory_threshold: float = Query(1.0, description="Mandatory threshold"),
+    mandatory_threshold: float = Query(
+        1.0, ge=0.0, le=1.0, description="Mandatory-candidate frequency threshold"
+    ),
 ) -> dict[str, Any]:
-    """Compare extracted WorkflowGraph against reference definition and compute Precision, Recall, F1, and Jaccard Edge Accuracy."""
+    """Evaluate only after prediction, using the separate reference store."""
     try:
-        workflow_def = get_workflow_definition(workflow_id)
+        result = evaluate_workflow_by_id(
+            workflow_id, mandatory_threshold=mandatory_threshold
+        )
     except FileNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
-
-    graph = get_workflow_by_id(workflow_id, mandatory_threshold=mandatory_threshold)
-    result = evaluate_graph(graph, workflow_def)
 
     return {
         "workflowId": workflow_id,
@@ -225,7 +227,7 @@ def list_jaeger_services(
 def discover_workflows(
     service_name: str = Query("frontend", description="Ingress / entry microservice name"),
     jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
-    limit: int = Query(100, description="Max traces to analyze"),
+    limit: int = Query(100, ge=1, le=5000, description="Max traces to analyze"),
     lookback: str = Query("1h", description="Time lookback window"),
 ) -> list[dict[str, Any]]:
     """Scan Jaeger traces and auto-discover root transactions/workflows without manual input."""
@@ -242,6 +244,7 @@ def discover_workflows(
 
 @router.get(
     "/live",
+    deprecated=True,
     response_model_by_alias=True,
     summary="Fetch live traces and build WorkflowGraph",
     responses=JAEGER_AND_NOT_FOUND_RESPONSES,
@@ -250,12 +253,17 @@ def read_live_workflow(
     service_name: str = Query("frontend", description="Entry microservice name"),
     operation: str | None = Query(None, description="Optional root operation name filter"),
     jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
-    criticality: float = Query(0.8, description="Business criticality rating (0.0 to 1.0)"),
-    mandatory_threshold: float = Query(1.0, description="Mandatory frequency threshold (default 1.0 = 100%)"),
-    limit: int = Query(100, description="Max traces to fetch"),
+    criticality: float = Query(
+        0.8, ge=0.0, le=1.0, description="Business criticality rating"
+    ),
+    mandatory_threshold: float = Query(
+        1.0, ge=0.0, le=1.0,
+        description="Mandatory-candidate frequency threshold",
+    ),
+    limit: int = Query(100, ge=1, le=5000, description="Max traces to fetch"),
     lookback: str = Query("1h", description="Time lookback window"),
 ) -> WorkflowGraph:
-    """Fetch live traces from Jaeger and run real-time dependency extraction."""
+    """Legacy adapter returning a candidate graph; it is not a validated export."""
     try:
         return get_live_workflow(
             service_name=service_name,

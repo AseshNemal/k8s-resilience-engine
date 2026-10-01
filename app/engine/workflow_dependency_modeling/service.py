@@ -1,47 +1,27 @@
-"""service.py — Member 1: Workflow Dependency Modeling
+"""Public service interface for Component 1 workflow dependency modeling.
 
-Public interface for Component 1.  All other components and API routes
-interact with this module only — they must not import directly from the
-internal modules (``trace_reader``, ``interaction_extractor``, etc.).
-
-Exported functions
-------------------
-``build_workflow_graph(workflow_definition, traces)``
-    The primary research function.  Accepts a workflow definition dict and
-    raw Jaeger trace data; runs the full five-stage pipeline and returns a
-    validated :class:`~app.shared.schemas.workflow.WorkflowGraph`.
-
-``get_sample_workflow()``
-    Convenience entry point used by the ``/api/workflows/sample`` route.
-    Runs ``build_workflow_graph`` against the mock checkout trace data so
-    the API always exercises the real algorithm, never a hardcoded fixture.
-
-Full pipeline
--------------
-::
-
-    raw Jaeger traces
-        -> trace_reader.parse_spans()
-        -> interaction_extractor.extract_interactions()
-        -> interaction_extractor.aggregate_edges()
-        -> dependency_classifier.classify_dependencies()
-        -> graph_builder.build_workflow_graph()
-        -> WorkflowGraph  (shared contract for Member 3)
+Prediction consumes only a :class:`WorkflowScenario` and observed traces.
+Independent reference fixtures are loaded only by evaluation endpoints.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 from app.engine.workflow_dependency_modeling.auto_discovery import (
-    build_workflow_definition_from_traces,
+    _slugify,
     discover_root_workflows,
     select_workflow_traces,
 )
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
+)
+from app.engine.workflow_dependency_modeling.fixture_repository import (
+    get_evidence_source,
+    get_reference,
+    get_scenario,
+    list_fixture_workflows,
+    load_fixture_traces,
 )
 from app.engine.workflow_dependency_modeling.graph_builder import (
     build_workflow_graph as _assemble,
@@ -50,81 +30,43 @@ from app.engine.workflow_dependency_modeling.interaction_extractor import (
     aggregate_edges,
     extract_interactions,
 )
-from app.engine.workflow_dependency_modeling.trace_reader import (
-    load_traces_from_file,
-    parse_spans,
-)
+from app.engine.workflow_dependency_modeling.models import WorkflowScenario
+from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
 from app.integrations.jaeger.client import JaegerClient
-from app.shared.sample_loader import SAMPLE_DATA_DIR
 from app.shared.schemas.workflow import WorkflowGraph
 
-_DEFINITIONS_DIR = SAMPLE_DATA_DIR / "workflow_definitions"
-_TRACES_DIR = SAMPLE_DATA_DIR / "traces"
+if TYPE_CHECKING:
+    from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
 
 
-# ---------------------------------------------------------------------------
-# Primary public interface
-# ---------------------------------------------------------------------------
+def _as_scenario(value: WorkflowScenario | Mapping[str, Any]) -> WorkflowScenario:
+    if isinstance(value, WorkflowScenario):
+        return value
+    return WorkflowScenario.from_mapping(value)
 
 
 def build_workflow_graph(
-    workflow_definition: dict,
+    scenario: WorkflowScenario | Mapping[str, Any],
     traces: list[dict],
     mandatory_threshold: float = 1.0,
     min_edge_frequency: float = 0.0,
 ) -> WorkflowGraph:
-    """Build a :class:`WorkflowGraph` from a workflow definition and Jaeger traces.
-
-    This is the **primary research function** for Component 1.  It runs
-    the complete five-stage pipeline:
-
-    1. Parse raw Jaeger span dicts into typed :class:`~trace_reader.Span`
-       objects.
-    2. Extract per-trace cross-service call edges.
-    3. Aggregate edges across all traces to compute occurrence frequencies.
-    4. Classify each service as MANDATORY, OPTIONAL, or SUPPORTING using the
-       workflow definition and the configurable ``mandatory_threshold``.
-    5. Assemble and return a validated :class:`WorkflowGraph`.
-
-    Args:
-        workflow_definition: Reference workflow dict loaded from
-            ``sample_data/workflow_definitions/*.json`` (or from a real
-            Kubernetes / registry source in future work). Must contain
-            ``"workflowId"``, ``"criticality"``, ``"expectedServices"``,
-            and ``"expectedEdges"``.
-        traces: Raw Jaeger HTTP API trace list — the value of the ``"data"``
-            key returned by :func:`~trace_reader.load_traces_from_file`.
-        mandatory_threshold: Services with a trace frequency >=
-            this value are classified as MANDATORY. Defaults to ``1.0``
-            (must appear in every trace run). Lower to tolerate occasional
-            missed traces (e.g. ``0.9`` for 90 % presence).
-        min_edge_frequency: Only edges with frequency >= this value are
-            included in the returned graph. Defaults to ``0.0`` (include
-            all observed edges). Set to ``1.0`` for mandatory-only edges.
-
-    Returns:
-        A validated :class:`~app.shared.schemas.workflow.WorkflowGraph`
-        ready to be returned by the API and consumed by Member 3.
-    """
+    """Build a candidate graph without loading or accepting reference truth."""
+    typed_scenario = _as_scenario(scenario)
     spans = parse_spans(traces)
     interactions = extract_interactions(spans)
     observed = aggregate_edges(interactions)
     classification = classify_dependencies(
         interactions,
-        workflow_definition,
+        typed_scenario.workflow_id,
         mandatory_threshold=mandatory_threshold,
     )
     return _assemble(
         classification,
         observed,
-        workflow_definition,
+        typed_scenario,
         min_edge_frequency=min_edge_frequency,
     )
-
-
-# ---------------------------------------------------------------------------
-# Live Jaeger integration & Auto-Discovery
-# ---------------------------------------------------------------------------
 
 
 def discover_live_workflows(
@@ -133,34 +75,23 @@ def discover_live_workflows(
     limit: int = 100,
     lookback: str = "1h",
 ) -> list[dict[str, Any]]:
-    """Query a running Jaeger server and auto-discover all active workflows.
-
-    Args:
-        service_name: Ingress / entry microservice to inspect (default 'frontend').
-        jaeger_url: Base URL of the Jaeger REST query service.
-        limit: Max traces to fetch.
-        lookback: Time lookback window.
-
-    Returns:
-        List of discovered workflow summary dicts.
-    """
-    client = JaegerClient(base_url=jaeger_url)
-    traces = client.fetch_traces(
+    """Discover candidate operations from observed Jaeger root spans."""
+    traces = JaegerClient(base_url=jaeger_url).fetch_traces(
         service_name=service_name,
         limit=limit,
         lookback=lookback,
     )
-    summaries = discover_root_workflows(traces)
     return [
         {
-            "workflowId": s.workflow_id,
-            "operationName": s.operation_name,
-            "rootService": s.root_service,
-            "traceCount": s.trace_count,
-            "participatingServices": s.participating_services,
-            "sampleTraceIds": s.sample_trace_ids,
+            "workflowId": summary.workflow_id,
+            "operationName": summary.operation_name,
+            "rootService": summary.root_service,
+            "traceCount": summary.trace_count,
+            "participatingServices": summary.participating_services,
+            "sampleTraceIds": summary.sample_trace_ids,
+            "status": "candidate",
         }
-        for s in summaries
+        for summary in discover_root_workflows(traces)
     ]
 
 
@@ -173,26 +104,12 @@ def get_live_workflow(
     limit: int = 100,
     lookback: str = "1h",
 ) -> WorkflowGraph:
-    """Fetch live traces from Jaeger and build a real-time WorkflowGraph.
+    """Legacy candidate-graph adapter for live traces.
 
-    If no explicit workflow definition exists, automatically infers expected
-    services and causal edges from the live traces.
-
-    Args:
-        service_name: Entry microservice (e.g. 'frontend').
-        operation: Target operation / workflow (e.g. 'checkout'). If None,
-            uses the most frequent discovered root operation.
-        jaeger_url: Jaeger server REST endpoint.
-        criticality: Business criticality rating.
-        mandatory_threshold: Mandatory presence threshold (default 1.0 = 100%).
-        limit: Max traces to fetch.
-        lookback: Time lookback.
-
-    Returns:
-        A validated :class:`WorkflowGraph` built from live traces.
+    The result is not evaluated or frozen. The UI uses ``get_live_evidence`` so
+    it can show observed evidence without presenting candidate labels as truth.
     """
-    client = JaegerClient(base_url=jaeger_url)
-    traces = client.fetch_traces(
+    traces = JaegerClient(base_url=jaeger_url).fetch_traces(
         service_name=service_name,
         operation=operation,
         limit=limit,
@@ -203,95 +120,73 @@ def get_live_workflow(
             f"No traces found in Jaeger at {jaeger_url} for service '{service_name}'"
             + (f" and operation '{operation}'" if operation else "")
         )
-
-    target_op = operation or "live_workflow"
-    workflow_definition = build_workflow_definition_from_traces(
-        traces,
-        operation_name=target_op,
+    operation_name = operation or "live_workflow"
+    scenario = WorkflowScenario(
+        workflow_id=_slugify(operation_name),
+        description="Candidate operation discovered from live trace evidence.",
         criticality=criticality,
+        success_condition="Not recorded by the legacy live endpoint.",
+        entry_service=service_name,
     )
-
     return build_workflow_graph(
-        workflow_definition=workflow_definition,
-        traces=traces,
+        scenario,
+        traces,
         mandatory_threshold=mandatory_threshold,
     )
 
 
-def get_live_evidence(service_name: str, operation: str, jaeger_url: str,
-                      limit: int = 1000, lookback: str = "1h") -> dict[str, Any]:
-    """Observed calls for one request type; trace presence is not necessity."""
+def get_live_evidence(
+    service_name: str,
+    operation: str,
+    jaeger_url: str,
+    limit: int = 1000,
+    lookback: str = "1h",
+) -> dict[str, Any]:
+    """Return observed calls for one candidate operation without necessity labels."""
     traces = JaegerClient(base_url=jaeger_url).fetch_traces(
-        service_name=service_name, limit=limit, lookback=lookback)
+        service_name=service_name,
+        limit=limit,
+        lookback=lookback,
+    )
     selected = select_workflow_traces(traces, operation)
     if not selected:
-        raise ValueError("No matching traces in this window. Refresh discovery or widen the lookback.")
+        raise ValueError(
+            "No matching traces in this window. Refresh discovery or widen the lookback."
+        )
     spans = parse_spans(selected)
     services = sorted({span.service_name for span in spans})
     evidence = []
     for name in services:
         count = len({span.trace_id for span in spans if span.service_name == name})
-        evidence.append({"service": name, "traceCount": count,
-                         "frequency": count / len(selected)})
+        evidence.append(
+            {
+                "service": name,
+                "traceCount": count,
+                "frequency": count / len(selected),
+            }
+        )
     edges = aggregate_edges(extract_interactions(spans))
-    return {"workflowId": operation, "criticality": None,
-            "mandatoryServices": [], "optionalServices": [],
-            "observedServices": services, "serviceEvidence": evidence,
-            "traceCount": len(selected), "sampleTraceIds": [t["traceID"] for t in selected[:10]],
-            "sampleLimit": limit, "fetchedTraceCount": len(traces),
-            "classificationStatus": "unvalidated", "source": "live",
-            "edges": [{"source": e.source, "target": e.target} for e in edges]}
-
-
-# ---------------------------------------------------------------------------
-# Benchmark data entry points
-# ---------------------------------------------------------------------------
+    return {
+        "workflowId": operation,
+        "criticality": None,
+        "mandatoryServices": [],
+        "optionalServices": [],
+        "observedServices": services,
+        "serviceEvidence": evidence,
+        "traceCount": len(selected),
+        "sampleTraceIds": [trace["traceID"] for trace in selected[:10]],
+        "sampleLimit": limit,
+        "fetchedTraceCount": len(traces),
+        "classificationStatus": "not_classified",
+        "evaluationStatus": "not_evaluated",
+        "source": "live_unverified",
+        "edges": [{"source": edge.source, "target": edge.target} for edge in edges],
+    }
 
 
 def list_benchmark_workflows() -> list[dict[str, Any]]:
-    """List all available reference benchmark workflows in the repository.
-
-    Returns:
-        List of workflow metadata dicts.
-    """
-    workflows = []
-    if not _DEFINITIONS_DIR.exists():
-        return workflows
-
-    for path in sorted(_DEFINITIONS_DIR.glob("*.json")):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-                workflows.append({
-                    "workflowId": data.get("workflowId", path.stem),
-                    "description": data.get("description", ""),
-                    "criticality": data.get("criticality", 0.5),
-                    "expectedServices": data.get("expectedServices", []),
-                    "entryService": data.get("entryService", "frontend"),
-                })
-        except Exception:
-            continue
-    return workflows
-
-
-def get_workflow_definition(workflow_id: str) -> dict[str, Any]:
-    """Load the raw JSON workflow definition dict for a given workflow ID.
-
-    Args:
-        workflow_id: Benchmark workflow ID.
-
-    Returns:
-        Workflow definition dictionary.
-
-    Raises:
-        FileNotFoundError: If the workflow definition JSON file does not exist.
-    """
-    def_file = _DEFINITIONS_DIR / f"{workflow_id}.json"
-    if not def_file.exists():
-        raise FileNotFoundError(f"Workflow definition '{workflow_id}' not found in {_DEFINITIONS_DIR}")
-
-    with open(def_file, encoding="utf-8") as fh:
-        return json.load(fh)
+    """List separated synthetic fixture datasets (legacy API name)."""
+    return list_fixture_workflows()
 
 
 def get_workflow_by_id(
@@ -299,39 +194,45 @@ def get_workflow_by_id(
     mandatory_threshold: float = 1.0,
     min_edge_frequency: float = 0.0,
 ) -> WorkflowGraph:
-    """Build a :class:`WorkflowGraph` for a specific benchmark workflow ID.
-
-    Args:
-        workflow_id: Identifier of the workflow (e.g. 'checkout', 'view_product', 'add_to_cart').
-        mandatory_threshold: Minimum trace presence fraction to classify as MANDATORY.
-        min_edge_frequency: Minimum edge frequency.
-
-    Returns:
-        Validated :class:`WorkflowGraph`.
-    """
-    workflow_definition = get_workflow_definition(workflow_id)
-
-    trace_file_str = workflow_definition.get("traceFile")
-    if trace_file_str:
-        trace_path = SAMPLE_DATA_DIR.parent / trace_file_str
-        if not trace_path.exists():
-            trace_path = _TRACES_DIR / f"{workflow_id}_traces.json"
-    else:
-        trace_path = _TRACES_DIR / f"{workflow_id}_traces.json"
-
-    if not trace_path.exists():
-        # Fallback to checkout traces if specific trace file is missing
-        trace_path = _TRACES_DIR / "checkout_traces.json"
-
-    raw_traces = load_traces_from_file(trace_path)
+    """Build a fixture prediction from scenario plus evidence only."""
+    scenario = get_scenario(workflow_id)
+    traces = load_fixture_traces(workflow_id)
     return build_workflow_graph(
-        workflow_definition=workflow_definition,
-        traces=raw_traces,
+        scenario,
+        traces,
         mandatory_threshold=mandatory_threshold,
         min_edge_frequency=min_edge_frequency,
     )
 
 
+def evaluate_workflow_by_id(
+    workflow_id: str,
+    mandatory_threshold: float = 1.0,
+) -> GraphEvaluationResult:
+    """Generate a fixture prediction first, then evaluate it separately."""
+    from app.engine.workflow_dependency_modeling.evaluator import evaluate_graph
+
+    generated = get_workflow_by_id(
+        workflow_id, mandatory_threshold=mandatory_threshold
+    )
+    reference = get_reference(workflow_id)
+    return evaluate_graph(generated, reference)
+
+
 def get_sample_workflow() -> WorkflowGraph:
-    """Return the checkout :class:`WorkflowGraph` built from mock trace data."""
+    """Return the checkout synthetic-fixture candidate graph."""
     return get_workflow_by_id("checkout")
+
+
+__all__ = [
+    "build_workflow_graph",
+    "discover_live_workflows",
+    "evaluate_workflow_by_id",
+    "get_evidence_source",
+    "get_live_evidence",
+    "get_live_workflow",
+    "get_sample_workflow",
+    "get_scenario",
+    "get_workflow_by_id",
+    "list_benchmark_workflows",
+]

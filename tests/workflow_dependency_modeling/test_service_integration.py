@@ -17,9 +17,6 @@ Integration contract (what Member 3 will receive from Component 1):
   edges:                4 edges (all observed, default min_edge_frequency=0.0)
 """
 
-import json
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -28,13 +25,13 @@ from app.engine.workflow_dependency_modeling.service import (
     get_sample_workflow,
 )
 from app.main import app
+from app.engine.workflow_dependency_modeling.fixture_repository import get_scenario
 from app.shared.sample_loader import SAMPLE_DATA_DIR
 from app.shared.schemas.workflow import WorkflowGraph
 from app.engine.workflow_dependency_modeling.trace_reader import (
     load_traces_from_file,
 )
 
-_DEFINITIONS_DIR = SAMPLE_DATA_DIR / "workflow_definitions"
 _TRACES_DIR = SAMPLE_DATA_DIR / "traces"
 
 client = TestClient(app)
@@ -45,9 +42,8 @@ client = TestClient(app)
 # ---------------------------------------------------------------------------
 
 
-def load_def(name: str) -> dict:
-    with open(_DEFINITIONS_DIR / f"{name}.json", encoding="utf-8") as fh:
-        return json.load(fh)
+def load_def(name: str):
+    return get_scenario(name)
 
 
 def load_traces(name: str) -> list[dict]:
