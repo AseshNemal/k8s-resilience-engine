@@ -30,16 +30,16 @@
     </div>
     <div class="live-config-form" style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-top: var(--space-sm);">
         <div class="form-group" style="flex: 1; min-width: 220px;">
-            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Jaeger Query URL</label>
-            <input type="text" data-role="jaeger-url-input" value="http://localhost:16686" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="http://localhost:16686">
+            <label for="jaeger-url-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Jaeger Query URL</label>
+            <input id="jaeger-url-input" type="text" data-role="jaeger-url-input" value="http://localhost:16686" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="http://localhost:16686">
         </div>
         <div class="form-group" style="width: 140px;">
-            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Entry Service</label>
-            <input type="text" data-role="entry-service-input" value="frontend" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="frontend">
+            <label for="entry-service-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Entry Service</label>
+            <input id="entry-service-input" type="text" data-role="entry-service-input" value="frontend" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="frontend">
         </div>
         <div class="form-group" style="width: 120px;">
-            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Lookback</label>
-            <select data-role="lookback-select" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
+            <label for="lookback-select" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Lookback</label>
+            <select id="lookback-select" data-role="lookback-select" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
                 <option value="1h" selected>Last 1h</option>
                 <option value="6h">Last 6h</option>
                 <option value="24h">Last 24h</option>
@@ -47,8 +47,8 @@
             </select>
         </div>
         <div class="form-group" style="min-width: 180px;">
-            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Synthetic Fixture Dataset</label>
-            <select data-role="benchmark-select" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
+            <label for="benchmark-select" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Synthetic Fixture Dataset</label>
+            <select id="benchmark-select" data-role="benchmark-select" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
                 <option value="checkout" selected>Checkout (synthetic)</option>
                 <option value="view_product">View Product (synthetic)</option>
                 <option value="add_to_cart">Add to Cart (synthetic)</option>
@@ -70,8 +70,8 @@
     <div data-role="discovered-workflows-container" style="display: none; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px dashed var(--color-border);">
         <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: var(--space-sm);">
-                <span style="font-size: 13px; font-weight: 600;">Candidate Operations:</span>
-                <select data-role="discovered-workflow-select" class="form-input" style="padding: 6px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);"></select>
+                <label for="discovered-workflow-select" style="font-size: 13px; font-weight: 600;">Candidate Operations:</label>
+                <select id="discovered-workflow-select" data-role="discovered-workflow-select" class="form-input" style="padding: 6px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);"></select>
             </div>
             <button type="button" class="primary-button" data-role="extract-live-button">
                 Extract Live Dependency Graph
@@ -154,8 +154,8 @@
     <div class="card" data-role="benchmark-only" style="margin-bottom: var(--space-lg);">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-md); margin-bottom: var(--space-md); padding-bottom: var(--space-md); border-bottom: 1px solid var(--color-border);">
             <div style="display: flex; align-items: center; gap: var(--space-md);">
-                <label style="font-size: 13px; font-weight: 600;">Mandatory Threshold (θ):</label>
-                <input type="range" data-role="eval-threshold-slider" min="0.5" max="1.0" step="0.05" value="1.0" style="cursor: pointer;">
+                <label for="eval-threshold-slider" style="font-size: 13px; font-weight: 600;">Mandatory Threshold (θ):</label>
+                <input id="eval-threshold-slider" type="range" data-role="eval-threshold-slider" min="0.5" max="1.0" step="0.05" value="1.0" style="cursor: pointer;">
                 <span data-role="eval-threshold-display" style="font-weight: 700; color: var(--color-primary);">1.00 (100%)</span>
             </div>
             <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap;">

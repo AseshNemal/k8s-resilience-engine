@@ -78,6 +78,23 @@ def select_workflow_traces(traces: list[dict], operation: str) -> list[dict]:
     return selected
 
 
+def _find_root_span(trace_spans: list[Span]) -> Span:
+    """Choose the explicit, external-parent, or earliest span for one trace."""
+    known_span_ids = {span.span_id for span in trace_spans}
+    explicit_root = next(
+        (span for span in trace_spans if span.parent_span_id is None),
+        None,
+    )
+    if explicit_root is not None:
+        return explicit_root
+
+    external_parent_root = next(
+        (span for span in trace_spans if span.parent_span_id not in known_span_ids),
+        None,
+    )
+    return external_parent_root or trace_spans[0]
+
+
 def find_root_spans(spans_by_trace: dict[str, list[Span]]) -> dict[str, Span]:
     """Find the root span for each trace in a collection.
 
@@ -92,35 +109,11 @@ def find_root_spans(spans_by_trace: dict[str, list[Span]]) -> dict[str, Span]:
     Returns:
         Dict mapping trace_id -> root Span.
     """
-    roots: dict[str, Span] = {}
-
-    for trace_id, trace_spans in spans_by_trace.items():
-        if not trace_spans:
-            continue
-
-        known_span_ids = {s.span_id for s in trace_spans}
-        root_candidate = None
-
-        # Pass 1: Look for explicit parent_span_id is None
-        for s in trace_spans:
-            if s.parent_span_id is None:
-                root_candidate = s
-                break
-
-        # Pass 2: Look for parent_span_id not in this trace's span set
-        if root_candidate is None:
-            for s in trace_spans:
-                if s.parent_span_id not in known_span_ids:
-                    root_candidate = s
-                    break
-
-        # Fallback: Pick the span with the earliest startTime / duration
-        if root_candidate is None:
-            root_candidate = trace_spans[0]
-
-        roots[trace_id] = root_candidate
-
-    return roots
+    return {
+        trace_id: _find_root_span(trace_spans)
+        for trace_id, trace_spans in spans_by_trace.items()
+        if trace_spans
+    }
 
 
 def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWorkflowSummary]:

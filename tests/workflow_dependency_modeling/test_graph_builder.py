@@ -124,8 +124,10 @@ class TestBuildCheckoutGraph:
 
     def test_edges_have_source_and_target(self, graph: WorkflowGraph) -> None:
         for edge in graph.edges:
-            assert isinstance(edge.source, str) and edge.source
-            assert isinstance(edge.target, str) and edge.target
+            assert isinstance(edge.source, str)
+            assert edge.source
+            assert isinstance(edge.target, str)
+            assert edge.target
 
     def test_mandatory_edges_present(self, graph: WorkflowGraph) -> None:
         pairs = {(e.source, e.target) for e in graph.edges}

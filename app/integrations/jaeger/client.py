@@ -13,6 +13,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 DEFAULT_JAEGER_URL = "http://localhost:16686"
+SERVICE_NAME_KEY = "service.name"
 
 
 class JaegerClient:
@@ -55,7 +56,7 @@ class JaegerClient:
                 data = response.json()
                 return data.get("data", []) or []
         except Exception as err:
-            logger.error("Failed to fetch services from Jaeger at %s: %s", self.base_url, err)
+            logger.exception("Failed to fetch services from Jaeger at %s", self.base_url)
             raise ConnectionError(
                 f"Could not connect to Jaeger at {self.base_url}: {err}"
             ) from err
@@ -79,10 +80,9 @@ class JaegerClient:
                 data = response.json()
                 return data.get("data", []) or []
         except Exception as err:
-            logger.error(
-                "Failed to fetch operations for service '%s' from Jaeger: %s",
+            logger.exception(
+                "Failed to fetch operations for service '%s' from Jaeger",
                 service_name,
-                err,
             )
             raise ConnectionError(
                 f"Could not fetch operations for '{service_name}' from Jaeger: {err}"
@@ -128,7 +128,7 @@ class JaegerClient:
                 data = response.json()
                 return data.get("data", []) or []
         except Exception as err:
-            logger.error("Failed to fetch traces from Jaeger at %s: %s", self.base_url, err)
+            logger.exception("Failed to fetch traces from Jaeger at %s", self.base_url)
             raise ConnectionError(
                 f"Could not fetch traces from Jaeger at {self.base_url}: {err}"
             ) from err
@@ -165,49 +165,49 @@ class JaegerClient:
             start_t = now_nano - (i * 60 * 1_000_000_000)
 
             # Frontend root
-            resource_spans.append({
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "frontend"}}]},
+            resource_spans.extend([{
+                "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "frontend"}}]},
                 "scopeSpans": [{"spans": [{
                     "traceId": trace_id, "spanId": root_span_id,
                     "name": "POST /cart/checkout", "kind": 1,
                     "startTimeUnixNano": str(start_t), "endTimeUnixNano": str(start_t + 250_000_000),
                     "status": {"code": 1}
                 }]}]
-            })
+            },
             # CartService
-            resource_spans.append({
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "cartservice"}}]},
+            {
+                "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "cartservice"}}]},
                 "scopeSpans": [{"spans": [{
                     "traceId": trace_id, "spanId": cart_span_id, "parentSpanId": root_span_id,
                     "name": "get_cart", "kind": 2,
                     "startTimeUnixNano": str(start_t + 10_000_000), "endTimeUnixNano": str(start_t + 50_000_000),
                     "status": {"code": 1}
                 }]}]
-            })
+            },
             # CheckoutService
-            resource_spans.append({
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "checkoutservice"}}]},
+            {
+                "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "checkoutservice"}}]},
                 "scopeSpans": [{"spans": [{
                     "traceId": trace_id, "spanId": co_span_id, "parentSpanId": cart_span_id,
                     "name": "place_order", "kind": 2,
                     "startTimeUnixNano": str(start_t + 60_000_000), "endTimeUnixNano": str(start_t + 220_000_000),
                     "status": {"code": 1}
                 }]}]
-            })
+            },
             # PaymentService (Mandatory: present in all 5 runs)
-            resource_spans.append({
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "paymentservice"}}]},
+            {
+                "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "paymentservice"}}]},
                 "scopeSpans": [{"spans": [{
                     "traceId": trace_id, "spanId": pay_span_id, "parentSpanId": co_span_id,
                     "name": "charge_credit_card", "kind": 2,
                     "startTimeUnixNano": str(start_t + 80_000_000), "endTimeUnixNano": str(start_t + 180_000_000),
                     "status": {"code": 1}
                 }]}]
-            })
+            }])
             # EmailService (Optional: present only in run 0 and 1)
             if i in (0, 1):
                 resource_spans.append({
-                    "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "emailservice"}}]},
+                    "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "emailservice"}}]},
                     "scopeSpans": [{"spans": [{
                         "traceId": trace_id, "spanId": email_span_id, "parentSpanId": co_span_id,
                         "name": "send_order_confirmation", "kind": 2,
@@ -227,39 +227,39 @@ class JaegerClient:
             start_t = now_nano - ((i + 5) * 60 * 1_000_000_000)
 
             # Frontend root
-            resource_spans.append({
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "frontend"}}]},
+            resource_spans.extend([{
+                "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "frontend"}}]},
                 "scopeSpans": [{"spans": [{
                     "traceId": trace_id, "spanId": root_span_id,
                     "name": "GET /product/66VCHSJNUP", "kind": 1,
                     "startTimeUnixNano": str(start_t), "endTimeUnixNano": str(start_t + 50_000_000),
                     "status": {"code": 1}
                 }]}]
-            })
+            },
             # ProductCatalogService (Mandatory)
-            resource_spans.append({
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "productcatalogservice"}}]},
+            {
+                "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "productcatalogservice"}}]},
                 "scopeSpans": [{"spans": [{
                     "traceId": trace_id, "spanId": prod_span_id, "parentSpanId": root_span_id,
                     "name": "GetProduct", "kind": 2,
                     "startTimeUnixNano": str(start_t + 5_000_000), "endTimeUnixNano": str(start_t + 20_000_000),
                     "status": {"code": 1}
                 }]}]
-            })
+            },
             # CurrencyService (Mandatory)
-            resource_spans.append({
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "currencyservice"}}]},
+            {
+                "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "currencyservice"}}]},
                 "scopeSpans": [{"spans": [{
                     "traceId": trace_id, "spanId": curr_span_id, "parentSpanId": root_span_id,
                     "name": "ConvertCurrency", "kind": 2,
                     "startTimeUnixNano": str(start_t + 22_000_000), "endTimeUnixNano": str(start_t + 35_000_000),
                     "status": {"code": 1}
                 }]}]
-            })
+            }])
             # RecommendationService (Optional: run 0 and 1)
             if i in (0, 1):
                 resource_spans.append({
-                    "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "recommendationservice"}}]},
+                    "resource": {"attributes": [{"key": SERVICE_NAME_KEY, "value": {"stringValue": "recommendationservice"}}]},
                     "scopeSpans": [{"spans": [{
                         "traceId": trace_id, "spanId": rec_span_id, "parentSpanId": root_span_id,
                         "name": "ListRecommendations", "kind": 2,

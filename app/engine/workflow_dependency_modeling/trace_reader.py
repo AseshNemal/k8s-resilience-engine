@@ -114,6 +114,48 @@ def load_traces_from_file(path: str | Path) -> list[dict]:
     return list(payload)
 
 
+def _parent_span_id(raw_span: dict) -> str | None:
+    """Return the first non-empty CHILD_OF parent span ID."""
+    child_reference = next(
+        (
+            reference
+            for reference in raw_span.get("references", [])
+            if reference.get("refType") == "CHILD_OF"
+        ),
+        None,
+    )
+    if child_reference is None:
+        return None
+    return child_reference.get("spanID") or None
+
+
+def _span_tags(raw_span: dict) -> tuple[dict[str, str], bool]:
+    """Flatten Jaeger tags and report whether the error tag is true."""
+    raw_tags = raw_span.get("tags", [])
+    tags = {tag.get("key", ""): str(tag.get("value")) for tag in raw_tags}
+    has_error = any(
+        tag.get("key") == "error" and tag.get("value") is True
+        for tag in raw_tags
+    )
+    return tags, has_error
+
+
+def _parse_span(raw_span: dict, trace_id: str, processes: dict[str, dict]) -> Span:
+    """Convert one raw Jaeger span using its trace-level process map."""
+    process = processes.get(raw_span.get("processID", ""), {})
+    tags, has_error = _span_tags(raw_span)
+    return Span(
+        trace_id=raw_span.get("traceID", trace_id),
+        span_id=raw_span.get("spanID", ""),
+        parent_span_id=_parent_span_id(raw_span),
+        service_name=process.get("serviceName", "unknown"),
+        operation_name=raw_span.get("operationName", ""),
+        duration_us=raw_span.get("duration", 0),
+        tags=tags,
+        error=has_error,
+    )
+
+
 def parse_spans(raw_traces: list[dict]) -> list[Span]:
     """Convert raw Jaeger trace dicts into typed :class:`Span` objects.
 
@@ -129,48 +171,8 @@ def parse_spans(raw_traces: list[dict]) -> list[Span]:
     Returns:
         A flat list of :class:`Span` objects across all traces.
     """
-    spans: list[Span] = []
-
-    for trace in raw_traces:
-        trace_id: str = trace.get("traceID", "")
-        processes: dict[str, dict] = trace.get("processes", {})
-
-        for raw_span in trace.get("spans", []):
-            # Resolve the service name through the process map ---------------
-            process_id: str = raw_span.get("processID", "")
-            process: dict = processes.get(process_id, {})
-            service_name: str = process.get("serviceName", "unknown")
-
-            # Resolve the parent span ID from CHILD_OF references -----------
-            parent_span_id: str | None = None
-            for ref in raw_span.get("references", []):
-                if ref.get("refType") == "CHILD_OF":
-                    ref_span_id = ref.get("spanID", "")
-                    if ref_span_id:
-                        parent_span_id = ref_span_id
-                    break
-
-            # Flatten tags to dict[str, str]; detect error flag -------------
-            tags: dict[str, str] = {}
-            error: bool = False
-            for tag in raw_span.get("tags", []):
-                key: str = tag.get("key", "")
-                value = tag.get("value")
-                tags[key] = str(value)
-                if key == "error" and value is True:
-                    error = True
-
-            spans.append(
-                Span(
-                    trace_id=raw_span.get("traceID", trace_id),
-                    span_id=raw_span.get("spanID", ""),
-                    parent_span_id=parent_span_id,
-                    service_name=service_name,
-                    operation_name=raw_span.get("operationName", ""),
-                    duration_us=raw_span.get("duration", 0),
-                    tags=tags,
-                    error=error,
-                )
-            )
-
-    return spans
+    return [
+        _parse_span(raw_span, trace.get("traceID", ""), trace.get("processes", {}))
+        for trace in raw_traces
+        for raw_span in trace.get("spans", [])
+    ]

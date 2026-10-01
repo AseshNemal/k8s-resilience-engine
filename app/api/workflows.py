@@ -23,8 +23,16 @@ router = APIRouter(
     tags=["Workflow Dependency Modeling"],
 )
 
+NOT_FOUND_RESPONSE = {404: {"description": "Requested workflow evidence was not found"}}
+JAEGER_UNAVAILABLE_RESPONSE = {503: {"description": "Jaeger service is unavailable"}}
+JAEGER_AND_NOT_FOUND_RESPONSES = {
+    **NOT_FOUND_RESPONSE,
+    **JAEGER_UNAVAILABLE_RESPONSE,
+}
+JAEGER_URL_DESCRIPTION = "Jaeger server base URL"
 
-@router.get("/live/evidence")
+
+@router.get("/live/evidence", responses=JAEGER_AND_NOT_FOUND_RESPONSES)
 def read_live_evidence(
     operation: str = Query(..., min_length=1),
     service_name: str = Query("frontend"),
@@ -62,9 +70,9 @@ def get_benchmark_workflows() -> list[dict[str, Any]]:
 
 @router.get(
     "/benchmark/{workflow_id}",
-    response_model=WorkflowGraph,
     response_model_by_alias=True,
     summary="Get workflow graph for a specific benchmark workflow",
+    responses=NOT_FOUND_RESPONSE,
 )
 def read_benchmark_workflow(
     workflow_id: str,
@@ -80,6 +88,7 @@ def read_benchmark_workflow(
 @router.get(
     "/evaluation/accuracy",
     summary="Evaluate accuracy of workflow extraction against ground-truth reference",
+    responses=NOT_FOUND_RESPONSE,
 )
 def evaluate_workflow_accuracy(
     workflow_id: str = Query("checkout", description="Benchmark workflow ID"),
@@ -124,6 +133,7 @@ def evaluate_workflow_accuracy(
 @router.get(
     "/evaluation/sensitivity",
     summary="Run sensitivity analysis across threshold range",
+    responses=NOT_FOUND_RESPONSE,
 )
 def get_sensitivity_analysis(
     workflow_id: str = Query("checkout", description="Benchmark workflow ID"),
@@ -156,7 +166,7 @@ def get_sensitivity_analysis(
     summary="Check Jaeger server connectivity",
 )
 def check_jaeger_status(
-    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description="Jaeger server base URL"),
+    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
 ) -> dict[str, Any]:
     """Check whether the Jaeger query server is online and reachable."""
     client = JaegerClient(base_url=jaeger_url)
@@ -171,6 +181,7 @@ def check_jaeger_status(
 @router.post(
     "/jaeger/seed",
     summary="Seed demo traces into Jaeger OTLP receiver",
+    responses=JAEGER_UNAVAILABLE_RESPONSE,
 )
 def seed_jaeger_traces(
     otlp_url: str = Query("http://localhost:4318", description="Jaeger OTLP HTTP receiver URL"),
@@ -192,9 +203,10 @@ def seed_jaeger_traces(
 @router.get(
     "/jaeger/services",
     summary="List all services recorded in Jaeger",
+    responses=JAEGER_UNAVAILABLE_RESPONSE,
 )
 def list_jaeger_services(
-    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description="Jaeger server base URL"),
+    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
 ) -> list[str]:
     """List all instrumented microservices that have reported traces to Jaeger."""
     client = JaegerClient(base_url=jaeger_url)
@@ -208,10 +220,11 @@ def list_jaeger_services(
 @router.get(
     "/discover",
     summary="Auto-discover all entry workflows from Jaeger traces",
+    responses=JAEGER_UNAVAILABLE_RESPONSE,
 )
 def discover_workflows(
     service_name: str = Query("frontend", description="Ingress / entry microservice name"),
-    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description="Jaeger server base URL"),
+    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
     limit: int = Query(100, description="Max traces to analyze"),
     lookback: str = Query("1h", description="Time lookback window"),
 ) -> list[dict[str, Any]]:
@@ -229,14 +242,14 @@ def discover_workflows(
 
 @router.get(
     "/live",
-    response_model=WorkflowGraph,
     response_model_by_alias=True,
     summary="Fetch live traces and build WorkflowGraph",
+    responses=JAEGER_AND_NOT_FOUND_RESPONSES,
 )
 def read_live_workflow(
     service_name: str = Query("frontend", description="Entry microservice name"),
     operation: str | None = Query(None, description="Optional root operation name filter"),
-    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description="Jaeger server base URL"),
+    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
     criticality: float = Query(0.8, description="Business criticality rating (0.0 to 1.0)"),
     mandatory_threshold: float = Query(1.0, description="Mandatory frequency threshold (default 1.0 = 100%)"),
     limit: int = Query(100, description="Max traces to fetch"),
