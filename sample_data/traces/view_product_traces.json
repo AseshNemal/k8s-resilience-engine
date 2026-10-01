@@ -1,0 +1,187 @@
+{
+  "data": [
+    {
+      "traceID": "trace-vp-001",
+      "spans": [
+        {
+          "traceID": "trace-vp-001",
+          "spanID": "s-vp1-01",
+          "operationName": "GET /product/66VCHSJNUP",
+          "references": [],
+          "startTime": 1700000000000000,
+          "duration": 45000,
+          "tags": [
+            { "key": "http.method", "type": "string", "value": "GET" },
+            { "key": "http.status_code", "type": "int64", "value": 200 },
+            { "key": "error", "type": "bool", "value": false }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-vp-001",
+          "spanID": "s-vp1-02",
+          "operationName": "GetProduct",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-001", "spanID": "s-vp1-01" }
+          ],
+          "startTime": 1700000000005000,
+          "duration": 12000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-vp-001",
+          "spanID": "s-vp1-03",
+          "operationName": "ConvertCurrency",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-001", "spanID": "s-vp1-01" }
+          ],
+          "startTime": 1700000000018000,
+          "duration": 8000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-vp-001",
+          "spanID": "s-vp1-04",
+          "operationName": "ListRecommendations",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-001", "spanID": "s-vp1-01" }
+          ],
+          "startTime": 1700000000027000,
+          "duration": 15000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p4"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend", "tags": [] },
+        "p2": { "serviceName": "productcatalogservice", "tags": [] },
+        "p3": { "serviceName": "currencyservice", "tags": [] },
+        "p4": { "serviceName": "recommendationservice", "tags": [] }
+      }
+    },
+    {
+      "traceID": "trace-vp-002",
+      "spans": [
+        {
+          "traceID": "trace-vp-002",
+          "spanID": "s-vp2-01",
+          "operationName": "GET /product/L9ECAV7KIM",
+          "references": [],
+          "startTime": 1700000005000000,
+          "duration": 52000,
+          "tags": [
+            { "key": "http.method", "type": "string", "value": "GET" },
+            { "key": "http.status_code", "type": "int64", "value": 200 },
+            { "key": "error", "type": "bool", "value": false }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-vp-002",
+          "spanID": "s-vp2-02",
+          "operationName": "GetProduct",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-002", "spanID": "s-vp2-01" }
+          ],
+          "startTime": 1700000005005000,
+          "duration": 14000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-vp-002",
+          "spanID": "s-vp2-03",
+          "operationName": "ConvertCurrency",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-002", "spanID": "s-vp2-01" }
+          ],
+          "startTime": 1700000005020000,
+          "duration": 9000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-vp-002",
+          "spanID": "s-vp2-04",
+          "operationName": "GetAds",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-002", "spanID": "s-vp2-01" }
+          ],
+          "startTime": 1700000005030000,
+          "duration": 18000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p5"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend", "tags": [] },
+        "p2": { "serviceName": "productcatalogservice", "tags": [] },
+        "p3": { "serviceName": "currencyservice", "tags": [] },
+        "p5": { "serviceName": "adservice", "tags": [] }
+      }
+    },
+    {
+      "traceID": "trace-vp-003",
+      "spans": [
+        {
+          "traceID": "trace-vp-003",
+          "spanID": "s-vp3-01",
+          "operationName": "GET /product/2ZYFJ3GM2N",
+          "references": [],
+          "startTime": 1700000010000000,
+          "duration": 38000,
+          "tags": [
+            { "key": "http.method", "type": "string", "value": "GET" },
+            { "key": "http.status_code", "type": "int64", "value": 200 },
+            { "key": "error", "type": "bool", "value": false }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-vp-003",
+          "spanID": "s-vp3-02",
+          "operationName": "GetProduct",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-003", "spanID": "s-vp3-01" }
+          ],
+          "startTime": 1700000010004000,
+          "duration": 11000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-vp-003",
+          "spanID": "s-vp3-03",
+          "operationName": "ConvertCurrency",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-003", "spanID": "s-vp3-01" }
+          ],
+          "startTime": 1700000010016000,
+          "duration": 8000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-vp-003",
+          "spanID": "s-vp3-04",
+          "operationName": "ListRecommendations",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-vp-003", "spanID": "s-vp3-01" }
+          ],
+          "startTime": 1700000010025000,
+          "duration": 12000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p4"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend", "tags": [] },
+        "p2": { "serviceName": "productcatalogservice", "tags": [] },
+        "p3": { "serviceName": "currencyservice", "tags": [] },
+        "p4": { "serviceName": "recommendationservice", "tags": [] }
+      }
+    }
+  ]
+}

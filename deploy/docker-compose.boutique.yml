@@ -1,0 +1,206 @@
+services:
+  # -------------------------------------------------------------------------
+  # Jaeger All-in-One (Tracing Backend + UI + OTLP Receiver)
+  # -------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Web UI / Query REST API
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    networks:
+      - boutique-net
+
+  # -------------------------------------------------------------------------
+  # Google Online Boutique Microservices (11 Core Services)
+  # -------------------------------------------------------------------------
+  frontend:
+    image: gcr.io/google-samples/microservices-demo/frontend:v0.10.1
+    container_name: boutique-frontend
+    environment:
+      - PORT=8080
+      - PRODUCT_CATALOG_SERVICE_ADDR=productcatalogservice:3550
+      - CURRENCY_SERVICE_ADDR=currencyservice:7000
+      - CART_SERVICE_ADDR=cartservice:7070
+      - RECOMMENDATION_SERVICE_ADDR=recommendationservice:8080
+      - SHIPPING_SERVICE_ADDR=shippingservice:50051
+      - CHECKOUT_SERVICE_ADDR=checkoutservice:5050
+      - AD_SERVICE_ADDR=adservice:9555
+      - SHOPPING_ASSISTANT_SERVICE_ADDR=shoppingassistantservice:80
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=frontend
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    ports:
+      - "8080:8080" # Web Store in your browser!
+    depends_on:
+      - jaeger
+      - productcatalogservice
+      - currencyservice
+      - cartservice
+    networks:
+      - boutique-net
+
+  cartservice:
+    image: gcr.io/google-samples/microservices-demo/cartservice:v0.10.1
+    container_name: boutique-cartservice
+    environment:
+      - PORT=7070
+      - REDIS_ADDR=redis-cart:6379
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=cartservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - redis-cart
+      - jaeger
+    networks:
+      - boutique-net
+
+  redis-cart:
+    image: redis:alpine
+    container_name: boutique-redis-cart
+    ports:
+      - "6379:6379"
+    networks:
+      - boutique-net
+
+  productcatalogservice:
+    image: gcr.io/google-samples/microservices-demo/productcatalogservice:v0.10.1
+    container_name: boutique-productcatalogservice
+    environment:
+      - PORT=3550
+      - DISABLE_PROFILER=1
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=productcatalogservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+    networks:
+      - boutique-net
+
+  currencyservice:
+    image: gcr.io/google-samples/microservices-demo/currencyservice:v0.10.1
+    container_name: boutique-currencyservice
+    environment:
+      - PORT=7000
+      - DISABLE_PROFILER=1
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=currencyservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+    networks:
+      - boutique-net
+
+  paymentservice:
+    image: gcr.io/google-samples/microservices-demo/paymentservice:v0.10.1
+    container_name: boutique-paymentservice
+    environment:
+      - PORT=50051
+      - DISABLE_PROFILER=1
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=paymentservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+    networks:
+      - boutique-net
+
+  shippingservice:
+    image: gcr.io/google-samples/microservices-demo/shippingservice:v0.10.1
+    container_name: boutique-shippingservice
+    environment:
+      - PORT=50051
+      - DISABLE_PROFILER=1
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=shippingservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+    networks:
+      - boutique-net
+
+  emailservice:
+    image: gcr.io/google-samples/microservices-demo/emailservice:v0.10.1
+    container_name: boutique-emailservice
+    environment:
+      - PORT=8080
+      - DISABLE_PROFILER=1
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=emailservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+    networks:
+      - boutique-net
+
+  checkoutservice:
+    image: gcr.io/google-samples/microservices-demo/checkoutservice:v0.10.1
+    container_name: boutique-checkoutservice
+    environment:
+      - PORT=5050
+      - PRODUCT_CATALOG_SERVICE_ADDR=productcatalogservice:3550
+      - SHIPPING_SERVICE_ADDR=shippingservice:50051
+      - PAYMENT_SERVICE_ADDR=paymentservice:50051
+      - EMAIL_SERVICE_ADDR=emailservice:8080
+      - CURRENCY_SERVICE_ADDR=currencyservice:7000
+      - CART_SERVICE_ADDR=cartservice:7070
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=checkoutservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+      - paymentservice
+      - shippingservice
+      - emailservice
+    networks:
+      - boutique-net
+
+  recommendationservice:
+    image: gcr.io/google-samples/microservices-demo/recommendationservice:v0.10.1
+    container_name: boutique-recommendationservice
+    environment:
+      - PORT=8080
+      - PRODUCT_CATALOG_SERVICE_ADDR=productcatalogservice:3550
+      - DISABLE_PROFILER=1
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=recommendationservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+    networks:
+      - boutique-net
+
+  adservice:
+    image: gcr.io/google-samples/microservices-demo/adservice:v0.10.1
+    container_name: boutique-adservice
+    environment:
+      - PORT=9555
+      - DISABLE_PROFILER=1
+      - ENABLE_TRACING=1
+      - OTEL_SERVICE_NAME=adservice
+      - COLLECTOR_SERVICE_ADDR=jaeger:4317
+    depends_on:
+      - jaeger
+    networks:
+      - boutique-net
+
+  # -------------------------------------------------------------------------
+  # Load Generator (Simulates Real Users Browsing and Buying)
+  # -------------------------------------------------------------------------
+  loadgenerator:
+    image: gcr.io/google-samples/microservices-demo/loadgenerator:v0.10.1
+    container_name: boutique-loadgenerator
+    environment:
+      - FRONTEND_ADDR=frontend:8080
+      - USERS=10
+    depends_on:
+      - frontend
+    networks:
+      - boutique-net
+
+networks:
+  boutique-net:
+    driver: bridge

@@ -1,0 +1,126 @@
+{
+  "data": [
+    {
+      "traceID": "trace-cart-001",
+      "spans": [
+        {
+          "traceID": "trace-cart-001",
+          "spanID": "s-ac1-01",
+          "operationName": "POST /cart",
+          "references": [],
+          "startTime": 1700000000000000,
+          "duration": 60000,
+          "tags": [
+            { "key": "http.method", "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64", "value": 200 },
+            { "key": "error", "type": "bool", "value": false }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-cart-001",
+          "spanID": "s-ac1-02",
+          "operationName": "GetProduct",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-cart-001", "spanID": "s-ac1-01" }
+          ],
+          "startTime": 1700000000005000,
+          "duration": 10000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-cart-001",
+          "spanID": "s-ac1-03",
+          "operationName": "AddItem",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-cart-001", "spanID": "s-ac1-01" }
+          ],
+          "startTime": 1700000000018000,
+          "duration": 35000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-cart-001",
+          "spanID": "s-ac1-04",
+          "operationName": "GetExchangeRate",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-cart-001", "spanID": "s-ac1-03" }
+          ],
+          "startTime": 1700000000025000,
+          "duration": 8000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p4"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend", "tags": [] },
+        "p2": { "serviceName": "productcatalogservice", "tags": [] },
+        "p3": { "serviceName": "cartservice", "tags": [] },
+        "p4": { "serviceName": "currencyservice", "tags": [] }
+      }
+    },
+    {
+      "traceID": "trace-cart-002",
+      "spans": [
+        {
+          "traceID": "trace-cart-002",
+          "spanID": "s-ac2-01",
+          "operationName": "POST /cart",
+          "references": [],
+          "startTime": 1700000004000000,
+          "duration": 58000,
+          "tags": [
+            { "key": "http.method", "type": "string", "value": "POST" },
+            { "key": "http.status_code", "type": "int64", "value": 200 },
+            { "key": "error", "type": "bool", "value": false }
+          ],
+          "processID": "p1"
+        },
+        {
+          "traceID": "trace-cart-002",
+          "spanID": "s-ac2-02",
+          "operationName": "GetProduct",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-cart-002", "spanID": "s-ac2-01" }
+          ],
+          "startTime": 1700000004005000,
+          "duration": 9000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p2"
+        },
+        {
+          "traceID": "trace-cart-002",
+          "spanID": "s-ac2-03",
+          "operationName": "AddItem",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-cart-002", "spanID": "s-ac2-01" }
+          ],
+          "startTime": 1700000004017000,
+          "duration": 34000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p3"
+        },
+        {
+          "traceID": "trace-cart-002",
+          "spanID": "s-ac2-04",
+          "operationName": "GetExchangeRate",
+          "references": [
+            { "refType": "CHILD_OF", "traceID": "trace-cart-002", "spanID": "s-ac2-03" }
+          ],
+          "startTime": 1700000004024000,
+          "duration": 7000,
+          "tags": [{ "key": "error", "type": "bool", "value": false }],
+          "processID": "p4"
+        }
+      ],
+      "processes": {
+        "p1": { "serviceName": "frontend", "tags": [] },
+        "p2": { "serviceName": "productcatalogservice", "tags": [] },
+        "p3": { "serviceName": "cartservice", "tags": [] },
+        "p4": { "serviceName": "currencyservice", "tags": [] }
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "workflowId": "view_product",
+  "description": "Product browsing: catalog lookup, price currency conversion, recommendation retrieval, and banner ad display.",
+  "criticality": 0.7,
+  "expectedServices": [
+    "frontend",
+    "productcatalogservice",
+    "currencyservice",
+    "recommendationservice",
+    "adservice"
+  ],
+  "expectedEdges": [
+    { "source": "frontend", "target": "productcatalogservice" },
+    { "source": "frontend", "target": "currencyservice" },
+    { "source": "frontend", "target": "recommendationservice" },
+    { "source": "frontend", "target": "adservice" }
+  ],
+  "successCondition": "productcatalog.get_product completes with HTTP 200",
+  "entryService": "frontend",
+  "traceFile": "sample_data/traces/view_product_traces.json"
+}

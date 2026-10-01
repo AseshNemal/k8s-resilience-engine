@@ -1,0 +1,19 @@
+{
+  "workflowId": "refund",
+  "description": "Customer refund: order lookup, payment reversal, and refund confirmation notification.",
+  "criticality": 0.7,
+  "expectedServices": [
+    "frontend",
+    "orderservice",
+    "paymentservice",
+    "notificationservice"
+  ],
+  "expectedEdges": [
+    { "source": "frontend",       "target": "orderservice"        },
+    { "source": "orderservice",   "target": "paymentservice"      },
+    { "source": "paymentservice", "target": "notificationservice" }
+  ],
+  "successCondition": "payment.reversal completes with HTTP 200",
+  "entryService": "frontend",
+  "traceFile": "sample_data/traces/refund_traces.json"
+}
