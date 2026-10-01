@@ -52,7 +52,12 @@ def test_scenario_rejects_reference_and_evidence_fields() -> None:
         "workflowId": "checkout",
         "description": "Checkout",
         "criticality": 0.9,
-        "successCondition": "HTTP 200",
+        "successCondition": {
+            "protocol": "http",
+            "terminalService": "frontend",
+            "operationName": "POST /checkout",
+            "httpStatusCodes": [200],
+        },
         "entryService": "frontend",
     }
     for forbidden in ("expectedServices", "expectedEdges", "traceFile"):
@@ -80,7 +85,12 @@ def test_missing_evidence_file_never_falls_back_to_checkout(
                 "workflowId": "missing",
                 "description": "Missing evidence fixture",
                 "criticality": 0.5,
-                "successCondition": "HTTP 200",
+                "successCondition": {
+                    "protocol": "http",
+                    "terminalService": "frontend",
+                    "operationName": "POST /missing",
+                    "httpStatusCodes": [200],
+                },
                 "entryService": "frontend",
             }
         ),

@@ -1,18 +1,30 @@
 from typing import Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Response, status
 
 from app.engine.workflow_dependency_modeling.evaluator import (
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
+    create_scenario,
     discover_live_workflows,
     evaluate_workflow_by_id,
     get_live_workflow,
     get_live_evidence,
     get_sample_workflow,
     get_workflow_by_id,
+    get_versioned_scenario,
     list_benchmark_workflows,
+    list_versioned_scenarios,
+    scenario_etag,
+    update_scenario,
 )
+from app.engine.workflow_dependency_modeling.models import ComponentDataError
+from app.engine.workflow_dependency_modeling.scenario_repository import (
+    ScenarioAlreadyExistsError,
+    ScenarioNotFoundError,
+    ScenarioVersionConflictError,
+)
+from app.engine.workflow_dependency_modeling.scenario_service import parse_scenario_etag
 from app.integrations.jaeger.client import DEFAULT_JAEGER_URL, JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
 
@@ -29,6 +41,91 @@ JAEGER_AND_NOT_FOUND_RESPONSES = {
     **JAEGER_UNAVAILABLE_RESPONSE,
 }
 JAEGER_URL_DESCRIPTION = "Jaeger server base URL"
+SCENARIO_NOT_FOUND_RESPONSE = {404: {"description": "Scenario or version not found"}}
+SCENARIO_CONFLICT_RESPONSE = {409: {"description": "Scenario already exists"}}
+SCENARIO_PRECONDITION_RESPONSE = {412: {"description": "Scenario version changed"}}
+SCENARIO_VALIDATION_RESPONSE = {422: {"description": "Scenario definition is invalid"}}
+
+
+def _scenario_payload(response: Response, scenario) -> dict[str, Any]:
+    response.headers["ETag"] = scenario_etag(scenario)
+    return scenario.to_mapping()
+
+
+@router.post(
+    "/scenarios",
+    status_code=status.HTTP_201_CREATED,
+    responses={**SCENARIO_CONFLICT_RESPONSE, **SCENARIO_VALIDATION_RESPONSE},
+)
+def create_workflow_scenario(
+    response: Response,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Create version 1 from a manual or discovery-assisted definition."""
+    try:
+        scenario = create_scenario(payload, actor=actor)
+        return _scenario_payload(response, scenario)
+    except ScenarioAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (ComponentDataError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/scenarios")
+def read_workflow_scenarios() -> list[dict[str, Any]]:
+    """List only the latest immutable version of each scenario."""
+    return [scenario.to_mapping() for scenario in list_versioned_scenarios()]
+
+
+@router.get(
+    "/scenarios/{workflow_id}",
+    responses=SCENARIO_NOT_FOUND_RESPONSE,
+)
+def read_workflow_scenario(
+    workflow_id: str,
+    response: Response,
+    version: int | None = Query(None, ge=1),
+) -> dict[str, Any]:
+    """Read the latest or an explicitly requested immutable version."""
+    try:
+        scenario = get_versioned_scenario(workflow_id, version)
+        return _scenario_payload(response, scenario)
+    except ScenarioNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.patch(
+    "/scenarios/{workflow_id}",
+    responses={
+        **SCENARIO_NOT_FOUND_RESPONSE,
+        **SCENARIO_PRECONDITION_RESPONSE,
+        **SCENARIO_VALIDATION_RESPONSE,
+    },
+)
+def revise_workflow_scenario(
+    workflow_id: str,
+    response: Response,
+    payload: dict[str, Any] = Body(...),
+    if_match: str = Header(..., alias="If-Match"),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Create the next version only when the caller holds the latest ETag."""
+    try:
+        expected_version = parse_scenario_etag(if_match, workflow_id)
+        scenario = update_scenario(
+            workflow_id,
+            payload,
+            expected_version=expected_version,
+            actor=actor,
+        )
+        return _scenario_payload(response, scenario)
+    except ScenarioNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ScenarioVersionConflictError as err:
+        raise HTTPException(status_code=412, detail=str(err)) from err
+    except (ComponentDataError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.get("/live/evidence", responses=JAEGER_AND_NOT_FOUND_RESPONSES)

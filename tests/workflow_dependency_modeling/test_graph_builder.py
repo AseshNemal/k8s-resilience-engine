@@ -7,15 +7,23 @@ from app.engine.workflow_dependency_modeling.dependency_classifier import (
 )
 from app.engine.workflow_dependency_modeling.graph_builder import build_workflow_graph
 from app.engine.workflow_dependency_modeling.interaction_extractor import ObservedEdge
-from app.engine.workflow_dependency_modeling.models import WorkflowScenario
+from app.engine.workflow_dependency_modeling.models import SuccessCondition, WorkflowScenario
 from app.shared.schemas.workflow import WorkflowGraph
 
 
+SUCCESS_CONDITION = SuccessCondition.from_mapping(
+    {
+        "protocol": "http",
+        "terminalService": "checkout",
+        "operationName": "POST /checkout",
+        "httpStatusCodes": [200],
+    }
+)
 SCENARIO = WorkflowScenario(
     workflow_id="checkout",
     description="Synthetic checkout fixture",
     criticality=0.9,
-    success_condition="HTTP 200",
+    success_condition=SUCCESS_CONDITION,
     entry_service="frontend",
 )
 CLASSIFICATION = DependencyClassification(
@@ -52,7 +60,7 @@ def test_edge_threshold_filters_low_frequency_observation() -> None:
 
 
 def test_mismatched_scenario_is_rejected() -> None:
-    other = WorkflowScenario("other", "Other", 0.5, "HTTP 200", "frontend")
+    other = WorkflowScenario("other", "Other", 0.5, SUCCESS_CONDITION, "frontend")
     with pytest.raises(ValueError, match="does not match"):
         build_workflow_graph(CLASSIFICATION, EDGES, other)
 
