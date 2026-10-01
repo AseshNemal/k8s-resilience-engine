@@ -76,9 +76,112 @@
             <button type="button" class="primary-button" data-role="extract-live-button">
                 Extract Live Dependency Graph
             </button>
+            <button type="button" class="secondary-button" data-role="use-candidate-button">
+                Use Candidate in Scenario
+            </button>
         </div>
     </div>
 </div>
+
+<section class="card scenario-registry" aria-labelledby="scenario-registry-title">
+    <div class="scenario-registry__header">
+        <div>
+            <h3 id="scenario-registry-title">Versioned Workflow Scenarios</h3>
+            <p>
+                Define the business contract before trace analysis. Saved versions are immutable
+                and updates require the latest API ETag.
+            </p>
+        </div>
+        <button type="button" class="secondary-button" data-role="refresh-scenarios-button">
+            Refresh Registry
+        </button>
+    </div>
+    <form class="scenario-form" data-role="scenario-form">
+        <div class="scenario-form__field">
+            <label for="scenario-workflow-id">Workflow ID</label>
+            <input id="scenario-workflow-id" name="workflowId" required
+                   pattern="[a-z0-9][a-z0-9_-]{0,63}" placeholder="customer_checkout">
+        </div>
+        <div class="scenario-form__field scenario-form__field--wide">
+            <label for="scenario-description">Business description</label>
+            <input id="scenario-description" name="description" required
+                   placeholder="Customer completes checkout and receives confirmation">
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-criticality">Criticality (0–1)</label>
+            <input id="scenario-criticality" name="criticality" type="number" required
+                   min="0" max="1" step="0.01" value="0.80">
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-entry-service">Entry service</label>
+            <input id="scenario-entry-service" name="entryService" required placeholder="frontend">
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-source">Definition source</label>
+            <select id="scenario-source" name="source">
+                <option value="manual">Manual</option>
+                <option value="discovered">Discovery-assisted</option>
+            </select>
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-lifecycle">Lifecycle</label>
+            <select id="scenario-lifecycle" name="lifecycle">
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+            </select>
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-protocol">Outcome protocol</label>
+            <select id="scenario-protocol" name="protocol" data-role="scenario-protocol">
+                <option value="http">HTTP</option>
+                <option value="grpc">gRPC</option>
+                <option value="span">Span status</option>
+            </select>
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-terminal-service">Terminal service</label>
+            <input id="scenario-terminal-service" name="terminalService" required
+                   placeholder="checkoutservice">
+        </div>
+        <div class="scenario-form__field scenario-form__field--wide">
+            <label for="scenario-operation">Terminal operation</label>
+            <input id="scenario-operation" name="operationName" required
+                   placeholder="POST /checkout">
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-outcomes" data-role="scenario-outcomes-label">
+                Accepted HTTP statuses
+            </label>
+            <input id="scenario-outcomes" name="outcomes" required value="200"
+                   aria-describedby="scenario-outcomes-help">
+            <small id="scenario-outcomes-help" data-role="scenario-outcomes-help">
+                Comma-separated numeric status codes.
+            </small>
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-duration">Maximum duration (ms)</label>
+            <input id="scenario-duration" name="maxDurationMs" type="number"
+                   min="1" step="1" placeholder="2000">
+        </div>
+        <div class="scenario-form__field">
+            <label for="scenario-actor">Defined by</label>
+            <input id="scenario-actor" name="actor" required placeholder="name@example.com">
+        </div>
+        <div class="scenario-form__field scenario-form__field--wide">
+            <label for="scenario-change-summary">Change summary</label>
+            <input id="scenario-change-summary" name="changeSummary" required
+                   value="Initial scenario definition">
+        </div>
+        <div class="scenario-form__actions">
+            <button type="submit" class="primary-button" data-role="save-scenario-button">
+                Save Version 1
+            </button>
+            <span data-role="scenario-form-status" aria-live="polite"></span>
+        </div>
+    </form>
+    <div class="scenario-registry__list" data-role="scenario-registry-list"
+         aria-live="polite"></div>
+</section>
 
 <div data-role="page-region">
     {{ loading_state("Loading WorkflowGraph…") }}
@@ -244,5 +347,5 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=live-evidence-2" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-2-scenarios" defer></script>
 {% endblock %}
