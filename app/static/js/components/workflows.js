@@ -6,7 +6,6 @@
  */
 
 (function () {
-    const SAMPLE_ENDPOINT = "/api/workflows/sample";
     const { fetchJson } = window.ResilienceApi;
     const { setError, formatRatioAsPercentage, initJsonPanel, updateLastRefreshed } =
         window.ResilienceUi;
@@ -35,21 +34,6 @@
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
         if (element) element.textContent = value;
-    }
-
-    function buildGraphNode(label, variant) {
-        const node = document.createElement("div");
-        node.className = `graph-flow__node graph-flow__node--${variant}`;
-        node.textContent = label;
-        return node;
-    }
-
-    function buildArrow() {
-        const arrow = document.createElement("div");
-        arrow.className = "graph-flow__arrow";
-        arrow.textContent = "↓";
-        arrow.setAttribute("aria-hidden", "true");
-        return arrow;
     }
 
     function renderGraph(container, workflow) {
@@ -195,7 +179,6 @@
             const isMandatory = mandatorySet.has(edge.target);
             const isOptional = optionalSet.has(edge.target);
             const strokeColor = isMandatory ? "#6366f1" : isOptional ? "#f59e0b" : "#94a3b8";
-            const dashArray = isOptional ? 'stroke-dasharray="5,4"' : "";
             const markerId = isMandatory ? "dag-arrow-mandatory" : "dag-arrow";
 
             const path = document.createElementNS(ns, "path");
@@ -333,16 +316,6 @@
         });
     }
 
-    function edgeType(target, workflow) {
-        if (workflow.mandatoryServices.includes(target)) {
-            return "Mandatory path";
-        }
-        if (workflow.optionalServices.includes(target)) {
-            return "Optional path";
-        }
-        return "Observed dependency";
-    }
-
     function renderEdgeTable(tbody, workflow) {
         tbody.innerHTML = "";
         workflow.edges.forEach((edge) => {
@@ -419,7 +392,7 @@
         );
 
         if (dataSourceBadge) {
-            dataSourceBadge.textContent = isLive ? "Live Jaeger Data" : "Sample Data";
+            dataSourceBadge.textContent = isLive ? "Jaeger • origin unverified" : "SYNTHETIC FIXTURE";
             dataSourceBadge.className = isLive
                 ? "status-badge status-badge--success"
                 : "status-badge status-badge--muted status-badge--no-dot";
@@ -427,12 +400,12 @@
 
         updateLastRefreshed(lastRefreshed);
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
-        if (sourcePill) sourcePill.textContent = isLive ? 'Live traces' : 'Saved benchmark';
+        if (sourcePill) sourcePill.textContent = isLive ? 'Jaeger • origin unverified' : 'Synthetic fixture';
         initEvaluationListeners();
         const note = region.querySelector('[data-role="evidence-note"]');
         note.textContent = isLive
-            ? `${workflow.traceCount} matching traces from ${workflow.fetchedTraceCount} fetched (limit ${workflow.sampleLimit}). These are observed calls; mandatory/optional classification and business criticality have not been validated. Missing services may be uninstrumented. No live accuracy score is available.`
-            : 'Saved benchmark data. Scores measure service and edge recovery against its reference, not live classification accuracy.';
+            ? `${workflow.traceCount} matching traces from ${workflow.fetchedTraceCount} fetched (limit ${workflow.sampleLimit}). Jaeger may contain synthetic demo traces; evidence origin and execution success have not been verified. These are observed calls, with no validated dependency classification or accuracy score. Missing services may be uninstrumented.`
+            : 'Synthetic engineering fixture, not empirical benchmark evidence. The prototype currently uses reference service lists during classification. Scores compare combined service and edge sets; they do not validate mandatory classification. Research-model correction is pending.';
         if (isLive) {
             setMetric(region, "workflow-criticality", "Not set");
             setMetric(region, "workflow-mandatory-count", "Not validated");
@@ -507,7 +480,7 @@
             alert(`Could not connect to Jaeger: ${error.message}`);
         } finally {
             discoverButton.disabled = false;
-            discoverButton.textContent = "Discover Workflows";
+            discoverButton.textContent = "Discover Candidate Operations";
         }
     }
 
@@ -515,7 +488,7 @@
         if (!extractLiveButton) return;
         const operation = discoveredSelect ? discoveredSelect.value : "";
         if (!operation) {
-            alert("Please select a valid discovered workflow from the dropdown.");
+            alert("Please select a candidate operation from the dropdown.");
             return;
         }
 
@@ -581,7 +554,7 @@
             alert(`Could not seed traces: ${err.message}`);
         } finally {
             seedTracesButton.disabled = false;
-            seedTracesButton.textContent = "Seed Traces to Jaeger";
+            seedTracesButton.textContent = "Seed Synthetic Demo Traces";
         }
     }
 
@@ -623,7 +596,7 @@
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = "Run Accuracy Evaluation";
+                btn.textContent = "Compare Fixture Sets";
             }
         }
     }
@@ -669,18 +642,19 @@
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = "Run Sensitivity Analysis";
+                btn.textContent = "Compare Thresholds";
             }
         }
     }
 
     function handleCopyMarkdownTable() {
         if (liveMode || !lastSensitivitySteps.length) {
-            alert("Run a benchmark sensitivity analysis before copying measured results.");
+            alert("Run a fixture threshold comparison before copying its results.");
             return;
         }
         const workflowId = benchmarkSelect ? benchmarkSelect.value : "checkout";
-        let markdown = `### Sensitivity Analysis for Workflow: \`${workflowId}\`\n\n`;
+        let markdown = `### Synthetic fixture threshold comparison: \`${workflowId}\`\n\n`;
+        markdown += 'Engineering fixture only. The classifier currently reads reference service lists. Combined-service scores do not measure mandatory classification or empirical benchmark accuracy.\n\n';
         markdown += `| Mandatory Threshold (θ) | Precision | Recall | F1-Score | Edge Accuracy | Mandatory Count | Optional Count |\n`;
         markdown += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
 
@@ -693,7 +667,7 @@
         }
 
         navigator.clipboard.writeText(markdown).then(() => {
-            alert("Thesis Markdown table copied to clipboard! You can paste it straight into your paper or report.");
+            alert("Fixture table copied with its research limitations. These are not empirical results.");
         }).catch(() => {
             prompt("Copy this Markdown table:", markdown);
         });
@@ -747,6 +721,3 @@
         setTimeout(handleRunEvaluation, 300);
     });
 })();
-
-
-

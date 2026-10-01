@@ -19,7 +19,7 @@
         <span class="component-owner">Owner: <strong>Member 1</strong></span>
         <span class="contract-chip">In: Distributed Traces</span>
         <span class="contract-chip contract-chip--out">Out: WorkflowGraph</span>
-        <span class="status-badge" data-role="data-source-badge">Sample Data</span>
+        <span class="status-badge" data-role="data-source-badge">SYNTHETIC FIXTURE</span>
     </div>
 </div>
 
@@ -47,30 +47,30 @@
             </select>
         </div>
         <div class="form-group" style="min-width: 180px;">
-            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Benchmark Dataset</label>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Synthetic Fixture Dataset</label>
             <select data-role="benchmark-select" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
-                <option value="checkout" selected>Checkout (Boutique)</option>
-                <option value="view_product">View Product (Boutique)</option>
-                <option value="add_to_cart">Add to Cart (Boutique)</option>
-                <option value="refund">Customer Refund</option>
+                <option value="checkout" selected>Checkout (synthetic)</option>
+                <option value="view_product">View Product (synthetic)</option>
+                <option value="add_to_cart">Add to Cart (synthetic)</option>
+                <option value="refund">Customer Refund (synthetic)</option>
             </select>
         </div>
         <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap;">
             <button type="button" class="primary-button" data-role="discover-button">
-                Discover Workflows
+                Discover Candidate Operations
             </button>
-            <button type="button" class="secondary-button" data-role="seed-traces-button" title="Send realistic multi-service spans into your local Jaeger for testing">
-                Seed Traces to Jaeger
+            <button type="button" class="secondary-button" data-role="seed-traces-button" title="Send synthetic test spans into localhost Jaeger; these are not benchmark executions">
+                Seed Synthetic Demo Traces
             </button>
             <button type="button" class="secondary-button" data-role="reload-sample-button">
-                Load Benchmark
+                Load Synthetic Fixture
             </button>
         </div>
     </div>
     <div data-role="discovered-workflows-container" style="display: none; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px dashed var(--color-border);">
         <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: var(--space-sm);">
-                <span style="font-size: 13px; font-weight: 600;">Discovered Workflows:</span>
+                <span style="font-size: 13px; font-weight: 600;">Candidate Operations:</span>
                 <select data-role="discovered-workflow-select" class="form-input" style="padding: 6px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);"></select>
             </div>
             <button type="button" class="primary-button" data-role="extract-live-button">
@@ -148,8 +148,8 @@
     </div>
 
     <div class="section-header" data-role="benchmark-only">
-        <h3 class="section-header__title">Saved Benchmark Evaluation</h3>
-        <span class="section-header__note">Validation against ground-truth reference architecture</span>
+        <h3 class="section-header__title">Synthetic Fixture Comparison</h3>
+        <span class="section-header__note">Engineering checks; independent research validation is pending</span>
     </div>
     <div class="card" data-role="benchmark-only" style="margin-bottom: var(--space-lg);">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-md); margin-bottom: var(--space-md); padding-bottom: var(--space-md); border-bottom: 1px solid var(--color-border);">
@@ -160,13 +160,13 @@
             </div>
             <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap;">
                 <button type="button" class="primary-button" data-role="run-eval-btn">
-                    Run Accuracy Evaluation
+                    Compare Fixture Sets
                 </button>
                 <button type="button" class="secondary-button" data-role="run-sensitivity-btn">
-                    Run Sensitivity Analysis
+                    Compare Thresholds
                 </button>
                 <button type="button" class="secondary-button" data-role="copy-markdown-btn">
-                    Copy Thesis Table
+                    Copy Fixture Table
                 </button>
             </div>
         </div>
