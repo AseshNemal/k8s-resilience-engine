@@ -2,6 +2,19 @@
   "workflowId": "refund",
   "description": "Customer refund: order lookup, payment reversal, and refund confirmation notification.",
   "criticality": 0.7,
-  "successCondition": "payment.reversal completes with HTTP 200",
-  "entryService": "frontend"
+  "successCondition": {
+    "protocol": "http",
+    "terminalService": "paymentservice",
+    "operationName": "reverse_payment",
+    "httpStatusCodes": [200],
+    "maxDurationMs": 2500,
+    "requiredAttributes": []
+  },
+  "entryService": "frontend",
+  "version": 1,
+  "lifecycle": "draft",
+  "source": "manual",
+  "createdAt": "2026-10-01T00:00:00Z",
+  "createdBy": "component-1",
+  "changeSummary": "Initial structured synthetic scenario"
 }

@@ -2,6 +2,19 @@
   "workflowId": "add_to_cart",
   "description": "Cart update: verifying product availability, adding item to cart, and recalculating cart item totals.",
   "criticality": 0.85,
-  "successCondition": "cart.add_item completes with HTTP 200",
-  "entryService": "frontend"
+  "successCondition": {
+    "protocol": "http",
+    "terminalService": "cartservice",
+    "operationName": "add_item",
+    "httpStatusCodes": [200],
+    "maxDurationMs": 1500,
+    "requiredAttributes": []
+  },
+  "entryService": "frontend",
+  "version": 1,
+  "lifecycle": "draft",
+  "source": "manual",
+  "createdAt": "2026-10-01T00:00:00Z",
+  "createdBy": "component-1",
+  "changeSummary": "Initial structured synthetic scenario"
 }
