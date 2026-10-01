@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger-resilience
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=info
+    ports:
+      # Jaeger Query UI & REST API
+      - "16686:16686"
+      # OpenTelemetry gRPC receiver
+      - "4317:4317"
+      # OpenTelemetry HTTP receiver
+      - "4318:4318"
+      # Jaeger Thrift HTTP collector
+      - "14268:14268"
+    restart: unless-stopped
