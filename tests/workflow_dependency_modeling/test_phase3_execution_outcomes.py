@@ -277,3 +277,15 @@ def test_external_jaeger_registration_correlates_exact_trace(monkeypatch) -> Non
     assert created.status_code == 201
     assert created.json()["status"] == "succeeded"
     assert created.json()["evidenceId"] == "trace:trace-1"
+
+
+def test_execution_http_exceptions_are_documented_in_openapi() -> None:
+    schema = TestClient(app).get("/openapi.json").json()
+    benchmark_responses = schema["paths"][
+        "/api/workflows/execution-batches/benchmarks/{workflow_id}"
+    ]["post"]["responses"]
+    jaeger_responses = schema["paths"]["/api/workflows/executions/jaeger"]["post"][
+        "responses"
+    ]
+    assert {"201", "404", "409", "422"} <= benchmark_responses.keys()
+    assert {"201", "404", "409", "422", "503"} <= jaeger_responses.keys()

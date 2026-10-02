@@ -22,7 +22,6 @@ from app.engine.workflow_dependency_modeling.service import (
     scenario_etag,
     update_scenario,
 )
-from app.engine.workflow_dependency_modeling.models import ComponentDataError
 from app.engine.workflow_dependency_modeling.execution_repository import (
     ExecutionAlreadyExistsError,
     ExecutionNotFoundError,
@@ -54,8 +53,6 @@ SCENARIO_CONFLICT_RESPONSE = {409: {"description": "Scenario already exists"}}
 SCENARIO_PRECONDITION_RESPONSE = {412: {"description": "Scenario version changed"}}
 SCENARIO_VALIDATION_RESPONSE = {422: {"description": "Scenario definition is invalid"}}
 EXECUTION_NOT_FOUND_RESPONSE = {404: {"description": "Execution was not found"}}
-EXECUTION_CONFLICT_RESPONSE = {409: {"description": "Execution ID already exists"}}
-EXECUTION_VALIDATION_RESPONSE = {422: {"description": "Execution registration is invalid"}}
 
 
 def _scenario_payload(response: Response, scenario) -> dict[str, Any]:
@@ -79,7 +76,7 @@ def create_workflow_scenario(
         return _scenario_payload(response, scenario)
     except ScenarioAlreadyExistsError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
-    except (ComponentDataError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
@@ -135,7 +132,7 @@ def revise_workflow_scenario(
         raise HTTPException(status_code=404, detail=str(err)) from err
     except ScenarioVersionConflictError as err:
         raise HTTPException(status_code=412, detail=str(err)) from err
-    except (ComponentDataError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
@@ -143,9 +140,9 @@ def revise_workflow_scenario(
     "/execution-batches/benchmarks/{workflow_id}",
     status_code=status.HTTP_201_CREATED,
     responses={
-        **EXECUTION_NOT_FOUND_RESPONSE,
-        **EXECUTION_CONFLICT_RESPONSE,
-        **EXECUTION_VALIDATION_RESPONSE,
+        404: {"description": "Benchmark workflow or evidence was not found"},
+        409: {"description": "Execution ID already exists"},
+        422: {"description": "Execution registration is invalid"},
     },
 )
 def execute_benchmark_batch(
@@ -167,7 +164,7 @@ def execute_benchmark_batch(
         raise HTTPException(status_code=404, detail=str(err)) from err
     except ExecutionAlreadyExistsError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
-    except (ComponentDataError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
@@ -175,10 +172,10 @@ def execute_benchmark_batch(
     "/executions/jaeger",
     status_code=status.HTTP_201_CREATED,
     responses={
-        **SCENARIO_NOT_FOUND_RESPONSE,
-        **EXECUTION_CONFLICT_RESPONSE,
-        **EXECUTION_VALIDATION_RESPONSE,
-        **JAEGER_UNAVAILABLE_RESPONSE,
+        404: {"description": "Scenario or version was not found"},
+        409: {"description": "Execution ID already exists"},
+        422: {"description": "Execution registration is invalid"},
+        503: {"description": "Jaeger service is unavailable"},
     },
 )
 def register_workflow_execution(
@@ -201,7 +198,7 @@ def register_workflow_execution(
         raise HTTPException(status_code=409, detail=str(err)) from err
     except ConnectionError as err:
         raise HTTPException(status_code=503, detail=str(err)) from err
-    except (ComponentDataError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
@@ -476,5 +473,3 @@ def read_live_workflow(
         raise HTTPException(status_code=503, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
-    register_jaeger_execution,
-    run_benchmark_batch,
