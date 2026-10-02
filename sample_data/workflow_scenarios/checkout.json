@@ -5,7 +5,7 @@
   "successCondition": {
     "protocol": "http",
     "terminalService": "paymentservice",
-    "operationName": "charge_credit_card",
+    "operationName": "payment.charge",
     "httpStatusCodes": [200],
     "maxDurationMs": 2000,
     "requiredAttributes": []

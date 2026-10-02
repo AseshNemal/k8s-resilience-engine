@@ -3,10 +3,10 @@
   "description": "Product browsing: catalog lookup, price currency conversion, recommendation retrieval, and banner ad display.",
   "criticality": 0.7,
   "successCondition": {
-    "protocol": "http",
+    "protocol": "span",
     "terminalService": "productcatalogservice",
     "operationName": "GetProduct",
-    "httpStatusCodes": [200],
+    "spanStatusCodes": ["UNSET", "OK"],
     "maxDurationMs": 1000,
     "requiredAttributes": []
   },

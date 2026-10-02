@@ -32,6 +32,12 @@
     const scenarioStatus = document.querySelector('[data-role="scenario-form-status"]');
     const scenarioList = document.querySelector('[data-role="scenario-registry-list"]');
     const refreshScenariosButton = document.querySelector('[data-role="refresh-scenarios-button"]');
+    const executionActor = document.querySelector('[data-role="execution-actor"]');
+    const executionBatchId = document.querySelector('[data-role="execution-batch-id"]');
+    const executionStatus = document.querySelector('[data-role="execution-runner-status"]');
+    const executionList = document.querySelector('[data-role="execution-ledger-list"]');
+    const runBenchmarkBatchButton = document.querySelector('[data-role="run-benchmark-batch-button"]');
+    const refreshExecutionsButton = document.querySelector('[data-role="refresh-executions-button"]');
 
     let discoveredWorkflows = [];
     let liveMode = false;
@@ -200,6 +206,100 @@
         scenarioForm.elements.operationName.value = candidate.operationName;
         scenarioForm.scrollIntoView({ behavior: "smooth", block: "start" });
         setScenarioStatus("Candidate copied. Review the business outcome before saving.");
+    }
+
+    function setExecutionStatus(message, isError = false) {
+        if (!executionStatus) return;
+        executionStatus.textContent = message;
+        executionStatus.style.color = isError
+            ? "var(--color-danger, #b91c1c)"
+            : "var(--color-text-muted)";
+    }
+
+    function executionText(tag, className, value) {
+        const element = document.createElement(tag);
+        element.className = className;
+        element.textContent = value;
+        return element;
+    }
+
+    function renderExecutionLedger(outcomes) {
+        if (!executionList) return;
+        executionList.replaceChildren();
+        if (!outcomes.length) {
+            const empty = document.createElement("p");
+            empty.className = "muted";
+            empty.textContent = "No workflow execution outcomes recorded yet.";
+            executionList.appendChild(empty);
+            return;
+        }
+        outcomes.forEach((outcome) => {
+            const record = document.createElement("article");
+            record.className = `execution-record execution-record--${outcome.status}`;
+            const identity = document.createElement("div");
+            identity.className = "execution-record__identity";
+            identity.append(
+                executionText("strong", "", outcome.executionId),
+                executionText(
+                    "small",
+                    "",
+                    `${outcome.workflowId} · scenario v${outcome.scenarioVersion}`
+                )
+            );
+            const status = executionText("span", "execution-record__status", outcome.status);
+            const correlation = scenarioChip(outcome.correlationStatus);
+            const passed = (outcome.assertions || []).filter((item) => item.passed).length;
+            const assertionCount = (outcome.assertions || []).length;
+            const evidence = executionText(
+                "span",
+                "execution-record__evidence",
+                outcome.evidenceId
+                    ? `${outcome.evidenceId} · ${passed}/${assertionCount} assertions passed`
+                    : (outcome.reasons || ["No trace evidence"])[0]
+            );
+            record.append(identity, status, correlation, evidence);
+            executionList.appendChild(record);
+        });
+    }
+
+    async function loadExecutionLedger() {
+        if (!executionList) return;
+        try {
+            renderExecutionLedger(await requestScenario("/api/workflows/executions"));
+        } catch (error) {
+            executionList.textContent = `Execution ledger unavailable: ${error.message}`;
+        }
+    }
+
+    async function runBenchmarkExecutions() {
+        if (!runBenchmarkBatchButton || !benchmarkSelect) return;
+        const actor = executionActor ? executionActor.value.trim() : "";
+        if (!actor) {
+            setExecutionStatus("Run registered by is required.", true);
+            return;
+        }
+        if (executionBatchId && !executionBatchId.reportValidity()) return;
+        const batchId = executionBatchId ? executionBatchId.value.trim() : "";
+        const params = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
+        const endpoint = `/api/workflows/execution-batches/benchmarks/${encodeURIComponent(benchmarkSelect.value)}${params}`;
+        runBenchmarkBatchButton.disabled = true;
+        setExecutionStatus("Correlating benchmark traces…");
+        try {
+            const outcomes = await requestScenario(endpoint, {
+                method: "POST",
+                headers: {"X-Actor": actor},
+            });
+            const succeeded = outcomes.filter((item) => item.status === "succeeded").length;
+            setExecutionStatus(
+                `Recorded ${outcomes.length} executions; ${succeeded} succeeded.`
+            );
+            if (executionBatchId) executionBatchId.value = outcomes[0]?.batchId || batchId;
+            await loadExecutionLedger();
+        } catch (error) {
+            setExecutionStatus(error.message, true);
+        } finally {
+            runBenchmarkBatchButton.disabled = false;
+        }
     }
 
     function setMetric(root, name, value) {
@@ -925,6 +1025,12 @@
     if (refreshScenariosButton) {
         refreshScenariosButton.addEventListener("click", loadScenarioRegistry);
     }
+    if (runBenchmarkBatchButton) {
+        runBenchmarkBatchButton.addEventListener("click", runBenchmarkExecutions);
+    }
+    if (refreshExecutionsButton) {
+        refreshExecutionsButton.addEventListener("click", loadExecutionLedger);
+    }
     if (jaegerUrlInput) {
         jaegerUrlInput.addEventListener("change", checkJaegerHealth);
     }
@@ -933,6 +1039,7 @@
         loadBenchmarkWorkflow();
         checkJaegerHealth();
         loadScenarioRegistry();
+        loadExecutionLedger();
         initEvaluationListeners();
         setTimeout(handleRunEvaluation, 300);
     });

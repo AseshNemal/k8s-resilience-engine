@@ -271,20 +271,116 @@
     gap: 6px;
 }
 
+.execution-ledger {
+    margin-bottom: var(--space-lg);
+}
+
+.execution-ledger__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+.execution-ledger__header h3,
+.execution-ledger__header p {
+    margin: 0;
+}
+
+.execution-ledger__header p,
+.execution-ledger__note {
+    color: var(--color-text-muted);
+    font-size: 13px;
+}
+
+.execution-ledger__header p {
+    margin-top: 4px;
+}
+
+.execution-runner {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto minmax(180px, 1fr);
+    gap: var(--space-md);
+    align-items: end;
+    margin-top: var(--space-md);
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+    background: var(--color-surface-soft, #f8fafc);
+}
+
+.execution-ledger__list {
+    display: grid;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.execution-record {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) auto auto minmax(220px, 1.5fr);
+    gap: var(--space-md);
+    align-items: center;
+    padding: 12px var(--space-md);
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-border);
+    border-radius: var(--radius-small);
+}
+
+.execution-record--succeeded {
+    border-left-color: #16a34a;
+}
+
+.execution-record--failed,
+.execution-record--timed_out {
+    border-left-color: #dc2626;
+}
+
+.execution-record--indeterminate {
+    border-left-color: #d97706;
+}
+
+.execution-record__identity strong,
+.execution-record__identity small {
+    display: block;
+}
+
+.execution-record__identity small,
+.execution-record__evidence {
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.execution-record__status {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 @media (max-width: 900px) {
     .scenario-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .execution-runner,
+    .execution-record {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
 @media (max-width: 560px) {
     .scenario-registry__header,
+    .execution-ledger__header,
     .scenario-form__actions {
         align-items: stretch;
         flex-direction: column;
     }
 
     .scenario-form {
+        grid-template-columns: 1fr;
+    }
+
+    .execution-runner,
+    .execution-record {
         grid-template-columns: 1fr;
     }
 

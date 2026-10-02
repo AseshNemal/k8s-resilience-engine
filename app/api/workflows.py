@@ -10,15 +10,22 @@ from app.engine.workflow_dependency_modeling.service import (
     evaluate_workflow_by_id,
     get_live_workflow,
     get_live_evidence,
+    get_execution,
     get_sample_workflow,
     get_workflow_by_id,
     get_versioned_scenario,
     list_benchmark_workflows,
+    list_executions,
     list_versioned_scenarios,
+    register_jaeger_execution,
+    run_benchmark_batch,
     scenario_etag,
     update_scenario,
 )
-from app.engine.workflow_dependency_modeling.models import ComponentDataError
+from app.engine.workflow_dependency_modeling.execution_repository import (
+    ExecutionAlreadyExistsError,
+    ExecutionNotFoundError,
+)
 from app.engine.workflow_dependency_modeling.scenario_repository import (
     ScenarioAlreadyExistsError,
     ScenarioNotFoundError,
@@ -45,6 +52,7 @@ SCENARIO_NOT_FOUND_RESPONSE = {404: {"description": "Scenario or version not fou
 SCENARIO_CONFLICT_RESPONSE = {409: {"description": "Scenario already exists"}}
 SCENARIO_PRECONDITION_RESPONSE = {412: {"description": "Scenario version changed"}}
 SCENARIO_VALIDATION_RESPONSE = {422: {"description": "Scenario definition is invalid"}}
+EXECUTION_NOT_FOUND_RESPONSE = {404: {"description": "Execution was not found"}}
 
 
 def _scenario_payload(response: Response, scenario) -> dict[str, Any]:
@@ -68,7 +76,7 @@ def create_workflow_scenario(
         return _scenario_payload(response, scenario)
     except ScenarioAlreadyExistsError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
-    except (ComponentDataError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
@@ -124,8 +132,98 @@ def revise_workflow_scenario(
         raise HTTPException(status_code=404, detail=str(err)) from err
     except ScenarioVersionConflictError as err:
         raise HTTPException(status_code=412, detail=str(err)) from err
-    except (ComponentDataError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/execution-batches/benchmarks/{workflow_id}",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Benchmark workflow or evidence was not found"},
+        409: {"description": "Execution ID already exists"},
+        422: {"description": "Execution registration is invalid"},
+    },
+)
+def execute_benchmark_batch(
+    workflow_id: str,
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    batch_id: str | None = Query(None, min_length=1),
+) -> list[dict[str, Any]]:
+    """Evaluate each separated fixture trace as an immutable execution record."""
+    try:
+        return [
+            outcome.to_mapping()
+            for outcome in run_benchmark_batch(
+                workflow_id,
+                actor=actor,
+                batch_id=batch_id,
+            )
+        ]
+    except FileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExecutionAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/executions/jaeger",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Scenario or version was not found"},
+        409: {"description": "Execution ID already exists"},
+        422: {"description": "Execution registration is invalid"},
+        503: {"description": "Jaeger service is unavailable"},
+    },
+)
+def register_workflow_execution(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
+    lookback: str = Query("1h"),
+) -> dict[str, Any]:
+    """Register an external invocation and correlate its exact trace ID."""
+    try:
+        return register_jaeger_execution(
+            payload,
+            actor=actor,
+            jaeger_url=jaeger_url,
+            lookback=lookback,
+        ).to_mapping()
+    except ScenarioNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExecutionAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ConnectionError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/executions")
+def read_workflow_executions(
+    workflow_id: str | None = Query(None),
+    batch_id: str | None = Query(None),
+) -> list[dict[str, Any]]:
+    """List execution outcomes, optionally filtered by workflow or batch."""
+    return [
+        outcome.to_mapping()
+        for outcome in list_executions(workflow_id=workflow_id, batch_id=batch_id)
+    ]
+
+
+@router.get(
+    "/executions/{execution_id}",
+    responses=EXECUTION_NOT_FOUND_RESPONSE,
+)
+def read_workflow_execution(execution_id: str) -> dict[str, Any]:
+    """Read one immutable execution outcome with its evidence provenance."""
+    try:
+        return get_execution(execution_id).to_mapping()
+    except ExecutionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
 
 
 @router.get("/live/evidence", responses=JAEGER_AND_NOT_FOUND_RESPONSES)

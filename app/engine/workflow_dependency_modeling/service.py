@@ -16,6 +16,14 @@ from app.engine.workflow_dependency_modeling.auto_discovery import (
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
 )
+from app.engine.workflow_dependency_modeling.execution_service import (
+    configure_execution_repository,
+    get_execution,
+    list_executions,
+    record_execution,
+    register_jaeger_execution,
+    run_benchmark_batch,
+)
 from app.engine.workflow_dependency_modeling.fixture_repository import (
     get_evidence_source,
     get_reference,
@@ -241,11 +249,13 @@ def get_sample_workflow() -> WorkflowGraph:
 
 __all__ = [
     "build_workflow_graph",
+    "configure_execution_repository",
     "configure_scenario_repository",
     "create_scenario",
     "discover_live_workflows",
     "evaluate_workflow_by_id",
     "get_evidence_source",
+    "get_execution",
     "get_live_evidence",
     "get_live_workflow",
     "get_sample_workflow",
@@ -253,7 +263,11 @@ __all__ = [
     "get_versioned_scenario",
     "get_workflow_by_id",
     "list_benchmark_workflows",
+    "list_executions",
     "list_versioned_scenarios",
+    "record_execution",
+    "register_jaeger_execution",
+    "run_benchmark_batch",
     "scenario_etag",
     "update_scenario",
 ]
