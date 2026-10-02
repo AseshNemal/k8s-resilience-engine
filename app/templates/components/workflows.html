@@ -183,6 +183,44 @@
          aria-live="polite"></div>
 </section>
 
+<section class="card execution-ledger" aria-labelledby="execution-ledger-title">
+    <div class="execution-ledger__header">
+        <div>
+            <h3 id="execution-ledger-title">Execution Outcome Ledger</h3>
+            <p>
+                Run the selected synthetic fixture as a trace-correlated batch. Every execution
+                retains its scenario version, assertion result, and evidence identity.
+            </p>
+        </div>
+        <button type="button" class="secondary-button" data-role="refresh-executions-button">
+            Refresh Outcomes
+        </button>
+    </div>
+    <div class="execution-runner">
+        <div class="scenario-form__field">
+            <label for="execution-actor">Run registered by</label>
+            <input id="execution-actor" data-role="execution-actor" required
+                   value="component-1-runner">
+        </div>
+        <div class="scenario-form__field">
+            <label for="execution-batch-id">Batch ID (optional)</label>
+            <input id="execution-batch-id" data-role="execution-batch-id"
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   placeholder="Generated automatically">
+        </div>
+        <button type="button" class="primary-button" data-role="run-benchmark-batch-button">
+            Run Selected Benchmark
+        </button>
+        <span data-role="execution-runner-status" aria-live="polite"></span>
+    </div>
+    <p class="execution-ledger__note">
+        Missing or duplicate trace IDs remain indeterminate; failed and timed-out invocations
+        are never removed from this ledger.
+    </p>
+    <div class="execution-ledger__list" data-role="execution-ledger-list"
+         aria-live="polite"></div>
+</section>
+
 <div data-role="page-region">
     {{ loading_state("Loading WorkflowGraph…") }}
 </div>
@@ -347,5 +385,5 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-2-scenarios" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-3-executions" defer></script>
 {% endblock %}
