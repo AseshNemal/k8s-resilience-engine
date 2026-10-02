@@ -3,10 +3,10 @@
   "description": "Cart update: verifying product availability, adding item to cart, and recalculating cart item totals.",
   "criticality": 0.85,
   "successCondition": {
-    "protocol": "http",
+    "protocol": "span",
     "terminalService": "cartservice",
-    "operationName": "add_item",
-    "httpStatusCodes": [200],
+    "operationName": "AddItem",
+    "spanStatusCodes": ["UNSET", "OK"],
     "maxDurationMs": 1500,
     "requiredAttributes": []
   },

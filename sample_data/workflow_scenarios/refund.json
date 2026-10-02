@@ -5,7 +5,7 @@
   "successCondition": {
     "protocol": "http",
     "terminalService": "paymentservice",
-    "operationName": "reverse_payment",
+    "operationName": "payment.reversal",
     "httpStatusCodes": [200],
     "maxDurationMs": 2500,
     "requiredAttributes": []
