@@ -352,6 +352,32 @@ def test_dependency_assessment_api_and_validated_graph(monkeypatch) -> None:
     assert graph.json()["optionalServices"] == ["emailservice"]
 
 
+def test_dependency_assessment_api_reports_missing_batch_as_not_found(
+    monkeypatch,
+) -> None:
+    from app.engine.workflow_dependency_modeling import (
+        dependency_assessment_service,
+        execution_service,
+        scenario_service,
+    )
+
+    scenarios, executions, assessments = _repositories()
+    monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
+    monkeypatch.setattr(execution_service, "_default_repository", executions)
+    monkeypatch.setattr(
+        dependency_assessment_service, "_default_repository", assessments
+    )
+    payload = _assessment_payload()
+    payload["baselineBatchIds"] = ["batch:does-not-exist"]
+    response = TestClient(app).post(
+        "/api/workflows/dependency-assessments",
+        json=payload,
+        headers={"X-Actor": "api-researcher"},
+    )
+    assert response.status_code == 404
+    assert "batch:does-not-exist" in response.json()["detail"]
+
+
 def test_dependency_assessment_http_exceptions_are_documented() -> None:
     schema = TestClient(app).get("/openapi.json").json()
     create_responses = schema["paths"]["/api/workflows/dependency-assessments"][

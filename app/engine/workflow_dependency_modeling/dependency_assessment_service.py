@@ -22,6 +22,7 @@ from app.engine.workflow_dependency_modeling.dependency_assessor import (
 )
 from app.engine.workflow_dependency_modeling.execution_models import ExecutionOutcome
 from app.engine.workflow_dependency_modeling.execution_repository import (
+    ExecutionNotFoundError,
     ExecutionRepository,
 )
 from app.engine.workflow_dependency_modeling.execution_service import (
@@ -75,7 +76,9 @@ def _records_for_batches(
     for batch_id in batch_ids:
         batch = list_executions(batch_id=batch_id, repository=execution_repository)
         if not batch:
-            raise ValueError(f"Execution batch '{batch_id}' was not found")
+            raise ExecutionNotFoundError(
+                f"Execution batch '{batch_id}' was not found"
+            )
         for outcome in batch:
             records[outcome.registration.execution_id] = outcome
     return list(records.values())

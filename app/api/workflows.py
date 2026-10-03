@@ -251,7 +251,7 @@ def create_workflow_dependency_assessment(
     """Compare exact-correlated baseline and intervention execution cohorts."""
     try:
         return create_dependency_assessment(payload, actor=actor).to_mapping()
-    except ScenarioNotFoundError as err:
+    except (ScenarioNotFoundError, ExecutionNotFoundError) as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
     except DependencyAssessmentAlreadyExistsError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
