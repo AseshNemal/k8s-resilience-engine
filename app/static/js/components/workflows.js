@@ -44,6 +44,14 @@
     const refreshAssessmentsButton = document.querySelector('[data-role="refresh-assessments-button"]');
     const approvalActor = document.querySelector('[data-role="assessment-approval-actor"]');
     const approvalRationale = document.querySelector('[data-role="assessment-approval-rationale"]');
+    const referenceForm = document.querySelector('[data-role="dependency-reference-form"]');
+    const referenceStatus = document.querySelector('[data-role="dependency-reference-status"]');
+    const experimentStatus = document.querySelector('[data-role="classification-experiment-status"]');
+    const classificationResults = document.querySelector('[data-role="classification-lab-results"]');
+    const refreshClassificationLab = document.querySelector('[data-role="refresh-classification-lab"]');
+    const runClassificationEvaluation = document.querySelector('[data-role="run-classification-evaluation"]');
+    const runPolicySensitivity = document.querySelector('[data-role="run-policy-sensitivity"]');
+    const runRepeatability = document.querySelector('[data-role="run-repeatability"]');
 
     let discoveredWorkflows = [];
     let liveMode = false;
@@ -68,6 +76,189 @@
             throw new Error(data.detail || `Request failed with HTTP ${response.status}`);
         }
         return data;
+    }
+
+    function setLabStatus(target, message, isError = false) {
+        if (!target) return;
+        target.textContent = message;
+        target.style.color = isError
+            ? "var(--color-danger, #b91c1c)"
+            : "var(--color-text-muted)";
+    }
+
+    function resultCard(label, value, detail) {
+        const card = document.createElement("article");
+        card.className = "classification-result";
+        const title = document.createElement("strong");
+        const metric = document.createElement("span");
+        const hint = document.createElement("small");
+        title.textContent = label;
+        metric.textContent = value;
+        hint.textContent = detail;
+        card.append(title, metric, hint);
+        return card;
+    }
+
+    function renderClassificationEvaluation(evaluation) {
+        if (!classificationResults) return;
+        classificationResults.replaceChildren(
+            resultCard("Macro F1", evaluation.macroF1.toFixed(3), "Equal weight per class"),
+            resultCard("Micro F1", evaluation.microF1.toFixed(3), "Aggregate classified decisions"),
+            resultCard("Coverage", formatRatioAsPercentage(evaluation.coverage), "Reference services classified"),
+            resultCard("Abstention", formatRatioAsPercentage(evaluation.abstentionRate), "Insufficient or missing evidence"),
+            resultCard("Accuracy", formatRatioAsPercentage(evaluation.accuracy), "Among classified services"),
+            resultCard(
+                "Reference",
+                `v${evaluation.referenceVersion}`,
+                evaluation.synthetic ? "Synthetic engineering reference" : "Independent reviewed reference"
+            )
+        );
+    }
+
+    async function loadClassificationLab() {
+        if (!classificationResults) return;
+        try {
+            const evaluations = await requestScenario("/api/workflows/dependency-evaluations");
+            if (!evaluations.length) {
+                classificationResults.innerHTML = '<p class="muted">No Phase 5 classification evaluation has been recorded yet.</p>';
+                return;
+            }
+            renderClassificationEvaluation(evaluations.at(-1));
+        } catch (error) {
+            classificationResults.textContent = `Classification results unavailable: ${error.message}`;
+        }
+    }
+
+    async function saveDependencyReference(event) {
+        event.preventDefault();
+        if (!referenceForm || !referenceForm.reportValidity()) return;
+        const values = new FormData(referenceForm);
+        const actor = String(values.get("actor")).trim();
+        const expectedVersion = Number(values.get("expectedVersion"));
+        const button = referenceForm.querySelector('button[type="submit"]');
+        button.disabled = true;
+        setLabStatus(referenceStatus, "Saving immutable reference version…");
+        try {
+            const payload = {
+                workflowId: String(values.get("workflowId")).trim(),
+                scenarioVersion: Number(values.get("scenarioVersion")),
+                labels: JSON.parse(String(values.get("labels"))),
+                source: String(values.get("source")).trim(),
+                synthetic: values.get("synthetic") === "on",
+            };
+            const reference = await requestScenario(
+                `/api/workflows/dependency-references?expected_version=${expectedVersion}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-Actor": actor },
+                    body: JSON.stringify(payload),
+                }
+            );
+            referenceForm.elements.expectedVersion.value = reference.referenceVersion;
+            setLabStatus(referenceStatus, `Saved reference version ${reference.referenceVersion}.`);
+        } catch (error) {
+            setLabStatus(referenceStatus, error.message, true);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function evaluationInputs() {
+        return {
+            assessmentId: document.querySelector('[data-role="evaluation-assessment-id"]').value.trim(),
+            evaluationId: document.querySelector('[data-role="classification-evaluation-id"]').value.trim(),
+            referenceVersion: Number(document.querySelector('[data-role="evaluation-reference-version"]').value),
+            actor: document.querySelector('[data-role="classification-evaluation-actor"]').value.trim(),
+        };
+    }
+
+    async function evaluateClassification() {
+        const values = evaluationInputs();
+        if (!values.assessmentId || !values.evaluationId || !values.actor) {
+            setLabStatus(experimentStatus, "Assessment ID, evaluation ID, and evaluator are required.", true);
+            return;
+        }
+        runClassificationEvaluation.disabled = true;
+        setLabStatus(experimentStatus, "Evaluating frozen classifications…");
+        try {
+            const evaluation = await requestScenario("/api/workflows/dependency-evaluations", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Actor": values.actor },
+                body: JSON.stringify({
+                    evaluationId: values.evaluationId,
+                    assessmentId: values.assessmentId,
+                    referenceVersion: values.referenceVersion,
+                }),
+            });
+            renderClassificationEvaluation(evaluation);
+            setLabStatus(experimentStatus, "Evaluation recorded. Reference truth was loaded after the frozen assessment.");
+        } catch (error) {
+            setLabStatus(experimentStatus, error.message, true);
+        } finally {
+            runClassificationEvaluation.disabled = false;
+        }
+    }
+
+    async function evaluatePolicySensitivity() {
+        const { assessmentId } = evaluationInputs();
+        if (!assessmentId) {
+            setLabStatus(experimentStatus, "A primary assessment ID is required.", true);
+            return;
+        }
+        runPolicySensitivity.disabled = true;
+        setLabStatus(experimentStatus, "Reclassifying frozen evidence under policy variants…");
+        try {
+            const report = await requestScenario("/api/workflows/dependency-experiments/sensitivity", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    assessmentId,
+                    cases: [
+                        { caseId: "strict", policy: { minSamplesPerCohort: 5, optionalEffectTolerance: 0.05, mandatoryEffectThreshold: 0.6, maxMandatorySuccessRate: 0.1 } },
+                        { caseId: "permissive", policy: { minSamplesPerCohort: 2, minBaselineSuccessRate: 0.7, optionalEffectTolerance: 0.2, mandatoryEffectThreshold: 0.4, maxMandatorySuccessRate: 0.3 } },
+                    ],
+                }),
+            });
+            classificationResults.replaceChildren(
+                resultCard("Sensitive services", String(report.sensitiveServices.length), report.sensitiveServices.join(", ") || "None"),
+                resultCard("Robust services", String(report.robustServices.length), report.robustServices.join(", ") || "None"),
+                resultCard("Policy cases", String(report.cases.length), "Strict and permissive threshold variants")
+            );
+            setLabStatus(experimentStatus, "Sensitivity analysis completed without changing stored evidence.");
+        } catch (error) {
+            setLabStatus(experimentStatus, error.message, true);
+        } finally {
+            runPolicySensitivity.disabled = false;
+        }
+    }
+
+    async function evaluateRepeatability() {
+        const input = document.querySelector('[data-role="repeatability-assessment-ids"]');
+        const assessmentIds = input.value.split(",").map((value) => value.trim()).filter(Boolean);
+        if (assessmentIds.length < 2) {
+            setLabStatus(experimentStatus, "Enter at least two assessment IDs for repeatability analysis.", true);
+            return;
+        }
+        runRepeatability.disabled = true;
+        setLabStatus(experimentStatus, "Comparing independent assessment runs…");
+        try {
+            const report = await requestScenario("/api/workflows/dependency-experiments/repeatability", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ assessmentIds }),
+            });
+            const unstable = report.services.filter((service) => !service.stable);
+            classificationResults.replaceChildren(
+                resultCard("Mean agreement", formatRatioAsPercentage(report.meanAgreementRate), `${assessmentIds.length} immutable runs`),
+                resultCard("Stable services", formatRatioAsPercentage(report.stableServiceRate), "Exact label agreement"),
+                resultCard("Unstable services", String(unstable.length), unstable.map((service) => service.serviceName).join(", ") || "None")
+            );
+            setLabStatus(experimentStatus, "Repeatability comparison completed.");
+        } catch (error) {
+            setLabStatus(experimentStatus, error.message, true);
+        } finally {
+            runRepeatability.disabled = false;
+        }
     }
 
     function scenarioChip(text) {
@@ -1203,6 +1394,11 @@
     if (jaegerUrlInput) {
         jaegerUrlInput.addEventListener("change", checkJaegerHealth);
     }
+    if (referenceForm) referenceForm.addEventListener("submit", saveDependencyReference);
+    if (refreshClassificationLab) refreshClassificationLab.addEventListener("click", loadClassificationLab);
+    if (runClassificationEvaluation) runClassificationEvaluation.addEventListener("click", evaluateClassification);
+    if (runPolicySensitivity) runPolicySensitivity.addEventListener("click", evaluatePolicySensitivity);
+    if (runRepeatability) runRepeatability.addEventListener("click", evaluateRepeatability);
 
     document.addEventListener("DOMContentLoaded", () => {
         loadBenchmarkWorkflow();
@@ -1210,6 +1406,7 @@
         loadScenarioRegistry();
         loadExecutionLedger();
         loadDependencyAssessments();
+        loadClassificationLab();
         initEvaluationListeners();
         setTimeout(handleRunEvaluation, 300);
     });

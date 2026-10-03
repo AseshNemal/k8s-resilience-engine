@@ -293,6 +293,113 @@
          aria-live="polite"></div>
 </section>
 
+<section class="card classification-lab" aria-labelledby="classification-lab-title">
+    <div class="classification-lab__header">
+        <div>
+            <span class="classification-lab__eyebrow">Phase 5 · research evaluation</span>
+            <h3 id="classification-lab-title">Classification Validation Lab</h3>
+            <p>
+                Register truth independently, evaluate a frozen assessment, and inspect
+                abstention, threshold sensitivity, and repeatability without changing evidence.
+            </p>
+        </div>
+        <button type="button" class="secondary-button" data-role="refresh-classification-lab">
+            Refresh Results
+        </button>
+    </div>
+    <div class="classification-lab__notice" role="note">
+        Synthetic references are engineering evidence only. Production claims require an
+        independently reviewed reference and controlled Jaeger experiment cohorts.
+    </div>
+    <div class="classification-lab__grid">
+        <form class="classification-lab__panel" data-role="dependency-reference-form">
+            <div class="classification-lab__panel-heading">
+                <span>01</span>
+                <div><h4>Independent reference</h4><p>Versioned labels loaded after prediction.</p></div>
+            </div>
+            <div class="classification-lab__fields">
+                <div class="scenario-form__field">
+                    <label for="reference-workflow-id">Workflow ID</label>
+                    <input id="reference-workflow-id" name="workflowId" required value="checkout">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="reference-scenario-version">Scenario version</label>
+                    <input id="reference-scenario-version" name="scenarioVersion" type="number" min="1" required value="1">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="reference-expected-version">Current reference version</label>
+                    <input id="reference-expected-version" name="expectedVersion" type="number" min="0" required value="0">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="reference-actor">Reviewed by</label>
+                    <input id="reference-actor" name="actor" required value="independent-reviewer">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="reference-source">Reference source</label>
+                    <input id="reference-source" name="source" required value="independent_domain_review">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="reference-labels">Service labels (JSON)</label>
+                    <textarea id="reference-labels" name="labels" rows="7" required
+                              aria-describedby="reference-labels-help"
+                              placeholder='[{"serviceName":"paymentservice","classification":"mandatory","justification":"Payment is required"}]'></textarea>
+                    <small id="reference-labels-help">Allowed labels: mandatory, optional, supporting. Each requires a justification.</small>
+                </div>
+                <label class="classification-lab__check" for="reference-synthetic">
+                    <input id="reference-synthetic" name="synthetic" type="checkbox" checked>
+                    Mark this reference as synthetic
+                </label>
+            </div>
+            <button type="submit" class="primary-button">Save Reference Version</button>
+            <span data-role="dependency-reference-status" aria-live="polite"></span>
+        </form>
+
+        <div class="classification-lab__panel">
+            <div class="classification-lab__panel-heading">
+                <span>02</span>
+                <div><h4>Evaluation &amp; robustness</h4><p>Operate only on immutable assessment IDs.</p></div>
+            </div>
+            <div class="classification-lab__fields">
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="evaluation-assessment-id">Primary assessment ID</label>
+                    <input id="evaluation-assessment-id" data-role="evaluation-assessment-id"
+                           placeholder="assessment:checkout:001">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="classification-evaluation-id">Evaluation ID</label>
+                    <input id="classification-evaluation-id" data-role="classification-evaluation-id"
+                           placeholder="evaluation:checkout:001">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="evaluation-reference-version">Reference version</label>
+                    <input id="evaluation-reference-version" data-role="evaluation-reference-version"
+                           type="number" min="1" value="1">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="evaluation-actor">Evaluated by</label>
+                    <input id="evaluation-actor" data-role="classification-evaluation-actor"
+                           value="component-1-evaluator">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="repeatability-assessment-ids">Repeatability assessment IDs</label>
+                    <input id="repeatability-assessment-ids" data-role="repeatability-assessment-ids"
+                           placeholder="assessment:run:001, assessment:run:002">
+                    <small>At least two runs from the same workflow, scenario, and environment.</small>
+                </div>
+            </div>
+            <div class="classification-lab__actions">
+                <button type="button" class="primary-button" data-role="run-classification-evaluation">Evaluate Classification</button>
+                <button type="button" class="secondary-button" data-role="run-policy-sensitivity">Test Policy Sensitivity</button>
+                <button type="button" class="secondary-button" data-role="run-repeatability">Check Repeatability</button>
+            </div>
+            <span data-role="classification-experiment-status" aria-live="polite"></span>
+        </div>
+    </div>
+    <div class="classification-lab__results" data-role="classification-lab-results" aria-live="polite">
+        <p class="muted">No Phase 5 classification evaluation has been recorded yet.</p>
+    </div>
+</section>
+
 <div data-role="page-region">
     {{ loading_state("Loading WorkflowGraph…") }}
 </div>
@@ -449,7 +556,7 @@
         <ul class="future-work-list">
             <li>Jaeger trace selector for choosing which recorded run to analyze</li>
             <li>Workflow selection across multiple business workflows</li>
-            <li>Validated dependency classification using success outcomes and independent references</li>
+            <li>Multi-environment controlled intervention campaigns with independently reviewed references</li>
             <li>Interactive, zoomable dependency graph</li>
         </ul>
     </div>
@@ -457,5 +564,5 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-3-executions" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-5-evaluation" defer></script>
 {% endblock %}

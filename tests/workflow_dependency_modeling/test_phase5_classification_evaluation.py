@@ -364,3 +364,13 @@ def test_phase5_experiment_api(monkeypatch) -> None:
     )
     assert repeatability.status_code == 200
     assert repeatability.json()["stableServiceRate"] == pytest.approx(1.0)
+
+
+def test_workflow_page_contains_phase5_validation_lab() -> None:
+    response = TestClient(app).get("/components/workflows")
+    assert response.status_code == 200
+    assert 'data-role="dependency-reference-form"' in response.text
+    assert 'data-role="run-classification-evaluation"' in response.text
+    assert 'data-role="run-policy-sensitivity"' in response.text
+    assert 'data-role="run-repeatability"' in response.text
+    assert "Synthetic references are engineering evidence only" in response.text
