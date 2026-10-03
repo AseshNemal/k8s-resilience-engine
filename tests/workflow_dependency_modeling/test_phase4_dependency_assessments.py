@@ -53,6 +53,7 @@ def _outcome(execution_id: str, batch_id: str, succeeded: bool) -> ExecutionOutc
             "invocationStatus": "completed",
             "source": "controlled_experiment",
             "evidenceLocator": "jaeger://trace",
+            "environmentId": "test-cluster-a",
             "expectedTraceId": f"trace:{execution_id}",
             "startedAt": "2026-10-03T00:00:00Z",
             "finishedAt": "2026-10-03T00:00:01Z",
@@ -193,6 +194,43 @@ def test_unmatched_evidence_is_excluded_and_cannot_force_a_decision() -> None:
     assert assessed.classification is ValidatedDependencyType.INSUFFICIENT_EVIDENCE
     assert assessed.intervention.eligible_records == 0
     assert assessed.excluded_execution_ids == ("missing:1",)
+
+
+def test_assessment_rejects_mixed_environments(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import scenario_service
+
+    scenarios, executions, assessments = _repositories()
+    monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
+    foreign = _outcome("batch:payment:foreign", "batch:payment", False)
+    foreign_registration = ExecutionRegistration.from_mapping(
+        {**foreign.registration.to_mapping(), "environmentId": "test-cluster-b"}
+    )
+    executions = InMemoryExecutionRepository()
+    for batch_id, results in {
+        "batch:baseline": [True, True, True],
+        "batch:inventory": [True, True, False],
+        "batch:email": [True, True, True],
+    }.items():
+        for index, succeeded in enumerate(results):
+            executions.create(_outcome(f"{batch_id}:{index}", batch_id, succeeded))
+    executions.create(
+        ExecutionOutcome(
+            registration=foreign_registration,
+            status=foreign.status,
+            correlation_status=foreign.correlation_status,
+            recorded_at=foreign.recorded_at,
+            matched_trace_id=foreign.matched_trace_id,
+            evidence_id=foreign.evidence_id,
+        )
+    )
+    with pytest.raises(ValueError, match="assessed environment"):
+        create_dependency_assessment(
+            _assessment_payload(),
+            actor="researcher",
+            repository=assessments,
+            execution_repository=executions,
+            now=NOW,
+        )
 
 
 def test_assessment_is_immutable_and_approval_projects_validated_graph(

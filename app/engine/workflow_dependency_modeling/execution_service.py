@@ -157,6 +157,7 @@ def run_benchmark_batch(
                 "invocationStatus": "completed",
                 "source": "benchmark_fixture",
                 "evidenceLocator": evidence.trace_file,
+                "environmentId": "synthetic-fixture",
                 "expectedTraceId": trace_id,
                 "startedAt": _iso(started_at),
                 "finishedAt": _iso(finished_at),

@@ -82,7 +82,10 @@ def _records_for_batches(
 
 
 def _validate_records(
-    records: list[ExecutionOutcome], workflow_id: str, scenario_version: int
+    records: list[ExecutionOutcome],
+    workflow_id: str,
+    scenario_version: int,
+    environment_id: str,
 ) -> None:
     for outcome in records:
         registration = outcome.registration
@@ -91,6 +94,10 @@ def _validate_records(
         if registration.scenario_version != scenario_version:
             raise ValueError(
                 "Every execution cohort must use the assessed scenario version"
+            )
+        if registration.environment_id != environment_id:
+            raise ValueError(
+                "Every execution cohort must use the assessed environment"
             )
 
 
@@ -110,6 +117,7 @@ def create_dependency_assessment(
         )
     graph = WorkflowGraph.model_validate(data.get("candidateGraph"))
     workflow_id = str(data.get("workflowId", "")).strip()
+    environment_id = str(data.get("environmentId", "")).strip()
     scenario_version = data.get("scenarioVersion")
     if graph.workflow_id != workflow_id:
         raise ValueError("Candidate graph workflow ID does not match the assessment")
@@ -148,7 +156,9 @@ def create_dependency_assessment(
         )
 
     baseline_records = _records_for_batches(baseline_ids, execution_repository)
-    _validate_records(baseline_records, workflow_id, scenario_version)
+    _validate_records(
+        baseline_records, workflow_id, scenario_version, environment_id
+    )
     policy = AssessmentPolicy.from_mapping(data.get("policy"))
     service_results = []
     for service_name in sorted(candidate_services):
@@ -161,7 +171,7 @@ def create_dependency_assessment(
             if intervention
             else []
         )
-        _validate_records(records, workflow_id, scenario_version)
+        _validate_records(records, workflow_id, scenario_version, environment_id)
         service_results.append(
             assess_service_dependency(
                 service_name,
