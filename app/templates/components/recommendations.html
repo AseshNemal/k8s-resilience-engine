@@ -106,6 +106,18 @@
     </div>
 
     <div class="section-header">
+        <h3 class="section-header__title">Approval Gate</h3>
+    </div>
+    <div class="card" id="approval-section">
+        <div data-role="approval-state-container">
+            <!-- Approval state goes here -->
+        </div>
+        <div class="approval-actions" style="margin-top: var(--space-md);" data-role="approval-actions">
+            <button type="button" class="primary-button" id="btn-request-approval">Request Approval</button>
+        </div>
+    </div>
+
+    <div class="section-header">
         <h3 class="section-header__title">Raw Data</h3>
     </div>
     <div class="stack-md">
@@ -141,6 +153,36 @@
         </ul>
     </div>
 </template>
+
+<div class="modal-backdrop" id="approval-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal__header">
+            <h3 class="modal__title" id="modal-title">Approval Confirmation</h3>
+        </div>
+        <div class="modal__body">
+            <p id="modal-message">
+                Approve this recommendation? <br><br>
+                This approval does NOT apply the change automatically.
+                It only authorizes this exact proposal for a future controlled test-environment application.
+            </p>
+            <div class="modal__context stack-sm" style="margin-top: var(--space-md);">
+                <div><strong>Service:</strong> <span id="modal-context-service"></span></div>
+                <div><strong>Recommendation Type:</strong> <span id="modal-context-type"></span></div>
+                <div><strong>Proposal Version:</strong> <span id="modal-context-version">v1.0</span></div>
+            </div>
+            <div class="form-group" style="margin-top: var(--space-md);">
+                <label for="approval-note">Decision Note (Optional)</label>
+                <textarea id="approval-note" rows="3" class="form-input"></textarea>
+            </div>
+        </div>
+        <div class="modal__footer">
+            <button type="button" class="secondary-button" id="modal-cancel">Cancel</button>
+            <button type="button" class="primary-button" id="modal-confirm-approve" style="display: none;">Approve</button>
+            <button type="button" class="danger-button" id="modal-confirm-reject" style="display: none;">Reject</button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block page_js %}

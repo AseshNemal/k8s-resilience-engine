@@ -43,3 +43,27 @@ class ResearchArtifact(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class RecommendationApprovalRecord(Base):
+    __tablename__ = "recommendation_approvals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recommendation_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    proposal_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    recommendation_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    yaml_snapshot: Mapped[str | None] = mapped_column(String, nullable=True)
+    evaluation_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    requested_by: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(String, nullable=True)
