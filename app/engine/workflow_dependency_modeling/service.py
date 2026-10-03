@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
+from app.engine.workflow_dependency_modeling.analysis_session_service import (
+    configure_analysis_session_repository,
+    get_workflow_analysis,
+    list_workflow_analyses,
+    start_workflow_analysis,
+)
 from app.engine.workflow_dependency_modeling.auto_discovery import (
     _slugify,
     discover_root_workflows,
@@ -272,6 +278,7 @@ __all__ = [
     "build_workflow_graph",
     "approve_dependency_assessment",
     "configure_dependency_assessment_repository",
+    "configure_analysis_session_repository",
     "configure_classification_evaluation_repository",
     "configure_execution_repository",
     "configure_scenario_repository",
@@ -292,6 +299,7 @@ __all__ = [
     "get_scenario",
     "get_versioned_scenario",
     "get_validated_workflow_graph",
+    "get_workflow_analysis",
     "get_workflow_by_id",
     "list_benchmark_workflows",
     "list_executions",
@@ -299,11 +307,13 @@ __all__ = [
     "list_dependency_classification_evaluations",
     "list_dependency_classification_references",
     "list_versioned_scenarios",
+    "list_workflow_analyses",
     "record_execution",
     "register_jaeger_execution",
     "run_dependency_repeatability_analysis",
     "run_dependency_sensitivity_analysis",
     "run_benchmark_batch",
     "scenario_etag",
+    "start_workflow_analysis",
     "update_scenario",
 ]

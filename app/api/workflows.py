@@ -6,6 +6,7 @@ from app.engine.workflow_dependency_modeling.evaluator import (
 )
 from app.engine.workflow_dependency_modeling.service import (
     approve_dependency_assessment,
+    start_workflow_analysis,
     create_scenario,
     create_dependency_assessment,
     create_dependency_classification_evaluation,
@@ -13,6 +14,7 @@ from app.engine.workflow_dependency_modeling.service import (
     discover_live_workflows,
     evaluate_workflow_by_id,
     get_live_workflow,
+    get_workflow_analysis,
     get_live_evidence,
     get_execution,
     get_dependency_assessment,
@@ -28,12 +30,17 @@ from app.engine.workflow_dependency_modeling.service import (
     list_dependency_classification_evaluations,
     list_dependency_classification_references,
     list_versioned_scenarios,
+    list_workflow_analyses,
     register_jaeger_execution,
     run_dependency_repeatability_analysis,
     run_dependency_sensitivity_analysis,
     run_benchmark_batch,
     scenario_etag,
     update_scenario,
+)
+from app.engine.workflow_dependency_modeling.analysis_session_repository import (
+    AnalysisSessionConflictError,
+    AnalysisSessionNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.classification_evaluation_repository import (
     ClassificationArtifactConflictError,
@@ -359,6 +366,46 @@ def create_workflow_dependency_reference(
         raise HTTPException(status_code=409, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/analysis-sessions",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {"description": "Analysis session already exists"},
+        422: {"description": "Connection or operation input is invalid"},
+        503: {"description": "Jaeger service is unavailable"},
+    },
+)
+def create_workflow_analysis_session(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Inspect one real trace operation without claiming dependency validation."""
+    try:
+        return start_workflow_analysis(payload, actor=actor).to_mapping()
+    except AnalysisSessionConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ConnectionError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/analysis-sessions")
+def read_workflow_analysis_sessions() -> list[dict[str, Any]]:
+    return [analysis.to_mapping() for analysis in list_workflow_analyses()]
+
+
+@router.get(
+    "/analysis-sessions/{session_id}",
+    responses={404: {"description": "Analysis session was not found"}},
+)
+def read_workflow_analysis_session(session_id: str) -> dict[str, Any]:
+    try:
+        return get_workflow_analysis(session_id).to_mapping()
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
 
 
 @router.get("/dependency-references")
