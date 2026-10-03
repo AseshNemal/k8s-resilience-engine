@@ -8,15 +8,13 @@ from app.engine.recommendation_evaluation_validation.feasibility_analyzer import
 from app.engine.recommendation_evaluation_validation.metrics import (
     calculate_replica_concentration,
 )
+from app.engine.recommendation_evaluation_validation.mutations import (
+    TopologySpreadMutation,
+)
 from app.engine.recommendation_evaluation_validation.simulation_result import (
     SimulationResult,
 )
-from app.engine.recommendation_evaluation_validation.simulator import (
-    simulate_topology_spread,
-)
-from app.engine.recommendation_evaluation_validation.virtual_model import (
-    create_virtual_deployment,
-)
+from app.engine.simulation import simulate_deployment_change
 from app.shared.sample_loader import load_sample_json
 from app.shared.schemas.deployment import DeploymentGraph
 from app.shared.schemas.failure_impact import FailureImpactReport
@@ -80,15 +78,13 @@ def evaluate_first_recommendation(
             simulated_deployment=None,
         )
 
-    virtual_deployment = create_virtual_deployment(deployment)
-
-    simulated_deployment = simulate_topology_spread(
-        virtual_deployment,
-        candidate.service,
+    sim_result = simulate_deployment_change(
+        deployment,
+        TopologySpreadMutation(candidate.service),
     )
 
     concentration_after = calculate_replica_concentration(
-        simulated_deployment,
+        sim_result.after,
         candidate.service,
     )
 
@@ -103,5 +99,5 @@ def evaluate_first_recommendation(
             concentration_before - concentration_after,
             2,
         ),
-        simulated_deployment=simulated_deployment,
+        simulated_deployment=sim_result.after,
     )
