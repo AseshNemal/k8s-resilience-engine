@@ -614,7 +614,260 @@
     color: var(--color-text-muted);
 }
 
+/* Component workbench: explain the research flow before exposing its controls. */
+.workflow-kicker {
+    margin: 0 0 6px;
+    color: var(--color-primary);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+
+.page-header__title {
+    max-width: 760px;
+    font-size: clamp(28px, 4vw, 44px);
+    letter-spacing: -.035em;
+    line-height: 1.05;
+}
+
+.page-header__subtitle {
+    max-width: 720px;
+    font-size: 15px;
+    line-height: 1.65;
+}
+
+.component-brief {
+    margin-bottom: var(--space-lg);
+    overflow: hidden;
+    border: 1px solid #172033;
+    border-radius: 14px;
+    background: #101827;
+    color: #f8fafc;
+}
+
+.component-brief__statement {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-md);
+    padding: clamp(20px, 4vw, 36px);
+}
+
+.component-brief__number {
+    color: #60a5fa;
+    font: 700 12px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.component-brief__label {
+    margin: 0 0 8px;
+    color: #93c5fd;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.component-brief h3 {
+    max-width: 720px;
+    margin: 0;
+    color: #fff;
+    font-size: clamp(20px, 3vw, 30px);
+    letter-spacing: -.025em;
+}
+
+.component-brief__statement p:last-child {
+    max-width: 720px;
+    margin: 10px 0 0;
+    color: #cbd5e1;
+    line-height: 1.6;
+}
+
+.component-contract {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 16px clamp(20px, 4vw, 36px);
+    border-top: 1px solid #293548;
+    background: #0c1320;
+}
+
+.component-contract div span,
+.component-contract div strong {
+    display: block;
+}
+
+.component-contract div span {
+    margin-bottom: 3px;
+    color: #94a3b8;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+}
+
+.component-contract div strong {
+    color: #e2e8f0;
+    font-size: 12px;
+}
+
+.component-contract__arrow {
+    color: #60a5fa;
+}
+
+.workflow-steps {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.workflow-step {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 0 10px;
+    align-items: center;
+    min-height: 68px;
+    padding: 10px 12px;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: var(--color-text-muted);
+    text-align: left;
+    cursor: pointer;
+}
+
+.workflow-step > span {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    grid-row: span 2;
+    place-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    font: 700 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.workflow-step strong,
+.workflow-step small {
+    display: block;
+}
+
+.workflow-step strong {
+    color: var(--color-text);
+    font-size: 13px;
+}
+
+.workflow-step small {
+    font-size: 11px;
+}
+
+.workflow-step:hover {
+    background: var(--color-surface-soft, #f8fafc);
+}
+
+.workflow-step:focus-visible {
+    outline: 3px solid rgba(37, 99, 235, .3);
+    outline-offset: 2px;
+}
+
+.workflow-step.is-active {
+    border-bottom-color: var(--color-primary);
+    color: var(--color-primary);
+}
+
+.workflow-step.is-active > span {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+    color: #fff;
+}
+
+.workflow-stage__intro {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2px 12px;
+    align-items: baseline;
+    margin: 0 0 var(--space-md);
+}
+
+.workflow-stage__intro p {
+    grid-row: span 2;
+    margin: 0;
+    color: var(--color-primary);
+    font: 700 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+    text-transform: uppercase;
+}
+
+.workflow-stage__intro h3,
+.workflow-stage__intro span {
+    margin: 0;
+}
+
+.workflow-stage__intro h3 {
+    font-size: 20px;
+    letter-spacing: -.015em;
+}
+
+.workflow-stage__intro span {
+    color: var(--color-text-muted);
+    font-size: 13px;
+}
+
+.workflow-stage > .card {
+    box-shadow: none;
+}
+
+.execution-ledger__list {
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.handoff-note {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-md);
+    margin-top: calc(var(--space-lg) * -0.5);
+    padding: 14px 16px;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-medium);
+    background: #eff6ff;
+    color: #1e3a8a;
+    font-size: 13px;
+}
+
+.diagnostic-disclosure {
+    margin: var(--space-lg) 0;
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.diagnostic-disclosure > summary {
+    padding: 14px 0;
+    color: var(--color-text);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.diagnostic-disclosure > p {
+    margin: 0 0 var(--space-md);
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.diagnostic-disclosure__body {
+    margin-bottom: var(--space-md);
+}
+
 @media (max-width: 900px) {
+    .component-contract {
+        grid-template-columns: 1fr;
+    }
+
+    .component-contract__arrow {
+        transform: rotate(90deg);
+    }
+
     .scenario-form {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -628,6 +881,25 @@
 }
 
 @media (max-width: 560px) {
+    .workflow-steps {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .workflow-step {
+        min-height: 64px;
+    }
+
+    .component-brief__statement {
+        grid-template-columns: 1fr;
+    }
+
+    .component-brief__number {
+        display: none;
+    }
+
+    .handoff-note {
+        grid-template-columns: 1fr;
+    }
     .scenario-registry__header,
     .execution-ledger__header,
     .dependency-validation__header,

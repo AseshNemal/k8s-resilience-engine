@@ -66,5 +66,19 @@ def test_workflow_page_uses_candidate_not_validated_necessity_language() -> None
     response = client.get("/components/workflows")
     assert response.status_code == 200
     assert "High-frequency Candidates" in response.text
+
+
+def test_workflow_page_explains_component_contract_and_stages() -> None:
+    response = client.get("/components/workflows")
+    assert response.status_code == 200
+    assert "Which services does this workflow actually need?" in response.text
+    assert "Model a business workflow—not the Kubernetes deployment." in response.text
+    assert "Output to Component 3" in response.text
+    assert 'data-workflow-stage-button="define"' in response.text
+    assert 'data-workflow-stage-button="evidence"' in response.text
+    assert 'data-workflow-stage-button="validate"' in response.text
+    assert 'data-workflow-stage-button="evaluate"' in response.text
+    assert 'data-workflow-stage="evidence" hidden' in response.text
+    assert "Future Work" not in response.text
     assert "Lower-frequency Candidates" in response.text
     assert "Mandatory Services" not in response.text

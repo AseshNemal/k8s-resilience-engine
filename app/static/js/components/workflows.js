@@ -52,10 +52,23 @@
     const runClassificationEvaluation = document.querySelector('[data-role="run-classification-evaluation"]');
     const runPolicySensitivity = document.querySelector('[data-role="run-policy-sensitivity"]');
     const runRepeatability = document.querySelector('[data-role="run-repeatability"]');
+    const stageButtons = document.querySelectorAll('[data-workflow-stage-button]');
+    const stagePanels = document.querySelectorAll('[data-workflow-stage]');
 
     let discoveredWorkflows = [];
     let liveMode = false;
     let renderVersion = 0;
+
+    function activateWorkflowStage(stageName) {
+        stagePanels.forEach((panel) => {
+            panel.hidden = panel.dataset.workflowStage !== stageName;
+        });
+        stageButtons.forEach((button) => {
+            const active = button.dataset.workflowStageButton === stageName;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", String(active));
+        });
+    }
 
     function setScenarioStatus(message, isError = false) {
         if (!scenarioStatus) return;
@@ -1399,8 +1412,14 @@
     if (runClassificationEvaluation) runClassificationEvaluation.addEventListener("click", evaluateClassification);
     if (runPolicySensitivity) runPolicySensitivity.addEventListener("click", evaluatePolicySensitivity);
     if (runRepeatability) runRepeatability.addEventListener("click", evaluateRepeatability);
+    stageButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            activateWorkflowStage(button.dataset.workflowStageButton);
+        });
+    });
 
     document.addEventListener("DOMContentLoaded", () => {
+        activateWorkflowStage("define");
         loadBenchmarkWorkflow();
         checkJaegerHealth();
         loadScenarioRegistry();
