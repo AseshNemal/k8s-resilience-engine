@@ -29,6 +29,8 @@ from app.engine.workflow_dependency_modeling.service import (
     list_dependency_classification_references,
     list_versioned_scenarios,
     register_jaeger_execution,
+    run_dependency_repeatability_analysis,
+    run_dependency_sensitivity_analysis,
     run_benchmark_batch,
     scenario_etag,
     update_scenario,
@@ -427,6 +429,42 @@ def read_workflow_dependency_evaluation(evaluation_id: str) -> dict[str, Any]:
         return get_dependency_classification_evaluation(evaluation_id).to_mapping()
     except ClassificationArtifactNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-experiments/sensitivity",
+    responses={
+        404: {"description": "Dependency assessment was not found"},
+        422: {"description": "Sensitivity experiment is invalid"},
+    },
+)
+def run_workflow_dependency_sensitivity(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        return run_dependency_sensitivity_analysis(payload).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-experiments/repeatability",
+    responses={
+        404: {"description": "Dependency assessment was not found"},
+        422: {"description": "Repeatability experiment is invalid"},
+    },
+)
+def run_workflow_dependency_repeatability(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        return run_dependency_repeatability_analysis(payload).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.get("/live/evidence", responses=JAEGER_AND_NOT_FOUND_RESPONSES)

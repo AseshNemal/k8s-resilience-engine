@@ -21,7 +21,12 @@ from app.engine.workflow_dependency_modeling.classification_evaluation_service i
 from app.engine.workflow_dependency_modeling.classification_evaluator import (
     evaluate_dependency_classification,
 )
+from app.engine.workflow_dependency_modeling.classification_experiments import (
+    analyze_repeatability,
+    analyze_threshold_sensitivity,
+)
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
+    AssessmentPolicy,
     DependencyAssessment,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
@@ -130,6 +135,21 @@ def _reference() -> DependencyClassificationReference:
             "createdBy": "domain-reviewer",
         }
     )
+
+
+def _assessment_with_interventions() -> DependencyAssessment:
+    payload = _assessment().to_mapping()
+    payload["interventions"] = [
+        {
+            "targetService": service,
+            "interventionType": "service_unavailable",
+            "batchIds": [f"intervention-{service}"],
+            "interventionConfirmed": True,
+            "confirmationEvidence": "Controlled fault was independently observed",
+        }
+        for service in ("paymentservice", "emailservice", "inventoryservice")
+    ]
+    return DependencyAssessment.from_mapping(payload)
 
 
 def test_perfect_multiclass_evaluation() -> None:
@@ -264,3 +284,83 @@ def test_phase5_http_exceptions_are_documented() -> None:
     evaluation = schema["paths"]["/api/workflows/dependency-evaluations"]["post"]["responses"]
     assert {"201", "404", "409", "422"} <= reference.keys()
     assert {"201", "404", "409", "422"} <= evaluation.keys()
+
+
+def test_threshold_sensitivity_reclassifies_only_frozen_summaries() -> None:
+    result = analyze_threshold_sensitivity(
+        _assessment_with_interventions(),
+        [
+            (
+                "wide-optional-band",
+                AssessmentPolicy(optional_effect_tolerance=0.4),
+            ),
+            (
+                "higher-sample-gate",
+                AssessmentPolicy(min_samples_per_cohort=4),
+            ),
+        ],
+    )
+    assert result.cases[0].changed_services == ("inventoryservice",)
+    assert result.cases[0].classifications["inventoryservice"] == "optional"
+    assert result.cases[1].changed_services == (
+        "emailservice",
+        "inventoryservice",
+        "paymentservice",
+    )
+    assert result.sensitive_services == (
+        "emailservice",
+        "inventoryservice",
+        "paymentservice",
+    )
+
+
+def test_repeatability_reports_per_service_label_stability() -> None:
+    first = _assessment()
+    payload = first.to_mapping()
+    payload["assessmentId"] = "assessment:checkout:repeat"
+    payload["services"][2]["classification"] = "optional"
+    second = DependencyAssessment.from_mapping(payload)
+    result = analyze_repeatability([first, second])
+    inventory = next(
+        item for item in result.services if item.service_name == "inventoryservice"
+    )
+    assert inventory.agreement_rate == pytest.approx(0.5)
+    assert inventory.stable is False
+    assert result.stable_service_rate == pytest.approx(2 / 3)
+
+
+def test_phase5_experiment_api(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import dependency_assessment_service
+
+    repository = InMemoryDependencyAssessmentRepository()
+    first = _assessment_with_interventions()
+    repository.create_assessment(first)
+    second_payload = first.to_mapping()
+    second_payload["assessmentId"] = "assessment:checkout:repeat-api"
+    repository.create_assessment(DependencyAssessment.from_mapping(second_payload))
+    monkeypatch.setattr(dependency_assessment_service, "_default_repository", repository)
+    client = TestClient(app)
+
+    sensitivity = client.post(
+        "/api/workflows/dependency-experiments/sensitivity",
+        json={
+            "assessmentId": first.assessment_id,
+            "cases": [
+                {
+                    "caseId": "sample-gate",
+                    "policy": {"minSamplesPerCohort": 4},
+                }
+            ],
+        },
+    )
+    assert sensitivity.status_code == 200
+    assert len(sensitivity.json()["sensitiveServices"]) == 3
+
+    repeatability = client.post(
+        "/api/workflows/dependency-experiments/repeatability",
+        json={
+            "assessmentIds": [first.assessment_id, "assessment:checkout:repeat-api"]
+        },
+    )
+    assert repeatability.status_code == 200
+    assert repeatability.json()["stableServiceRate"] == pytest.approx(1.0)
