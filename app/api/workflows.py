@@ -8,12 +8,16 @@ from app.engine.workflow_dependency_modeling.service import (
     approve_dependency_assessment,
     create_scenario,
     create_dependency_assessment,
+    create_dependency_classification_evaluation,
+    create_dependency_classification_reference,
     discover_live_workflows,
     evaluate_workflow_by_id,
     get_live_workflow,
     get_live_evidence,
     get_execution,
     get_dependency_assessment,
+    get_dependency_classification_evaluation,
+    get_dependency_classification_reference,
     get_sample_workflow,
     get_workflow_by_id,
     get_versioned_scenario,
@@ -21,11 +25,17 @@ from app.engine.workflow_dependency_modeling.service import (
     list_benchmark_workflows,
     list_executions,
     list_dependency_assessments,
+    list_dependency_classification_evaluations,
+    list_dependency_classification_references,
     list_versioned_scenarios,
     register_jaeger_execution,
     run_benchmark_batch,
     scenario_etag,
     update_scenario,
+)
+from app.engine.workflow_dependency_modeling.classification_evaluation_repository import (
+    ClassificationArtifactConflictError,
+    ClassificationArtifactNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
     DependencyAssessmentAlreadyExistsError,
@@ -318,6 +328,104 @@ def read_validated_workflow_graph(workflow_id: str) -> WorkflowGraph:
     try:
         return get_validated_workflow_graph(workflow_id)
     except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-references",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Scenario was not found"},
+        409: {"description": "Reference version changed"},
+        422: {"description": "Reference labels are invalid"},
+    },
+)
+def create_workflow_dependency_reference(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    expected_version: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    try:
+        return create_dependency_classification_reference(
+            payload,
+            actor=actor,
+            expected_version=expected_version,
+        ).to_mapping()
+    except ScenarioNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ClassificationArtifactConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/dependency-references")
+def read_workflow_dependency_references() -> list[dict[str, Any]]:
+    return [
+        reference.to_mapping()
+        for reference in list_dependency_classification_references()
+    ]
+
+
+@router.get(
+    "/dependency-references/{workflow_id}",
+    responses={404: {"description": "Dependency reference was not found"}},
+)
+def read_workflow_dependency_reference(
+    workflow_id: str,
+    version: int | None = Query(None, ge=1),
+) -> dict[str, Any]:
+    try:
+        return get_dependency_classification_reference(
+            workflow_id, version
+        ).to_mapping()
+    except ClassificationArtifactNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-evaluations",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Assessment or reference was not found"},
+        409: {"description": "Evaluation already exists"},
+        422: {"description": "Evaluation inputs are incompatible"},
+    },
+)
+def create_workflow_dependency_evaluation(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return create_dependency_classification_evaluation(
+            payload, actor=actor
+        ).to_mapping()
+    except (DependencyAssessmentNotFoundError, ClassificationArtifactNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ClassificationArtifactConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/dependency-evaluations")
+def read_workflow_dependency_evaluations(
+    workflow_id: str | None = Query(None),
+) -> list[dict[str, Any]]:
+    return [
+        evaluation.to_mapping()
+        for evaluation in list_dependency_classification_evaluations(workflow_id)
+    ]
+
+
+@router.get(
+    "/dependency-evaluations/{evaluation_id}",
+    responses={404: {"description": "Classification evaluation was not found"}},
+)
+def read_workflow_dependency_evaluation(evaluation_id: str) -> dict[str, Any]:
+    try:
+        return get_dependency_classification_evaluation(evaluation_id).to_mapping()
+    except ClassificationArtifactNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
