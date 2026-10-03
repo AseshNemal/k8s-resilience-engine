@@ -179,7 +179,7 @@ def test_topology_spread_mutation_via_shared_engine() -> None:
     # after snapshot reflects redistribution across available nodes.
     after_nodes = [pod.node for pod in result.after.services[0].pods]
     # All three pods should be spread; at minimum they should differ from the
-    # concentrated original layout (all concentrated on node-1).
+    # original layout is concentrated 2:1 across node-1 and node-2.
     assert after_nodes != before_nodes
 
 
