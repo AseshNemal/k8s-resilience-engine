@@ -11,6 +11,7 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     SqlAlchemyAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
+    discover_analysis_workflows,
     start_workflow_analysis,
 )
 from app.main import app
@@ -101,13 +102,63 @@ def test_sqlalchemy_analysis_session_round_trip(monkeypatch, tmp_path) -> None:
     assert reopened.list() == [created]
 
 
+def test_guided_discovery_uses_approved_connection(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import service
+
+    discovered = [
+        {
+            "workflowId": "post_cart_checkout",
+            "operationName": "POST /cart/checkout",
+            "rootService": "frontend",
+            "traceCount": 12,
+            "participatingServices": ["frontend", "checkoutservice"],
+            "sampleTraceIds": ["trace-1"],
+            "status": "candidate",
+        }
+    ]
+    monkeypatch.setattr(service, "discover_live_workflows", lambda **kwargs: discovered)
+    result = discover_analysis_workflows(
+        {
+            "jaegerUrl": "http://localhost:16686",
+            "entryService": "frontend",
+            "lookback": "1h",
+        }
+    )
+    assert result == discovered
+
+
 def test_analysis_session_api(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import analysis_session_service, service
 
     repository = InMemoryAnalysisSessionRepository()
     monkeypatch.setattr(analysis_session_service, "_default_repository", repository)
     monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    monkeypatch.setattr(
+        service,
+        "discover_live_workflows",
+        lambda **kwargs: [
+            {
+                "workflowId": "post_cart_checkout",
+                "operationName": "POST /cart/checkout",
+                "rootService": "frontend",
+                "traceCount": 12,
+                "participatingServices": ["frontend", "checkoutservice"],
+                "sampleTraceIds": ["trace-1"],
+                "status": "candidate",
+            }
+        ],
+    )
     client = TestClient(app)
+    discovery = client.post(
+        "/api/workflows/analysis-sessions/discover",
+        json={
+            "jaegerUrl": "http://localhost:16686",
+            "entryService": "frontend",
+            "lookback": "1h",
+        },
+    )
+    assert discovery.status_code == 200
+    assert discovery.json()[0]["operationName"] == "POST /cart/checkout"
     response = client.post(
         "/api/workflows/analysis-sessions",
         json=_payload(),

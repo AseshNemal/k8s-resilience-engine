@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
     configure_analysis_session_repository,
+    discover_analysis_workflows,
     get_workflow_analysis,
     list_workflow_analyses,
     start_workflow_analysis,
@@ -287,6 +288,7 @@ __all__ = [
     "create_dependency_classification_reference",
     "create_scenario",
     "discover_live_workflows",
+    "discover_analysis_workflows",
     "evaluate_workflow_by_id",
     "get_evidence_source",
     "get_dependency_assessment",

@@ -12,6 +12,7 @@ from app.engine.workflow_dependency_modeling.service import (
     create_dependency_classification_evaluation,
     create_dependency_classification_reference,
     discover_live_workflows,
+    discover_analysis_workflows,
     evaluate_workflow_by_id,
     get_live_workflow,
     get_workflow_analysis,
@@ -395,6 +396,24 @@ def create_workflow_analysis_session(
 @router.get("/analysis-sessions")
 def read_workflow_analysis_sessions() -> list[dict[str, Any]]:
     return [analysis.to_mapping() for analysis in list_workflow_analyses()]
+
+
+@router.post(
+    "/analysis-sessions/discover",
+    responses={
+        422: {"description": "Connection input is invalid"},
+        503: {"description": "Jaeger service is unavailable"},
+    },
+)
+def discover_workflow_analysis_operations(
+    payload: dict[str, Any] = Body(...),
+) -> list[dict[str, Any]]:
+    try:
+        return discover_analysis_workflows(payload)
+    except ConnectionError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.get(

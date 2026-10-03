@@ -160,6 +160,27 @@ def start_workflow_analysis(
     return _repository(repository).create(analysis)
 
 
+def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Discover operations through the same allowlisted connection policy."""
+    jaeger_url = _jaeger_url(data.get("jaegerUrl"))
+    entry_service = _text(data, "entryService")
+    lookback = str(data.get("lookback", "1h")).strip()
+    if not _LOOKBACK.fullmatch(lookback):
+        raise ValueError("lookback must use a positive duration such as 30m, 1h, or 2d")
+    limit = data.get("limit", 1000)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5000:
+        raise ValueError("limit must be an integer between 1 and 5000")
+
+    from app.engine.workflow_dependency_modeling.service import discover_live_workflows
+
+    return discover_live_workflows(
+        service_name=entry_service,
+        jaeger_url=jaeger_url,
+        limit=limit,
+        lookback=lookback,
+    )
+
+
 def get_workflow_analysis(
     session_id: str,
     repository: AnalysisSessionRepository | None = None,
