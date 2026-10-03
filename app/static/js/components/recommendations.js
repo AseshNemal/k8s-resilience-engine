@@ -20,6 +20,7 @@
         validation: "/api/validations/sample",
         deployment: "/api/deployments/sample",
         failureImpact: "/api/failure-impacts/sample",
+        approvalBase: "/api/recommendations",
     };
 
     const { fetchAll } = window.ResilienceApi;
@@ -36,6 +37,11 @@
     const template = document.querySelector('[data-role="page-template"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
+    const approvalModal = document.getElementById("approval-modal");
+    
+    let currentRecommendationId = null;
+    let currentProposalVersion = "v1.0";
+    let currentRecommendation = null;
 
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
@@ -218,6 +224,164 @@
             }
         });
     }
+    
+    // Approval UI Logic
+    async function loadApprovalState(recommendationId) {
+        try {
+            const response = await fetch(`${ENDPOINTS.approvalBase}/${recommendationId}/approval`);
+            if (response.status === 404) {
+                renderApprovalState(null);
+                return;
+            }
+            if (!response.ok) throw new Error("Failed to load approval state");
+            const data = await response.json();
+            renderApprovalState(data);
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    function renderApprovalState(approval) {
+        const stateContainer = region.querySelector('[data-role="approval-state-container"]');
+        const actionsContainer = region.querySelector('[data-role="approval-actions"]');
+        if (!stateContainer || !actionsContainer) return;
+        
+        if (!approval) {
+            stateContainer.innerHTML = `<span class="status-badge status-badge--muted">No Approval Requested</span>`;
+            actionsContainer.innerHTML = `<button type="button" class="primary-button" id="btn-request-approval">Request Approval</button>`;
+            
+            const reqBtn = actionsContainer.querySelector("#btn-request-approval");
+            if (reqBtn && currentRecommendation && currentRecommendation.feasible) {
+                reqBtn.addEventListener("click", () => requestApproval(currentRecommendationId));
+            } else if (reqBtn) {
+                reqBtn.disabled = true;
+                reqBtn.title = "Recommendation must be feasible";
+            }
+            return;
+        }
+
+        let badgeClass = "status-badge--muted";
+        if (approval.status === "PENDING_APPROVAL") badgeClass = "status-badge--warning";
+        if (approval.status === "APPROVED") badgeClass = "status-badge--success";
+        if (approval.status === "REJECTED") badgeClass = "status-badge--danger";
+
+        let html = `<div class="stack-sm">
+            <div><span class="status-badge ${badgeClass}">${approval.status}</span></div>
+            <div class="text-sm text-muted">Proposal Version: ${approval.proposalVersion}</div>
+        `;
+        
+        if (approval.decisionNote) {
+            html += `<div class="approval-note"><strong>Note:</strong> ${approval.decisionNote}</div>`;
+        }
+        
+        html += `</div>`;
+        stateContainer.innerHTML = html;
+
+        if (approval.status === "PENDING_APPROVAL") {
+            actionsContainer.innerHTML = `
+                <button type="button" class="danger-button" id="btn-show-reject">Reject</button>
+                <button type="button" class="success-button" id="btn-show-approve">Approve</button>
+            `;
+            actionsContainer.querySelector("#btn-show-approve").addEventListener("click", () => showApprovalModal('approve'));
+            actionsContainer.querySelector("#btn-show-reject").addEventListener("click", () => showApprovalModal('reject'));
+        } else {
+            actionsContainer.innerHTML = "";
+        }
+    }
+
+    async function requestApproval(recommendationId) {
+        try {
+            const response = await fetch(`${ENDPOINTS.approvalBase}/${recommendationId}/request-approval`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    recommendationId: recommendationId,
+                    proposalVersion: currentProposalVersion,
+                }),
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                alert(`Error: ${err.detail || 'Could not request approval'}`);
+                return;
+            }
+            const data = await response.json();
+            renderApprovalState(data);
+        } catch (error) {
+            console.error(error);
+            alert("Failed to request approval");
+        }
+    }
+
+    function showApprovalModal(action) {
+        if (!approvalModal || !currentRecommendation) return;
+        
+        const typeEl = approvalModal.querySelector("#modal-context-type");
+        const serviceEl = approvalModal.querySelector("#modal-context-service");
+        const msgEl = approvalModal.querySelector("#modal-message");
+        
+        typeEl.textContent = formatCodeLabel(currentRecommendation.type);
+        serviceEl.textContent = currentRecommendation.service;
+        
+        const btnApprove = approvalModal.querySelector("#modal-confirm-approve");
+        const btnReject = approvalModal.querySelector("#modal-confirm-reject");
+        
+        btnApprove.style.display = "none";
+        btnReject.style.display = "none";
+        
+        if (action === 'approve') {
+            msgEl.innerHTML = `Approve this recommendation? <br><br>
+                This approval does NOT apply the change automatically.
+                It only authorizes this exact proposal for a future controlled test-environment application.`;
+            btnApprove.style.display = "inline-flex";
+            btnApprove.onclick = () => submitApprovalDecision('approve');
+        } else {
+            msgEl.innerHTML = `Reject this recommendation proposal?`;
+            btnReject.style.display = "inline-flex";
+            btnReject.onclick = () => submitApprovalDecision('reject');
+        }
+        
+        approvalModal.querySelector("#approval-note").value = "";
+        approvalModal.classList.add("is-visible");
+        approvalModal.setAttribute("aria-hidden", "false");
+    }
+    
+    async function submitApprovalDecision(action) {
+        const note = approvalModal.querySelector("#approval-note").value;
+        const endpoint = `${ENDPOINTS.approvalBase}/${currentRecommendationId}/${action}`;
+        
+        try {
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    note: note,
+                    expectedProposalVersion: currentProposalVersion,
+                }),
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                alert(`Error: ${err.detail || 'Decision failed'}`);
+                return;
+            }
+            const data = await response.json();
+            renderApprovalState(data);
+            hideApprovalModal();
+        } catch (error) {
+            console.error(error);
+            alert("Failed to submit decision");
+        }
+    }
+
+    function hideApprovalModal() {
+        if (!approvalModal) return;
+        approvalModal.classList.remove("is-visible");
+        approvalModal.setAttribute("aria-hidden", "true");
+    }
+
+    if (approvalModal) {
+        const cancelBtn = approvalModal.querySelector("#modal-cancel");
+        if (cancelBtn) cancelBtn.addEventListener("click", hideApprovalModal);
+    }
 
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
@@ -243,6 +407,9 @@
                 recommendation.recommendations.find(
                     (candidate) => candidate.id === recommendation.selectedRecommendationId
                 ) || recommendation.recommendations[0];
+
+            currentRecommendationId = selectedCandidate.id;
+            currentRecommendation = selectedCandidate;
 
             setMetric(
                 region,
@@ -319,6 +486,8 @@
             );
             initJsonPanel(region.querySelector("#rec-raw-validation"), validation);
             initYamlPanelToggle(region);
+            
+            await loadApprovalState(currentRecommendationId);
 
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
