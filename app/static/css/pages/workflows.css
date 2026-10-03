@@ -356,13 +356,133 @@
     text-transform: uppercase;
 }
 
+.dependency-validation {
+    margin-bottom: var(--space-lg);
+}
+
+.dependency-validation__header,
+.dependency-assessment-record__header,
+.assessment-approval {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+.dependency-validation__header h3,
+.dependency-validation__header p {
+    margin: 0;
+}
+
+.dependency-validation__header p,
+.dependency-assessment-record__header small,
+.assessment-service small {
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.dependency-validation__header p {
+    margin-top: 4px;
+}
+
+.assessment-form {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-md);
+    margin-top: var(--space-md);
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+    background: var(--color-surface-soft, #f8fafc);
+}
+
+.assessment-form textarea {
+    width: 100%;
+    resize: vertical;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.assessment-form__interventions {
+    grid-column: 1 / -1;
+}
+
+.assessment-approval {
+    justify-content: flex-start;
+    margin-top: var(--space-md);
+}
+
+.assessment-approval .scenario-form__field {
+    flex: 1;
+}
+
+.dependency-validation__list {
+    display: grid;
+    gap: var(--space-md);
+    margin-top: var(--space-md);
+}
+
+.dependency-assessment-record {
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+}
+
+.dependency-assessment-record__header strong,
+.dependency-assessment-record__header small,
+.assessment-service strong,
+.assessment-service span,
+.assessment-service small {
+    display: block;
+}
+
+.dependency-assessment-record__services {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.assessment-service {
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-left: 4px solid #64748b;
+    border-radius: var(--radius-small);
+}
+
+.assessment-service--mandatory {
+    border-left-color: #dc2626;
+}
+
+.assessment-service--optional {
+    border-left-color: #16a34a;
+}
+
+.assessment-service--supporting {
+    border-left-color: #2563eb;
+}
+
+.assessment-service--insufficient_evidence {
+    border-left-color: #d97706;
+}
+
+.assessment-service__classification {
+    margin: 3px 0;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 @media (max-width: 900px) {
     .scenario-form {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .execution-runner,
-    .execution-record {
+    .execution-record,
+    .assessment-form {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
@@ -370,6 +490,9 @@
 @media (max-width: 560px) {
     .scenario-registry__header,
     .execution-ledger__header,
+    .dependency-validation__header,
+    .dependency-assessment-record__header,
+    .assessment-approval,
     .scenario-form__actions {
         align-items: stretch;
         flex-direction: column;
@@ -380,11 +503,16 @@
     }
 
     .execution-runner,
-    .execution-record {
+    .execution-record,
+    .assessment-form {
         grid-template-columns: 1fr;
     }
 
     .scenario-form__field--wide {
+        grid-column: span 1;
+    }
+
+    .assessment-form__interventions {
         grid-column: span 1;
     }
 }

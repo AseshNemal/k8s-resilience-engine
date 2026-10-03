@@ -81,6 +81,7 @@ class ExecutionRegistration:
     invocation_status: InvocationStatus
     source: str
     evidence_locator: str
+    environment_id: str
     started_at: datetime
     finished_at: datetime | None = None
     expected_trace_id: str | None = None
@@ -116,6 +117,10 @@ class ExecutionRegistration:
             invocation_status=invocation_status,
             source=_required_text(data, "source"),
             evidence_locator=_required_text(data, "evidenceLocator"),
+            environment_id=_identifier(
+                {"environmentId": data.get("environmentId", "unspecified")},
+                "environmentId",
+            ),
             started_at=started_at,
             finished_at=finished_at,
             expected_trace_id=expected_trace_id.strip() if expected_trace_id else None,
@@ -131,6 +136,7 @@ class ExecutionRegistration:
             "invocationStatus": self.invocation_status.value,
             "source": self.source,
             "evidenceLocator": self.evidence_locator,
+            "environmentId": self.environment_id,
             "startedAt": _iso(self.started_at),
             "registeredBy": self.registered_by,
         }

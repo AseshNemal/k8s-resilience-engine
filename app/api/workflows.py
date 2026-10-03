@@ -5,22 +5,31 @@ from app.engine.workflow_dependency_modeling.evaluator import (
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
+    approve_dependency_assessment,
     create_scenario,
+    create_dependency_assessment,
     discover_live_workflows,
     evaluate_workflow_by_id,
     get_live_workflow,
     get_live_evidence,
     get_execution,
+    get_dependency_assessment,
     get_sample_workflow,
     get_workflow_by_id,
     get_versioned_scenario,
+    get_validated_workflow_graph,
     list_benchmark_workflows,
     list_executions,
+    list_dependency_assessments,
     list_versioned_scenarios,
     register_jaeger_execution,
     run_benchmark_batch,
     scenario_etag,
     update_scenario,
+)
+from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
+    DependencyAssessmentAlreadyExistsError,
+    DependencyAssessmentNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.execution_repository import (
     ExecutionAlreadyExistsError,
@@ -223,6 +232,92 @@ def read_workflow_execution(execution_id: str) -> dict[str, Any]:
     try:
         return get_execution(execution_id).to_mapping()
     except ExecutionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-assessments",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Scenario or execution batch was not found"},
+        409: {"description": "Assessment already exists"},
+        422: {"description": "Assessment evidence or policy is invalid"},
+    },
+)
+def create_workflow_dependency_assessment(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Compare exact-correlated baseline and intervention execution cohorts."""
+    try:
+        return create_dependency_assessment(payload, actor=actor).to_mapping()
+    except (ScenarioNotFoundError, ExecutionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except DependencyAssessmentAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/dependency-assessments")
+def read_workflow_dependency_assessments(
+    workflow_id: str | None = Query(None),
+) -> list[dict[str, Any]]:
+    return [
+        assessment.to_mapping()
+        for assessment in list_dependency_assessments(workflow_id=workflow_id)
+    ]
+
+
+@router.get(
+    "/dependency-assessments/{assessment_id}",
+    responses={404: {"description": "Dependency assessment was not found"}},
+)
+def read_workflow_dependency_assessment(assessment_id: str) -> dict[str, Any]:
+    try:
+        return get_dependency_assessment(assessment_id).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-assessments/{assessment_id}/approve",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Dependency assessment was not found"},
+        409: {"description": "Assessment is already approved"},
+        422: {"description": "Assessment cannot pass the approval gate"},
+    },
+)
+def approve_workflow_dependency_assessment(
+    assessment_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return approve_dependency_assessment(
+            assessment_id,
+            actor=actor,
+            rationale=payload.get("rationale"),
+        ).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except DependencyAssessmentAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/{workflow_id}/validated-graph",
+    response_model=WorkflowGraph,
+    response_model_by_alias=True,
+    responses={404: {"description": "No approved dependency assessment was found"}},
+)
+def read_validated_workflow_graph(workflow_id: str) -> WorkflowGraph:
+    try:
+        return get_validated_workflow_graph(workflow_id)
+    except DependencyAssessmentNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 

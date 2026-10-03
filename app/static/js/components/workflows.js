@@ -38,6 +38,12 @@
     const executionList = document.querySelector('[data-role="execution-ledger-list"]');
     const runBenchmarkBatchButton = document.querySelector('[data-role="run-benchmark-batch-button"]');
     const refreshExecutionsButton = document.querySelector('[data-role="refresh-executions-button"]');
+    const assessmentForm = document.querySelector('[data-role="assessment-form"]');
+    const assessmentStatus = document.querySelector('[data-role="assessment-status"]');
+    const assessmentList = document.querySelector('[data-role="dependency-assessment-list"]');
+    const refreshAssessmentsButton = document.querySelector('[data-role="refresh-assessments-button"]');
+    const approvalActor = document.querySelector('[data-role="assessment-approval-actor"]');
+    const approvalRationale = document.querySelector('[data-role="assessment-approval-rationale"]');
 
     let discoveredWorkflows = [];
     let liveMode = false;
@@ -299,6 +305,163 @@
             setExecutionStatus(error.message, true);
         } finally {
             runBenchmarkBatchButton.disabled = false;
+        }
+    }
+
+    function setAssessmentStatus(message, isError = false) {
+        if (!assessmentStatus) return;
+        assessmentStatus.textContent = message;
+        assessmentStatus.style.color = isError
+            ? "var(--color-danger, #b91c1c)"
+            : "var(--color-text-muted)";
+    }
+
+    function assessmentClassName(classification) {
+        return `assessment-service assessment-service--${classification}`;
+    }
+
+    function renderDependencyAssessments(assessments) {
+        if (!assessmentList) return;
+        assessmentList.replaceChildren();
+        if (!assessments.length) {
+            const empty = document.createElement("p");
+            empty.className = "muted";
+            empty.textContent = "No dependency evidence assessments recorded yet.";
+            assessmentList.appendChild(empty);
+            return;
+        }
+        assessments.forEach((assessment) => {
+            const record = document.createElement("article");
+            record.className = "dependency-assessment-record";
+            const heading = document.createElement("div");
+            heading.className = "dependency-assessment-record__header";
+            const identity = document.createElement("div");
+            identity.append(
+                executionText("strong", "", assessment.assessmentId),
+                executionText(
+                    "small",
+                    "",
+                    `${assessment.workflowId} · scenario v${assessment.scenarioVersion} · ${assessment.environmentId}`
+                )
+            );
+            const unresolved = assessment.services.filter(
+                (item) => item.classification === "insufficient_evidence"
+            );
+            const approve = document.createElement("button");
+            approve.type = "button";
+            approve.className = "secondary-button";
+            approve.textContent = unresolved.length ? "Evidence incomplete" : "Approve graph";
+            approve.disabled = unresolved.length > 0;
+            approve.addEventListener("click", () => approveAssessment(assessment.assessmentId));
+            heading.append(identity, approve);
+
+            const services = document.createElement("div");
+            services.className = "dependency-assessment-record__services";
+            assessment.services.forEach((item) => {
+                const service = document.createElement("div");
+                service.className = assessmentClassName(item.classification);
+                const effect = item.failureEffect === null
+                    ? "effect unavailable"
+                    : `failure effect ${(item.failureEffect * 100).toFixed(1)}%`;
+                service.append(
+                    executionText("strong", "", item.serviceName),
+                    executionText("span", "assessment-service__classification", item.classification.replaceAll("_", " ")),
+                    executionText(
+                        "small",
+                        "",
+                        `${effect} · evidence ${(item.evidenceStrength * 100).toFixed(0)}%`
+                    ),
+                    executionText("small", "", item.reasons[0] || "No explanation recorded")
+                );
+                services.appendChild(service);
+            });
+            record.append(heading, services);
+            assessmentList.appendChild(record);
+        });
+    }
+
+    async function loadDependencyAssessments() {
+        if (!assessmentList) return;
+        try {
+            const workflowId = benchmarkSelect ? benchmarkSelect.value : "";
+            const suffix = workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : "";
+            renderDependencyAssessments(
+                await requestScenario(`/api/workflows/dependency-assessments${suffix}`)
+            );
+        } catch (error) {
+            assessmentList.textContent = `Dependency assessments unavailable: ${error.message}`;
+        }
+    }
+
+    function commaSeparatedIds(value) {
+        return value.split(",").map((item) => item.trim()).filter(Boolean);
+    }
+
+    async function createAssessment(event) {
+        event.preventDefault();
+        if (!assessmentForm || !assessmentForm.reportValidity() || !benchmarkSelect) return;
+        const values = new FormData(assessmentForm);
+        const actor = String(values.get("actor")).trim();
+        let interventions;
+        try {
+            interventions = JSON.parse(String(values.get("interventions")));
+            if (!Array.isArray(interventions)) throw new Error("Expected a JSON array");
+        } catch (error) {
+            setAssessmentStatus(`Intervention JSON is invalid: ${error.message}`, true);
+            return;
+        }
+        const button = assessmentForm.querySelector('[data-role="create-assessment-button"]');
+        button.disabled = true;
+        setAssessmentStatus("Evaluating baseline and intervention evidence…");
+        try {
+            const workflowId = benchmarkSelect.value;
+            const graph = await requestScenario(
+                `/api/workflows/benchmark/${encodeURIComponent(workflowId)}`
+            );
+            const payload = {
+                assessmentId: String(values.get("assessmentId")).trim(),
+                workflowId,
+                scenarioVersion: 1,
+                environmentId: String(values.get("environmentId")).trim(),
+                source: "controlled_experiment",
+                candidateGraph: graph,
+                baselineBatchIds: commaSeparatedIds(String(values.get("baselineBatchIds"))),
+                interventions,
+            };
+            const created = await requestScenario("/api/workflows/dependency-assessments", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Actor": actor },
+                body: JSON.stringify(payload),
+            });
+            setAssessmentStatus(`Created immutable assessment ${created.assessmentId}.`);
+            await loadDependencyAssessments();
+        } catch (error) {
+            setAssessmentStatus(error.message, true);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function approveAssessment(assessmentId) {
+        const actor = approvalActor ? approvalActor.value.trim() : "";
+        const rationale = approvalRationale ? approvalRationale.value.trim() : "";
+        if (!actor || !rationale) {
+            setAssessmentStatus("Approval actor and rationale are required.", true);
+            return;
+        }
+        try {
+            await requestScenario(
+                `/api/workflows/dependency-assessments/${encodeURIComponent(assessmentId)}/approve`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-Actor": actor },
+                    body: JSON.stringify({ rationale }),
+                }
+            );
+            setAssessmentStatus(`Approved validated graph from ${assessmentId}.`);
+            await loadDependencyAssessments();
+        } catch (error) {
+            setAssessmentStatus(error.message, true);
         }
     }
 
@@ -1031,6 +1194,12 @@
     if (refreshExecutionsButton) {
         refreshExecutionsButton.addEventListener("click", loadExecutionLedger);
     }
+    if (assessmentForm) {
+        assessmentForm.addEventListener("submit", createAssessment);
+    }
+    if (refreshAssessmentsButton) {
+        refreshAssessmentsButton.addEventListener("click", loadDependencyAssessments);
+    }
     if (jaegerUrlInput) {
         jaegerUrlInput.addEventListener("change", checkJaegerHealth);
     }
@@ -1040,6 +1209,7 @@
         checkJaegerHealth();
         loadScenarioRegistry();
         loadExecutionLedger();
+        loadDependencyAssessments();
         initEvaluationListeners();
         setTimeout(handleRunEvaluation, 300);
     });
