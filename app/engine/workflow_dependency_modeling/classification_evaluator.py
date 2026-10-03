@@ -32,7 +32,7 @@ def _metrics(
         precision=precision,
         recall=recall,
         f1=f1,
-        support=sum(value is label for value in actual.values()),
+        support=sum(actual[name] is label for name in services),
         true_positives=tp,
         false_positives=fp,
         false_negatives=fn,

@@ -177,6 +177,7 @@ def test_abstention_reduces_coverage_without_becoming_misclassification() -> Non
     assert result.abstention_rate == pytest.approx(1 / 3)
     assert result.abstained_services == ("emailservice",)
     assert result.misclassified_services == ()
+    assert result.per_class["optional"].support == 0
 
 
 def test_reference_versions_are_immutable_and_optimistic(monkeypatch) -> None:
