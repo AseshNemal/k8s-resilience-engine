@@ -22,6 +22,10 @@ from app.engine.workflow_dependency_modeling.classification_evaluation_service i
     list_dependency_classification_evaluations,
     list_dependency_classification_references,
 )
+from app.engine.workflow_dependency_modeling.classification_experiments import (
+    run_dependency_repeatability_analysis,
+    run_dependency_sensitivity_analysis,
+)
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
 )
@@ -297,6 +301,8 @@ __all__ = [
     "list_versioned_scenarios",
     "record_execution",
     "register_jaeger_execution",
+    "run_dependency_repeatability_analysis",
+    "run_dependency_sensitivity_analysis",
     "run_benchmark_batch",
     "scenario_etag",
     "update_scenario",
