@@ -362,3 +362,11 @@ def test_dependency_assessment_http_exceptions_are_documented() -> None:
     ]["post"]["responses"]
     assert {"201", "404", "409", "422"} <= create_responses.keys()
     assert {"201", "404", "409", "422"} <= approval_responses.keys()
+
+
+def test_workflow_page_contains_dependency_validation_controls() -> None:
+    response = TestClient(app).get("/components/workflows")
+    assert response.status_code == 200
+    assert 'data-role="assessment-form"' in response.text
+    assert 'data-role="dependency-assessment-list"' in response.text
+    assert 'data-role="assessment-approval-rationale"' in response.text

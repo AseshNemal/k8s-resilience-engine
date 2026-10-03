@@ -221,6 +221,78 @@
          aria-live="polite"></div>
 </section>
 
+<section class="card dependency-validation" aria-labelledby="dependency-validation-title">
+    <div class="dependency-validation__header">
+        <div>
+            <h3 id="dependency-validation-title">Dependency Evidence Assessments</h3>
+            <p>
+                Compare exact-correlated baseline and controlled-intervention batches. Weak,
+                mixed-environment, or contradictory evidence remains unresolved.
+            </p>
+        </div>
+        <button type="button" class="secondary-button" data-role="refresh-assessments-button">
+            Refresh Assessments
+        </button>
+    </div>
+    <form class="assessment-form" data-role="assessment-form">
+        <div class="scenario-form__field">
+            <label for="assessment-id">Assessment ID</label>
+            <input id="assessment-id" name="assessmentId" required
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   placeholder="assessment:checkout:001">
+        </div>
+        <div class="scenario-form__field">
+            <label for="assessment-environment">Environment ID</label>
+            <input id="assessment-environment" name="environmentId" required
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   placeholder="test-cluster-a">
+        </div>
+        <div class="scenario-form__field scenario-form__field--wide">
+            <label for="assessment-baseline-batches">Baseline batch IDs</label>
+            <input id="assessment-baseline-batches" name="baselineBatchIds" required
+                   placeholder="baseline:checkout:001, baseline:checkout:002">
+            <small>Comma-separated immutable execution batch IDs.</small>
+        </div>
+        <div class="scenario-form__field">
+            <label for="assessment-actor">Assessed by</label>
+            <input id="assessment-actor" name="actor" required value="component-1-researcher">
+        </div>
+        <div class="scenario-form__field assessment-form__interventions">
+            <label for="assessment-interventions">Confirmed intervention cohorts (JSON)</label>
+            <textarea id="assessment-interventions" name="interventions" required rows="6"
+                      aria-describedby="assessment-interventions-help"
+                      placeholder='[{"targetService":"paymentservice","interventionType":"service_unavailable","batchIds":["intervention:payment:001"],"interventionConfirmed":true,"confirmationEvidence":"chaos-run:001"}]'></textarea>
+            <small id="assessment-interventions-help">
+                One cohort per candidate service. Component 1 records evidence but never injects failures.
+            </small>
+        </div>
+        <div class="scenario-form__actions">
+            <button type="submit" class="primary-button" data-role="create-assessment-button">
+                Assess Selected Benchmark
+            </button>
+            <span data-role="assessment-status" aria-live="polite"></span>
+        </div>
+    </form>
+    <div class="assessment-approval">
+        <div class="scenario-form__field">
+            <label for="assessment-approval-actor">Approval actor</label>
+            <input id="assessment-approval-actor" data-role="assessment-approval-actor"
+                   value="component-1-approver">
+        </div>
+        <div class="scenario-form__field">
+            <label for="assessment-approval-rationale">Approval rationale</label>
+            <input id="assessment-approval-rationale" data-role="assessment-approval-rationale"
+                   placeholder="Controlled evidence reviewed and accepted">
+        </div>
+    </div>
+    <p class="execution-ledger__note">
+        Approval is blocked while any service has insufficient evidence. Supporting services
+        remain in the assessment record and are excluded from the Component 3 graph projection.
+    </p>
+    <div class="dependency-validation__list" data-role="dependency-assessment-list"
+         aria-live="polite"></div>
+</section>
+
 <div data-role="page-region">
     {{ loading_state("Loading WorkflowGraph…") }}
 </div>
