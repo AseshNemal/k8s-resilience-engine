@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import timezone
 from sqlalchemy.orm import Session
 from app.shared.persistence.models import RecommendationApprovalRecord
 from .models import ApprovalModel
@@ -65,17 +66,25 @@ class ApprovalRepository:
         raise ValueError(f"Approval with ID {approval.id} not found")
 
     def _to_domain(self, record: RecommendationApprovalRecord) -> ApprovalModel:
+        requested_at = record.requested_at
+        if requested_at and requested_at.tzinfo is None:
+            requested_at = requested_at.replace(tzinfo=timezone.utc)
+            
+        decided_at = record.decided_at
+        if decided_at and decided_at.tzinfo is None:
+            decided_at = decided_at.replace(tzinfo=timezone.utc)
+            
         return ApprovalModel(
             id=record.id,
             recommendation_id=record.recommendation_id,
             proposal_version=record.proposal_version,
             status=ApprovalStatus(record.status),
-            requested_at=record.requested_at,
+            requested_at=requested_at,
             requested_by=record.requested_by,
             recommendation_snapshot=record.recommendation_snapshot,
             yaml_snapshot=record.yaml_snapshot,
             evaluation_snapshot=record.evaluation_snapshot,
-            decided_at=record.decided_at,
+            decided_at=decided_at,
             decided_by=record.decided_by,
             decision_note=record.decision_note,
         )
