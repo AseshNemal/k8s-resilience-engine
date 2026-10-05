@@ -222,6 +222,8 @@ class WorkflowProbeDefinition:
         raw_steps = data.get("steps")
         if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 20:
             raise ComponentDataError("HTTP workflow requires between 1 and 20 steps")
+        if any(not isinstance(item, Mapping) for item in raw_steps):
+            raise ComponentDataError("Each HTTP workflow step must be an object")
         steps = tuple(HttpProbeStep.from_mapping(item) for item in raw_steps)
         if len({item.name for item in steps}) != len(steps):
             raise ComponentDataError("Probe step names must be unique")

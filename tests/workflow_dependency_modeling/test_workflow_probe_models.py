@@ -59,6 +59,7 @@ def test_generic_http_probe_round_trips_without_benchmark_assumptions() -> None:
         (lambda data: data["steps"][0].update(headers={"Authorization": "raw"}), "Sensitive"),
         (lambda data: data["steps"][0].update(secretHeaders={"Authorization": "bad-name"}), "environment-variable"),
         (lambda data: data["steps"][0].update(jsonBody={}, formBody={"x": "y"}), "cannot combine"),
+        (lambda data: data.update(steps=["not-an-object"]), "must be an object"),
     ],
 )
 def test_probe_rejects_unsafe_or_ambiguous_requests(mutator, message: str) -> None:
