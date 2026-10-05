@@ -192,6 +192,7 @@ def test_completed_campaign_creates_explainable_assessment() -> None:
         repository=assessments,
         now=NOW,
     )
+    assert result.source == "controlled_workflow_campaign"
     assert result.structural_entry_service == "frontend"
     assert result.candidate_graph.mandatory_services == ["frontend", "paymentservice"]
     assert result.services[0].classification is ValidatedDependencyType.MANDATORY

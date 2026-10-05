@@ -171,7 +171,7 @@ def assess_experiment_campaign(
             "workflowId": campaign.workflow_id,
             "scenarioVersion": 1,
             "environmentId": campaign.environment_id,
-            "source": "controlled_online_boutique_campaign",
+            "source": "controlled_workflow_campaign",
             "candidateGraph": {
                 "workflowId": campaign.workflow_id,
                 "criticality": 1.0,
@@ -222,7 +222,10 @@ def approve_experiment_campaign(
         campaign_repository=campaign_repository,
         repository=repository,
     )
-    if assessment.source != "controlled_online_boutique_campaign":
+    if assessment.source not in {
+        "controlled_workflow_campaign",
+        "controlled_online_boutique_campaign",
+    }:
         raise ValueError("Campaign approval requires controlled campaign evidence")
     return approve_dependency_assessment(
         assessment.assessment_id,
