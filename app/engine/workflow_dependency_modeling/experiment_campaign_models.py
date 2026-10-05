@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping
 
-from app.engine.workflow_dependency_modeling.models import ComponentDataError
+from app.engine.workflow_dependency_modeling.models import (
+    ComponentDataError,
+    SuccessCondition,
+)
+from app.engine.workflow_dependency_modeling.workflow_probe_models import (
+    WorkflowProbeDefinition,
+)
 
 
 class CampaignStatus(str, Enum):
@@ -57,41 +63,55 @@ def _iso(value: datetime) -> str:
 @dataclass(frozen=True)
 class WorkflowSuccessContract:
     outcome: str
-    protocol: str
-    accepted_status_codes: tuple[int, ...]
-    terminal_service: str
-    terminal_operation: str
-    response_marker: str
+    condition: SuccessCondition
+    response_marker: str | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "WorkflowSuccessContract":
-        protocol = _text(data, "protocol").lower()
-        if protocol != "http":
-            raise ComponentDataError("Online Boutique campaigns currently require HTTP")
-        raw_codes = data.get("acceptedStatusCodes")
-        if not isinstance(raw_codes, list) or not raw_codes:
-            raise ComponentDataError("Success contract requires acceptedStatusCodes")
-        codes = tuple(sorted(set(raw_codes)))
-        if any(isinstance(code, bool) or not isinstance(code, int) or not 100 <= code <= 599 for code in codes):
-            raise ComponentDataError("acceptedStatusCodes must contain HTTP status codes")
+        condition_data = data.get("condition")
+        if condition_data is None:
+            condition_data = {
+                "protocol": data.get("protocol"),
+                "terminalService": data.get("terminalService"),
+                "operationName": data.get("terminalOperation"),
+                "httpStatusCodes": data.get("acceptedStatusCodes", []),
+                "requiredAttributes": [],
+            }
+        if not isinstance(condition_data, Mapping):
+            raise ComponentDataError("Success contract condition must be an object")
+        marker = data.get("responseMarker")
+        if marker is not None and (not isinstance(marker, str) or not marker.strip()):
+            raise ComponentDataError("responseMarker must be non-empty text")
         return cls(
             outcome=_text(data, "outcome"),
-            protocol=protocol,
-            accepted_status_codes=codes,
-            terminal_service=_text(data, "terminalService"),
-            terminal_operation=_text(data, "terminalOperation"),
-            response_marker=_text(data, "responseMarker"),
+            condition=SuccessCondition.from_mapping(condition_data),
+            response_marker=marker.strip() if isinstance(marker, str) else None,
         )
 
+    @property
+    def protocol(self) -> str:
+        return self.condition.protocol.value
+
+    @property
+    def accepted_status_codes(self) -> tuple[int, ...]:
+        return self.condition.http_status_codes
+
+    @property
+    def terminal_service(self) -> str:
+        return self.condition.terminal_service
+
+    @property
+    def terminal_operation(self) -> str:
+        return self.condition.operation_name
+
     def to_mapping(self) -> dict[str, Any]:
-        return {
+        result = {
             "outcome": self.outcome,
-            "protocol": self.protocol,
-            "acceptedStatusCodes": list(self.accepted_status_codes),
-            "terminalService": self.terminal_service,
-            "terminalOperation": self.terminal_operation,
-            "responseMarker": self.response_marker,
+            "condition": self.condition.to_mapping(),
         }
+        if self.response_marker is not None:
+            result["responseMarker"] = self.response_marker
+        return result
 
 
 @dataclass(frozen=True)
@@ -178,6 +198,7 @@ class ExperimentCampaign:
     observed_trace_count: int
     candidate_services: tuple[str, ...]
     success_contract: WorkflowSuccessContract
+    execution_definition: WorkflowProbeDefinition | None
     baseline: BaselinePlan
     interventions: tuple[InterventionPlan, ...]
     status: CampaignStatus
@@ -210,6 +231,11 @@ class ExperimentCampaign:
             observed_trace_count=_positive_integer(data, "observedTraceCount"),
             candidate_services=services,
             success_contract=WorkflowSuccessContract.from_mapping(data.get("successContract", {})),
+            execution_definition=(
+                WorkflowProbeDefinition.from_mapping(data["executionDefinition"])
+                if data.get("executionDefinition") is not None
+                else None
+            ),
             baseline=BaselinePlan.from_mapping(data.get("baseline", {})),
             interventions=interventions,
             status=status,
@@ -230,6 +256,11 @@ class ExperimentCampaign:
             "observedTraceCount": self.observed_trace_count,
             "candidateServices": list(self.candidate_services),
             "successContract": self.success_contract.to_mapping(),
+            "executionDefinition": (
+                self.execution_definition.to_mapping()
+                if self.execution_definition is not None
+                else None
+            ),
             "baseline": self.baseline.to_mapping(),
             "interventions": [item.to_mapping() for item in self.interventions],
             "status": self.status.value,

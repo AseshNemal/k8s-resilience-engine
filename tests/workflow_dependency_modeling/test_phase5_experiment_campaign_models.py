@@ -83,6 +83,41 @@ def test_campaign_requires_safe_interventions_and_exact_correlation() -> None:
     assert campaign.status.value == "baseline_required"
 
 
+def test_campaign_accepts_generic_probe_and_protocol_aware_success() -> None:
+    payload = _campaign().to_mapping()
+    payload["workloadProfile"] = "reviewed_http_sequence"
+    payload["successContract"] = {
+        "outcome": "Payment is accepted",
+        "condition": {
+            "protocol": "grpc",
+            "terminalService": "payment-api",
+            "operationName": "payments.Payment/Charge",
+            "grpcStatusCodes": ["OK"],
+            "requiredAttributes": [],
+        },
+    }
+    payload["executionDefinition"] = {
+        "runnerType": "http_sequence",
+        "steps": [
+            {
+                "name": "submit_order",
+                "method": "POST",
+                "path": "/orders",
+                "expectedStatusCodes": [202],
+            }
+        ],
+        "successCondition": payload["successContract"]["condition"],
+    }
+
+    campaign = ExperimentCampaign.from_mapping(payload)
+
+    assert campaign.success_contract.protocol == "grpc"
+    assert campaign.success_contract.terminal_service == "payment-api"
+    assert campaign.execution_definition is not None
+    assert campaign.execution_definition.steps[0].path == "/orders"
+    assert ExperimentCampaign.from_mapping(campaign.to_mapping()) == campaign
+
+
 def test_campaign_rejects_unapproved_intervention() -> None:
     payload = _campaign().to_mapping()
     payload["interventions"][0]["operatorApprovalRequired"] = False
