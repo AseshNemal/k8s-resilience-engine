@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -5,6 +7,7 @@ from app.main import app
 
 
 client = TestClient(app)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 PAGE_CASES = [
@@ -98,3 +101,14 @@ def test_workflow_page_defaults_to_guided_analysis_not_internal_artifacts() -> N
     assert "NO ACTIVE CAMPAIGN" in response.text
     assert "Research audit controls" in response.text
     assert '<details class="research-audit">' in response.text
+
+
+def test_workflow_client_exposes_operator_gated_campaign_lifecycle() -> None:
+    script = (
+        REPOSITORY_ROOT / "app" / "static" / "js" / "components" / "workflows.js"
+    ).read_text(encoding="utf-8")
+    assert "This component never changes the cluster" in script
+    assert "Confirm intervention active" in script
+    assert "Classify dependencies" in script
+    assert "Approve WorkflowGraph" in script
+    assert "/approval" in script

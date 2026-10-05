@@ -224,7 +224,14 @@
                 runStatus.textContent = outcome.correlationStatus === "matched"
                     ? `Trial recorded: ${outcome.status}.`
                     : `Trial excluded: trace correlation is ${outcome.correlationStatus}.`;
-                await loadBaselineReadiness(campaign, readiness, runButton, runStatus);
+                await loadBaselineReadiness(
+                    campaign,
+                    readiness,
+                    runButton,
+                    runStatus,
+                    interventionConsole,
+                    frontendUrl
+                );
             } catch (error) {
                 runStatus.textContent = guidedConnectionError(error);
                 runStatus.classList.add("is-error");
@@ -249,6 +256,10 @@
         });
         runbook.appendChild(list);
 
+        const interventionConsole = document.createElement("section");
+        interventionConsole.className = "intervention-console";
+        interventionConsole.hidden = true;
+
         const next = document.createElement("div");
         next.className = "guided-next";
         next.appendChild(guidedText("h5", "", "Why classification is blocked"));
@@ -256,15 +267,29 @@
         campaign.blockers.forEach((blocker) => blockers.appendChild(guidedText("li", "", blocker)));
         next.appendChild(blockers);
 
-        guidedResult.append(heading, metrics, contract, baseline, runbook, next);
-        loadBaselineReadiness(campaign, readiness, runButton, runStatus);
+        guidedResult.append(heading, metrics, contract, baseline, runbook, interventionConsole, next);
+        loadBaselineReadiness(
+            campaign,
+            readiness,
+            runButton,
+            runStatus,
+            interventionConsole,
+            frontendUrl
+        );
         if (dataSourceBadge) {
             dataSourceBadge.textContent = "EXPERIMENT · BASELINE REQUIRED";
             dataSourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
         }
     }
 
-    async function loadBaselineReadiness(campaign, target, runButton, runStatus) {
+    async function loadBaselineReadiness(
+        campaign,
+        target,
+        runButton,
+        runStatus,
+        interventionConsole,
+        frontendUrl
+    ) {
         try {
             const readiness = await requestScenario(
                 `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/baseline-readiness`
@@ -301,11 +326,260 @@
                 runStatus.textContent = "The clean checkout baseline is stable and fully correlated.";
                 updateExperimentPath(2);
                 if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · BASELINE READY";
+                interventionConsole.hidden = false;
+                await loadInterventionConsole(campaign, interventionConsole, frontendUrl);
             }
         } catch (error) {
             target.replaceChildren(guidedText("p", "baseline-console__status is-error", error.message));
             runButton.disabled = false;
         }
+    }
+
+    async function postCampaignAction(url, payload) {
+        return requestScenario(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Actor": "guided-local-researcher",
+            },
+            body: JSON.stringify(payload),
+        });
+    }
+
+    function interventionActionButton(label, action) {
+        const button = guidedText("button", "experiment-button", label);
+        button.type = "button";
+        button.addEventListener("click", action);
+        return button;
+    }
+
+    async function loadInterventionConsole(campaign, target, frontendUrl) {
+        target.replaceChildren();
+        const heading = document.createElement("div");
+        heading.className = "baseline-console__heading";
+        heading.append(
+            guidedText("div", "", "03  ·  CONTROLLED INTERVENTIONS"),
+            guidedText("strong", "", "Test one downstream service at a time")
+        );
+        target.append(
+            heading,
+            guidedText(
+                "p",
+                "intervention-console__notice",
+                "This component never changes the cluster. Use your approved Docker or Kubernetes procedure, record what you changed, then confirm the state here."
+            )
+        );
+        try {
+            const status = await requestScenario(
+                `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/intervention-status`
+            );
+            const list = document.createElement("div");
+            list.className = "intervention-console__list";
+            status.services.forEach((service) => {
+                list.appendChild(renderInterventionService(campaign, service, target, frontendUrl));
+            });
+            target.appendChild(list);
+            if (status.services.every((service) => service.evidenceReady)) {
+                updateExperimentPath(3);
+                target.appendChild(renderAssessmentAction(campaign, target));
+            }
+        } catch (error) {
+            target.appendChild(guidedText("p", "baseline-console__status is-error", error.message));
+        }
+    }
+
+    function renderInterventionService(campaign, service, target, frontendUrl) {
+        const card = document.createElement("article");
+        card.className = `intervention-service intervention-service--${service.state}`;
+        const title = document.createElement("div");
+        title.className = "intervention-service__title";
+        title.append(
+            guidedText("strong", "", service.targetService),
+            guidedText("span", "guided-maturity", service.evidenceReady ? "evidence ready" : service.state)
+        );
+        const progress = guidedText(
+            "p",
+            "",
+            `${service.eligibleTrials}/${service.requiredTrials} eligible checkout trials · ${service.excludedTrials} excluded`
+        );
+        const controls = document.createElement("div");
+        controls.className = "intervention-service__controls";
+        const evidence = document.createElement("input");
+        evidence.type = "text";
+        evidence.placeholder = service.state === "active"
+            ? "Restoration evidence (ticket, command result, observation)"
+            : "Activation evidence (ticket, command result, observation)";
+        evidence.setAttribute("aria-label", `${service.targetService} operator evidence`);
+        const message = guidedText("span", "baseline-console__status", "");
+
+        const refresh = () => loadInterventionConsole(campaign, target, frontendUrl);
+        const recordEvent = async (eventType) => {
+            if (!evidence.value.trim()) {
+                evidence.setCustomValidity("Record concrete operator evidence before confirming this state.");
+                evidence.reportValidity();
+                return;
+            }
+            evidence.setCustomValidity("");
+            message.textContent = `Recording ${eventType} evidence…`;
+            try {
+                await postCampaignAction(
+                    `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/intervention-events`,
+                    {
+                        targetService: service.targetService,
+                        eventType,
+                        operatorConfirmed: true,
+                        evidence: evidence.value.trim(),
+                        occurredAt: new Date().toISOString(),
+                    }
+                );
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+                message.classList.add("is-error");
+            }
+        };
+
+        if (service.evidenceReady) {
+            controls.appendChild(guidedText("span", "intervention-service__complete", "Cohort correlated and service restored."));
+        } else if (service.state === "active") {
+            const run = interventionActionButton("Run checkout trial", async () => {
+                if (!frontendUrl.reportValidity()) return;
+                run.disabled = true;
+                message.textContent = "Executing checkout under the confirmed intervention…";
+                try {
+                    await postCampaignAction(
+                        `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/interventions/${encodeURIComponent(service.targetService)}/runs`,
+                        {frontendUrl: frontendUrl.value.trim()}
+                    );
+                    await refresh();
+                } catch (error) {
+                    message.textContent = guidedConnectionError(error);
+                    message.classList.add("is-error");
+                    run.disabled = false;
+                }
+            });
+            const restore = interventionActionButton("Confirm restored", () => recordEvent("restored"));
+            restore.disabled = service.eligibleTrials < service.requiredTrials || service.excludedTrials > 0;
+            controls.append(run, evidence, restore);
+        } else {
+            const activate = interventionActionButton(
+                service.state === "restored" ? "Confirm intervention active again" : "Confirm intervention active",
+                () => recordEvent("activated")
+            );
+            controls.append(evidence, activate);
+        }
+        card.append(title, progress, controls, message);
+        return card;
+    }
+
+    function renderAssessmentAction(campaign, target) {
+        const section = document.createElement("section");
+        section.className = "assessment-console";
+        const status = guidedText("span", "baseline-console__status", "All service cohorts are ready.");
+        const button = interventionActionButton("Classify dependencies", async () => {
+            button.disabled = true;
+            status.textContent = "Comparing baseline and intervention outcomes…";
+            try {
+                const assessment = await postCampaignAction(
+                    `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/assessment`,
+                    {}
+                );
+                renderCampaignAssessment(campaign, assessment, section);
+            } catch (error) {
+                status.textContent = error.message;
+                status.classList.add("is-error");
+                button.disabled = false;
+            }
+        });
+        section.append(
+            guidedText("div", "guided-result__label", "04  ·  CLASSIFY"),
+            guidedText("h5", "", "Convert controlled outcomes into dependency classes"),
+            status,
+            button
+        );
+        return section;
+    }
+
+    function renderCampaignAssessment(campaign, assessment, target) {
+        target.replaceChildren(
+            guidedText("div", "guided-result__label", "04  ·  CLASSIFICATION RESULT"),
+            guidedText("h5", "", "Review the evidence before releasing a graph")
+        );
+        const results = document.createElement("div");
+        results.className = "assessment-console__results";
+        assessment.services.forEach((service) => {
+            const row = document.createElement("article");
+            row.append(
+                guidedText("strong", "", service.serviceName),
+                guidedText("span", "guided-maturity", service.classification.replaceAll("_", " ")),
+                guidedText(
+                    "small",
+                    "",
+                    `Baseline ${Math.round(service.baseline.successRate * 100)}% → intervention ${Math.round(service.intervention.successRate * 100)}% · evidence strength ${Math.round(service.evidenceStrength * 100)}%`
+                ),
+                guidedText("p", "", service.reasons.join(" "))
+            );
+            results.appendChild(row);
+        });
+        const entry = guidedText(
+            "p",
+            "assessment-console__entry",
+            `${assessment.structuralEntryService} is retained as the structural entrypoint; it was not falsely classified through a self-defeating outage.`
+        );
+        const rationale = document.createElement("textarea");
+        rationale.rows = 3;
+        rationale.placeholder = "Why is this graph fit to hand to Component 3?";
+        rationale.setAttribute("aria-label", "Approval rationale");
+        const confirmationLabel = guidedText("label", "assessment-console__confirmation", "");
+        const confirmation = document.createElement("input");
+        confirmation.type = "checkbox";
+        confirmationLabel.append(confirmation, document.createTextNode(" I reviewed every classification and its evidence."));
+        const approvalStatus = guidedText("span", "baseline-console__status", "Not approved. Component 3 cannot consume this graph yet.");
+        const approve = interventionActionButton("Approve WorkflowGraph", async () => {
+            if (!rationale.value.trim() || !confirmation.checked) {
+                approvalStatus.textContent = "Add a review rationale and confirm the evidence review.";
+                approvalStatus.classList.add("is-error");
+                return;
+            }
+            approve.disabled = true;
+            try {
+                const approval = await postCampaignAction(
+                    `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/approval`,
+                    {
+                        rationale: rationale.value.trim(),
+                        approvalConfirmed: true,
+                    }
+                );
+                renderApprovedGraph(approval, target);
+            } catch (error) {
+                approvalStatus.textContent = error.message;
+                approvalStatus.classList.add("is-error");
+                approve.disabled = false;
+            }
+        });
+        target.append(results, entry, rationale, confirmationLabel, approve, approvalStatus);
+        updateExperimentPath(4);
+    }
+
+    function renderApprovedGraph(approval, target) {
+        target.replaceChildren(
+            guidedText("div", "guided-result__label", "05  ·  APPROVED OUTPUT"),
+            guidedText("h5", "", "WorkflowGraph released to Component 3")
+        );
+        const graph = approval.approvedGraph;
+        const summary = document.createElement("div");
+        summary.className = "approved-graph";
+        summary.append(
+            resultCard("Mandatory", graph.mandatoryServices.join(", ") || "None", "Workflow cannot succeed without these"),
+            resultCard("Optional", graph.optionalServices.join(", ") || "None", "No material outcome effect observed"),
+            resultCard("Retained edges", String(graph.edges.length), "Only between approved services")
+        );
+        target.append(
+            summary,
+            guidedText("p", "assessment-console__entry", `Approved by ${approval.approvedBy}. ${approval.rationale}`)
+        );
+        updateExperimentPath(5);
+        if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · GRAPH APPROVED";
     }
 
     async function createGuidedCampaign(sessionId, requiredTrials, button, status) {
