@@ -44,6 +44,7 @@ from app.engine.workflow_dependency_modeling.workflow_probe_models import (
 from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
     run_http_workflow_probe,
 )
+from app.engine.workflow_dependency_modeling.trace_source import JaegerTraceSource
 from app.engine.workflow_dependency_modeling.intervention_event_models import (
     InterventionEvent,
     InterventionEventType,
@@ -52,9 +53,6 @@ from app.engine.workflow_dependency_modeling.intervention_event_repository impor
     InterventionEventRepository,
     SqlAlchemyInterventionEventRepository,
 )
-from app.integrations.jaeger.client import JaegerClient
-
-
 WorkloadRunner = Callable[..., WorkflowRunResult]
 TraceFetcher = Callable[[Any, str], list[dict[str, Any]]]
 Sleeper = Callable[[float], None]
@@ -112,11 +110,11 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
 
 def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]:
     del trace_id
-    return JaegerClient(base_url=analysis.jaeger_url).fetch_traces(
+    return JaegerTraceSource.from_url(analysis.jaeger_url).fetch_workflow_traces(
         service_name=analysis.entry_service,
         operation=analysis.operation_name,
         limit=100,
-        lookback="1h",
+        lookback=analysis.lookback,
     )
 
 
