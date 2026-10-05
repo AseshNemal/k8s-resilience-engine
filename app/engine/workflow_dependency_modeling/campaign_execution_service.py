@@ -138,9 +138,9 @@ def run_campaign_baseline_trial(
     campaign_repository: ExperimentCampaignRepository | None = None,
     analysis_repository: AnalysisSessionRepository | None = None,
     repository: ExecutionRepository | None = None,
-    workload_runner: WorkloadRunner = run_online_boutique_checkout,
-    trace_fetcher: TraceFetcher = _default_trace_fetcher,
-    sleeper: Sleeper = time.sleep,
+    workload_runner: WorkloadRunner | None = None,
+    trace_fetcher: TraceFetcher | None = None,
+    sleeper: Sleeper | None = None,
     now: datetime | None = None,
 ) -> ExecutionOutcome:
     """Run one baseline checkout and persist only evidence-honest correlation."""
@@ -153,14 +153,17 @@ def run_campaign_baseline_trial(
 
     analysis = get_workflow_analysis(campaign.analysis_session_id, analysis_repository)
     timestamp = _utc(now)
-    run = workload_runner(frontend_url, started_at=timestamp)
+    resolved_runner = workload_runner or run_online_boutique_checkout
+    resolved_fetcher = trace_fetcher or _default_trace_fetcher
+    resolved_sleeper = sleeper or time.sleep
+    run = resolved_runner(frontend_url, started_at=timestamp)
     traces: list[dict[str, Any]] = []
     for attempt in range(5):
-        traces = trace_fetcher(analysis, run.trace_id)
+        traces = resolved_fetcher(analysis, run.trace_id)
         if any(trace.get("traceID") == run.trace_id for trace in traces):
             break
         if attempt < 4:
-            sleeper(0.4)
+            resolved_sleeper(0.4)
 
     registration = ExecutionRegistration.from_mapping(
         {

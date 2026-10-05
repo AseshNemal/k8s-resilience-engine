@@ -33,6 +33,10 @@ from app.engine.workflow_dependency_modeling.classification_experiments import (
     run_dependency_repeatability_analysis,
     run_dependency_sensitivity_analysis,
 )
+from app.engine.workflow_dependency_modeling.campaign_execution_service import (
+    baseline_readiness,
+    run_campaign_baseline_trial,
+)
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
 )
@@ -283,6 +287,7 @@ def get_sample_workflow() -> WorkflowGraph:
 
 __all__ = [
     "build_workflow_graph",
+    "baseline_readiness",
     "approve_dependency_assessment",
     "configure_dependency_assessment_repository",
     "configure_analysis_session_repository",
@@ -325,6 +330,7 @@ __all__ = [
     "run_dependency_repeatability_analysis",
     "run_dependency_sensitivity_analysis",
     "run_benchmark_batch",
+    "run_campaign_baseline_trial",
     "scenario_etag",
     "start_workflow_analysis",
     "update_scenario",

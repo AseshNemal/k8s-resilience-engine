@@ -1,4 +1,5 @@
 from typing import Any
+import httpx
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Response, status
 
 from app.engine.workflow_dependency_modeling.evaluator import (
@@ -6,6 +7,7 @@ from app.engine.workflow_dependency_modeling.evaluator import (
 )
 from app.engine.workflow_dependency_modeling.service import (
     approve_dependency_assessment,
+    baseline_readiness,
     start_workflow_analysis,
     create_scenario,
     create_dependency_assessment,
@@ -39,6 +41,7 @@ from app.engine.workflow_dependency_modeling.service import (
     run_dependency_repeatability_analysis,
     run_dependency_sensitivity_analysis,
     run_benchmark_batch,
+    run_campaign_baseline_trial,
     scenario_etag,
     update_scenario,
 )
@@ -470,6 +473,49 @@ def read_workflow_experiment_campaigns() -> list[dict[str, Any]]:
 def read_workflow_experiment_campaign(campaign_id: str) -> dict[str, Any]:
     try:
         return get_experiment_campaign(campaign_id).to_mapping()
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/baseline-runs",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "Execution evidence already exists"},
+        422: {"description": "Baseline run is invalid or no longer allowed"},
+        503: {"description": "Online Boutique or Jaeger is unavailable"},
+    },
+)
+def execute_workflow_campaign_baseline(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    frontend_url = payload.get("frontendUrl")
+    try:
+        return run_campaign_baseline_trial(
+            campaign_id,
+            frontend_url,
+            actor=actor,
+        ).to_mapping()
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExecutionAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (ConnectionError, httpx.HTTPError) as err:
+        raise HTTPException(status_code=503, detail="Experiment evidence source is unavailable") from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/baseline-readiness",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_workflow_campaign_baseline_readiness(campaign_id: str) -> dict[str, Any]:
+    try:
+        return baseline_readiness(get_experiment_campaign(campaign_id))
     except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 

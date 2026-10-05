@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+from fastapi.testclient import TestClient
+
 from app.engine.workflow_dependency_modeling.analysis_session_models import (
     WorkflowAnalysisSession,
 )
@@ -28,6 +30,7 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
 from app.engine.workflow_dependency_modeling.online_boutique_workload import (
     OnlineBoutiqueRunResult,
 )
+from app.main import app
 
 
 NOW = datetime(2026, 10, 5, tzinfo=timezone.utc)
@@ -182,3 +185,50 @@ def test_confirmation_marker_can_fail_matched_http_trace() -> None:
     assert outcome.correlation_status is CorrelationStatus.MATCHED
     assert outcome.status is ExecutionOutcomeStatus.FAILED
     assert "confirmation marker" in outcome.reasons[-1]
+
+
+def test_campaign_baseline_api_runs_and_reports_readiness(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import (
+        analysis_session_service,
+        campaign_execution_service,
+        execution_service,
+        experiment_campaign_service,
+    )
+
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    monkeypatch.setattr(analysis_session_service, "_default_repository", analyses)
+    monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
+    monkeypatch.setattr(execution_service, "_default_repository", executions)
+    monkeypatch.setattr(
+        campaign_execution_service,
+        "run_online_boutique_checkout",
+        lambda *args, **kwargs: _run(),
+    )
+    monkeypatch.setattr(
+        campaign_execution_service,
+        "_default_trace_fetcher",
+        lambda analysis, trace_id: [_trace()],
+    )
+    client = TestClient(app)
+    created = client.post(
+        f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/baseline-runs",
+        json={"frontendUrl": "http://localhost:8080"},
+        headers={"X-Actor": "runner"},
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "succeeded"
+    readiness = client.get(
+        f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/baseline-readiness"
+    )
+    assert readiness.status_code == 200
+    assert readiness.json()["eligibleTrials"] == 1
+    assert readiness.json()["ready"] is False
+
+
+def test_campaign_baseline_http_exceptions_are_documented() -> None:
+    responses = TestClient(app).get("/openapi.json").json()["paths"][
+        "/api/workflows/experiment-campaigns/{campaign_id}/baseline-runs"
+    ]["post"]["responses"]
+    assert {"201", "404", "409", "422", "503"} <= responses.keys()
