@@ -2162,6 +2162,8 @@
 
     document.addEventListener("DOMContentLoaded", () => {
         activateWorkflowStage("define");
+        const sourcePill = document.querySelector('.topbar .pill-badge--teal');
+        if (sourcePill) sourcePill.textContent = "No active campaign";
         loadLatestExperiment();
     });
 })();
