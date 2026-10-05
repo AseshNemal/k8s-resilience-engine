@@ -6,6 +6,7 @@ from app.engine.workflow_dependency_modeling.evaluator import (
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
+    assess_experiment_campaign,
     approve_dependency_assessment,
     baseline_readiness,
     intervention_status,
@@ -594,6 +595,30 @@ def execute_workflow_campaign_intervention(
         raise HTTPException(status_code=409, detail=str(err)) from err
     except (ConnectionError, httpx.HTTPError) as err:
         raise HTTPException(status_code=503, detail="Experiment evidence source is unavailable") from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/assessment",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "Campaign assessment already exists"},
+        422: {"description": "Campaign evidence is incomplete or inconsistent"},
+    },
+)
+def create_workflow_campaign_assessment(
+    campaign_id: str,
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Classify a completed campaign without asking for internal evidence IDs."""
+    try:
+        return assess_experiment_campaign(campaign_id, actor=actor).to_mapping()
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except DependencyAssessmentAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 

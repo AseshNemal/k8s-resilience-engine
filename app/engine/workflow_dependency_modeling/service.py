@@ -41,6 +41,9 @@ from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     run_campaign_baseline_trial,
     run_campaign_intervention_trial,
 )
+from app.engine.workflow_dependency_modeling.campaign_assessment_service import (
+    assess_experiment_campaign,
+)
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
 )
@@ -290,6 +293,7 @@ def get_sample_workflow() -> WorkflowGraph:
 
 
 __all__ = [
+    "assess_experiment_campaign",
     "build_workflow_graph",
     "baseline_readiness",
     "approve_dependency_assessment",
