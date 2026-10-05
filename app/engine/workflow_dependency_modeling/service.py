@@ -52,6 +52,12 @@ from app.engine.workflow_dependency_modeling.execution_service import (
     register_jaeger_execution,
     run_benchmark_batch,
 )
+from app.engine.workflow_dependency_modeling.experiment_campaign_service import (
+    configure_experiment_campaign_repository,
+    create_experiment_campaign,
+    get_experiment_campaign,
+    list_experiment_campaigns,
+)
 from app.engine.workflow_dependency_modeling.fixture_repository import (
     get_evidence_source,
     get_reference,
@@ -282,11 +288,13 @@ __all__ = [
     "configure_analysis_session_repository",
     "configure_classification_evaluation_repository",
     "configure_execution_repository",
+    "configure_experiment_campaign_repository",
     "configure_scenario_repository",
     "create_dependency_assessment",
     "create_dependency_classification_evaluation",
     "create_dependency_classification_reference",
     "create_scenario",
+    "create_experiment_campaign",
     "discover_live_workflows",
     "discover_analysis_workflows",
     "evaluate_workflow_by_id",
@@ -295,6 +303,7 @@ __all__ = [
     "get_dependency_classification_evaluation",
     "get_dependency_classification_reference",
     "get_execution",
+    "get_experiment_campaign",
     "get_live_evidence",
     "get_live_workflow",
     "get_sample_workflow",
@@ -305,6 +314,7 @@ __all__ = [
     "get_workflow_by_id",
     "list_benchmark_workflows",
     "list_executions",
+    "list_experiment_campaigns",
     "list_dependency_assessments",
     "list_dependency_classification_evaluations",
     "list_dependency_classification_references",

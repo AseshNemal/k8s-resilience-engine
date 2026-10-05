@@ -11,6 +11,7 @@ from app.engine.workflow_dependency_modeling.service import (
     create_dependency_assessment,
     create_dependency_classification_evaluation,
     create_dependency_classification_reference,
+    create_experiment_campaign,
     discover_live_workflows,
     discover_analysis_workflows,
     evaluate_workflow_by_id,
@@ -18,6 +19,7 @@ from app.engine.workflow_dependency_modeling.service import (
     get_workflow_analysis,
     get_live_evidence,
     get_execution,
+    get_experiment_campaign,
     get_dependency_assessment,
     get_dependency_classification_evaluation,
     get_dependency_classification_reference,
@@ -27,6 +29,7 @@ from app.engine.workflow_dependency_modeling.service import (
     get_validated_workflow_graph,
     list_benchmark_workflows,
     list_executions,
+    list_experiment_campaigns,
     list_dependency_assessments,
     list_dependency_classification_evaluations,
     list_dependency_classification_references,
@@ -54,6 +57,10 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_repository im
 from app.engine.workflow_dependency_modeling.execution_repository import (
     ExecutionAlreadyExistsError,
     ExecutionNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.experiment_campaign_repository import (
+    ExperimentCampaignConflictError,
+    ExperimentCampaignNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.scenario_repository import (
     ScenarioAlreadyExistsError,
@@ -424,6 +431,46 @@ def read_workflow_analysis_session(session_id: str) -> dict[str, Any]:
     try:
         return get_workflow_analysis(session_id).to_mapping()
     except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Analysis session was not found"},
+        409: {"description": "Experiment campaign already exists"},
+        422: {"description": "Experiment plan is invalid or unsafe"},
+    },
+)
+def create_workflow_experiment_campaign(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Create a safe Online Boutique checkout experiment from observed evidence."""
+    try:
+        return create_experiment_campaign(payload, actor=actor).to_mapping()
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExperimentCampaignConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/experiment-campaigns")
+def read_workflow_experiment_campaigns() -> list[dict[str, Any]]:
+    return [campaign.to_mapping() for campaign in list_experiment_campaigns()]
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_workflow_experiment_campaign(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_experiment_campaign(campaign_id).to_mapping()
+    except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
