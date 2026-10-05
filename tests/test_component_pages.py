@@ -112,3 +112,5 @@ def test_workflow_client_exposes_operator_gated_campaign_lifecycle() -> None:
     assert "Classify dependencies" in script
     assert "Approve WorkflowGraph" in script
     assert "/approval" in script
+    assert "loadCampaignDecision" in script
+    assert "Campaign active" in script

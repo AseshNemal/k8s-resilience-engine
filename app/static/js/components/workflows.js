@@ -95,7 +95,9 @@
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-            throw new Error(data.detail || `Request failed with HTTP ${response.status}`);
+            const error = new Error(data.detail || `Request failed with HTTP ${response.status}`);
+            error.status = response.status;
+            throw error;
         }
         return data;
     }
@@ -146,6 +148,8 @@
         guidedResult.hidden = false;
         guidedResult.replaceChildren();
         updateExperimentPath(campaign.status === "baseline_required" ? 1 : 2);
+        const sourcePill = document.querySelector('.topbar .pill-badge--teal');
+        if (sourcePill) sourcePill.textContent = "Campaign active";
 
         const heading = document.createElement("div");
         heading.className = "guided-result__heading";
@@ -381,7 +385,10 @@
             target.appendChild(list);
             if (status.services.every((service) => service.evidenceReady)) {
                 updateExperimentPath(3);
-                target.appendChild(renderAssessmentAction(campaign, target));
+                const decision = document.createElement("section");
+                decision.className = "assessment-console";
+                target.appendChild(decision);
+                await loadCampaignDecision(campaign, decision);
             }
         } catch (error) {
             target.appendChild(guidedText("p", "baseline-console__status is-error", error.message));
@@ -498,6 +505,30 @@
             button
         );
         return section;
+    }
+
+    async function loadCampaignDecision(campaign, target) {
+        const base = `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}`;
+        try {
+            const approval = await requestScenario(`${base}/approval`);
+            renderApprovedGraph(approval, target);
+            return;
+        } catch (error) {
+            if (error.status !== 404) {
+                target.replaceChildren(guidedText("p", "baseline-console__status is-error", error.message));
+                return;
+            }
+        }
+        try {
+            const assessment = await requestScenario(`${base}/assessment`);
+            renderCampaignAssessment(campaign, assessment, target);
+        } catch (error) {
+            if (error.status === 404) {
+                target.replaceWith(renderAssessmentAction(campaign, target));
+                return;
+            }
+            target.replaceChildren(guidedText("p", "baseline-console__status is-error", error.message));
+        }
     }
 
     function renderCampaignAssessment(campaign, assessment, target) {
@@ -2132,7 +2163,5 @@
     document.addEventListener("DOMContentLoaded", () => {
         activateWorkflowStage("define");
         loadLatestExperiment();
-        const sourcePill = document.querySelector('.topbar .pill-badge--teal');
-        if (sourcePill) sourcePill.textContent = "No active campaign";
     });
 })();
