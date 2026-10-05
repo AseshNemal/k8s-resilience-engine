@@ -8,6 +8,8 @@ from app.engine.workflow_dependency_modeling.evaluator import (
 from app.engine.workflow_dependency_modeling.service import (
     approve_dependency_assessment,
     baseline_readiness,
+    intervention_status,
+    record_intervention_event,
     start_workflow_analysis,
     create_scenario,
     create_dependency_assessment,
@@ -64,6 +66,9 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
 from app.engine.workflow_dependency_modeling.experiment_campaign_repository import (
     ExperimentCampaignConflictError,
     ExperimentCampaignNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.intervention_event_repository import (
+    InterventionEventConflictError,
 )
 from app.engine.workflow_dependency_modeling.scenario_repository import (
     ScenarioAlreadyExistsError,
@@ -516,6 +521,45 @@ def execute_workflow_campaign_baseline(
 def read_workflow_campaign_baseline_readiness(campaign_id: str) -> dict[str, Any]:
     try:
         return baseline_readiness(get_experiment_campaign(campaign_id))
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/intervention-events",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign was not found"},
+        409: {"description": "Intervention event already exists"},
+        422: {"description": "Intervention transition or evidence is invalid"},
+    },
+)
+def create_workflow_campaign_intervention_event(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return record_intervention_event(
+            campaign_id,
+            payload,
+            actor=actor,
+        ).to_mapping()
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except InterventionEventConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/intervention-status",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_workflow_campaign_intervention_status(campaign_id: str) -> dict[str, Any]:
+    try:
+        return intervention_status(campaign_id)
     except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 

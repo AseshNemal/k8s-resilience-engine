@@ -12,6 +12,8 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
 )
 from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     baseline_readiness,
+    intervention_status,
+    record_intervention_event,
     run_campaign_baseline_trial,
 )
 from app.engine.workflow_dependency_modeling.execution_models import (
@@ -29,6 +31,9 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
 )
 from app.engine.workflow_dependency_modeling.online_boutique_workload import (
     OnlineBoutiqueRunResult,
+)
+from app.engine.workflow_dependency_modeling.intervention_event_repository import (
+    InMemoryInterventionEventRepository,
 )
 from app.main import app
 
@@ -82,9 +87,9 @@ def _campaigns(analyses, required_trials=3):
     return repository, campaign
 
 
-def _run(success=True) -> OnlineBoutiqueRunResult:
+def _run(success=True, trace_id=TRACE_ID) -> OnlineBoutiqueRunResult:
     return OnlineBoutiqueRunResult(
-        trace_id=TRACE_ID,
+        trace_id=trace_id,
         product_id="OLJCESPC7Z",
         started_at=NOW,
         finished_at=NOW + timedelta(seconds=1),
@@ -100,13 +105,13 @@ def _run(success=True) -> OnlineBoutiqueRunResult:
     )
 
 
-def _trace(status=200):
+def _trace(status=200, trace_id=TRACE_ID):
     return {
-        "traceID": TRACE_ID,
+        "traceID": trace_id,
         "processes": {"p1": {"serviceName": "frontend"}},
         "spans": [
             {
-                "traceID": TRACE_ID,
+                "traceID": trace_id,
                 "spanID": "span-1",
                 "operationName": "POST /cart/checkout",
                 "processID": "p1",
@@ -232,3 +237,140 @@ def test_campaign_baseline_http_exceptions_are_documented() -> None:
         "/api/workflows/experiment-campaigns/{campaign_id}/baseline-runs"
     ]["post"]["responses"]
     assert {"201", "404", "409", "422", "503"} <= responses.keys()
+
+
+def test_duplicate_trace_reuse_blocks_baseline_readiness() -> None:
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    for _ in range(3):
+        run_campaign_baseline_trial(
+            campaign.campaign_id,
+            "http://localhost:8080",
+            actor="runner",
+            campaign_repository=campaigns,
+            analysis_repository=analyses,
+            repository=executions,
+            workload_runner=lambda *args, **kwargs: _run(),
+            trace_fetcher=lambda analysis, trace_id: [_trace()],
+            sleeper=lambda seconds: None,
+            now=NOW,
+        )
+    readiness = baseline_readiness(campaign, executions)
+    assert readiness["ready"] is False
+    assert readiness["duplicateTraceIds"] == [TRACE_ID]
+
+
+def _ready_baseline(analyses, campaigns, campaign, executions) -> None:
+    trace_ids = [f"{index:032x}" for index in range(1, 4)]
+    for trace_id in trace_ids:
+        run_campaign_baseline_trial(
+            campaign.campaign_id,
+            "http://localhost:8080",
+            actor="runner",
+            campaign_repository=campaigns,
+            analysis_repository=analyses,
+            repository=executions,
+            workload_runner=lambda *args, _trace_id=trace_id, **kwargs: _run(trace_id=_trace_id),
+            trace_fetcher=lambda analysis, expected, _trace_id=trace_id: [_trace(trace_id=_trace_id)],
+            sleeper=lambda seconds: None,
+            now=NOW,
+        )
+
+
+def test_intervention_events_require_ready_baseline_and_safe_order() -> None:
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    events = InMemoryInterventionEventRepository()
+    _ready_baseline(analyses, campaigns, campaign, executions)
+    activated = record_intervention_event(
+        campaign.campaign_id,
+        {
+            "targetService": "paymentservice",
+            "eventType": "activated",
+            "operatorConfirmed": True,
+            "evidence": "docker:paymentservice-stopped",
+            "occurredAt": NOW.isoformat(),
+        },
+        actor="operator",
+        campaign_repository=campaigns,
+        repository=events,
+        execution_repository_override=executions,
+        now=NOW,
+    )
+    restored = record_intervention_event(
+        campaign.campaign_id,
+        {
+            "targetService": "paymentservice",
+            "eventType": "restored",
+            "operatorConfirmed": True,
+            "evidence": "docker:paymentservice-healthy",
+            "occurredAt": (NOW + timedelta(minutes=1)).isoformat(),
+        },
+        actor="operator",
+        campaign_repository=campaigns,
+        repository=events,
+        execution_repository_override=executions,
+        now=NOW + timedelta(minutes=1),
+    )
+    assert activated.batch_id == restored.batch_id
+    status = intervention_status(
+        campaign.campaign_id,
+        campaign_repository=campaigns,
+        repository=events,
+        execution_repository_override=executions,
+    )
+    payment = next(item for item in status["services"] if item["targetService"] == "paymentservice")
+    assert status["baselineReady"] is True
+    assert payment["state"] == "restored"
+    assert len(payment["events"]) == 2
+
+
+def test_intervention_event_api_records_operator_confirmation(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import (
+        campaign_execution_service,
+        execution_service,
+        experiment_campaign_service,
+    )
+
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    events = InMemoryInterventionEventRepository()
+    _ready_baseline(analyses, campaigns, campaign, executions)
+    monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
+    monkeypatch.setattr(execution_service, "_default_repository", executions)
+    monkeypatch.setattr(
+        campaign_execution_service, "_default_intervention_repository", events
+    )
+    client = TestClient(app)
+    created = client.post(
+        f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/intervention-events",
+        json={
+            "targetService": "paymentservice",
+            "eventType": "activated",
+            "operatorConfirmed": True,
+            "evidence": "docker:paymentservice-stopped",
+            "occurredAt": NOW.isoformat(),
+        },
+        headers={"X-Actor": "operator"},
+    )
+    assert created.status_code == 201
+    assert created.json()["eventType"] == "activated"
+    status = client.get(
+        f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/intervention-status"
+    )
+    assert status.status_code == 200
+    payment = next(
+        item for item in status.json()["services"]
+        if item["targetService"] == "paymentservice"
+    )
+    assert payment["state"] == "active"
+
+
+def test_intervention_event_http_exceptions_are_documented() -> None:
+    responses = TestClient(app).get("/openapi.json").json()["paths"][
+        "/api/workflows/experiment-campaigns/{campaign_id}/intervention-events"
+    ]["post"]["responses"]
+    assert {"201", "404", "409", "422"} <= responses.keys()

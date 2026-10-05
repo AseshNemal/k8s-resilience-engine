@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import time
 from typing import Any
 from uuid import uuid4
@@ -41,12 +41,44 @@ from app.engine.workflow_dependency_modeling.online_boutique_workload import (
     run_online_boutique_checkout,
 )
 from app.engine.workflow_dependency_modeling.outcome_evaluator import evaluate_execution
+from app.engine.workflow_dependency_modeling.intervention_event_models import (
+    InterventionEvent,
+    InterventionEventType,
+)
+from app.engine.workflow_dependency_modeling.intervention_event_repository import (
+    InterventionEventRepository,
+    SqlAlchemyInterventionEventRepository,
+)
 from app.integrations.jaeger.client import JaegerClient
 
 
 WorkloadRunner = Callable[..., OnlineBoutiqueRunResult]
 TraceFetcher = Callable[[Any, str], list[dict[str, Any]]]
 Sleeper = Callable[[float], None]
+_default_intervention_repository: InterventionEventRepository | None = None
+
+
+def configure_intervention_event_repository(
+    repository: InterventionEventRepository,
+) -> None:
+    global _default_intervention_repository
+    _default_intervention_repository = repository
+
+
+def _intervention_repository(
+    repository: InterventionEventRepository | None,
+) -> InterventionEventRepository:
+    if repository is not None:
+        return repository
+    global _default_intervention_repository
+    if _default_intervention_repository is None:
+        from app.core.config import get_settings
+        from app.core.database import get_engine
+
+        _default_intervention_repository = SqlAlchemyInterventionEventRepository(
+            get_engine(get_settings().database_url)
+        )
+    return _default_intervention_repository
 
 
 def _utc(now: datetime | None) -> datetime:
@@ -106,6 +138,10 @@ def baseline_readiness(
     failures = sum(item.status is ExecutionOutcomeStatus.FAILED for item in eligible)
     excluded = len(records) - len(eligible)
     success_rate = successes / len(eligible) if eligible else None
+    trace_ids = [item.matched_trace_id for item in eligible]
+    duplicate_trace_ids = sorted(
+        {trace_id for trace_id in trace_ids if trace_id and trace_ids.count(trace_id) > 1}
+    )
     blockers: list[str] = []
     if len(eligible) < campaign.baseline.required_trials:
         blockers.append(
@@ -113,6 +149,8 @@ def baseline_readiness(
         )
     if excluded:
         blockers.append("Resolve or restart the campaign after uncorrelated baseline trials.")
+    if duplicate_trace_ids:
+        blockers.append("Baseline contains a trace reused by multiple trial records.")
     if success_rate is not None and 1 - success_rate > campaign.baseline.maximum_failure_rate:
         blockers.append("Baseline failure rate exceeds the campaign stability gate.")
     return {
@@ -124,6 +162,7 @@ def baseline_readiness(
         "successfulTrials": successes,
         "failedTrials": failures,
         "excludedTrials": excluded,
+        "duplicateTraceIds": duplicate_trace_ids,
         "successRate": round(success_rate, 4) if success_rate is not None else None,
         "ready": not blockers,
         "blockers": blockers,
@@ -198,3 +237,112 @@ def run_campaign_baseline_trial(
             reasons=(*outcome.reasons, run.reason),
         )
     return execution_repository(repository).create(outcome)
+
+
+def record_intervention_event(
+    campaign_id: str,
+    data: dict[str, Any],
+    *,
+    actor: str,
+    campaign_repository: ExperimentCampaignRepository | None = None,
+    repository: InterventionEventRepository | None = None,
+    execution_repository_override: ExecutionRepository | None = None,
+    now: datetime | None = None,
+) -> InterventionEvent:
+    """Record operator-confirmed activation or restoration without applying a fault."""
+    forbidden = {
+        "eventId",
+        "campaignId",
+        "batchId",
+        "recordedAt",
+        "recordedBy",
+    } & data.keys()
+    if forbidden:
+        raise ValueError(
+            f"Server-managed fields are not accepted: {', '.join(sorted(forbidden))}"
+        )
+    if data.get("operatorConfirmed") is not True:
+        raise ValueError("operatorConfirmed must be true for intervention evidence")
+    campaign = get_experiment_campaign(campaign_id, campaign_repository)
+    target_service = data.get("targetService")
+    plan = next(
+        (item for item in campaign.interventions if item.target_service == target_service),
+        None,
+    )
+    if plan is None:
+        raise ValueError("targetService is not a candidate in this campaign")
+    try:
+        event_type = InterventionEventType(data.get("eventType"))
+    except ValueError as err:
+        raise ValueError("eventType must be activated or restored") from err
+
+    event_repository = _intervention_repository(repository)
+    existing = event_repository.list(campaign_id, plan.target_service)
+    active = bool(existing and existing[-1].event_type is InterventionEventType.ACTIVATED)
+    if event_type is InterventionEventType.ACTIVATED:
+        if active:
+            raise ValueError("This service already has an active intervention")
+        if not baseline_readiness(campaign, execution_repository_override)["ready"]:
+            raise ValueError("Baseline readiness must pass before an intervention is activated")
+    elif not active:
+        raise ValueError("A restoration requires an active intervention")
+
+    recorded_at = _utc(now)
+    event = InterventionEvent.from_mapping(
+        {
+            "eventId": f"intervention-event:{uuid4().hex}",
+            "campaignId": campaign.campaign_id,
+            "targetService": plan.target_service,
+            "batchId": plan.batch_id,
+            "eventType": event_type.value,
+            "evidence": data.get("evidence"),
+            "occurredAt": data.get("occurredAt"),
+            "recordedAt": recorded_at.isoformat(),
+            "recordedBy": actor,
+        }
+    )
+    if event.occurred_at > recorded_at + timedelta(minutes=5):
+        raise ValueError("occurredAt cannot be more than five minutes in the future")
+    if existing and event.occurred_at < existing[-1].occurred_at:
+        raise ValueError("Intervention events must be recorded in chronological order")
+    return event_repository.create(event)
+
+
+def intervention_status(
+    campaign_id: str,
+    *,
+    campaign_repository: ExperimentCampaignRepository | None = None,
+    repository: InterventionEventRepository | None = None,
+    execution_repository_override: ExecutionRepository | None = None,
+) -> dict[str, Any]:
+    campaign = get_experiment_campaign(campaign_id, campaign_repository)
+    event_repository = _intervention_repository(repository)
+    services = []
+    for plan in campaign.interventions:
+        events = event_repository.list(campaign_id, plan.target_service)
+        state = "planned"
+        if events:
+            state = (
+                "active"
+                if events[-1].event_type is InterventionEventType.ACTIVATED
+                else "restored"
+            )
+        trial_count = len(
+            execution_repository(execution_repository_override).list(batch_id=plan.batch_id)
+        )
+        services.append(
+            {
+                "targetService": plan.target_service,
+                "batchId": plan.batch_id,
+                "state": state,
+                "trialCount": trial_count,
+                "events": [event.to_mapping() for event in events],
+            }
+        )
+    return {
+        "campaignId": campaign.campaign_id,
+        "baselineReady": baseline_readiness(
+            campaign, execution_repository_override
+        )["ready"],
+        "services": services,
+    }

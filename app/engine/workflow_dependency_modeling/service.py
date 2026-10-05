@@ -35,6 +35,9 @@ from app.engine.workflow_dependency_modeling.classification_experiments import (
 )
 from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     baseline_readiness,
+    configure_intervention_event_repository,
+    intervention_status,
+    record_intervention_event,
     run_campaign_baseline_trial,
 )
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
@@ -294,6 +297,7 @@ __all__ = [
     "configure_classification_evaluation_repository",
     "configure_execution_repository",
     "configure_experiment_campaign_repository",
+    "configure_intervention_event_repository",
     "configure_scenario_repository",
     "create_dependency_assessment",
     "create_dependency_classification_evaluation",
@@ -320,6 +324,8 @@ __all__ = [
     "list_benchmark_workflows",
     "list_executions",
     "list_experiment_campaigns",
+    "intervention_status",
+    "record_intervention_event",
     "list_dependency_assessments",
     "list_dependency_classification_evaluations",
     "list_dependency_classification_references",
