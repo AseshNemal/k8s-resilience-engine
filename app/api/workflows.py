@@ -6,6 +6,7 @@ from app.engine.workflow_dependency_modeling.evaluator import (
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
+    approve_experiment_campaign,
     assess_experiment_campaign,
     approve_dependency_assessment,
     baseline_readiness,
@@ -25,6 +26,7 @@ from app.engine.workflow_dependency_modeling.service import (
     get_live_evidence,
     get_execution,
     get_experiment_campaign,
+    get_experiment_campaign_assessment,
     get_dependency_assessment,
     get_dependency_classification_evaluation,
     get_dependency_classification_reference,
@@ -616,6 +618,47 @@ def create_workflow_campaign_assessment(
     try:
         return assess_experiment_campaign(campaign_id, actor=actor).to_mapping()
     except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except DependencyAssessmentAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/assessment",
+    responses={404: {"description": "Campaign or campaign assessment was not found"}},
+)
+def read_workflow_campaign_assessment(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_experiment_campaign_assessment(campaign_id).to_mapping()
+    except (ExperimentCampaignNotFoundError, DependencyAssessmentNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/approval",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Campaign or campaign assessment was not found"},
+        409: {"description": "Campaign assessment is already approved"},
+        422: {"description": "Approval is unconfirmed or evidence is unresolved"},
+    },
+)
+def approve_workflow_campaign(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Approve reviewed classifications and publish the Component 3 graph."""
+    try:
+        return approve_experiment_campaign(
+            campaign_id,
+            actor=actor,
+            rationale=payload.get("rationale"),
+            approval_confirmed=payload.get("approvalConfirmed"),
+        ).to_mapping()
+    except (ExperimentCampaignNotFoundError, DependencyAssessmentNotFoundError) as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
     except DependencyAssessmentAlreadyExistsError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err

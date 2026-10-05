@@ -16,6 +16,7 @@ from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     intervention_status,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
+    AssessmentApproval,
     AssessmentPolicy,
     DependencyAssessment,
     InterventionCohort,
@@ -25,6 +26,7 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_repository im
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_service import (
     _repository as assessment_repository,
+    approve_dependency_assessment,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessor import (
     assess_service_dependency,
@@ -82,6 +84,10 @@ def _candidate_edges(
         {"source": source, "target": target}
         for source, target in sorted(result)
     ]
+
+
+def _assessment_id(campaign_id: str) -> str:
+    return f"assessment:{campaign_id.split(':')[-1]}"
 
 
 def assess_experiment_campaign(
@@ -159,10 +165,9 @@ def assess_experiment_campaign(
     expected = {analysis.entry_service, *campaign.candidate_services}
     if services != expected:
         raise ValueError("Campaign candidates no longer match the observed service set")
-    token = campaign.campaign_id.split(":")[-1]
     assessment = DependencyAssessment.from_mapping(
         {
-            "assessmentId": f"assessment:{token}",
+            "assessmentId": _assessment_id(campaign.campaign_id),
             "workflowId": campaign.workflow_id,
             "scenarioVersion": 1,
             "environmentId": campaign.environment_id,
@@ -184,3 +189,45 @@ def assess_experiment_campaign(
         }
     )
     return assessment_repository(repository).create_assessment(assessment)
+
+
+def get_experiment_campaign_assessment(
+    campaign_id: str,
+    *,
+    campaign_repository: ExperimentCampaignRepository | None = None,
+    repository: DependencyAssessmentRepository | None = None,
+) -> DependencyAssessment:
+    """Return the assessment owned by a campaign, if it has been created."""
+    get_experiment_campaign(campaign_id, campaign_repository)
+    return assessment_repository(repository).get_assessment(
+        _assessment_id(campaign_id)
+    )
+
+
+def approve_experiment_campaign(
+    campaign_id: str,
+    *,
+    actor: str,
+    rationale: str,
+    approval_confirmed: bool,
+    campaign_repository: ExperimentCampaignRepository | None = None,
+    repository: DependencyAssessmentRepository | None = None,
+    now: datetime | None = None,
+) -> AssessmentApproval:
+    """Approve only the assessment deterministically owned by this campaign."""
+    if approval_confirmed is not True:
+        raise ValueError("approvalConfirmed must be true after reviewing classifications")
+    assessment = get_experiment_campaign_assessment(
+        campaign_id,
+        campaign_repository=campaign_repository,
+        repository=repository,
+    )
+    if assessment.source != "controlled_online_boutique_campaign":
+        raise ValueError("Campaign approval requires controlled campaign evidence")
+    return approve_dependency_assessment(
+        assessment.assessment_id,
+        actor=actor,
+        rationale=rationale,
+        repository=repository,
+        now=now,
+    )

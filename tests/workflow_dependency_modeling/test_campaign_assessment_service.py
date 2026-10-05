@@ -12,7 +12,9 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     InMemoryAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.campaign_assessment_service import (
+    approve_experiment_campaign,
     assess_experiment_campaign,
+    get_experiment_campaign_assessment,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     ValidatedDependencyType,
@@ -194,6 +196,26 @@ def test_completed_campaign_creates_explainable_assessment() -> None:
     assert result.services[0].classification is ValidatedDependencyType.MANDATORY
     assert result.services[0].evidence_strength == 1.0
     assert "activated=event:activated" in result.interventions[0].confirmation_evidence
+    assert get_experiment_campaign_assessment(
+        "campaign:checkout1",
+        campaign_repository=campaigns,
+        repository=assessments,
+    ) == result
+
+    approval = approve_experiment_campaign(
+        "campaign:checkout1",
+        actor="principal-investigator",
+        rationale="Reviewed exact trace cohorts and causal classifications.",
+        approval_confirmed=True,
+        campaign_repository=campaigns,
+        repository=assessments,
+        now=NOW,
+    )
+    assert approval.approved_graph.mandatory_services == [
+        "frontend",
+        "paymentservice",
+    ]
+    assert approval.approved_graph.edges[0].source == "frontend"
 
 
 def test_incomplete_intervention_cannot_be_assessed() -> None:
@@ -212,7 +234,12 @@ def test_incomplete_intervention_cannot_be_assessed() -> None:
 
 
 def test_campaign_assessment_http_errors_are_documented() -> None:
-    operation = TestClient(app).get("/openapi.json").json()["paths"][
+    paths = TestClient(app).get("/openapi.json").json()["paths"]
+    operation = paths[
         "/api/workflows/experiment-campaigns/{campaign_id}/assessment"
     ]["post"]
     assert set(operation["responses"]) >= {"201", "404", "409", "422"}
+    approval = paths[
+        "/api/workflows/experiment-campaigns/{campaign_id}/approval"
+    ]["post"]
+    assert set(approval["responses"]) >= {"201", "404", "409", "422"}
