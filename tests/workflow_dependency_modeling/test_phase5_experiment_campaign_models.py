@@ -43,8 +43,9 @@ def _campaign() -> ExperimentCampaign:
                 "outcome": "Customer receives an order confirmation",
                 "protocol": "http",
                 "acceptedStatusCodes": [200],
-                "terminalService": "checkoutservice",
-                "terminalOperation": "PlaceOrder",
+                "terminalService": "frontend",
+                "terminalOperation": "POST /cart/checkout",
+                "responseMarker": "Your order is complete!",
             },
             "baseline": {
                 "batchId": "batch:baseline:1",
@@ -147,6 +148,9 @@ def test_service_derives_online_boutique_plan_from_observation() -> None:
     assert created.baseline.required_trials == 7
     assert created.candidate_services == ("checkoutservice", "paymentservice")
     assert created.success_contract.outcome == "Customer receives a confirmed order"
+    assert created.success_contract.terminal_service == "frontend"
+    assert created.success_contract.terminal_operation == "POST /cart/checkout"
+    assert created.success_contract.response_marker == "Your order is complete!"
     assert created.blockers[0].startswith("Collect 7")
 
 

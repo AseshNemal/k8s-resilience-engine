@@ -61,6 +61,7 @@ class WorkflowSuccessContract:
     accepted_status_codes: tuple[int, ...]
     terminal_service: str
     terminal_operation: str
+    response_marker: str
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "WorkflowSuccessContract":
@@ -79,6 +80,7 @@ class WorkflowSuccessContract:
             accepted_status_codes=codes,
             terminal_service=_text(data, "terminalService"),
             terminal_operation=_text(data, "terminalOperation"),
+            response_marker=_text(data, "responseMarker"),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -88,6 +90,7 @@ class WorkflowSuccessContract:
             "acceptedStatusCodes": list(self.accepted_status_codes),
             "terminalService": self.terminal_service,
             "terminalOperation": self.terminal_operation,
+            "responseMarker": self.response_marker,
         }
 
 

@@ -22,13 +22,6 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_repository impo
 
 
 ONLINE_BOUTIQUE_CHECKOUT_PROFILE = "online_boutique_checkout_v0_10_1"
-_PROFILE_CONTRACT = {
-    "outcome": "Customer receives a confirmed order",
-    "protocol": "http",
-    "acceptedStatusCodes": [200],
-    "terminalService": "checkoutservice",
-    "terminalOperation": "PlaceOrder",
-}
 _SERVER_FIELDS = {
     "campaignId",
     "environmentId",
@@ -131,7 +124,14 @@ def create_experiment_campaign(
             "evidenceTier": analysis.evidence_tier.value,
             "observedTraceCount": analysis.trace_count,
             "candidateServices": list(candidates),
-            "successContract": _PROFILE_CONTRACT,
+            "successContract": {
+                "outcome": "Customer receives a confirmed order",
+                "protocol": "http",
+                "acceptedStatusCodes": [200],
+                "terminalService": analysis.entry_service,
+                "terminalOperation": analysis.operation_name,
+                "responseMarker": "Your order is complete!",
+            },
             "baseline": {
                 "batchId": f"batch:{token}:baseline",
                 "requiredTrials": required_trials,
