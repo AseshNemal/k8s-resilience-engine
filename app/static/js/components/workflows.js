@@ -180,6 +180,58 @@
             )
         );
 
+        const baseline = document.createElement("section");
+        baseline.className = "baseline-console";
+        baseline.dataset.role = "baseline-console";
+        const baselineHeading = document.createElement("div");
+        baselineHeading.className = "baseline-console__heading";
+        baselineHeading.append(
+            guidedText("div", "", "02  ·  BASELINE EVIDENCE"),
+            guidedText("strong", "", "Run a clean checkout before changing any service")
+        );
+        const baselineControls = document.createElement("div");
+        baselineControls.className = "baseline-console__controls";
+        const frontendLabel = guidedText("label", "", "Online Boutique frontend URL");
+        const frontendUrl = document.createElement("input");
+        frontendUrl.type = "url";
+        frontendUrl.value = "http://localhost:8080";
+        frontendUrl.required = true;
+        frontendLabel.appendChild(frontendUrl);
+        const runButton = guidedText("button", "experiment-button", "Run baseline checkout");
+        runButton.type = "button";
+        const runStatus = guidedText("span", "baseline-console__status", "No cluster change is applied.");
+        baselineControls.append(frontendLabel, runButton, runStatus);
+        const readiness = document.createElement("div");
+        readiness.className = "baseline-readiness";
+        baseline.append(baselineHeading, baselineControls, readiness);
+        runButton.addEventListener("click", async () => {
+            if (!frontendUrl.reportValidity()) return;
+            runButton.disabled = true;
+            runStatus.textContent = "Executing checkout and waiting for its exact Jaeger trace…";
+            runStatus.classList.remove("is-error");
+            try {
+                const outcome = await requestScenario(
+                    `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/baseline-runs`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-Actor": "guided-local-runner",
+                        },
+                        body: JSON.stringify({frontendUrl: frontendUrl.value.trim()}),
+                    }
+                );
+                runStatus.textContent = outcome.correlationStatus === "matched"
+                    ? `Trial recorded: ${outcome.status}.`
+                    : `Trial excluded: trace correlation is ${outcome.correlationStatus}.`;
+                await loadBaselineReadiness(campaign, readiness, runButton, runStatus);
+            } catch (error) {
+                runStatus.textContent = guidedConnectionError(error);
+                runStatus.classList.add("is-error");
+                runButton.disabled = false;
+            }
+        });
+
         const runbook = document.createElement("section");
         runbook.className = "campaign-runbook";
         runbook.appendChild(guidedText("h5", "", "Intervention runbook"));
@@ -204,10 +256,55 @@
         campaign.blockers.forEach((blocker) => blockers.appendChild(guidedText("li", "", blocker)));
         next.appendChild(blockers);
 
-        guidedResult.append(heading, metrics, contract, runbook, next);
+        guidedResult.append(heading, metrics, contract, baseline, runbook, next);
+        loadBaselineReadiness(campaign, readiness, runButton, runStatus);
         if (dataSourceBadge) {
             dataSourceBadge.textContent = "EXPERIMENT · BASELINE REQUIRED";
             dataSourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
+        }
+    }
+
+    async function loadBaselineReadiness(campaign, target, runButton, runStatus) {
+        try {
+            const readiness = await requestScenario(
+                `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/baseline-readiness`
+            );
+            target.replaceChildren();
+            const counts = document.createElement("div");
+            counts.className = "baseline-readiness__counts";
+            counts.append(
+                resultCard("Eligible", `${readiness.eligibleTrials}/${readiness.requiredTrials}`, "Exactly correlated"),
+                resultCard("Succeeded", String(readiness.successfulTrials), "Met the success contract"),
+                resultCard("Failed", String(readiness.failedTrials), "Business outcome failed"),
+                resultCard("Excluded", String(readiness.excludedTrials), "Missing or ambiguous evidence")
+            );
+            const gate = document.createElement("div");
+            gate.className = readiness.ready
+                ? "baseline-readiness__gate is-ready"
+                : "baseline-readiness__gate";
+            gate.appendChild(guidedText(
+                "strong",
+                "",
+                readiness.ready ? "Baseline gate passed" : "Baseline gate not yet satisfied"
+            ));
+            if (readiness.blockers.length) {
+                const list = document.createElement("ul");
+                readiness.blockers.forEach((blocker) => list.appendChild(guidedText("li", "", blocker)));
+                gate.appendChild(list);
+            } else {
+                gate.appendChild(guidedText("span", "", "Intervention cohorts may now be collected one service at a time."));
+            }
+            target.append(counts, gate);
+            runButton.disabled = readiness.ready;
+            if (readiness.ready) {
+                runButton.textContent = "Baseline complete";
+                runStatus.textContent = "The clean checkout baseline is stable and fully correlated.";
+                updateExperimentPath(2);
+                if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · BASELINE READY";
+            }
+        } catch (error) {
+            target.replaceChildren(guidedText("p", "baseline-console__status is-error", error.message));
+            runButton.disabled = false;
         }
     }
 
