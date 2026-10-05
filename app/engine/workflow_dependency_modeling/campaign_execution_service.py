@@ -36,11 +36,14 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
     get_experiment_campaign,
 )
 from app.engine.workflow_dependency_modeling.models import WorkflowScenario
-from app.engine.workflow_dependency_modeling.online_boutique_workload import (
-    OnlineBoutiqueRunResult,
-    run_online_boutique_checkout,
-)
 from app.engine.workflow_dependency_modeling.outcome_evaluator import evaluate_execution
+from app.engine.workflow_dependency_modeling.workflow_probe_models import (
+    WorkflowProbeDefinition,
+    WorkflowRunResult,
+)
+from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
+    run_http_workflow_probe,
+)
 from app.engine.workflow_dependency_modeling.intervention_event_models import (
     InterventionEvent,
     InterventionEventType,
@@ -52,7 +55,7 @@ from app.engine.workflow_dependency_modeling.intervention_event_repository impor
 from app.integrations.jaeger.client import JaegerClient
 
 
-WorkloadRunner = Callable[..., OnlineBoutiqueRunResult]
+WorkloadRunner = Callable[..., WorkflowRunResult]
 TraceFetcher = Callable[[Any, str], list[dict[str, Any]]]
 Sleeper = Callable[[float], None]
 _default_intervention_repository: InterventionEventRepository | None = None
@@ -96,19 +99,13 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
             "description": campaign.workflow_name,
             "criticality": 1.0,
             "entryService": contract.terminal_service,
-            "successCondition": {
-                "protocol": contract.protocol,
-                "terminalService": contract.terminal_service,
-                "operationName": contract.terminal_operation,
-                "httpStatusCodes": list(contract.accepted_status_codes),
-                "requiredAttributes": [],
-            },
+            "successCondition": contract.condition.to_mapping(),
             "version": 1,
             "lifecycle": "active",
             "source": "discovered",
             "createdAt": campaign.created_at.isoformat(),
             "createdBy": campaign.created_by,
-            "changeSummary": "Generated from reviewed Online Boutique campaign profile",
+            "changeSummary": "Generated from a reviewed workflow experiment",
         }
     )
 
@@ -127,7 +124,7 @@ def _record_campaign_trial(
     campaign: ExperimentCampaign,
     analysis: Any,
     batch_id: str,
-    frontend_url: str,
+    application_url: str,
     actor: str,
     repository: ExecutionRepository | None,
     workload_runner: WorkloadRunner | None,
@@ -136,10 +133,15 @@ def _record_campaign_trial(
     now: datetime | None,
 ) -> ExecutionOutcome:
     timestamp = _utc(now)
-    resolved_runner = workload_runner or run_online_boutique_checkout
+    definition: WorkflowProbeDefinition | None = campaign.execution_definition
+    if definition is None:
+        raise ValueError(
+            "Campaign has no execution definition; create a new reviewed campaign"
+        )
+    resolved_runner = workload_runner or run_http_workflow_probe
     resolved_fetcher = trace_fetcher or _default_trace_fetcher
     resolved_sleeper = sleeper or time.sleep
-    run = resolved_runner(frontend_url, started_at=timestamp)
+    run = resolved_runner(application_url, definition, started_at=timestamp)
     traces: list[dict[str, Any]] = []
     for attempt in range(5):
         traces = resolved_fetcher(analysis, run.trace_id)
@@ -155,7 +157,7 @@ def _record_campaign_trial(
             "workflowId": campaign.workflow_id,
             "scenarioVersion": 1,
             "invocationStatus": "completed",
-            "source": "controlled_online_boutique",
+            "source": "controlled_workflow_experiment",
             "evidenceLocator": f"{analysis.jaeger_url}/api/traces/{run.trace_id}",
             "environmentId": campaign.environment_id,
             "expectedTraceId": run.trace_id,
@@ -231,7 +233,7 @@ def baseline_readiness(
 
 def run_campaign_baseline_trial(
     campaign_id: str,
-    frontend_url: str,
+    application_url: str,
     *,
     actor: str,
     campaign_repository: ExperimentCampaignRepository | None = None,
@@ -242,7 +244,7 @@ def run_campaign_baseline_trial(
     sleeper: Sleeper | None = None,
     now: datetime | None = None,
 ) -> ExecutionOutcome:
-    """Run one baseline checkout and persist only evidence-honest correlation."""
+    """Run one baseline workflow and persist only evidence-honest correlation."""
     campaign = get_experiment_campaign(campaign_id, campaign_repository)
     readiness = baseline_readiness(campaign, repository)
     if readiness["ready"]:
@@ -255,7 +257,7 @@ def run_campaign_baseline_trial(
         campaign,
         analysis,
         campaign.baseline.batch_id,
-        frontend_url,
+        application_url,
         actor,
         repository,
         workload_runner,
@@ -268,7 +270,7 @@ def run_campaign_baseline_trial(
 def run_campaign_intervention_trial(
     campaign_id: str,
     target_service: str,
-    frontend_url: str,
+    application_url: str,
     *,
     actor: str,
     campaign_repository: ExperimentCampaignRepository | None = None,
@@ -280,7 +282,7 @@ def run_campaign_intervention_trial(
     sleeper: Sleeper | None = None,
     now: datetime | None = None,
 ) -> ExecutionOutcome:
-    """Run one checkout only while the selected intervention is confirmed active."""
+    """Run one workflow only while the selected intervention is confirmed active."""
     campaign = get_experiment_campaign(campaign_id, campaign_repository)
     if not baseline_readiness(campaign, repository)["ready"]:
         raise ValueError("Baseline readiness must pass before intervention trials")
@@ -303,7 +305,7 @@ def run_campaign_intervention_trial(
         campaign,
         analysis,
         plan.batch_id,
-        frontend_url,
+        application_url,
         actor,
         repository,
         workload_runner,

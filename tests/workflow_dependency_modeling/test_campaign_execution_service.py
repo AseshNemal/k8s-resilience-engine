@@ -130,6 +130,13 @@ def test_baseline_trial_executes_correlates_and_persists() -> None:
     analyses = _analysis_repository()
     campaigns, campaign = _campaigns(analyses)
     executions = InMemoryExecutionRepository()
+    received_definition = None
+
+    def runner(application_url, definition, **kwargs):
+        nonlocal received_definition
+        received_definition = definition
+        return _run()
+
     outcome = run_campaign_baseline_trial(
         campaign.campaign_id,
         "http://localhost:8080",
@@ -137,7 +144,7 @@ def test_baseline_trial_executes_correlates_and_persists() -> None:
         campaign_repository=campaigns,
         analysis_repository=analyses,
         repository=executions,
-        workload_runner=lambda *args, **kwargs: _run(),
+        workload_runner=runner,
         trace_fetcher=lambda analysis, trace_id: [_trace()],
         sleeper=lambda seconds: None,
         now=NOW,
@@ -145,6 +152,8 @@ def test_baseline_trial_executes_correlates_and_persists() -> None:
     assert outcome.status is ExecutionOutcomeStatus.SUCCEEDED
     assert outcome.correlation_status is CorrelationStatus.MATCHED
     assert outcome.matched_trace_id == TRACE_ID
+    assert outcome.registration.source == "controlled_workflow_experiment"
+    assert received_definition == campaign.execution_definition
     assert executions.list(batch_id=campaign.baseline.batch_id) == [outcome]
     assert baseline_readiness(campaign, executions)["eligibleTrials"] == 1
 
@@ -209,7 +218,7 @@ def test_campaign_baseline_api_runs_and_reports_readiness(monkeypatch) -> None:
     monkeypatch.setattr(execution_service, "_default_repository", executions)
     monkeypatch.setattr(
         campaign_execution_service,
-        "run_online_boutique_checkout",
+        "run_http_workflow_probe",
         lambda *args, **kwargs: _run(),
     )
     monkeypatch.setattr(
@@ -350,7 +359,7 @@ def test_intervention_event_api_records_operator_confirmation(monkeypatch) -> No
     intervention_trace_id = "00000000000000000000000000000020"
     monkeypatch.setattr(
         campaign_execution_service,
-        "run_online_boutique_checkout",
+        "run_http_workflow_probe",
         lambda *args, **kwargs: _run(False, intervention_trace_id),
     )
     monkeypatch.setattr(
