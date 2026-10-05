@@ -24,7 +24,11 @@ _TRACE_ID = re.compile(r"^[0-9a-f]{32}$")
 _VARIABLE = re.compile(r"{{\s*([A-Za-z][A-Za-z0-9_.-]{0,63})\s*}}")
 
 
-def approved_application_url(value: Any) -> str:
+def approved_application_url(
+    value: Any,
+    *,
+    allowed_hosts: set[str] | None = None,
+) -> str:
     """Validate an operator-supplied target against the deployment allowlist."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("Application base URL is required")
@@ -35,7 +39,7 @@ def approved_application_url(value: Any) -> str:
         raise ValueError(
             "Application base URL cannot contain credentials, query, or fragment"
         )
-    allowed = {
+    allowed = allowed_hosts or {
         item.strip().lower()
         for item in os.getenv(
             "WORKFLOW_TARGET_ALLOWED_HOSTS",
@@ -168,9 +172,10 @@ def run_http_workflow_probe(
     transport: httpx.BaseTransport | None = None,
     started_at: datetime | None = None,
     secrets: Mapping[str, str] | None = None,
+    allowed_hosts: set[str] | None = None,
 ) -> WorkflowRunResult:
     """Execute a reviewed multi-step workflow using one distributed trace ID."""
-    approved_url = approved_application_url(base_url)
+    approved_url = approved_application_url(base_url, allowed_hosts=allowed_hosts)
     if not 1 <= timeout_seconds <= 60:
         raise ValueError("timeoutSeconds must be between 1 and 60")
     resolved_trace_id = trace_id or uuid4().hex

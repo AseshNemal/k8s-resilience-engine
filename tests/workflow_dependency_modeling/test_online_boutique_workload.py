@@ -7,11 +7,22 @@ import httpx
 import pytest
 
 from app.engine.workflow_dependency_modeling.online_boutique_workload import (
+    online_boutique_checkout_probe,
     run_online_boutique_checkout,
 )
 
 
 TRACE_ID = "0123456789abcdef0123456789abcdef"
+
+
+def test_benchmark_is_a_generic_probe_profile() -> None:
+    definition = online_boutique_checkout_probe("OLJCESPC7Z", 2028)
+    assert [step.name for step in definition.steps] == [
+        "view_product",
+        "add_to_cart",
+        "checkout",
+    ]
+    assert definition.steps[-1].response_contains == ("Your order is complete!",)
 
 
 def test_executes_reviewed_checkout_flow_with_exact_trace_context() -> None:
@@ -56,7 +67,7 @@ def test_checkout_without_confirmation_marker_is_not_success() -> None:
         transport=httpx.MockTransport(handler),
     )
     assert result.business_success is False
-    assert "confirmation marker" in result.reason
+    assert "required marker" in result.reason
 
 
 def test_rejects_unapproved_frontend_before_network_access() -> None:

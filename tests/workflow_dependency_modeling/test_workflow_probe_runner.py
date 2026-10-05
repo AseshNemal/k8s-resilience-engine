@@ -9,6 +9,7 @@ from app.engine.workflow_dependency_modeling.workflow_probe_models import (
     WorkflowProbeDefinition,
 )
 from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
+    approved_application_url,
     run_http_workflow_probe,
 )
 
@@ -144,6 +145,16 @@ def test_rejects_unapproved_target_before_network_access() -> None:
             secrets={"SHOP_API_TOKEN": "secret"},
         )
     assert called is False
+
+
+def test_explicit_adapter_allowlist_does_not_change_process_configuration() -> None:
+    assert (
+        approved_application_url(
+            "https://reviewed-app.internal/root",
+            allowed_hosts={"reviewed-app.internal"},
+        )
+        == "https://reviewed-app.internal/root"
+    )
 
 
 def test_missing_extracted_value_is_an_evidence_failure() -> None:
