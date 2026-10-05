@@ -109,6 +109,15 @@ def _scenario_payload(response: Response, scenario) -> dict[str, Any]:
     return scenario.to_mapping()
 
 
+def _campaign_application_url(payload: dict[str, Any]) -> Any:
+    application_url = payload.get("applicationUrl")
+    legacy_url = payload.get("frontendUrl")
+    if application_url is not None and legacy_url is not None:
+        if application_url != legacy_url:
+            raise ValueError("applicationUrl and frontendUrl cannot conflict")
+    return application_url if application_url is not None else legacy_url
+
+
 @router.post(
     "/scenarios",
     status_code=status.HTTP_201_CREATED,
@@ -460,7 +469,7 @@ def create_workflow_experiment_campaign(
     payload: dict[str, Any] = Body(...),
     actor: str = Header(..., alias="X-Actor", min_length=1),
 ) -> dict[str, Any]:
-    """Create a safe Online Boutique checkout experiment from observed evidence."""
+    """Create a safe workflow experiment from observed trace evidence."""
     try:
         return create_experiment_campaign(payload, actor=actor).to_mapping()
     except AnalysisSessionNotFoundError as err:
@@ -494,7 +503,7 @@ def read_workflow_experiment_campaign(campaign_id: str) -> dict[str, Any]:
         404: {"description": "Experiment campaign or analysis session was not found"},
         409: {"description": "Execution evidence already exists"},
         422: {"description": "Baseline run is invalid or no longer allowed"},
-        503: {"description": "Online Boutique or Jaeger is unavailable"},
+        503: {"description": "The target application or trace source is unavailable"},
     },
 )
 def execute_workflow_campaign_baseline(
@@ -502,11 +511,10 @@ def execute_workflow_campaign_baseline(
     payload: dict[str, Any] = Body(...),
     actor: str = Header(..., alias="X-Actor", min_length=1),
 ) -> dict[str, Any]:
-    frontend_url = payload.get("frontendUrl")
     try:
         return run_campaign_baseline_trial(
             campaign_id,
-            frontend_url,
+            _campaign_application_url(payload),
             actor=actor,
         ).to_mapping()
     except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
@@ -576,7 +584,7 @@ def read_workflow_campaign_intervention_status(campaign_id: str) -> dict[str, An
         404: {"description": "Experiment campaign or analysis session was not found"},
         409: {"description": "Execution evidence already exists"},
         422: {"description": "Intervention run is invalid or not currently allowed"},
-        503: {"description": "Online Boutique or Jaeger is unavailable"},
+        503: {"description": "The target application or trace source is unavailable"},
     },
 )
 def execute_workflow_campaign_intervention(
@@ -589,7 +597,7 @@ def execute_workflow_campaign_intervention(
         return run_campaign_intervention_trial(
             campaign_id,
             target_service,
-            payload.get("frontendUrl"),
+            _campaign_application_url(payload),
             actor=actor,
         ).to_mapping()
     except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:

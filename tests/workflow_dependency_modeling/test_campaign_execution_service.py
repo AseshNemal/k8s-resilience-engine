@@ -229,7 +229,7 @@ def test_campaign_baseline_api_runs_and_reports_readiness(monkeypatch) -> None:
     client = TestClient(app)
     created = client.post(
         f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/baseline-runs",
-        json={"frontendUrl": "http://localhost:8080"},
+        json={"applicationUrl": "http://localhost:8080"},
         headers={"X-Actor": "runner"},
     )
     assert created.status_code == 201
@@ -240,6 +240,16 @@ def test_campaign_baseline_api_runs_and_reports_readiness(monkeypatch) -> None:
     assert readiness.status_code == 200
     assert readiness.json()["eligibleTrials"] == 1
     assert readiness.json()["ready"] is False
+    conflict = client.post(
+        f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/baseline-runs",
+        json={
+            "applicationUrl": "http://localhost:8080",
+            "frontendUrl": "http://localhost:8081",
+        },
+        headers={"X-Actor": "runner"},
+    )
+    assert conflict.status_code == 422
+    assert "cannot conflict" in conflict.json()["detail"]
 
 
 def test_campaign_baseline_http_exceptions_are_documented() -> None:
@@ -383,7 +393,7 @@ def test_intervention_event_api_records_operator_confirmation(monkeypatch) -> No
     assert created.json()["eventType"] == "activated"
     trial = client.post(
         f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/interventions/paymentservice/runs",
-        json={"frontendUrl": "http://localhost:8080"},
+        json={"applicationUrl": "http://localhost:8080"},
         headers={"X-Actor": "runner"},
     )
     assert trial.status_code == 201
