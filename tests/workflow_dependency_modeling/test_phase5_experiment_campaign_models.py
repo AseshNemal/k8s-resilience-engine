@@ -195,7 +195,7 @@ def test_service_rejects_non_checkout_observation() -> None:
     payload["sessionId"] = "analysis:product"
     payload["operationName"] = "GET /product/{id}"
     analyses.create(WorkflowAnalysisSession.from_mapping(payload))
-    with pytest.raises(ValueError, match="checkout operation"):
+    with pytest.raises(ValueError, match="executionDefinition"):
         create_experiment_campaign(
             {
                 "analysisSessionId": "analysis:product",
@@ -205,6 +205,60 @@ def test_service_rejects_non_checkout_observation() -> None:
             repository=InMemoryExperimentCampaignRepository(),
             analysis_repository=analyses,
         )
+
+
+def test_service_creates_generic_campaign_for_unrelated_application() -> None:
+    analyses = InMemoryAnalysisSessionRepository()
+    payload = _analysis().to_mapping()
+    payload.update(
+        {
+            "sessionId": "analysis:orders",
+            "environmentId": "retail-staging",
+            "entryService": "gateway",
+            "operationName": "POST /orders",
+            "workflowId": "post_orders",
+            "observedServices": ["gateway", "order-api", "payment-api"],
+        }
+    )
+    analyses.create(WorkflowAnalysisSession.from_mapping(payload))
+
+    created = create_experiment_campaign(
+        {
+            "analysisSessionId": "analysis:orders",
+            "successContractConfirmed": True,
+            "workflowName": "Place customer order",
+            "businessOutcome": "The order is accepted and payment completes",
+            "executionDefinition": {
+                "runnerType": "http_sequence",
+                "steps": [
+                    {
+                        "name": "place_order",
+                        "method": "POST",
+                        "path": "/orders",
+                        "expectedStatusCodes": [202],
+                    }
+                ],
+                "successCondition": {
+                    "protocol": "grpc",
+                    "terminalService": "payment-api",
+                    "operationName": "payments.Payment/Charge",
+                    "grpcStatusCodes": ["OK"],
+                    "requiredAttributes": [],
+                },
+            },
+        },
+        actor="architect",
+        repository=InMemoryExperimentCampaignRepository(),
+        analysis_repository=analyses,
+        now=datetime(2026, 10, 5, tzinfo=timezone.utc),
+    )
+
+    assert created.workflow_id == "post_orders"
+    assert created.workflow_name == "Place customer order"
+    assert created.workload_profile == "reviewed_http_sequence"
+    assert created.success_contract.protocol == "grpc"
+    assert created.execution_definition is not None
+    assert created.candidate_services == ("order-api", "payment-api")
 
 
 def test_experiment_campaign_api(monkeypatch) -> None:
