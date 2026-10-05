@@ -39,6 +39,7 @@ from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     intervention_status,
     record_intervention_event,
     run_campaign_baseline_trial,
+    run_campaign_intervention_trial,
 )
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
@@ -337,6 +338,7 @@ __all__ = [
     "run_dependency_sensitivity_analysis",
     "run_benchmark_batch",
     "run_campaign_baseline_trial",
+    "run_campaign_intervention_trial",
     "scenario_etag",
     "start_workflow_analysis",
     "update_scenario",

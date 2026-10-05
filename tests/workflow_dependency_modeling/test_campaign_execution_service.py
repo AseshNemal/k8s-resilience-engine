@@ -15,6 +15,7 @@ from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     intervention_status,
     record_intervention_event,
     run_campaign_baseline_trial,
+    run_campaign_intervention_trial,
 )
 from app.engine.workflow_dependency_modeling.execution_models import (
     CorrelationStatus,
@@ -329,6 +330,7 @@ def test_intervention_events_require_ready_baseline_and_safe_order() -> None:
 
 def test_intervention_event_api_records_operator_confirmation(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import (
+        analysis_session_service,
         campaign_execution_service,
         execution_service,
         experiment_campaign_service,
@@ -339,10 +341,22 @@ def test_intervention_event_api_records_operator_confirmation(monkeypatch) -> No
     executions = InMemoryExecutionRepository()
     events = InMemoryInterventionEventRepository()
     _ready_baseline(analyses, campaigns, campaign, executions)
+    monkeypatch.setattr(analysis_session_service, "_default_repository", analyses)
     monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
     monkeypatch.setattr(execution_service, "_default_repository", executions)
     monkeypatch.setattr(
         campaign_execution_service, "_default_intervention_repository", events
+    )
+    intervention_trace_id = "00000000000000000000000000000020"
+    monkeypatch.setattr(
+        campaign_execution_service,
+        "run_online_boutique_checkout",
+        lambda *args, **kwargs: _run(False, intervention_trace_id),
+    )
+    monkeypatch.setattr(
+        campaign_execution_service,
+        "_default_trace_fetcher",
+        lambda analysis, trace_id: [_trace(500, intervention_trace_id)],
     )
     client = TestClient(app)
     created = client.post(
@@ -358,6 +372,13 @@ def test_intervention_event_api_records_operator_confirmation(monkeypatch) -> No
     )
     assert created.status_code == 201
     assert created.json()["eventType"] == "activated"
+    trial = client.post(
+        f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/interventions/paymentservice/runs",
+        json={"frontendUrl": "http://localhost:8080"},
+        headers={"X-Actor": "runner"},
+    )
+    assert trial.status_code == 201
+    assert trial.json()["status"] == "failed"
     status = client.get(
         f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/intervention-status"
     )
@@ -374,3 +395,59 @@ def test_intervention_event_http_exceptions_are_documented() -> None:
         "/api/workflows/experiment-campaigns/{campaign_id}/intervention-events"
     ]["post"]["responses"]
     assert {"201", "404", "409", "422"} <= responses.keys()
+
+
+def test_intervention_trial_requires_active_event_and_updates_status() -> None:
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    events = InMemoryInterventionEventRepository()
+    _ready_baseline(analyses, campaigns, campaign, executions)
+    record_intervention_event(
+        campaign.campaign_id,
+        {
+            "targetService": "paymentservice",
+            "eventType": "activated",
+            "operatorConfirmed": True,
+            "evidence": "docker:paymentservice-stopped",
+            "occurredAt": NOW.isoformat(),
+        },
+        actor="operator",
+        campaign_repository=campaigns,
+        repository=events,
+        execution_repository_override=executions,
+        now=NOW,
+    )
+    trace_id = "00000000000000000000000000000010"
+    outcome = run_campaign_intervention_trial(
+        campaign.campaign_id,
+        "paymentservice",
+        "http://localhost:8080",
+        actor="runner",
+        campaign_repository=campaigns,
+        analysis_repository=analyses,
+        event_repository=events,
+        repository=executions,
+        workload_runner=lambda *args, **kwargs: _run(False, trace_id),
+        trace_fetcher=lambda analysis, expected: [_trace(500, trace_id)],
+        sleeper=lambda seconds: None,
+        now=NOW,
+    )
+    assert outcome.status is ExecutionOutcomeStatus.FAILED
+    status = intervention_status(
+        campaign.campaign_id,
+        campaign_repository=campaigns,
+        repository=events,
+        execution_repository_override=executions,
+    )
+    payment = next(item for item in status["services"] if item["targetService"] == "paymentservice")
+    assert payment["state"] == "active"
+    assert payment["eligibleTrials"] == 1
+    assert payment["evidenceReady"] is False
+
+
+def test_intervention_run_http_exceptions_are_documented() -> None:
+    responses = TestClient(app).get("/openapi.json").json()["paths"][
+        "/api/workflows/experiment-campaigns/{campaign_id}/interventions/{target_service}/runs"
+    ]["post"]["responses"]
+    assert {"201", "404", "409", "422", "503"} <= responses.keys()

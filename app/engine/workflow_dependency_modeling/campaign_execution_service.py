@@ -123,6 +123,66 @@ def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]
     )
 
 
+def _record_campaign_trial(
+    campaign: ExperimentCampaign,
+    analysis: Any,
+    batch_id: str,
+    frontend_url: str,
+    actor: str,
+    repository: ExecutionRepository | None,
+    workload_runner: WorkloadRunner | None,
+    trace_fetcher: TraceFetcher | None,
+    sleeper: Sleeper | None,
+    now: datetime | None,
+) -> ExecutionOutcome:
+    timestamp = _utc(now)
+    resolved_runner = workload_runner or run_online_boutique_checkout
+    resolved_fetcher = trace_fetcher or _default_trace_fetcher
+    resolved_sleeper = sleeper or time.sleep
+    run = resolved_runner(frontend_url, started_at=timestamp)
+    traces: list[dict[str, Any]] = []
+    for attempt in range(5):
+        traces = resolved_fetcher(analysis, run.trace_id)
+        if any(trace.get("traceID") == run.trace_id for trace in traces):
+            break
+        if attempt < 4:
+            resolved_sleeper(0.4)
+
+    registration = ExecutionRegistration.from_mapping(
+        {
+            "executionId": f"execution:{campaign.campaign_id.split(':')[-1]}:{uuid4().hex[:12]}",
+            "batchId": batch_id,
+            "workflowId": campaign.workflow_id,
+            "scenarioVersion": 1,
+            "invocationStatus": "completed",
+            "source": "controlled_online_boutique",
+            "evidenceLocator": f"{analysis.jaeger_url}/api/traces/{run.trace_id}",
+            "environmentId": campaign.environment_id,
+            "expectedTraceId": run.trace_id,
+            "startedAt": run.started_at.isoformat(),
+            "finishedAt": run.finished_at.isoformat(),
+            "registeredBy": actor,
+        }
+    )
+    outcome = evaluate_execution(registration, _scenario(campaign), traces, now=timestamp)
+    if (
+        not run.business_success
+        and outcome.correlation_status is CorrelationStatus.MATCHED
+        and outcome.status is ExecutionOutcomeStatus.SUCCEEDED
+    ):
+        outcome = ExecutionOutcome(
+            registration=outcome.registration,
+            status=ExecutionOutcomeStatus.FAILED,
+            correlation_status=outcome.correlation_status,
+            recorded_at=outcome.recorded_at,
+            matched_trace_id=outcome.matched_trace_id,
+            evidence_id=outcome.evidence_id,
+            assertions=outcome.assertions,
+            reasons=(*outcome.reasons, run.reason),
+        )
+    return execution_repository(repository).create(outcome)
+
+
 def baseline_readiness(
     campaign: ExperimentCampaign,
     repository: ExecutionRepository | None = None,
@@ -191,52 +251,66 @@ def run_campaign_baseline_trial(
         raise ValueError("Baseline attempt limit reached; investigate evidence quality")
 
     analysis = get_workflow_analysis(campaign.analysis_session_id, analysis_repository)
-    timestamp = _utc(now)
-    resolved_runner = workload_runner or run_online_boutique_checkout
-    resolved_fetcher = trace_fetcher or _default_trace_fetcher
-    resolved_sleeper = sleeper or time.sleep
-    run = resolved_runner(frontend_url, started_at=timestamp)
-    traces: list[dict[str, Any]] = []
-    for attempt in range(5):
-        traces = resolved_fetcher(analysis, run.trace_id)
-        if any(trace.get("traceID") == run.trace_id for trace in traces):
-            break
-        if attempt < 4:
-            resolved_sleeper(0.4)
-
-    registration = ExecutionRegistration.from_mapping(
-        {
-            "executionId": f"execution:{campaign.campaign_id.split(':')[-1]}:{uuid4().hex[:12]}",
-            "batchId": campaign.baseline.batch_id,
-            "workflowId": campaign.workflow_id,
-            "scenarioVersion": 1,
-            "invocationStatus": "completed",
-            "source": "controlled_online_boutique",
-            "evidenceLocator": f"{analysis.jaeger_url}/api/traces/{run.trace_id}",
-            "environmentId": campaign.environment_id,
-            "expectedTraceId": run.trace_id,
-            "startedAt": run.started_at.isoformat(),
-            "finishedAt": run.finished_at.isoformat(),
-            "registeredBy": actor,
-        }
+    return _record_campaign_trial(
+        campaign,
+        analysis,
+        campaign.baseline.batch_id,
+        frontend_url,
+        actor,
+        repository,
+        workload_runner,
+        trace_fetcher,
+        sleeper,
+        now,
     )
-    outcome = evaluate_execution(registration, _scenario(campaign), traces, now=timestamp)
-    if (
-        not run.business_success
-        and outcome.correlation_status is CorrelationStatus.MATCHED
-        and outcome.status is ExecutionOutcomeStatus.SUCCEEDED
-    ):
-        outcome = ExecutionOutcome(
-            registration=outcome.registration,
-            status=ExecutionOutcomeStatus.FAILED,
-            correlation_status=outcome.correlation_status,
-            recorded_at=outcome.recorded_at,
-            matched_trace_id=outcome.matched_trace_id,
-            evidence_id=outcome.evidence_id,
-            assertions=outcome.assertions,
-            reasons=(*outcome.reasons, run.reason),
-        )
-    return execution_repository(repository).create(outcome)
+
+
+def run_campaign_intervention_trial(
+    campaign_id: str,
+    target_service: str,
+    frontend_url: str,
+    *,
+    actor: str,
+    campaign_repository: ExperimentCampaignRepository | None = None,
+    analysis_repository: AnalysisSessionRepository | None = None,
+    event_repository: InterventionEventRepository | None = None,
+    repository: ExecutionRepository | None = None,
+    workload_runner: WorkloadRunner | None = None,
+    trace_fetcher: TraceFetcher | None = None,
+    sleeper: Sleeper | None = None,
+    now: datetime | None = None,
+) -> ExecutionOutcome:
+    """Run one checkout only while the selected intervention is confirmed active."""
+    campaign = get_experiment_campaign(campaign_id, campaign_repository)
+    if not baseline_readiness(campaign, repository)["ready"]:
+        raise ValueError("Baseline readiness must pass before intervention trials")
+    plan = next(
+        (item for item in campaign.interventions if item.target_service == target_service),
+        None,
+    )
+    if plan is None:
+        raise ValueError("targetService is not a candidate in this campaign")
+    events = _intervention_repository(event_repository).list(
+        campaign.campaign_id, target_service
+    )
+    if not events or events[-1].event_type is not InterventionEventType.ACTIVATED:
+        raise ValueError("Intervention must be confirmed active before collecting trials")
+    attempts = execution_repository(repository).list(batch_id=plan.batch_id)
+    if len(attempts) >= campaign.baseline.required_trials * 3:
+        raise ValueError("Intervention attempt limit reached; investigate evidence quality")
+    analysis = get_workflow_analysis(campaign.analysis_session_id, analysis_repository)
+    return _record_campaign_trial(
+        campaign,
+        analysis,
+        plan.batch_id,
+        frontend_url,
+        actor,
+        repository,
+        workload_runner,
+        trace_fetcher,
+        sleeper,
+        now,
+    )
 
 
 def record_intervention_event(
@@ -327,15 +401,38 @@ def intervention_status(
                 if events[-1].event_type is InterventionEventType.ACTIVATED
                 else "restored"
             )
-        trial_count = len(
-            execution_repository(execution_repository_override).list(batch_id=plan.batch_id)
+        records = execution_repository(execution_repository_override).list(
+            batch_id=plan.batch_id
         )
+        trial_count = len(records)
+        eligible = [
+            item
+            for item in records
+            if item.correlation_status is CorrelationStatus.MATCHED
+            and item.status
+            in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
+        ]
+        trace_ids = [item.matched_trace_id for item in eligible]
+        duplicate_trace_ids = sorted(
+            {trace_id for trace_id in trace_ids if trace_id and trace_ids.count(trace_id) > 1}
+        )
+        excluded = len(records) - len(eligible)
         services.append(
             {
                 "targetService": plan.target_service,
                 "batchId": plan.batch_id,
                 "state": state,
                 "trialCount": trial_count,
+                "eligibleTrials": len(eligible),
+                "requiredTrials": campaign.baseline.required_trials,
+                "excludedTrials": excluded,
+                "duplicateTraceIds": duplicate_trace_ids,
+                "evidenceReady": (
+                    state == "restored"
+                    and len(eligible) >= campaign.baseline.required_trials
+                    and excluded == 0
+                    and not duplicate_trace_ids
+                ),
                 "events": [event.to_mapping() for event in events],
             }
         )

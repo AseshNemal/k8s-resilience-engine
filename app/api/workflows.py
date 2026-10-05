@@ -44,6 +44,7 @@ from app.engine.workflow_dependency_modeling.service import (
     run_dependency_sensitivity_analysis,
     run_benchmark_batch,
     run_campaign_baseline_trial,
+    run_campaign_intervention_trial,
     scenario_etag,
     update_scenario,
 )
@@ -562,6 +563,39 @@ def read_workflow_campaign_intervention_status(campaign_id: str) -> dict[str, An
         return intervention_status(campaign_id)
     except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/interventions/{target_service}/runs",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "Execution evidence already exists"},
+        422: {"description": "Intervention run is invalid or not currently allowed"},
+        503: {"description": "Online Boutique or Jaeger is unavailable"},
+    },
+)
+def execute_workflow_campaign_intervention(
+    campaign_id: str,
+    target_service: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return run_campaign_intervention_trial(
+            campaign_id,
+            target_service,
+            payload.get("frontendUrl"),
+            actor=actor,
+        ).to_mapping()
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExecutionAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (ConnectionError, httpx.HTTPError) as err:
+        raise HTTPException(status_code=503, detail="Experiment evidence source is unavailable") from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.get("/dependency-references")
