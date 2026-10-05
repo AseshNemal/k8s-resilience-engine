@@ -257,6 +257,7 @@ class DependencyAssessment:
     environment_id: str
     source: str
     candidate_graph: WorkflowGraph
+    structural_entry_service: str | None
     baseline_batch_ids: tuple[str, ...]
     interventions: tuple[InterventionCohort, ...]
     policy: AssessmentPolicy
@@ -272,6 +273,7 @@ class DependencyAssessment:
             "environmentId": self.environment_id,
             "source": self.source,
             "candidateGraph": self.candidate_graph.model_dump(by_alias=True),
+            "structuralEntryService": self.structural_entry_service,
             "baselineBatchIds": list(self.baseline_batch_ids),
             "interventions": [item.to_mapping() for item in self.interventions],
             "policy": self.policy.to_mapping(),
@@ -293,6 +295,11 @@ class DependencyAssessment:
             environment_id=_identifier(data, "environmentId"),
             source=_required_text(data, "source"),
             candidate_graph=graph,
+            structural_entry_service=(
+                _identifier(data, "structuralEntryService")
+                if data.get("structuralEntryService") is not None
+                else None
+            ),
             baseline_batch_ids=_batch_ids(
                 data.get("baselineBatchIds"), "baselineBatchIds"
             ),

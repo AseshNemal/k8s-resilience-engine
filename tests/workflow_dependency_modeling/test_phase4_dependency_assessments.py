@@ -290,6 +290,42 @@ def test_approval_rejects_unresolved_candidate(monkeypatch) -> None:
         )
 
 
+def test_structural_entrypoint_is_retained_without_false_intervention(
+    monkeypatch,
+) -> None:
+    from app.engine.workflow_dependency_modeling import scenario_service
+
+    scenarios, executions, assessments = _repositories()
+    monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
+    payload = _assessment_payload()
+    payload["candidateGraph"]["mandatoryServices"].append("frontend")
+    payload["candidateGraph"]["edges"].append(
+        {"source": "frontend", "target": "paymentservice"}
+    )
+    payload["structuralEntryService"] = "frontend"
+
+    created = create_dependency_assessment(
+        payload,
+        actor="researcher",
+        repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    assert "frontend" not in {item.service_name for item in created.services}
+
+    approval = approve_dependency_assessment(
+        created.assessment_id,
+        actor="lead-researcher",
+        rationale="Entry route and controlled cohorts reviewed.",
+        repository=assessments,
+        now=NOW,
+    )
+    assert approval.approved_graph.mandatory_services == ["frontend", "paymentservice"]
+    assert ("frontend", "paymentservice") in {
+        (edge.source, edge.target) for edge in approval.approved_graph.edges
+    }
+
+
 def test_sqlalchemy_repository_round_trips_assessment_and_approval(
     tmp_path, monkeypatch
 ) -> None:
