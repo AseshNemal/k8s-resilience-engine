@@ -20,7 +20,7 @@
         <span class="component-owner">Owner: <strong>Member 1</strong></span>
         <span class="contract-chip">In: Distributed Traces</span>
         <span class="contract-chip contract-chip--out">Out: WorkflowGraph</span>
-        <span class="status-badge" data-role="data-source-badge">SYNTHETIC FIXTURE</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="data-source-badge">NO ACTIVE CAMPAIGN</span>
     </div>
 </div>
 
@@ -45,6 +45,70 @@
     </div>
 </section>
 
+<section class="guided-analysis" aria-labelledby="guided-analysis-title">
+    <div class="guided-analysis__header">
+        <div>
+            <p class="workflow-kicker">Online Boutique · controlled experiment</p>
+            <h3 id="guided-analysis-title">Determine what checkout actually depends on</h3>
+            <p>Start from checkout traces, establish a stable baseline, then compare confirmed service interventions. Frequency alone never becomes a dependency claim.</p>
+        </div>
+        <span class="status-badge status-badge--muted status-badge--no-dot">Interventions require approval</span>
+    </div>
+    <ol class="experiment-path" aria-label="Checkout dependency experiment stages">
+        <li class="is-current"><span>01</span><strong>Observe</strong><small>Find checkout traces</small></li>
+        <li><span>02</span><strong>Baseline</strong><small>Prove stable success</small></li>
+        <li><span>03</span><strong>Intervene</strong><small>Test one service</small></li>
+        <li><span>04</span><strong>Classify</strong><small>Compare outcomes</small></li>
+        <li><span>05</span><strong>Approve</strong><small>Release graph</small></li>
+    </ol>
+    <div class="experiment-profile">
+        <div><span>Workflow under test</span><strong>Customer checkout</strong></div>
+        <div><span>Business success</span><strong>Customer receives a confirmed order</strong></div>
+        <div><span>Evidence source</span><strong>Jaeger traces + controlled outcomes</strong></div>
+    </div>
+    <form class="guided-analysis__form" data-role="guided-analysis-form">
+        <div class="guided-field">
+            <label for="guided-environment">Experiment environment</label>
+            <input id="guided-environment" name="environmentId" value="online-boutique-local" required>
+            <small>Used to prevent evidence from different deployments being mixed.</small>
+        </div>
+        <div class="guided-field guided-field--wide">
+            <label for="guided-jaeger-url">Jaeger Query URL</label>
+            <input id="guided-jaeger-url" name="jaegerUrl" type="url"
+                   value="http://localhost:16686" required>
+            <small>The backend accepts only administrator-approved Jaeger hosts.</small>
+        </div>
+        <div class="guided-field">
+            <label for="guided-lookback">Trace window</label>
+            <select id="guided-lookback" name="lookback">
+                <option value="1h" selected>Last hour</option>
+                <option value="6h">Last 6 hours</option>
+                <option value="24h">Last 24 hours</option>
+                <option value="7d">Last 7 days</option>
+            </select>
+        </div>
+        <input name="entryService" value="frontend" type="hidden">
+        <input name="evidenceTier" value="experimental" type="hidden">
+        <div class="guided-analysis__action">
+            <button type="submit" class="experiment-button" data-role="guided-discover-button">Connect to checkout traces</button>
+            <span data-role="guided-analysis-status" aria-live="polite"></span>
+        </div>
+    </form>
+    <div class="guided-discovery" data-role="guided-discovery" hidden>
+        <div>
+            <label for="guided-operation">Observed checkout operation</label>
+            <select id="guided-operation" data-role="guided-operation"></select>
+        </div>
+        <button type="button" class="experiment-button" data-role="guided-inspect-button">Use this checkout evidence</button>
+    </div>
+    <div class="guided-result" data-role="guided-result" hidden aria-live="polite"></div>
+</section>
+
+<details class="research-audit">
+<summary>
+    <span><strong>Research audit controls</strong><small>Scenarios, execution ledgers, intervention cohorts, references, and metrics</small></span>
+</summary>
+<div class="research-audit__body">
 <nav class="workflow-steps" aria-label="Workflow modeling stages">
     <button type="button" class="workflow-step is-active" data-workflow-stage-button="define" aria-pressed="true">
         <span>1</span><strong>Define</strong><small>Business outcome</small>
@@ -472,6 +536,8 @@
     {{ loading_state("Loading WorkflowGraph…") }}
 </div>
 </div>
+</div>
+</details>
 
 <template data-role="page-template">
     <p class="card" data-role="evidence-note" aria-live="polite"></p>
@@ -620,5 +686,5 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-5-evaluation" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-5-experiment-workspace" defer></script>
 {% endblock %}

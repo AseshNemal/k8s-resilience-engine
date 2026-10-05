@@ -82,3 +82,19 @@ def test_workflow_page_explains_component_contract_and_stages() -> None:
     assert "Future Work" not in response.text
     assert "Lower-frequency Candidates" in response.text
     assert "Mandatory Services" not in response.text
+
+
+def test_workflow_page_defaults_to_guided_analysis_not_internal_artifacts() -> None:
+    response = client.get("/components/workflows")
+    assert response.status_code == 200
+    assert 'data-role="guided-analysis-form"' in response.text
+    assert 'data-role="guided-discover-button"' in response.text
+    assert 'data-role="guided-inspect-button"' in response.text
+    assert "Determine what checkout actually depends on" in response.text
+    assert "Customer receives a confirmed order" in response.text
+    assert "Connect to checkout traces" in response.text
+    assert "Interventions require approval" in response.text
+    assert "Synthetic Fixture Dataset" in response.text
+    assert "NO ACTIVE CAMPAIGN" in response.text
+    assert "Research audit controls" in response.text
+    assert '<details class="research-audit">' in response.text

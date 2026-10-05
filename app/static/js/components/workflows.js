@@ -54,10 +54,19 @@
     const runRepeatability = document.querySelector('[data-role="run-repeatability"]');
     const stageButtons = document.querySelectorAll('[data-workflow-stage-button]');
     const stagePanels = document.querySelectorAll('[data-workflow-stage]');
+    const guidedForm = document.querySelector('[data-role="guided-analysis-form"]');
+    const guidedStatus = document.querySelector('[data-role="guided-analysis-status"]');
+    const guidedDiscovery = document.querySelector('[data-role="guided-discovery"]');
+    const guidedOperation = document.querySelector('[data-role="guided-operation"]');
+    const guidedInspectButton = document.querySelector('[data-role="guided-inspect-button"]');
+    const guidedResult = document.querySelector('[data-role="guided-result"]');
+    const researchAudit = document.querySelector(".research-audit");
 
     let discoveredWorkflows = [];
+    let guidedWorkflows = [];
     let liveMode = false;
     let renderVersion = 0;
+    let researchAuditInitialized = false;
 
     function activateWorkflowStage(stageName) {
         stagePanels.forEach((panel) => {
@@ -89,6 +98,321 @@
             throw new Error(data.detail || `Request failed with HTTP ${response.status}`);
         }
         return data;
+    }
+
+    function guidedConnectionPayload() {
+        const values = new FormData(guidedForm);
+        return {
+            environmentId: String(values.get("environmentId")).trim(),
+            evidenceTier: String(values.get("evidenceTier")),
+            jaegerUrl: String(values.get("jaegerUrl")).trim(),
+            entryService: String(values.get("entryService")).trim(),
+            lookback: String(values.get("lookback")),
+        };
+    }
+
+    function setGuidedStatus(message, isError = false) {
+        if (!guidedStatus) return;
+        guidedStatus.textContent = message;
+        guidedStatus.style.color = isError
+            ? "var(--color-danger, #b91c1c)"
+            : "var(--color-text-muted)";
+    }
+
+    function guidedConnectionError(error) {
+        const message = String(error && error.message ? error.message : error);
+        if (message.includes("Could not fetch traces") || message.includes("Jaeger")) {
+            return "Jaeger is not reachable. Start the Online Boutique experiment stack or verify the approved Jaeger URL, then try again.";
+        }
+        return message;
+    }
+
+    function guidedText(tag, className, value) {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        element.textContent = value;
+        return element;
+    }
+
+    function updateExperimentPath(activeIndex) {
+        document.querySelectorAll(".experiment-path li").forEach((item, index) => {
+            item.classList.toggle("is-current", index === activeIndex);
+            item.classList.toggle("is-complete", index < activeIndex);
+        });
+    }
+
+    function renderCampaign(campaign) {
+        if (!guidedResult) return;
+        guidedResult.hidden = false;
+        guidedResult.replaceChildren();
+        updateExperimentPath(campaign.status === "baseline_required" ? 1 : 2);
+
+        const heading = document.createElement("div");
+        heading.className = "guided-result__heading";
+        const identity = document.createElement("div");
+        identity.append(
+            guidedText("span", "guided-result__label", "Controlled experiment plan"),
+            guidedText("h4", "", campaign.workflowName),
+            guidedText("p", "", `${campaign.environmentId} · ${campaign.evidenceTier} evidence`)
+        );
+        heading.append(
+            identity,
+            guidedText("span", "guided-maturity", campaign.status.replaceAll("_", " "))
+        );
+
+        const metrics = document.createElement("div");
+        metrics.className = "guided-result__metrics";
+        metrics.append(
+            resultCard("Baseline gate", `${campaign.baseline.requiredTrials} trials`, "All traces must correlate exactly"),
+            resultCard("Candidates", String(campaign.candidateServices.length), "One intervention cohort per service"),
+            resultCard("Observed evidence", `${campaign.observedTraceCount} traces`, "Discovery only—not dependency proof")
+        );
+
+        const contract = document.createElement("section");
+        contract.className = "guided-contract guided-contract--confirmed";
+        contract.append(
+            guidedText("span", "guided-result__label", "Locked success contract"),
+            guidedText("h5", "", campaign.successContract.outcome),
+            guidedText(
+                "p",
+                "",
+                `${campaign.successContract.terminalService} · ${campaign.successContract.terminalOperation} · HTTP ${campaign.successContract.acceptedStatusCodes.join(", ")}`
+            )
+        );
+
+        const runbook = document.createElement("section");
+        runbook.className = "campaign-runbook";
+        runbook.appendChild(guidedText("h5", "", "Intervention runbook"));
+        const list = document.createElement("div");
+        list.className = "campaign-runbook__list";
+        campaign.interventions.forEach((intervention, index) => {
+            const item = document.createElement("article");
+            item.className = "campaign-runbook__item";
+            item.append(
+                guidedText("span", "campaign-runbook__number", String(index + 1).padStart(2, "0")),
+                guidedText("strong", "", intervention.targetService),
+                guidedText("small", "", "Make unavailable · confirm · collect cohort · restore")
+            );
+            list.appendChild(item);
+        });
+        runbook.appendChild(list);
+
+        const next = document.createElement("div");
+        next.className = "guided-next";
+        next.appendChild(guidedText("h5", "", "Why classification is blocked"));
+        const blockers = document.createElement("ol");
+        campaign.blockers.forEach((blocker) => blockers.appendChild(guidedText("li", "", blocker)));
+        next.appendChild(blockers);
+
+        guidedResult.append(heading, metrics, contract, runbook, next);
+        if (dataSourceBadge) {
+            dataSourceBadge.textContent = "EXPERIMENT · BASELINE REQUIRED";
+            dataSourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
+        }
+    }
+
+    async function createGuidedCampaign(sessionId, requiredTrials, button, status) {
+        button.disabled = true;
+        status.textContent = "Generating baseline and intervention cohorts…";
+        try {
+            const campaign = await requestScenario("/api/workflows/experiment-campaigns", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Actor": "guided-local-researcher",
+                },
+                body: JSON.stringify({
+                    analysisSessionId: sessionId,
+                    successContractConfirmed: true,
+                    requiredBaselineTrials: requiredTrials,
+                }),
+            });
+            renderCampaign(campaign);
+            setGuidedStatus("Experiment planned. Baseline evidence is now required.");
+        } catch (error) {
+            status.textContent = error.message;
+            status.classList.add("is-error");
+            button.disabled = false;
+        }
+    }
+
+    function renderGuidedSession(session) {
+        if (!guidedResult) return;
+        guidedResult.hidden = false;
+        guidedResult.replaceChildren();
+
+        const heading = document.createElement("div");
+        heading.className = "guided-result__heading";
+        const identity = document.createElement("div");
+        identity.append(
+            guidedText("span", "guided-result__label", "Observed workflow"),
+            guidedText("h4", "", session.operationName),
+            guidedText(
+                "p",
+                "",
+                `${session.environmentId} · ${session.evidenceTier} evidence · ${session.lookback} window`
+            )
+        );
+        const maturity = guidedText("span", "guided-maturity", session.maturity);
+        heading.append(identity, maturity);
+
+        const metrics = document.createElement("div");
+        metrics.className = "guided-result__metrics";
+        metrics.append(
+            resultCard("Traces", String(session.traceCount), "Matched to this operation"),
+            resultCard("Services", String(session.observedServices.length), "Observed participants"),
+            resultCard("Edges", String(session.edges.length), "Observed call relationships")
+        );
+
+        const warning = document.createElement("div");
+        warning.className = "guided-result__warning";
+        warning.append(
+            guidedText("strong", "", "Observed does not mean validated."),
+            guidedText("span", "", session.limitations.join(" "))
+        );
+
+        const evidence = document.createElement("div");
+        evidence.className = "guided-evidence";
+        evidence.appendChild(guidedText("h5", "", "Observed service participation"));
+        session.serviceEvidence.forEach((item) => {
+            const row = document.createElement("div");
+            row.className = "guided-evidence__row";
+            const service = guidedText("strong", "", item.service);
+            const track = document.createElement("span");
+            track.className = "guided-evidence__track";
+            const bar = document.createElement("span");
+            bar.style.width = `${Math.round(item.frequency * 100)}%`;
+            track.appendChild(bar);
+            const value = guidedText(
+                "small",
+                "",
+                `${item.traceCount}/${session.traceCount} traces · ${Math.round(item.frequency * 100)}%`
+            );
+            row.append(service, track, value);
+            evidence.appendChild(row);
+        });
+
+        const contract = document.createElement("section");
+        contract.className = "guided-contract";
+        contract.append(
+            guidedText("span", "guided-result__label", "Business success contract"),
+            guidedText("h5", "", "Customer receives a confirmed order"),
+            guidedText("p", "", "The checkout request completes with HTTP 200 and the checkoutservice records PlaceOrder.")
+        );
+        const confirmation = document.createElement("label");
+        confirmation.className = "guided-contract__confirmation";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        confirmation.append(checkbox, document.createTextNode(" This correctly defines a successful checkout for this experiment."));
+        const controls = document.createElement("div");
+        controls.className = "guided-contract__controls";
+        const trialsLabel = guidedText("label", "", "Baseline trials");
+        const trials = document.createElement("input");
+        trials.type = "number";
+        trials.min = "3";
+        trials.max = "30";
+        trials.value = "5";
+        trialsLabel.appendChild(trials);
+        const planButton = guidedText("button", "experiment-button", "Create controlled experiment");
+        planButton.type = "button";
+        planButton.disabled = true;
+        const planStatus = guidedText("small", "guided-contract__status", "No service will be changed by this action.");
+        checkbox.addEventListener("change", () => {
+            planButton.disabled = !checkbox.checked;
+        });
+        planButton.addEventListener("click", () => {
+            createGuidedCampaign(session.sessionId, Number(trials.value), planButton, planStatus);
+        });
+        controls.append(trialsLabel, planButton, planStatus);
+        contract.append(confirmation, controls);
+
+        guidedResult.append(heading, metrics, warning, evidence, contract);
+        updateExperimentPath(0);
+        if (dataSourceBadge) {
+            dataSourceBadge.textContent = `${session.evidenceTier.toUpperCase()} · OBSERVED`;
+            dataSourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
+        }
+    }
+
+    async function discoverGuidedWorkflows(event) {
+        event.preventDefault();
+        if (!guidedForm || !guidedForm.reportValidity()) return;
+        const button = guidedForm.querySelector('[data-role="guided-discover-button"]');
+        button.disabled = true;
+        setGuidedStatus("Checking the approved Jaeger connection…");
+        try {
+            const payload = guidedConnectionPayload();
+            const discovered = await requestScenario(
+                "/api/workflows/analysis-sessions/discover",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                }
+            );
+            guidedWorkflows = discovered.filter((workflow) =>
+                workflow.operationName.toLowerCase().includes("checkout")
+            );
+            guidedOperation.replaceChildren();
+            guidedWorkflows.forEach((workflow) => {
+                const option = document.createElement("option");
+                option.value = workflow.operationName;
+                option.textContent = `${workflow.operationName} · ${workflow.traceCount} traces · ${workflow.participatingServices.length} services`;
+                guidedOperation.appendChild(option);
+            });
+            guidedDiscovery.hidden = guidedWorkflows.length === 0;
+            setGuidedStatus(
+                guidedWorkflows.length
+                    ? `Found ${guidedWorkflows.length} checkout operation${guidedWorkflows.length === 1 ? "" : "s"}. Select the one representing the full customer checkout.`
+                    : "Jaeger is reachable, but no checkout operation was found in this trace window.",
+                guidedWorkflows.length === 0
+            );
+        } catch (error) {
+            guidedDiscovery.hidden = true;
+            setGuidedStatus(guidedConnectionError(error), true);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function inspectGuidedWorkflow() {
+        if (!guidedOperation || !guidedOperation.value) return;
+        guidedInspectButton.disabled = true;
+        setGuidedStatus("Creating an immutable observational evidence record…");
+        try {
+            const session = await requestScenario("/api/workflows/analysis-sessions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Actor": "guided-local-operator",
+                },
+                body: JSON.stringify({
+                    ...guidedConnectionPayload(),
+                    operationName: guidedOperation.value,
+                }),
+            });
+            renderGuidedSession(session);
+            setGuidedStatus("Observation recorded. No dependency-necessity claim has been made.");
+        } catch (error) {
+            setGuidedStatus(error.message, true);
+        } finally {
+            guidedInspectButton.disabled = false;
+        }
+    }
+
+    async function loadLatestExperiment() {
+        if (!guidedResult) return;
+        try {
+            const campaigns = await requestScenario("/api/workflows/experiment-campaigns");
+            if (campaigns.length) {
+                renderCampaign(campaigns[0]);
+                return;
+            }
+            const sessions = await requestScenario("/api/workflows/analysis-sessions");
+            if (sessions.length) renderGuidedSession(sessions[0]);
+        } catch (error) {
+            setGuidedStatus(`Previous analysis unavailable: ${error.message}`, true);
+        }
     }
 
     function setLabStatus(target, message, isError = false) {
@@ -1412,6 +1736,22 @@
     if (runClassificationEvaluation) runClassificationEvaluation.addEventListener("click", evaluateClassification);
     if (runPolicySensitivity) runPolicySensitivity.addEventListener("click", evaluatePolicySensitivity);
     if (runRepeatability) runRepeatability.addEventListener("click", evaluateRepeatability);
+    if (guidedForm) guidedForm.addEventListener("submit", discoverGuidedWorkflows);
+    if (guidedInspectButton) guidedInspectButton.addEventListener("click", inspectGuidedWorkflow);
+    if (researchAudit) {
+        researchAudit.addEventListener("toggle", () => {
+            if (!researchAudit.open || researchAuditInitialized) return;
+            researchAuditInitialized = true;
+            loadBenchmarkWorkflow();
+            checkJaegerHealth();
+            loadScenarioRegistry();
+            loadExecutionLedger();
+            loadDependencyAssessments();
+            loadClassificationLab();
+            initEvaluationListeners();
+            setTimeout(handleRunEvaluation, 300);
+        });
+    }
     stageButtons.forEach((button) => {
         button.addEventListener("click", () => {
             activateWorkflowStage(button.dataset.workflowStageButton);
@@ -1420,13 +1760,8 @@
 
     document.addEventListener("DOMContentLoaded", () => {
         activateWorkflowStage("define");
-        loadBenchmarkWorkflow();
-        checkJaegerHealth();
-        loadScenarioRegistry();
-        loadExecutionLedger();
-        loadDependencyAssessments();
-        loadClassificationLab();
-        initEvaluationListeners();
-        setTimeout(handleRunEvaluation, 300);
+        loadLatestExperiment();
+        const sourcePill = document.querySelector('.topbar .pill-badge--teal');
+        if (sourcePill) sourcePill.textContent = "No active campaign";
     });
 })();
