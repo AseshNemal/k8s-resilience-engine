@@ -231,3 +231,14 @@ def approve_experiment_campaign(
         repository=repository,
         now=now,
     )
+
+
+def get_experiment_campaign_approval(
+    campaign_id: str,
+    *,
+    campaign_repository: ExperimentCampaignRepository | None = None,
+    repository: DependencyAssessmentRepository | None = None,
+) -> AssessmentApproval:
+    """Return the immutable approved graph owned by this campaign."""
+    get_experiment_campaign(campaign_id, campaign_repository)
+    return assessment_repository(repository).get_approval(_assessment_id(campaign_id))

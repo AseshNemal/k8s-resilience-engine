@@ -27,6 +27,7 @@ from app.engine.workflow_dependency_modeling.service import (
     get_execution,
     get_experiment_campaign,
     get_experiment_campaign_assessment,
+    get_experiment_campaign_approval,
     get_dependency_assessment,
     get_dependency_classification_evaluation,
     get_dependency_classification_reference,
@@ -664,6 +665,18 @@ def approve_workflow_campaign(
         raise HTTPException(status_code=409, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/approval",
+    responses={404: {"description": "Campaign or campaign approval was not found"}},
+)
+def read_workflow_campaign_approval(campaign_id: str) -> dict[str, Any]:
+    """Resume the approved Component 3 handoff for an existing campaign."""
+    try:
+        return get_experiment_campaign_approval(campaign_id).to_mapping()
+    except (ExperimentCampaignNotFoundError, DependencyAssessmentNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
 
 
 @router.get("/dependency-references")

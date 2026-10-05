@@ -45,6 +45,7 @@ from app.engine.workflow_dependency_modeling.campaign_assessment_service import 
     approve_experiment_campaign,
     assess_experiment_campaign,
     get_experiment_campaign_assessment,
+    get_experiment_campaign_approval,
 )
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
@@ -322,6 +323,7 @@ __all__ = [
     "get_execution",
     "get_experiment_campaign",
     "get_experiment_campaign_assessment",
+    "get_experiment_campaign_approval",
     "get_live_evidence",
     "get_live_workflow",
     "get_sample_workflow",

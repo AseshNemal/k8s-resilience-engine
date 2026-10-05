@@ -15,6 +15,7 @@ from app.engine.workflow_dependency_modeling.campaign_assessment_service import 
     approve_experiment_campaign,
     assess_experiment_campaign,
     get_experiment_campaign_assessment,
+    get_experiment_campaign_approval,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     ValidatedDependencyType,
@@ -216,6 +217,11 @@ def test_completed_campaign_creates_explainable_assessment() -> None:
         "paymentservice",
     ]
     assert approval.approved_graph.edges[0].source == "frontend"
+    assert get_experiment_campaign_approval(
+        "campaign:checkout1",
+        campaign_repository=campaigns,
+        repository=assessments,
+    ) == approval
 
 
 def test_incomplete_intervention_cannot_be_assessed() -> None:
@@ -243,3 +249,6 @@ def test_campaign_assessment_http_errors_are_documented() -> None:
         "/api/workflows/experiment-campaigns/{campaign_id}/approval"
     ]["post"]
     assert set(approval["responses"]) >= {"201", "404", "409", "422"}
+    assert "get" in paths[
+        "/api/workflows/experiment-campaigns/{campaign_id}/approval"
+    ]
