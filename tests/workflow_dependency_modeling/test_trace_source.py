@@ -2,7 +2,12 @@
 
 from typing import Any
 
-from app.engine.workflow_dependency_modeling.trace_source import JaegerTraceSource
+import pytest
+
+from app.engine.workflow_dependency_modeling.trace_source import (
+    JaegerTraceSource,
+    TraceSourceConfiguration,
+)
 
 
 class RecordingJaegerClient:
@@ -32,3 +37,44 @@ def test_jaeger_adapter_satisfies_generic_trace_source_contract() -> None:
         "lookback": "30m",
         "limit": 250,
     }
+
+
+def test_bearer_authentication_resolves_only_from_secret_environment() -> None:
+    configuration = TraceSourceConfiguration.from_mapping(
+        {
+            "type": "jaeger",
+            "endpoint": "https://traces.example.test",
+            "authentication": {
+                "type": "bearer_env",
+                "secretEnv": "JAEGER_API_TOKEN",
+            },
+        }
+    )
+
+    source = JaegerTraceSource.from_configuration(
+        configuration,
+        secrets={"JAEGER_API_TOKEN": "private-token"},
+    )
+
+    assert source.client.headers == {"Authorization": "Bearer private-token"}
+    mapping = configuration.to_mapping()
+    assert mapping["authentication"] == {
+        "type": "bearer_env",
+        "secretEnv": "JAEGER_API_TOKEN",
+    }
+    assert "private-token" not in str(mapping)
+
+
+def test_missing_bearer_secret_fails_before_querying_trace_backend() -> None:
+    configuration = TraceSourceConfiguration.from_mapping(
+        {
+            "type": "jaeger",
+            "endpoint": "https://traces.example.test",
+            "authentication": {
+                "type": "bearer_env",
+                "secretEnv": "JAEGER_API_TOKEN",
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="JAEGER_API_TOKEN"):
+        JaegerTraceSource.from_configuration(configuration, secrets={})
