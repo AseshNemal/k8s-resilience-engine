@@ -49,6 +49,17 @@ def _payload() -> dict:
     }
 
 
+def _generic_payload() -> dict:
+    payload = _payload()
+    payload.pop("jaegerUrl")
+    payload["traceSource"] = {
+        "type": "jaeger",
+        "endpoint": "http://localhost:16686",
+        "authentication": {"type": "none"},
+    }
+    return payload
+
+
 def test_session_is_server_managed_and_evidence_honest(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import service
 
@@ -63,6 +74,37 @@ def test_session_is_server_managed_and_evidence_honest(monkeypatch) -> None:
     assert result.next_action == "confirm_success_condition"
     assert "participation, not dependency necessity" in result.limitations[0]
     assert repository.get(result.session_id) == result
+
+
+def test_session_uses_generic_trace_source_contract(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import service
+
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    result = start_workflow_analysis(
+        _generic_payload(),
+        actor="operator",
+        repository=InMemoryAnalysisSessionRepository(),
+        now=NOW,
+    )
+
+    assert result.trace_source.kind.value == "jaeger"
+    assert result.trace_source.endpoint == "http://localhost:16686"
+    assert result.to_mapping()["traceSource"] == _generic_payload()["traceSource"]
+
+
+def test_trace_source_rejects_authentication_before_it_is_implemented() -> None:
+    payload = _generic_payload()
+    payload["traceSource"]["authentication"] = {
+        "type": "bearer_env",
+        "secretEnv": "JAEGER_API_TOKEN",
+    }
+    with pytest.raises(ValueError, match="currently be none"):
+        start_workflow_analysis(
+            payload,
+            actor="operator",
+            repository=InMemoryAnalysisSessionRepository(),
+            now=NOW,
+        )
 
 
 def test_unapproved_jaeger_host_is_rejected_before_network_access(monkeypatch) -> None:

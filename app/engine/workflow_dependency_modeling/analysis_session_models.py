@@ -8,6 +8,9 @@ from enum import Enum
 from typing import Any, Mapping
 
 from app.engine.workflow_dependency_modeling.models import ComponentDataError
+from app.engine.workflow_dependency_modeling.trace_source import (
+    TraceSourceConfiguration,
+)
 
 
 class EvidenceTier(str, Enum):
@@ -51,7 +54,7 @@ class WorkflowAnalysisSession:
     session_id: str
     environment_id: str
     evidence_tier: EvidenceTier
-    jaeger_url: str
+    trace_source: TraceSourceConfiguration
     entry_service: str
     operation_name: str
     lookback: str
@@ -67,11 +70,17 @@ class WorkflowAnalysisSession:
     created_at: datetime
     created_by: str
 
+    @property
+    def jaeger_url(self) -> str:
+        """Compatibility accessor for existing orchestration code."""
+        return self.trace_source.endpoint
+
     def to_mapping(self) -> dict[str, Any]:
         return {
             "sessionId": self.session_id,
             "environmentId": self.environment_id,
             "evidenceTier": self.evidence_tier.value,
+            "traceSource": self.trace_source.to_mapping(),
             "jaegerUrl": self.jaeger_url,
             "entryService": self.entry_service,
             "operationName": self.operation_name,
@@ -102,11 +111,18 @@ class WorkflowAnalysisSession:
         services = tuple(str(item).strip() for item in data.get("observedServices", []))
         if not services or any(not item for item in services):
             raise ComponentDataError("Analysis session requires observed services")
+        trace_source_data = data.get("traceSource")
+        if trace_source_data is None:
+            trace_source_data = {
+                "type": "jaeger",
+                "endpoint": _text(data, "jaegerUrl"),
+                "authentication": {"type": "none"},
+            }
         return cls(
             session_id=_text(data, "sessionId"),
             environment_id=_text(data, "environmentId"),
             evidence_tier=tier,
-            jaeger_url=_text(data, "jaegerUrl"),
+            trace_source=TraceSourceConfiguration.from_mapping(trace_source_data),
             entry_service=_text(data, "entryService"),
             operation_name=_text(data, "operationName"),
             lookback=_text(data, "lookback"),

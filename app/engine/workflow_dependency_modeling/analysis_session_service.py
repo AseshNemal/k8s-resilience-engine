@@ -17,6 +17,9 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     SqlAlchemyAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.auto_discovery import _slugify
+from app.engine.workflow_dependency_modeling.trace_source import (
+    TraceSourceConfiguration,
+)
 
 
 _default_repository: AnalysisSessionRepository | None = None
@@ -78,6 +81,30 @@ def _jaeger_url(value: Any) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
 
 
+def _trace_source(data: Mapping[str, Any]) -> TraceSourceConfiguration:
+    raw_source = data.get("traceSource")
+    legacy_url = data.get("jaegerUrl")
+    if raw_source is not None and legacy_url is not None:
+        raise ValueError("traceSource and jaegerUrl cannot both be provided")
+    if raw_source is None:
+        source = TraceSourceConfiguration.from_mapping(
+            {
+                "type": "jaeger",
+                "endpoint": legacy_url,
+                "authentication": {"type": "none"},
+            }
+        )
+    else:
+        source = TraceSourceConfiguration.from_mapping(raw_source)
+    endpoint = _jaeger_url(source.endpoint)
+    return TraceSourceConfiguration(
+        kind=source.kind,
+        endpoint=endpoint,
+        authentication=source.authentication,
+        secret_env=source.secret_env,
+    )
+
+
 def _text(data: Mapping[str, Any], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -104,7 +131,7 @@ def start_workflow_analysis(
         raise ValueError(
             f"Server-managed fields are not accepted: {', '.join(sorted(forbidden))}"
         )
-    jaeger_url = _jaeger_url(data.get("jaegerUrl"))
+    trace_source = _trace_source(data)
     environment_id = _text(data, "environmentId")
     entry_service = _text(data, "entryService")
     operation_name = _text(data, "operationName")
@@ -123,7 +150,7 @@ def start_workflow_analysis(
     evidence = get_live_evidence(
         entry_service,
         operation_name,
-        jaeger_url,
+        trace_source.endpoint,
         limit,
         lookback,
     )
@@ -133,7 +160,7 @@ def start_workflow_analysis(
             "sessionId": f"analysis:{uuid4().hex}",
             "environmentId": environment_id,
             "evidenceTier": evidence_tier,
-            "jaegerUrl": jaeger_url,
+            "traceSource": trace_source.to_mapping(),
             "entryService": entry_service,
             "operationName": operation_name,
             "lookback": lookback,
@@ -162,7 +189,7 @@ def start_workflow_analysis(
 
 def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Discover operations through the same allowlisted connection policy."""
-    jaeger_url = _jaeger_url(data.get("jaegerUrl"))
+    trace_source = _trace_source(data)
     entry_service = _text(data, "entryService")
     lookback = str(data.get("lookback", "1h")).strip()
     if not _LOOKBACK.fullmatch(lookback):
@@ -175,7 +202,7 @@ def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]
 
     return discover_live_workflows(
         service_name=entry_service,
-        jaeger_url=jaeger_url,
+        jaeger_url=trace_source.endpoint,
         limit=limit,
         lookback=lookback,
     )
