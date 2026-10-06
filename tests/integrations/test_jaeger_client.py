@@ -7,9 +7,35 @@ from app.integrations.jaeger.client import JaegerClient
 
 
 def test_jaeger_client_init():
-    client = JaegerClient("http://jaeger.local:16686/", timeout_seconds=10.0)
+    client = JaegerClient(
+        "http://jaeger.local:16686/",
+        timeout_seconds=10.0,
+        headers={"Authorization": "Bearer test-token"},
+    )
     assert client.base_url == "http://jaeger.local:16686"
     assert client.timeout == 10.0
+    assert client.headers == {"Authorization": "Bearer test-token"}
+
+
+@patch("httpx.Client")
+def test_jaeger_client_applies_authentication_to_every_request(mock_client_cls):
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"data": []}
+    mock_client.get.return_value = mock_response
+    mock_client_cls.return_value.__enter__.return_value = mock_client
+
+    client = JaegerClient(
+        "https://traces.example.test",
+        headers={"Authorization": "Bearer secret"},
+    )
+    client.get_services()
+
+    mock_client_cls.assert_called_once_with(
+        timeout=5.0,
+        headers={"Authorization": "Bearer secret"},
+    )
 
 
 @patch("httpx.Client")
