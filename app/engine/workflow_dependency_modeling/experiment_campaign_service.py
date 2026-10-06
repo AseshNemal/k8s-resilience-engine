@@ -234,6 +234,29 @@ def create_experiment_campaign(
     return _repository(repository).create(campaign)
 
 
+def preview_workflow_probe(
+    session_id: str,
+    setup: Mapping[str, Any],
+    *,
+    analysis_repository: AnalysisSessionRepository | None = None,
+) -> dict[str, Any]:
+    """Validate onboarding input and return the derived probe without persisting it."""
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError("analysis session ID is required")
+    analysis = get_workflow_analysis(session_id.strip(), analysis_repository)
+    definition = build_workflow_probe(
+        analysis.entry_service,
+        analysis.operation_name,
+        setup,
+    )
+    return {
+        "analysisSessionId": analysis.session_id,
+        "workflowId": analysis.workflow_id,
+        "observedOperation": analysis.operation_name,
+        "executionDefinition": definition.to_mapping(),
+    }
+
+
 def get_experiment_campaign(
     campaign_id: str,
     repository: ExperimentCampaignRepository | None = None,

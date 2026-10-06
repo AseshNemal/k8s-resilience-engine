@@ -332,6 +332,16 @@ def test_experiment_campaign_api(monkeypatch) -> None:
     monkeypatch.setattr(analysis_session_service, "_default_repository", analyses)
     monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
     client = TestClient(app)
+    preview = client.post(
+        "/api/workflows/analysis-sessions/analysis:checkout/workflow-probe-preview",
+        json={
+            "mode": "observed_entry",
+            "expectedStatusCodes": [200],
+            "request": {"responseContains": ["order"]},
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.json()["executionDefinition"]["steps"][0]["path"] == "/cart/checkout"
     response = client.post(
         "/api/workflows/experiment-campaigns",
         json={

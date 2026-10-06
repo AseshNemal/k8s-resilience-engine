@@ -43,6 +43,7 @@ from app.engine.workflow_dependency_modeling.service import (
     list_dependency_classification_references,
     list_versioned_scenarios,
     list_workflow_analyses,
+    preview_workflow_probe,
     register_jaeger_execution,
     run_dependency_repeatability_analysis,
     run_dependency_sensitivity_analysis,
@@ -454,6 +455,26 @@ def read_workflow_analysis_session(session_id: str) -> dict[str, Any]:
         return get_workflow_analysis(session_id).to_mapping()
     except AnalysisSessionNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/analysis-sessions/{session_id}/workflow-probe-preview",
+    responses={
+        404: {"description": "Analysis session was not found"},
+        422: {"description": "Workflow onboarding input is invalid"},
+    },
+)
+def preview_analysis_workflow_probe(
+    session_id: str,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Validate and derive an executable probe without creating a campaign."""
+    try:
+        return preview_workflow_probe(session_id, payload)
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.post(

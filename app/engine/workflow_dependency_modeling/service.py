@@ -71,6 +71,7 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
     create_experiment_campaign,
     get_experiment_campaign,
     list_experiment_campaigns,
+    preview_workflow_probe,
 )
 from app.engine.workflow_dependency_modeling.fixture_repository import (
     get_evidence_source,
@@ -332,6 +333,7 @@ __all__ = [
     "create_dependency_classification_reference",
     "create_scenario",
     "create_experiment_campaign",
+    "preview_workflow_probe",
     "discover_live_workflows",
     "discover_analysis_workflows",
     "evaluate_workflow_by_id",
