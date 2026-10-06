@@ -22,8 +22,8 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_repository impo
 from app.engine.workflow_dependency_modeling.online_boutique_workload import (
     online_boutique_checkout_probe,
 )
-from app.engine.workflow_dependency_modeling.workflow_probe_models import (
-    WorkflowProbeDefinition,
+from app.engine.workflow_dependency_modeling.workflow_onboarding import (
+    build_workflow_probe,
 )
 
 
@@ -99,10 +99,23 @@ def create_experiment_campaign(
 
     analysis = get_workflow_analysis(session_id.strip(), analysis_repository)
     raw_definition = data.get("executionDefinition")
-    if raw_definition is None:
+    workflow_setup = data.get("workflowSetup")
+    benchmark_profile = data.get("benchmarkProfile")
+    selected_inputs = sum(
+        item is not None
+        for item in (raw_definition, workflow_setup, benchmark_profile)
+    )
+    if selected_inputs != 1:
+        raise ValueError(
+            "Provide exactly one of workflowSetup, executionDefinition, or benchmarkProfile"
+        )
+
+    if benchmark_profile is not None:
+        if benchmark_profile != ONLINE_BOUTIQUE_CHECKOUT_PROFILE:
+            raise ValueError("benchmarkProfile is not supported")
         if "checkout" not in analysis.operation_name.lower():
             raise ValueError(
-                "A reviewed executionDefinition is required for this workflow"
+                "The Online Boutique benchmark requires an observed checkout operation"
             )
         definition = online_boutique_checkout_probe(
             "OLJCESPC7Z",
@@ -114,9 +127,27 @@ def create_experiment_campaign(
         outcome = "Customer receives a confirmed order"
         response_marker = "Your order is complete!"
     else:
-        if not isinstance(raw_definition, Mapping):
-            raise ValueError("executionDefinition must be an object")
-        definition = WorkflowProbeDefinition.from_mapping(raw_definition)
+        if workflow_setup is not None:
+            if not isinstance(workflow_setup, Mapping):
+                raise ValueError("workflowSetup must be an object")
+            definition = build_workflow_probe(
+                analysis.entry_service,
+                analysis.operation_name,
+                workflow_setup,
+            )
+            setup_mode = str(workflow_setup.get("mode"))
+        else:
+            if not isinstance(raw_definition, Mapping):
+                raise ValueError("executionDefinition must be an object")
+            definition = build_workflow_probe(
+                analysis.entry_service,
+                analysis.operation_name,
+                {
+                    "mode": "imported_definition",
+                    "executionDefinition": raw_definition,
+                },
+            )
+            setup_mode = "imported_definition"
         workflow_id = analysis.workflow_id
         workflow_name = data.get("workflowName")
         if not isinstance(workflow_name, str) or not workflow_name.strip():
@@ -126,7 +157,7 @@ def create_experiment_campaign(
         if not isinstance(outcome, str) or not outcome.strip():
             raise ValueError("businessOutcome is required for a custom workflow")
         outcome = outcome.strip()
-        workload_profile = "reviewed_http_sequence"
+        workload_profile = f"reviewed_{setup_mode}"
         response_marker = None
 
     terminal_service = definition.success_condition.terminal_service

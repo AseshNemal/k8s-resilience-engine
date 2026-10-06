@@ -78,6 +78,7 @@ def _campaigns(analyses, required_trials=3):
         {
             "analysisSessionId": "analysis:checkout",
             "successContractConfirmed": True,
+            "benchmarkProfile": "online_boutique_checkout_v0_10_1",
             "requiredBaselineTrials": required_trials,
         },
         actor="researcher",

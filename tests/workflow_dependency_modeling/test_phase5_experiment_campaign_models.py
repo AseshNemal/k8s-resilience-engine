@@ -172,6 +172,7 @@ def test_service_derives_online_boutique_plan_from_observation() -> None:
         {
             "analysisSessionId": "analysis:checkout",
             "successContractConfirmed": True,
+            "benchmarkProfile": "online_boutique_checkout_v0_10_1",
             "requiredBaselineTrials": 7,
         },
         actor="researcher",
@@ -195,10 +196,26 @@ def test_service_rejects_non_checkout_observation() -> None:
     payload["sessionId"] = "analysis:product"
     payload["operationName"] = "GET /product/{id}"
     analyses.create(WorkflowAnalysisSession.from_mapping(payload))
-    with pytest.raises(ValueError, match="executionDefinition"):
+    with pytest.raises(ValueError, match="checkout operation"):
         create_experiment_campaign(
             {
                 "analysisSessionId": "analysis:product",
+                "successContractConfirmed": True,
+                "benchmarkProfile": "online_boutique_checkout_v0_10_1",
+            },
+            actor="researcher",
+            repository=InMemoryExperimentCampaignRepository(),
+            analysis_repository=analyses,
+        )
+
+
+def test_service_never_assumes_benchmark_when_setup_is_missing() -> None:
+    analyses = InMemoryAnalysisSessionRepository()
+    analyses.create(_analysis())
+    with pytest.raises(ValueError, match="exactly one"):
+        create_experiment_campaign(
+            {
+                "analysisSessionId": "analysis:checkout",
                 "successContractConfirmed": True,
             },
             actor="researcher",
@@ -228,22 +245,25 @@ def test_service_creates_generic_campaign_for_unrelated_application() -> None:
             "successContractConfirmed": True,
             "workflowName": "Place customer order",
             "businessOutcome": "The order is accepted and payment completes",
-            "executionDefinition": {
-                "runnerType": "http_sequence",
-                "steps": [
-                    {
-                        "name": "place_order",
-                        "method": "POST",
-                        "path": "/orders",
-                        "expectedStatusCodes": [202],
-                    }
-                ],
-                "successCondition": {
-                    "protocol": "grpc",
-                    "terminalService": "payment-api",
-                    "operationName": "payments.Payment/Charge",
-                    "grpcStatusCodes": ["OK"],
-                    "requiredAttributes": [],
+            "workflowSetup": {
+                "mode": "imported_definition",
+                "executionDefinition": {
+                    "runnerType": "http_sequence",
+                    "steps": [
+                        {
+                            "name": "place_order",
+                            "method": "POST",
+                            "path": "/orders",
+                            "expectedStatusCodes": [202],
+                        }
+                    ],
+                    "successCondition": {
+                        "protocol": "grpc",
+                        "terminalService": "payment-api",
+                        "operationName": "payments.Payment/Charge",
+                        "grpcStatusCodes": ["OK"],
+                        "requiredAttributes": [],
+                    },
                 },
             },
         },
@@ -255,10 +275,49 @@ def test_service_creates_generic_campaign_for_unrelated_application() -> None:
 
     assert created.workflow_id == "post_orders"
     assert created.workflow_name == "Place customer order"
-    assert created.workload_profile == "reviewed_http_sequence"
+    assert created.workload_profile == "reviewed_imported_definition"
     assert created.success_contract.protocol == "grpc"
     assert created.execution_definition is not None
     assert created.candidate_services == ("order-api", "payment-api")
+
+
+def test_service_builds_campaign_from_observed_entry_setup() -> None:
+    analyses = InMemoryAnalysisSessionRepository()
+    payload = _analysis().to_mapping()
+    payload.update(
+        {
+            "sessionId": "analysis:create-order",
+            "environmentId": "retail-staging",
+            "entryService": "gateway",
+            "operationName": "POST /orders",
+            "workflowId": "post_orders",
+            "observedServices": ["gateway", "order-api"],
+        }
+    )
+    analyses.create(WorkflowAnalysisSession.from_mapping(payload))
+
+    created = create_experiment_campaign(
+        {
+            "analysisSessionId": "analysis:create-order",
+            "successContractConfirmed": True,
+            "workflowName": "Create order",
+            "businessOutcome": "A customer order is accepted",
+            "workflowSetup": {
+                "mode": "observed_entry",
+                "expectedStatusCodes": [202],
+                "request": {"jsonBody": {"sku": "item-42"}},
+            },
+        },
+        actor="architect",
+        repository=InMemoryExperimentCampaignRepository(),
+        analysis_repository=analyses,
+        now=datetime(2026, 10, 5, tzinfo=timezone.utc),
+    )
+
+    assert created.workload_profile == "reviewed_observed_entry"
+    assert created.execution_definition is not None
+    assert created.execution_definition.steps[0].path == "/orders"
+    assert created.success_contract.terminal_service == "gateway"
 
 
 def test_experiment_campaign_api(monkeypatch) -> None:
@@ -278,6 +337,7 @@ def test_experiment_campaign_api(monkeypatch) -> None:
         json={
             "analysisSessionId": "analysis:checkout",
             "successContractConfirmed": True,
+            "benchmarkProfile": "online_boutique_checkout_v0_10_1",
         },
         headers={"X-Actor": "researcher"},
     )
