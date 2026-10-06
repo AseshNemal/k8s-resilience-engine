@@ -92,19 +92,23 @@ def test_session_uses_generic_trace_source_contract(monkeypatch) -> None:
     assert result.to_mapping()["traceSource"] == _generic_payload()["traceSource"]
 
 
-def test_trace_source_rejects_authentication_before_it_is_implemented() -> None:
+def test_trace_source_persists_secret_reference_without_secret(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import service
+
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
     payload = _generic_payload()
     payload["traceSource"]["authentication"] = {
         "type": "bearer_env",
         "secretEnv": "JAEGER_API_TOKEN",
     }
-    with pytest.raises(ValueError, match="currently be none"):
-        start_workflow_analysis(
-            payload,
-            actor="operator",
-            repository=InMemoryAnalysisSessionRepository(),
-            now=NOW,
-        )
+    result = start_workflow_analysis(
+        payload,
+        actor="operator",
+        repository=InMemoryAnalysisSessionRepository(),
+        now=NOW,
+    )
+    assert result.trace_source.secret_env == "JAEGER_API_TOKEN"
+    assert "private-token" not in str(result.to_mapping())
 
 
 def test_unapproved_jaeger_host_is_rejected_before_network_access(monkeypatch) -> None:

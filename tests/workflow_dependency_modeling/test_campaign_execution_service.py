@@ -158,6 +158,35 @@ def test_baseline_trial_executes_correlates_and_persists() -> None:
     assert baseline_readiness(campaign, executions)["eligibleTrials"] == 1
 
 
+def test_default_trace_fetcher_uses_saved_trace_source(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import campaign_execution_service
+
+    analysis = _analysis_repository().get("analysis:checkout")
+    captured = None
+
+    class Source:
+        def fetch_workflow_traces(self, **query):
+            nonlocal captured
+            captured = query
+            return []
+
+    monkeypatch.setattr(
+        campaign_execution_service.JaegerTraceSource,
+        "from_configuration",
+        lambda configuration: Source(),
+    )
+
+    assert campaign_execution_service._default_trace_fetcher(
+        analysis, TRACE_ID
+    ) == []
+    assert captured == {
+        "service_name": "frontend",
+        "operation": "POST /cart/checkout",
+        "lookback": "1h",
+        "limit": 100,
+    }
+
+
 def test_missing_trace_is_indeterminate_and_blocks_readiness() -> None:
     analyses = _analysis_repository()
     campaigns, campaign = _campaigns(analyses)

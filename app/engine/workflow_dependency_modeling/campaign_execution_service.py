@@ -110,7 +110,9 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
 
 def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]:
     del trace_id
-    return JaegerTraceSource.from_url(analysis.jaeger_url).fetch_workflow_traces(
+    return JaegerTraceSource.from_configuration(
+        analysis.trace_source
+    ).fetch_workflow_traces(
         service_name=analysis.entry_service,
         operation=analysis.operation_name,
         limit=100,
