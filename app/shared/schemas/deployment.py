@@ -21,6 +21,8 @@ class ServicePlacement(APIModel):
     declared_replicas: int
     ready_replicas: int
     replica_concentration: float | None = None
+    drift_detected: bool = False
+    drift_reasons: list[str] = []
     pods: list[PodModel]
 
 
