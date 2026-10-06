@@ -96,6 +96,7 @@ from app.engine.workflow_dependency_modeling.scenario_service import (
     update_scenario,
 )
 from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
+from app.engine.workflow_dependency_modeling.trace_source import TraceSource
 from app.integrations.jaeger.client import JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
 
@@ -138,13 +139,22 @@ def discover_live_workflows(
     jaeger_url: str = "http://localhost:16686",
     limit: int = 100,
     lookback: str = "1h",
+    trace_source: TraceSource | None = None,
 ) -> list[dict[str, Any]]:
     """Discover candidate operations from observed Jaeger root spans."""
-    traces = JaegerClient(base_url=jaeger_url).fetch_traces(
-        service_name=service_name,
-        limit=limit,
-        lookback=lookback,
-    )
+    if trace_source is None:
+        traces = JaegerClient(base_url=jaeger_url).fetch_traces(
+            service_name=service_name,
+            limit=limit,
+            lookback=lookback,
+        )
+    else:
+        traces = trace_source.fetch_workflow_traces(
+            service_name=service_name,
+            operation="",
+            limit=limit,
+            lookback=lookback,
+        )
     return [
         {
             "workflowId": summary.workflow_id,
@@ -212,13 +222,22 @@ def get_live_evidence(
     jaeger_url: str,
     limit: int = 1000,
     lookback: str = "1h",
+    trace_source: TraceSource | None = None,
 ) -> dict[str, Any]:
     """Return observed calls for one candidate operation without necessity labels."""
-    traces = JaegerClient(base_url=jaeger_url).fetch_traces(
-        service_name=service_name,
-        limit=limit,
-        lookback=lookback,
-    )
+    if trace_source is None:
+        traces = JaegerClient(base_url=jaeger_url).fetch_traces(
+            service_name=service_name,
+            limit=limit,
+            lookback=lookback,
+        )
+    else:
+        traces = trace_source.fetch_workflow_traces(
+            service_name=service_name,
+            operation="",
+            limit=limit,
+            lookback=lookback,
+        )
     selected = select_workflow_traces(traces, operation)
     if not selected:
         raise ValueError(

@@ -18,6 +18,7 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
 )
 from app.engine.workflow_dependency_modeling.auto_discovery import _slugify
 from app.engine.workflow_dependency_modeling.trace_source import (
+    JaegerTraceSource,
     TraceSourceConfiguration,
 )
 
@@ -153,6 +154,7 @@ def start_workflow_analysis(
         trace_source.endpoint,
         limit,
         lookback,
+        JaegerTraceSource.from_configuration(trace_source),
     )
     timestamp = _timestamp(now)
     analysis = WorkflowAnalysisSession.from_mapping(
@@ -205,6 +207,7 @@ def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]
         jaeger_url=trace_source.endpoint,
         limit=limit,
         lookback=lookback,
+        trace_source=JaegerTraceSource.from_configuration(trace_source),
     )
 
 

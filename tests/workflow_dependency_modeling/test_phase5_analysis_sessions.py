@@ -96,6 +96,7 @@ def test_trace_source_persists_secret_reference_without_secret(monkeypatch) -> N
     from app.engine.workflow_dependency_modeling import service
 
     monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    monkeypatch.setenv("JAEGER_API_TOKEN", "private-token")
     payload = _generic_payload()
     payload["traceSource"]["authentication"] = {
         "type": "bearer_env",
