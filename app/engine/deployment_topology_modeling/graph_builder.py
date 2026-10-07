@@ -80,7 +80,7 @@ class DeploymentGraphBuilder:
 
         return DeploymentGraph(
             snapshot_id=f"snap-{uuid.uuid4().hex[:6]}",
-            timestamp=datetime.datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
             cluster=cluster_meta,
             validation=validation_metrics,
             nodes=self.node_models,

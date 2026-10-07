@@ -15,7 +15,6 @@ router = APIRouter(
 
 @router.get(
     "/sample",
-    response_model=DeploymentGraph,
     response_model_by_alias=True,
 )
 def read_sample_deployment() -> DeploymentGraph:
@@ -24,7 +23,6 @@ def read_sample_deployment() -> DeploymentGraph:
 
 @router.get(
     "/live",
-    response_model=DeploymentGraph,
     response_model_by_alias=True,
 )
 def read_live_deployment() -> DeploymentGraph:

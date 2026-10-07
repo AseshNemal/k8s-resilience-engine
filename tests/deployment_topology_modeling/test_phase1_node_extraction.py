@@ -87,6 +87,9 @@ def test_pod_readiness_mapped_correctly(mock_kube_config, mock_core_api):
 
     # Assert
     assert len(pods) == 3
-    assert pods[0].name == "pod-ready" and pods[0].ready is True
-    assert pods[1].name == "pod-unready" and pods[1].ready is False
-    assert pods[2].name == "pod-noconds" and pods[2].ready is False
+    assert pods[0].name == "pod-ready"
+    assert pods[0].ready is True
+    assert pods[1].name == "pod-unready"
+    assert pods[1].ready is False
+    assert pods[2].name == "pod-noconds"
+    assert pods[2].ready is False
