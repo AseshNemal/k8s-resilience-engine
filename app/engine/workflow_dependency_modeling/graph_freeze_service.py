@@ -8,10 +8,17 @@ from typing import Any, Mapping
 from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
     DependencyAssessmentRepository,
 )
+from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
+    AssessmentApproval,
+    DependencyAssessment,
+)
 from app.engine.workflow_dependency_modeling.dependency_assessment_service import (
     dependency_assessment_repository,
 )
-from app.engine.workflow_dependency_modeling.execution_models import CorrelationStatus
+from app.engine.workflow_dependency_modeling.execution_models import (
+    CorrelationStatus,
+    ExecutionOutcome,
+)
 from app.engine.workflow_dependency_modeling.execution_repository import (
     ExecutionNotFoundError,
     ExecutionRepository,
@@ -47,19 +54,8 @@ def _repository(repository: GraphFreezeRepository | None) -> GraphFreezeReposito
     return _default_repository
 
 
-def freeze_workflow_graph(
-    workflow_id: str,
-    data: Mapping[str, Any],
-    *,
-    actor: str,
-    repository: GraphFreezeRepository | None = None,
-    dependency_repository: DependencyAssessmentRepository | None = None,
-    execution_repository: ExecutionRepository | None = None,
-    now: datetime | None = None,
-) -> FrozenWorkflowGraph:
-    """Freeze only an approved graph and derive provenance from its cohorts."""
-    allowed_fields = {"assessmentId", "freezeId"}
-    unknown_fields = sorted(set(data) - allowed_fields)
+def _freeze_identity(data: Mapping[str, Any], actor: str) -> tuple[str, str, str]:
+    unknown_fields = sorted(set(data) - {"assessmentId", "freezeId"})
     if unknown_fields:
         raise ValueError(
             "Freeze provenance is server-derived; unsupported fields: "
@@ -72,10 +68,16 @@ def freeze_workflow_graph(
     frozen_by = actor.strip() if isinstance(actor, str) else ""
     if not frozen_by:
         raise ValueError("actor is required")
+    return assessment_id, freeze_id, frozen_by
 
-    assessment_repo = dependency_assessment_repository(dependency_repository)
-    approval = assessment_repo.get_approval(assessment_id)
-    assessment = assessment_repo.get_assessment(assessment_id)
+
+def _approved_assessment(
+    workflow_id: str,
+    assessment_id: str,
+    repository: DependencyAssessmentRepository,
+) -> tuple[AssessmentApproval, DependencyAssessment]:
+    approval = repository.get_approval(assessment_id)
+    assessment = repository.get_assessment(assessment_id)
     if approval.workflow_id != workflow_id or assessment.workflow_id != workflow_id:
         raise ValueError("Approved assessment does not belong to the requested workflow")
     if approval.assessment_id != assessment.assessment_id:
@@ -84,19 +86,37 @@ def freeze_workflow_graph(
         raise ValueError("Approval scenario version does not match the assessment")
     if approval.approved_graph.workflow_id != workflow_id:
         raise ValueError("Approved graph workflow ID does not match the requested workflow")
+    return approval, assessment
 
-    batch_ids = {
+
+def _assessment_batch_ids(assessment: DependencyAssessment) -> set[str]:
+    return {
         *assessment.baseline_batch_ids,
-        *(batch_id for cohort in assessment.interventions for batch_id in cohort.batch_ids),
+        *(
+            batch_id
+            for cohort in assessment.interventions
+            for batch_id in cohort.batch_ids
+        ),
     }
-    outcomes = []
+
+
+def _evidence_outcomes(
+    batch_ids: set[str], repository: ExecutionRepository | None
+) -> list[ExecutionOutcome]:
+    outcomes: list[ExecutionOutcome] = []
     for batch_id in sorted(batch_ids):
-        batch = list_executions(batch_id=batch_id, repository=execution_repository)
+        batch = list_executions(batch_id=batch_id, repository=repository)
         if not batch:
             raise ExecutionNotFoundError(
                 f"Execution batch '{batch_id}' was not found while freezing provenance"
             )
         outcomes.extend(batch)
+    return outcomes
+
+
+def _trace_provenance(
+    outcomes: list[ExecutionOutcome],
+) -> tuple[tuple[str, ...], int]:
     matched_trace_ids = [
         outcome.matched_trace_id
         for outcome in outcomes
@@ -115,6 +135,28 @@ def freeze_workflow_graph(
         outcome.correlation_status is not CorrelationStatus.MATCHED
         or not outcome.matched_trace_id
         for outcome in outcomes
+    )
+    return valid_trace_ids, excluded_count
+
+
+def freeze_workflow_graph(
+    workflow_id: str,
+    data: Mapping[str, Any],
+    *,
+    actor: str,
+    repository: GraphFreezeRepository | None = None,
+    dependency_repository: DependencyAssessmentRepository | None = None,
+    execution_repository: ExecutionRepository | None = None,
+    now: datetime | None = None,
+) -> FrozenWorkflowGraph:
+    """Freeze only an approved graph and derive provenance from its cohorts."""
+    assessment_id, freeze_id, frozen_by = _freeze_identity(data, actor)
+    assessment_repo = dependency_assessment_repository(dependency_repository)
+    approval, assessment = _approved_assessment(
+        workflow_id, assessment_id, assessment_repo
+    )
+    valid_trace_ids, excluded_count = _trace_provenance(
+        _evidence_outcomes(_assessment_batch_ids(assessment), execution_repository)
     )
     frozen_at = now or datetime.now(timezone.utc)
     if frozen_at.tzinfo is None:

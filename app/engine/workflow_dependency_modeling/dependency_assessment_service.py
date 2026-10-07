@@ -111,6 +111,36 @@ def _validate_records(
             )
 
 
+def _assessment_scope(
+    graph: WorkflowGraph,
+    baseline_ids: tuple[str, ...],
+    interventions: tuple[InterventionCohort, ...],
+    structural_entry_service: str | None,
+) -> set[str]:
+    intervention_services = [item.target_service for item in interventions]
+    if len(intervention_services) != len(set(intervention_services)):
+        raise ValueError("Only one intervention cohort is allowed per candidate service")
+    intervention_batches = {
+        batch_id for item in interventions for batch_id in item.batch_ids
+    }
+    if set(baseline_ids) & intervention_batches:
+        raise ValueError("Baseline and intervention batches must not overlap")
+    candidate_services = set(graph.mandatory_services + graph.optional_services)
+    if not candidate_services:
+        raise ValueError("Candidate graph must contain at least one service")
+    unknown = set(intervention_services) - candidate_services
+    if unknown:
+        raise ValueError(
+            "Interventions target services outside the candidate graph: "
+            + ", ".join(sorted(unknown))
+        )
+    if structural_entry_service not in candidate_services | {None}:
+        raise ValueError("Structural entry service must be present in the candidate graph")
+    if structural_entry_service in intervention_services:
+        raise ValueError("Structural entry service must not have an intervention cohort")
+    return candidate_services
+
+
 def create_dependency_assessment(
     data: Mapping[str, Any],
     *,
@@ -147,29 +177,10 @@ def create_dependency_assessment(
         InterventionCohort.from_mapping(item)
         for item in data.get("interventions", [])
     )
-    intervention_services = [item.target_service for item in interventions]
-    if len(intervention_services) != len(set(intervention_services)):
-        raise ValueError("Only one intervention cohort is allowed per candidate service")
-    intervention_batches = {
-        batch_id for item in interventions for batch_id in item.batch_ids
-    }
-    if set(baseline_ids) & intervention_batches:
-        raise ValueError("Baseline and intervention batches must not overlap")
-
-    candidate_services = set(graph.mandatory_services + graph.optional_services)
-    if not candidate_services:
-        raise ValueError("Candidate graph must contain at least one service")
-    unknown = set(intervention_services) - candidate_services
-    if unknown:
-        raise ValueError(
-            f"Interventions target services outside the candidate graph: {', '.join(sorted(unknown))}"
-        )
     structural_entry_service = data.get("structuralEntryService")
-    if structural_entry_service is not None:
-        if structural_entry_service not in candidate_services:
-            raise ValueError("Structural entry service must be present in the candidate graph")
-        if structural_entry_service in intervention_services:
-            raise ValueError("Structural entry service must not have an intervention cohort")
+    candidate_services = _assessment_scope(
+        graph, baseline_ids, interventions, structural_entry_service
+    )
 
     baseline_records = _records_for_batches(baseline_ids, execution_repository)
     _validate_records(

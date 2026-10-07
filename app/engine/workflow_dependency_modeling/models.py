@@ -344,6 +344,80 @@ class ReferenceEdge:
     target: str
 
 
+def _reference_services(data: Mapping[str, Any]) -> tuple[set[str], set[str]]:
+    service_sets = {
+        "expectedServices": data["expectedServices"],
+        "mandatoryServices": data["mandatoryServices"],
+        "optionalServices": data["optionalServices"],
+    }
+    for field_name, values in service_sets.items():
+        if not isinstance(values, list) or not all(
+            isinstance(item, str) and item.strip() for item in values
+        ):
+            raise ComponentDataError(
+                f"ReferenceWorkflow {field_name} must be strings"
+            )
+    mandatory = set(service_sets["mandatoryServices"])
+    optional = set(service_sets["optionalServices"])
+    if mandatory & optional:
+        raise ComponentDataError(
+            "ReferenceWorkflow mandatoryServices and optionalServices must not overlap"
+        )
+    if set(service_sets["expectedServices"]) != mandatory | optional:
+        raise ComponentDataError(
+            "ReferenceWorkflow expectedServices must equal the union of "
+            "mandatoryServices and optionalServices"
+        )
+    return mandatory, optional
+
+
+def _reference_edges(values: Any, field_name: str) -> set[ReferenceEdge]:
+    if not isinstance(values, list):
+        raise ComponentDataError(f"ReferenceWorkflow {field_name} must be a list")
+    if any(not isinstance(item, Mapping) for item in values):
+        raise ComponentDataError("Each reference edge must be an object")
+    return {
+        ReferenceEdge(
+            source=_required_text(item, "source", "ReferenceEdge"),
+            target=_required_text(item, "target", "ReferenceEdge"),
+        )
+        for item in values
+    }
+
+
+def _validate_reference_edges(
+    expected: set[ReferenceEdge],
+    mandatory: set[ReferenceEdge],
+    optional: set[ReferenceEdge],
+    mandatory_services: set[str],
+    optional_services: set[str],
+) -> None:
+    if mandatory & optional:
+        raise ComponentDataError(
+            "ReferenceWorkflow mandatoryEdges and optionalEdges must not overlap"
+        )
+    if expected != mandatory | optional:
+        raise ComponentDataError(
+            "ReferenceWorkflow expectedEdges must equal the union of "
+            "mandatoryEdges and optionalEdges"
+        )
+    expected_services = mandatory_services | optional_services
+    if any(
+        edge.source not in expected_services or edge.target not in expected_services
+        for edge in expected
+    ):
+        raise ComponentDataError(
+            "ReferenceWorkflow edge endpoints must be declared in expectedServices"
+        )
+    if any(
+        edge.source not in mandatory_services or edge.target not in mandatory_services
+        for edge in mandatory
+    ):
+        raise ComponentDataError(
+            "ReferenceWorkflow mandatoryEdges must connect mandatory services"
+        )
+
+
 @dataclass(frozen=True)
 class ReferenceWorkflow:
     """Evaluation-only service labels and expected edge set."""
@@ -382,81 +456,17 @@ class ReferenceWorkflow:
                 "ReferenceWorkflow requires expectedServices, mandatoryServices, "
                 "optionalServices, expectedEdges, mandatoryEdges, and optionalEdges"
             )
-        raw_services = data["expectedServices"]
-        raw_mandatory_services = data["mandatoryServices"]
-        raw_optional_services = data["optionalServices"]
-        raw_edges = data["expectedEdges"]
-        raw_mandatory_edges = data["mandatoryEdges"]
-        raw_optional_edges = data["optionalEdges"]
-        service_sets = {
-            "expectedServices": raw_services,
-            "mandatoryServices": raw_mandatory_services,
-            "optionalServices": raw_optional_services,
-        }
-        for field_name, values in service_sets.items():
-            if not isinstance(values, list) or not all(
-                isinstance(item, str) and item.strip() for item in values
-            ):
-                raise ComponentDataError(
-                    f"ReferenceWorkflow {field_name} must be strings"
-                )
-
-        mandatory_services = set(raw_mandatory_services)
-        optional_services = set(raw_optional_services)
-        if mandatory_services & optional_services:
-            raise ComponentDataError(
-                "ReferenceWorkflow mandatoryServices and optionalServices must not overlap"
-            )
-        if set(raw_services) != mandatory_services | optional_services:
-            raise ComponentDataError(
-                "ReferenceWorkflow expectedServices must equal the union of "
-                "mandatoryServices and optionalServices"
-            )
-        def parse_edges(values: Any, field_name: str) -> set[ReferenceEdge]:
-            if not isinstance(values, list):
-                raise ComponentDataError(
-                    f"ReferenceWorkflow {field_name} must be a list"
-                )
-            parsed: set[ReferenceEdge] = set()
-            for item in values:
-                if not isinstance(item, Mapping):
-                    raise ComponentDataError("Each reference edge must be an object")
-                parsed.add(
-                    ReferenceEdge(
-                        source=_required_text(item, "source", "ReferenceEdge"),
-                        target=_required_text(item, "target", "ReferenceEdge"),
-                    )
-                )
-            return parsed
-
-        edges = parse_edges(raw_edges, "expectedEdges")
-        mandatory_edges = parse_edges(raw_mandatory_edges, "mandatoryEdges")
-        optional_edges = parse_edges(raw_optional_edges, "optionalEdges")
-        if mandatory_edges & optional_edges:
-            raise ComponentDataError(
-                "ReferenceWorkflow mandatoryEdges and optionalEdges must not overlap"
-            )
-        if edges != mandatory_edges | optional_edges:
-            raise ComponentDataError(
-                "ReferenceWorkflow expectedEdges must equal the union of "
-                "mandatoryEdges and optionalEdges"
-            )
-        expected_services = mandatory_services | optional_services
-        if any(
-            edge.source not in expected_services or edge.target not in expected_services
-            for edge in edges
-        ):
-            raise ComponentDataError(
-                "ReferenceWorkflow edge endpoints must be declared in expectedServices"
-            )
-        if any(
-            edge.source not in mandatory_services
-            or edge.target not in mandatory_services
-            for edge in mandatory_edges
-        ):
-            raise ComponentDataError(
-                "ReferenceWorkflow mandatoryEdges must connect mandatory services"
-            )
+        mandatory_services, optional_services = _reference_services(data)
+        edges = _reference_edges(data["expectedEdges"], "expectedEdges")
+        mandatory_edges = _reference_edges(data["mandatoryEdges"], "mandatoryEdges")
+        optional_edges = _reference_edges(data["optionalEdges"], "optionalEdges")
+        _validate_reference_edges(
+            edges,
+            mandatory_edges,
+            optional_edges,
+            mandatory_services,
+            optional_services,
+        )
         synthetic = data.get("synthetic")
         if not isinstance(synthetic, bool):
             raise ComponentDataError("ReferenceWorkflow requires boolean 'synthetic'")
