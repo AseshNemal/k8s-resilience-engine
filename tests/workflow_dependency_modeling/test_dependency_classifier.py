@@ -60,9 +60,22 @@ def test_missing_evidence_is_not_silently_classified() -> None:
         classify_dependencies([], "checkout")
 
 
-def test_trace_without_cross_service_edges_is_not_silently_classified() -> None:
-    with pytest.raises(InsufficientEvidenceError, match="no cross-service"):
+def test_trace_without_observed_services_is_not_silently_classified() -> None:
+    with pytest.raises(InsufficientEvidenceError, match="no observed services"):
         classify_dependencies([TraceInteraction(trace_id="t1", edges=[])], "checkout")
+
+
+def test_root_only_service_participation_is_classified() -> None:
+    result = classify_dependencies(
+        [
+            TraceInteraction(
+                trace_id="t1", edges=[], observed_services=["frontend"]
+            )
+        ],
+        "root-only",
+    )
+
+    assert result.mandatory_candidates == ["frontend"]
 
 
 def test_classifier_interface_has_no_reference_argument() -> None:

@@ -8,10 +8,44 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
+from app.engine.workflow_dependency_modeling.analysis_session_service import (
+    configure_analysis_session_repository,
+    discover_analysis_workflows,
+    get_workflow_analysis,
+    list_workflow_analyses,
+    start_workflow_analysis,
+)
 from app.engine.workflow_dependency_modeling.auto_discovery import (
-    _slugify,
     discover_root_workflows,
     select_workflow_traces,
+    slugify_operation,
+)
+from app.engine.workflow_dependency_modeling.classification_evaluation_service import (
+    configure_classification_evaluation_repository,
+    create_dependency_classification_evaluation,
+    create_dependency_classification_reference,
+    get_dependency_classification_evaluation,
+    get_dependency_classification_reference,
+    list_dependency_classification_evaluations,
+    list_dependency_classification_references,
+)
+from app.engine.workflow_dependency_modeling.classification_experiments import (
+    run_dependency_repeatability_analysis,
+    run_dependency_sensitivity_analysis,
+)
+from app.engine.workflow_dependency_modeling.campaign_execution_service import (
+    baseline_readiness,
+    configure_intervention_event_repository,
+    intervention_status,
+    record_intervention_event,
+    run_campaign_baseline_trial,
+    run_campaign_intervention_trial,
+)
+from app.engine.workflow_dependency_modeling.campaign_assessment_service import (
+    approve_experiment_campaign,
+    assess_experiment_campaign,
+    get_experiment_campaign_assessment,
+    get_experiment_campaign_approval,
 )
 from app.engine.workflow_dependency_modeling.dependency_classifier import (
     classify_dependencies,
@@ -31,6 +65,13 @@ from app.engine.workflow_dependency_modeling.execution_service import (
     record_execution,
     register_jaeger_execution,
     run_benchmark_batch,
+)
+from app.engine.workflow_dependency_modeling.experiment_campaign_service import (
+    configure_experiment_campaign_repository,
+    create_experiment_campaign,
+    get_experiment_campaign,
+    list_experiment_campaigns,
+    preview_workflow_probe,
 )
 from app.engine.workflow_dependency_modeling.fixture_repository import (
     get_evidence_source,
@@ -53,9 +94,20 @@ from app.engine.workflow_dependency_modeling.scenario_service import (
     get_versioned_scenario,
     list_versioned_scenarios,
     scenario_etag,
+    transition_scenario_lifecycle,
     update_scenario,
 )
 from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
+from app.engine.workflow_dependency_modeling.trace_validator import (
+    eligible_traces,
+    validate_trace_quality,
+)
+from app.engine.workflow_dependency_modeling.graph_freeze_service import (
+    configure_graph_freeze_repository,
+    freeze_workflow_graph,
+    get_frozen_workflow_graph,
+)
+from app.engine.workflow_dependency_modeling.trace_source import TraceSource
 from app.integrations.jaeger.client import JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
 
@@ -77,7 +129,14 @@ def build_workflow_graph(
 ) -> WorkflowGraph:
     """Build a candidate graph without loading or accepting reference truth."""
     typed_scenario = _as_scenario(scenario)
-    spans = parse_spans(traces)
+    quality = validate_trace_quality(traces)
+    valid_traces = eligible_traces(traces, quality)
+    if not valid_traces:
+        raise ValueError(
+            f"No valid trace evidence remains for workflow '{typed_scenario.workflow_id}'; "
+            f"excluded {quality.excluded_count} trace(s)"
+        )
+    spans = parse_spans(valid_traces)
     interactions = extract_interactions(spans)
     observed = aggregate_edges(interactions)
     classification = classify_dependencies(
@@ -98,13 +157,22 @@ def discover_live_workflows(
     jaeger_url: str = "http://localhost:16686",
     limit: int = 100,
     lookback: str = "1h",
+    trace_source: TraceSource | None = None,
 ) -> list[dict[str, Any]]:
     """Discover candidate operations from observed Jaeger root spans."""
-    traces = JaegerClient(base_url=jaeger_url).fetch_traces(
-        service_name=service_name,
-        limit=limit,
-        lookback=lookback,
-    )
+    if trace_source is None:
+        traces = JaegerClient(base_url=jaeger_url).fetch_traces(
+            service_name=service_name,
+            limit=limit,
+            lookback=lookback,
+        )
+    else:
+        traces = trace_source.fetch_workflow_traces(
+            service_name=service_name,
+            operation="",
+            limit=limit,
+            lookback=lookback,
+        )
     return [
         {
             "workflowId": summary.workflow_id,
@@ -146,7 +214,7 @@ def get_live_workflow(
         )
     operation_name = operation or "live_workflow"
     scenario = WorkflowScenario(
-        workflow_id=_slugify(operation_name),
+        workflow_id=slugify_operation(operation_name),
         description="Candidate operation discovered from live trace evidence.",
         criticality=criticality,
         success_condition=SuccessCondition.from_mapping(
@@ -172,13 +240,22 @@ def get_live_evidence(
     jaeger_url: str,
     limit: int = 1000,
     lookback: str = "1h",
+    trace_source: TraceSource | None = None,
 ) -> dict[str, Any]:
     """Return observed calls for one candidate operation without necessity labels."""
-    traces = JaegerClient(base_url=jaeger_url).fetch_traces(
-        service_name=service_name,
-        limit=limit,
-        lookback=lookback,
-    )
+    if trace_source is None:
+        traces = JaegerClient(base_url=jaeger_url).fetch_traces(
+            service_name=service_name,
+            limit=limit,
+            lookback=lookback,
+        )
+    else:
+        traces = trace_source.fetch_workflow_traces(
+            service_name=service_name,
+            operation="",
+            limit=limit,
+            lookback=lookback,
+        )
     selected = select_workflow_traces(traces, operation)
     if not selected:
         raise ValueError(
@@ -256,32 +333,65 @@ def get_sample_workflow() -> WorkflowGraph:
 
 
 __all__ = [
+    "assess_experiment_campaign",
+    "approve_experiment_campaign",
     "build_workflow_graph",
+    "baseline_readiness",
     "approve_dependency_assessment",
     "configure_dependency_assessment_repository",
+    "configure_analysis_session_repository",
+    "configure_classification_evaluation_repository",
     "configure_execution_repository",
+    "configure_experiment_campaign_repository",
+    "configure_graph_freeze_repository",
+    "configure_intervention_event_repository",
     "configure_scenario_repository",
     "create_dependency_assessment",
+    "create_dependency_classification_evaluation",
+    "create_dependency_classification_reference",
     "create_scenario",
+    "create_experiment_campaign",
+    "preview_workflow_probe",
     "discover_live_workflows",
+    "discover_analysis_workflows",
     "evaluate_workflow_by_id",
+    "freeze_workflow_graph",
     "get_evidence_source",
     "get_dependency_assessment",
+    "get_dependency_classification_evaluation",
+    "get_dependency_classification_reference",
     "get_execution",
+    "get_experiment_campaign",
+    "get_experiment_campaign_assessment",
+    "get_experiment_campaign_approval",
+    "get_frozen_workflow_graph",
     "get_live_evidence",
     "get_live_workflow",
     "get_sample_workflow",
     "get_scenario",
     "get_versioned_scenario",
     "get_validated_workflow_graph",
+    "get_workflow_analysis",
     "get_workflow_by_id",
     "list_benchmark_workflows",
     "list_executions",
+    "list_experiment_campaigns",
+    "intervention_status",
+    "record_intervention_event",
     "list_dependency_assessments",
+    "list_dependency_classification_evaluations",
+    "list_dependency_classification_references",
     "list_versioned_scenarios",
+    "list_workflow_analyses",
     "record_execution",
     "register_jaeger_execution",
+    "run_dependency_repeatability_analysis",
+    "run_dependency_sensitivity_analysis",
     "run_benchmark_batch",
+    "run_campaign_baseline_trial",
+    "run_campaign_intervention_trial",
     "scenario_etag",
+    "start_workflow_analysis",
+    "transition_scenario_lifecycle",
     "update_scenario",
 ]

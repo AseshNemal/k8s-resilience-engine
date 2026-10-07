@@ -7,6 +7,7 @@ from app.engine.workflow_dependency_modeling.service import (
     get_workflow_by_id,
     list_benchmark_workflows,
 )
+from app.engine.workflow_dependency_modeling.fixture_repository import get_reference
 from app.main import app
 
 client = TestClient(app)
@@ -44,6 +45,41 @@ def test_get_add_to_cart_workflow():
 def test_get_workflow_by_id_not_found():
     with pytest.raises(FileNotFoundError):
         get_workflow_by_id("non_existent_workflow_xyz")
+
+
+@pytest.mark.parametrize(
+    ("workflow_id", "mandatory", "optional"),
+    [
+        (
+            "checkout",
+            {"frontend", "cartservice", "checkoutservice", "paymentservice"},
+            {"emailservice"},
+        ),
+        (
+            "view_product",
+            {"frontend", "productcatalogservice", "currencyservice"},
+            {"recommendationservice", "adservice"},
+        ),
+        (
+            "add_to_cart",
+            {"frontend", "cartservice", "productcatalogservice", "currencyservice"},
+            set(),
+        ),
+        (
+            "refund",
+            {"frontend", "orderservice", "paymentservice"},
+            {"notificationservice"},
+        ),
+    ],
+)
+def test_benchmark_reference_classification_labels(
+    workflow_id: str, mandatory: set[str], optional: set[str]
+) -> None:
+    reference = get_reference(workflow_id)
+
+    assert set(reference.mandatory_services) == mandatory
+    assert set(reference.optional_services) == optional
+    assert set(reference.expected_services) == mandatory | optional
 
 
 def test_api_get_benchmarks():

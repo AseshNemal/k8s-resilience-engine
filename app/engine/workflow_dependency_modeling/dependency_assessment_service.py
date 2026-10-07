@@ -61,6 +61,13 @@ def _repository(
     return _default_repository
 
 
+def dependency_assessment_repository(
+    repository: DependencyAssessmentRepository | None = None,
+) -> DependencyAssessmentRepository:
+    """Return the configured repository for collaborating Component 1 services."""
+    return _repository(repository)
+
+
 def _utc(value: datetime | None = None) -> datetime:
     resolved = value or datetime.now(timezone.utc)
     if resolved.tzinfo is None:
@@ -104,6 +111,36 @@ def _validate_records(
             )
 
 
+def _assessment_scope(
+    graph: WorkflowGraph,
+    baseline_ids: tuple[str, ...],
+    interventions: tuple[InterventionCohort, ...],
+    structural_entry_service: str | None,
+) -> set[str]:
+    intervention_services = [item.target_service for item in interventions]
+    if len(intervention_services) != len(set(intervention_services)):
+        raise ValueError("Only one intervention cohort is allowed per candidate service")
+    intervention_batches = {
+        batch_id for item in interventions for batch_id in item.batch_ids
+    }
+    if set(baseline_ids) & intervention_batches:
+        raise ValueError("Baseline and intervention batches must not overlap")
+    candidate_services = set(graph.mandatory_services + graph.optional_services)
+    if not candidate_services:
+        raise ValueError("Candidate graph must contain at least one service")
+    unknown = set(intervention_services) - candidate_services
+    if unknown:
+        raise ValueError(
+            "Interventions target services outside the candidate graph: "
+            + ", ".join(sorted(unknown))
+        )
+    if structural_entry_service not in candidate_services | {None}:
+        raise ValueError("Structural entry service must be present in the candidate graph")
+    if structural_entry_service in intervention_services:
+        raise ValueError("Structural entry service must not have an intervention cohort")
+    return candidate_services
+
+
 def create_dependency_assessment(
     data: Mapping[str, Any],
     *,
@@ -140,23 +177,10 @@ def create_dependency_assessment(
         InterventionCohort.from_mapping(item)
         for item in data.get("interventions", [])
     )
-    intervention_services = [item.target_service for item in interventions]
-    if len(intervention_services) != len(set(intervention_services)):
-        raise ValueError("Only one intervention cohort is allowed per candidate service")
-    intervention_batches = {
-        batch_id for item in interventions for batch_id in item.batch_ids
-    }
-    if set(baseline_ids) & intervention_batches:
-        raise ValueError("Baseline and intervention batches must not overlap")
-
-    candidate_services = set(graph.mandatory_services + graph.optional_services)
-    if not candidate_services:
-        raise ValueError("Candidate graph must contain at least one service")
-    unknown = set(intervention_services) - candidate_services
-    if unknown:
-        raise ValueError(
-            f"Interventions target services outside the candidate graph: {', '.join(sorted(unknown))}"
-        )
+    structural_entry_service = data.get("structuralEntryService")
+    candidate_services = _assessment_scope(
+        graph, baseline_ids, interventions, structural_entry_service
+    )
 
     baseline_records = _records_for_batches(baseline_ids, execution_repository)
     _validate_records(
@@ -164,7 +188,7 @@ def create_dependency_assessment(
     )
     policy = AssessmentPolicy.from_mapping(data.get("policy"))
     service_results = []
-    for service_name in sorted(candidate_services):
+    for service_name in sorted(candidate_services - {structural_entry_service}):
         intervention = next(
             (item for item in interventions if item.target_service == service_name),
             None,
@@ -235,9 +259,18 @@ def approve_dependency_assessment(
         raise ValueError("Approval requires a non-empty rationale")
 
     mandatory = sorted(
-        item.service_name
-        for item in assessment.services
-        if item.classification is ValidatedDependencyType.MANDATORY
+        {
+            *(
+                [assessment.structural_entry_service]
+                if assessment.structural_entry_service
+                else []
+            ),
+            *(
+                item.service_name
+                for item in assessment.services
+                if item.classification is ValidatedDependencyType.MANDATORY
+            ),
+        }
     )
     optional = sorted(
         item.service_name

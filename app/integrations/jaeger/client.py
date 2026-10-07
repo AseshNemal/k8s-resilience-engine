@@ -7,7 +7,7 @@ to retrieve services, operations, and raw distributed traces.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Mapping
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ class JaegerClient:
         self,
         base_url: str = DEFAULT_JAEGER_URL,
         timeout_seconds: float = 5.0,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         """Initialize the Jaeger client.
 
@@ -32,11 +33,12 @@ class JaegerClient:
         """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout_seconds
+        self.headers = dict(headers or {})
 
     def is_healthy(self) -> bool:
         """Check if the Jaeger server is reachable and responsive."""
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
                 response = client.get(f"{self.base_url}/api/services")
                 return response.status_code == 200
         except Exception as err:
@@ -50,7 +52,7 @@ class JaegerClient:
             List of service name strings.
         """
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
                 response = client.get(f"{self.base_url}/api/services")
                 response.raise_for_status()
                 data = response.json()
@@ -71,7 +73,7 @@ class JaegerClient:
             List of operation names (e.g. ['/cart/checkout', 'HTTP GET']).
         """
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
                 response = client.get(
                     f"{self.base_url}/api/operations",
                     params={"service": service_name},
@@ -119,7 +121,7 @@ class JaegerClient:
             params["tags"] = str(tags)
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
                 response = client.get(
                     f"{self.base_url}/api/traces",
                     params=params,

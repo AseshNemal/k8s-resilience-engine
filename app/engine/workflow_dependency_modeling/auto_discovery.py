@@ -41,11 +41,15 @@ class DiscoveredWorkflowSummary:
     """Sample trace IDs observed for this workflow."""
 
 
-def _slugify(text: str) -> str:
+def slugify_operation(text: str) -> str:
     """Normalize an operation name into a clean workflow ID slug."""
     clean = re.sub(r"[^\w\s-]", "_", text).strip().lower()
     clean = re.sub(r"[-\s_]+", "_", clean)
     return clean.strip("_") or "workflow"
+
+
+# Backward-compatible alias for older imports. New code uses the public name.
+_slugify = slugify_operation
 
 
 def operation_key(root: Span) -> str | None:
@@ -152,7 +156,7 @@ def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWork
             for s in spans_by_trace[tid]:
                 services.add(s.service_name)
 
-        workflow_id = _slugify(op_name)
+        workflow_id = slugify_operation(op_name)
 
         results.append(
             DiscoveredWorkflowSummary(

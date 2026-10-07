@@ -1,31 +1,68 @@
 from typing import Any
+import httpx
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Response, status
 
 from app.engine.workflow_dependency_modeling.evaluator import (
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
+    approve_experiment_campaign,
+    assess_experiment_campaign,
     approve_dependency_assessment,
+    baseline_readiness,
+    intervention_status,
+    record_intervention_event,
+    start_workflow_analysis,
     create_scenario,
     create_dependency_assessment,
+    create_dependency_classification_evaluation,
+    create_dependency_classification_reference,
+    create_experiment_campaign,
     discover_live_workflows,
+    discover_analysis_workflows,
     evaluate_workflow_by_id,
+    freeze_workflow_graph,
     get_live_workflow,
+    get_workflow_analysis,
     get_live_evidence,
     get_execution,
+    get_experiment_campaign,
+    get_experiment_campaign_assessment,
+    get_experiment_campaign_approval,
+    get_frozen_workflow_graph,
     get_dependency_assessment,
+    get_dependency_classification_evaluation,
+    get_dependency_classification_reference,
     get_sample_workflow,
     get_workflow_by_id,
     get_versioned_scenario,
     get_validated_workflow_graph,
     list_benchmark_workflows,
     list_executions,
+    list_experiment_campaigns,
     list_dependency_assessments,
+    list_dependency_classification_evaluations,
+    list_dependency_classification_references,
     list_versioned_scenarios,
+    list_workflow_analyses,
+    preview_workflow_probe,
     register_jaeger_execution,
+    run_dependency_repeatability_analysis,
+    run_dependency_sensitivity_analysis,
     run_benchmark_batch,
+    run_campaign_baseline_trial,
+    run_campaign_intervention_trial,
     scenario_etag,
+    transition_scenario_lifecycle,
     update_scenario,
+)
+from app.engine.workflow_dependency_modeling.analysis_session_repository import (
+    AnalysisSessionConflictError,
+    AnalysisSessionNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.classification_evaluation_repository import (
+    ClassificationArtifactConflictError,
+    ClassificationArtifactNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
     DependencyAssessmentAlreadyExistsError,
@@ -34,6 +71,17 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_repository im
 from app.engine.workflow_dependency_modeling.execution_repository import (
     ExecutionAlreadyExistsError,
     ExecutionNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.experiment_campaign_repository import (
+    ExperimentCampaignConflictError,
+    ExperimentCampaignNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
+    FrozenGraphAlreadyExistsError,
+    FrozenGraphNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.intervention_event_repository import (
+    InterventionEventConflictError,
 )
 from app.engine.workflow_dependency_modeling.scenario_repository import (
     ScenarioAlreadyExistsError,
@@ -67,6 +115,15 @@ EXECUTION_NOT_FOUND_RESPONSE = {404: {"description": "Execution was not found"}}
 def _scenario_payload(response: Response, scenario) -> dict[str, Any]:
     response.headers["ETag"] = scenario_etag(scenario)
     return scenario.to_mapping()
+
+
+def _campaign_application_url(payload: dict[str, Any]) -> Any:
+    application_url = payload.get("applicationUrl")
+    legacy_url = payload.get("frontendUrl")
+    if application_url is not None and legacy_url is not None:
+        if application_url != legacy_url:
+            raise ValueError("applicationUrl and frontendUrl cannot conflict")
+    return application_url if application_url is not None else legacy_url
 
 
 @router.post(
@@ -321,6 +378,521 @@ def read_validated_workflow_graph(workflow_id: str) -> WorkflowGraph:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
+@router.post(
+    "/dependency-references",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Scenario was not found"},
+        409: {"description": "Reference version changed"},
+        422: {"description": "Reference labels are invalid"},
+    },
+)
+def create_workflow_dependency_reference(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    expected_version: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    try:
+        return create_dependency_classification_reference(
+            payload,
+            actor=actor,
+            expected_version=expected_version,
+        ).to_mapping()
+    except ScenarioNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ClassificationArtifactConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/scenarios/{workflow_id}/lifecycle",
+    responses={
+        404: {"description": "Scenario or version not found"},
+        412: {"description": "Scenario version changed"},
+        422: {"description": "Scenario definition is invalid"},
+    },
+)
+def change_workflow_scenario_lifecycle(
+    workflow_id: str,
+    response: Response,
+    payload: dict[str, Any] = Body(...),
+    if_match: str = Header(..., alias="If-Match"),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Promote or retire a scenario through an explicit audited transition."""
+    try:
+        expected_version = parse_scenario_etag(if_match, workflow_id)
+        scenario = transition_scenario_lifecycle(
+            workflow_id,
+            str(payload.get("lifecycle", "")),
+            expected_version=expected_version,
+            actor=actor,
+            rationale=payload.get("rationale"),
+        )
+        return _scenario_payload(response, scenario)
+    except ScenarioNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ScenarioVersionConflictError as err:
+        raise HTTPException(status_code=412, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/analysis-sessions",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {"description": "Analysis session already exists"},
+        422: {"description": "Connection or operation input is invalid"},
+        503: {"description": "Jaeger service is unavailable"},
+    },
+)
+def create_workflow_analysis_session(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Inspect one real trace operation without claiming dependency validation."""
+    try:
+        return start_workflow_analysis(payload, actor=actor).to_mapping()
+    except AnalysisSessionConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ConnectionError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/analysis-sessions")
+def read_workflow_analysis_sessions() -> list[dict[str, Any]]:
+    return [analysis.to_mapping() for analysis in list_workflow_analyses()]
+
+
+@router.post(
+    "/analysis-sessions/discover",
+    responses={
+        422: {"description": "Connection input is invalid"},
+        503: {"description": "Jaeger service is unavailable"},
+    },
+)
+def discover_workflow_analysis_operations(
+    payload: dict[str, Any] = Body(...),
+) -> list[dict[str, Any]]:
+    try:
+        return discover_analysis_workflows(payload)
+    except ConnectionError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/analysis-sessions/{session_id}",
+    responses={404: {"description": "Analysis session was not found"}},
+)
+def read_workflow_analysis_session(session_id: str) -> dict[str, Any]:
+    try:
+        return get_workflow_analysis(session_id).to_mapping()
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/analysis-sessions/{session_id}/workflow-probe-preview",
+    responses={
+        404: {"description": "Analysis session was not found"},
+        422: {"description": "Workflow onboarding input is invalid"},
+    },
+)
+def preview_analysis_workflow_probe(
+    session_id: str,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Validate and derive an executable probe without creating a campaign."""
+    try:
+        return preview_workflow_probe(session_id, payload)
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Analysis session was not found"},
+        409: {"description": "Experiment campaign already exists"},
+        422: {"description": "Experiment plan is invalid or unsafe"},
+    },
+)
+def create_workflow_experiment_campaign(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Create a safe workflow experiment from observed trace evidence."""
+    try:
+        return create_experiment_campaign(payload, actor=actor).to_mapping()
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExperimentCampaignConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/experiment-campaigns")
+def read_workflow_experiment_campaigns() -> list[dict[str, Any]]:
+    return [campaign.to_mapping() for campaign in list_experiment_campaigns()]
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_workflow_experiment_campaign(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_experiment_campaign(campaign_id).to_mapping()
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/baseline-runs",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "Execution evidence already exists"},
+        422: {"description": "Baseline run is invalid or no longer allowed"},
+        503: {"description": "The target application or trace source is unavailable"},
+    },
+)
+def execute_workflow_campaign_baseline(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return run_campaign_baseline_trial(
+            campaign_id,
+            _campaign_application_url(payload),
+            actor=actor,
+        ).to_mapping()
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExecutionAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (ConnectionError, httpx.HTTPError) as err:
+        raise HTTPException(status_code=503, detail="Experiment evidence source is unavailable") from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/baseline-readiness",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_workflow_campaign_baseline_readiness(campaign_id: str) -> dict[str, Any]:
+    try:
+        return baseline_readiness(get_experiment_campaign(campaign_id))
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/intervention-events",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign was not found"},
+        409: {"description": "Intervention event already exists"},
+        422: {"description": "Intervention transition or evidence is invalid"},
+    },
+)
+def create_workflow_campaign_intervention_event(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return record_intervention_event(
+            campaign_id,
+            payload,
+            actor=actor,
+        ).to_mapping()
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except InterventionEventConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/intervention-status",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_workflow_campaign_intervention_status(campaign_id: str) -> dict[str, Any]:
+    try:
+        return intervention_status(campaign_id)
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/interventions/{target_service}/runs",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "Execution evidence already exists"},
+        422: {"description": "Intervention run is invalid or not currently allowed"},
+        503: {"description": "The target application or trace source is unavailable"},
+    },
+)
+def execute_workflow_campaign_intervention(
+    campaign_id: str,
+    target_service: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return run_campaign_intervention_trial(
+            campaign_id,
+            target_service,
+            _campaign_application_url(payload),
+            actor=actor,
+        ).to_mapping()
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExecutionAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (ConnectionError, httpx.HTTPError) as err:
+        raise HTTPException(status_code=503, detail="Experiment evidence source is unavailable") from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/assessment",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "Campaign assessment already exists"},
+        422: {"description": "Campaign evidence is incomplete or inconsistent"},
+    },
+)
+def create_workflow_campaign_assessment(
+    campaign_id: str,
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Classify a completed campaign without asking for internal evidence IDs."""
+    try:
+        return assess_experiment_campaign(campaign_id, actor=actor).to_mapping()
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except DependencyAssessmentAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/assessment",
+    responses={404: {"description": "Campaign or campaign assessment was not found"}},
+)
+def read_workflow_campaign_assessment(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_experiment_campaign_assessment(campaign_id).to_mapping()
+    except (ExperimentCampaignNotFoundError, DependencyAssessmentNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/approval",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Campaign or campaign assessment was not found"},
+        409: {"description": "Campaign assessment is already approved"},
+        422: {"description": "Approval is unconfirmed or evidence is unresolved"},
+    },
+)
+def approve_workflow_campaign(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Approve reviewed classifications and publish the Component 3 graph."""
+    try:
+        return approve_experiment_campaign(
+            campaign_id,
+            actor=actor,
+            rationale=payload.get("rationale"),
+            approval_confirmed=payload.get("approvalConfirmed"),
+        ).to_mapping()
+    except (ExperimentCampaignNotFoundError, DependencyAssessmentNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except DependencyAssessmentAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/approval",
+    responses={404: {"description": "Campaign or campaign approval was not found"}},
+)
+def read_workflow_campaign_approval(campaign_id: str) -> dict[str, Any]:
+    """Resume the approved Component 3 handoff for an existing campaign."""
+    try:
+        return get_experiment_campaign_approval(campaign_id).to_mapping()
+    except (ExperimentCampaignNotFoundError, DependencyAssessmentNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get("/dependency-references")
+def read_workflow_dependency_references() -> list[dict[str, Any]]:
+    return [
+        reference.to_mapping()
+        for reference in list_dependency_classification_references()
+    ]
+
+
+@router.get(
+    "/dependency-references/{workflow_id}",
+    responses={404: {"description": "Dependency reference was not found"}},
+)
+def read_workflow_dependency_reference(
+    workflow_id: str,
+    version: int | None = Query(None, ge=1),
+) -> dict[str, Any]:
+    try:
+        return get_dependency_classification_reference(
+            workflow_id, version
+        ).to_mapping()
+    except ClassificationArtifactNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-evaluations",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Assessment or reference was not found"},
+        409: {"description": "Evaluation already exists"},
+        422: {"description": "Evaluation inputs are incompatible"},
+    },
+)
+def create_workflow_dependency_evaluation(
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    try:
+        return create_dependency_classification_evaluation(
+            payload, actor=actor
+        ).to_mapping()
+    except (DependencyAssessmentNotFoundError, ClassificationArtifactNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ClassificationArtifactConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/dependency-evaluations")
+def read_workflow_dependency_evaluations(
+    workflow_id: str | None = Query(None),
+) -> list[dict[str, Any]]:
+    return [
+        evaluation.to_mapping()
+        for evaluation in list_dependency_classification_evaluations(workflow_id)
+    ]
+
+
+@router.get(
+    "/dependency-evaluations/{evaluation_id}",
+    responses={404: {"description": "Classification evaluation was not found"}},
+)
+def read_workflow_dependency_evaluation(evaluation_id: str) -> dict[str, Any]:
+    try:
+        return get_dependency_classification_evaluation(evaluation_id).to_mapping()
+    except ClassificationArtifactNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-experiments/sensitivity",
+    responses={
+        404: {"description": "Dependency assessment was not found"},
+        422: {"description": "Sensitivity experiment is invalid"},
+    },
+)
+def run_workflow_dependency_sensitivity(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        return run_dependency_sensitivity_analysis(payload).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/{workflow_id}/freeze",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Approved assessment was not found"},
+        409: {"description": "Freeze ID already exists"},
+        422: {"description": "Graph is not ready to freeze"},
+    },
+)
+def freeze_approved_workflow_graph(
+    workflow_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Freeze an approved graph together with exact evidence provenance."""
+    try:
+        return freeze_workflow_graph(
+            workflow_id, payload, actor=actor
+        ).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except FrozenGraphAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (ExecutionNotFoundError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/{workflow_id}/frozen",
+    responses={404: {"description": "Frozen workflow graph was not found"}},
+)
+def read_frozen_workflow_graph(workflow_id: str) -> dict[str, Any]:
+    try:
+        return get_frozen_workflow_graph(workflow_id).to_mapping()
+    except FrozenGraphNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/dependency-experiments/repeatability",
+    responses={
+        404: {"description": "Dependency assessment was not found"},
+        422: {"description": "Repeatability experiment is invalid"},
+    },
+)
+def run_workflow_dependency_repeatability(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        return run_dependency_repeatability_analysis(payload).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
 @router.get("/live/evidence", responses=JAEGER_AND_NOT_FOUND_RESPONSES)
 def read_live_evidence(
     operation: str = Query(..., min_length=1),
@@ -398,7 +970,7 @@ def evaluate_workflow_accuracy(
     return {
         "workflowId": workflow_id,
         "mandatoryThreshold": mandatory_threshold,
-        "serviceMetrics": {
+        "discoveryServiceMetrics": {
             "precision": result.service_metrics.precision,
             "recall": result.service_metrics.recall,
             "f1": result.service_metrics.f1,
@@ -406,6 +978,24 @@ def evaluate_workflow_accuracy(
             "truePositives": result.service_metrics.true_positives,
             "falsePositives": result.service_metrics.false_positives,
             "falseNegatives": result.service_metrics.false_negatives,
+        },
+        "serviceMetrics": {
+            "precision": result.mandatory_service_metrics.precision,
+            "recall": result.mandatory_service_metrics.recall,
+            "f1": result.mandatory_service_metrics.f1,
+            "accuracy": result.mandatory_service_metrics.accuracy,
+            "truePositives": result.mandatory_service_metrics.true_positives,
+            "falsePositives": result.mandatory_service_metrics.false_positives,
+            "falseNegatives": result.mandatory_service_metrics.false_negatives,
+        },
+        "mandatoryServiceMetrics": {
+            "precision": result.mandatory_service_metrics.precision,
+            "recall": result.mandatory_service_metrics.recall,
+            "f1": result.mandatory_service_metrics.f1,
+            "accuracy": result.mandatory_service_metrics.accuracy,
+            "truePositives": result.mandatory_service_metrics.true_positives,
+            "falsePositives": result.mandatory_service_metrics.false_positives,
+            "falseNegatives": result.mandatory_service_metrics.false_negatives,
         },
         "edgeMetrics": {
             "precision": result.edge_metrics.precision,
@@ -416,21 +1006,37 @@ def evaluate_workflow_accuracy(
             "falsePositives": result.edge_metrics.false_positives,
             "falseNegatives": result.edge_metrics.false_negatives,
         },
+        "mandatoryEdgeMetrics": {
+            "precision": result.mandatory_edge_metrics.precision,
+            "recall": result.mandatory_edge_metrics.recall,
+            "f1": result.mandatory_edge_metrics.f1,
+            "accuracy": result.mandatory_edge_metrics.accuracy,
+            "truePositives": result.mandatory_edge_metrics.true_positives,
+            "falsePositives": result.mandatory_edge_metrics.false_positives,
+            "falseNegatives": result.mandatory_edge_metrics.false_negatives,
+        },
         "truePositiveServices": result.true_positive_services,
         "falsePositiveServices": result.false_positive_services,
         "falseNegativeServices": result.false_negative_services,
+        "truePositiveMandatoryServices": result.true_positive_mandatory_services,
+        "falsePositiveMandatoryServices": result.false_positive_mandatory_services,
+        "falseNegativeMandatoryServices": result.false_negative_mandatory_services,
+        "truePositiveMandatoryEdges": result.true_positive_mandatory_edges,
+        "falsePositiveMandatoryEdges": result.false_positive_mandatory_edges,
+        "falseNegativeMandatoryEdges": result.false_negative_mandatory_edges,
     }
 
 
 @router.get(
     "/evaluation/sensitivity",
     summary="Run sensitivity analysis across threshold range",
+    deprecated=True,
     responses=NOT_FOUND_RESPONSE,
 )
 def get_sensitivity_analysis(
     workflow_id: str = Query("checkout", description="Benchmark workflow ID"),
 ) -> list[dict[str, Any]]:
-    """Run sensitivity analysis varying threshold from 0.5 to 1.0 to generate thesis comparison curves."""
+    """Run mandatory-aware synthetic fixture sensitivity for compatibility."""
     try:
         steps = run_sensitivity_analysis(workflow_id)
         return [

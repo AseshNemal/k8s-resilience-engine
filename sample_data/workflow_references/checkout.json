@@ -1,10 +1,20 @@
 {
   "workflowId": "checkout",
   "expectedServices": ["frontend", "cartservice", "checkoutservice", "paymentservice", "emailservice"],
+  "mandatoryServices": ["frontend", "cartservice", "checkoutservice", "paymentservice"],
+  "optionalServices": ["emailservice"],
   "expectedEdges": [
     {"source": "frontend", "target": "cartservice"},
     {"source": "cartservice", "target": "checkoutservice"},
     {"source": "checkoutservice", "target": "paymentservice"},
+    {"source": "checkoutservice", "target": "emailservice"}
+  ],
+  "mandatoryEdges": [
+    {"source": "frontend", "target": "cartservice"},
+    {"source": "cartservice", "target": "checkoutservice"},
+    {"source": "checkoutservice", "target": "paymentservice"}
+  ],
+  "optionalEdges": [
     {"source": "checkoutservice", "target": "emailservice"}
   ],
   "synthetic": true

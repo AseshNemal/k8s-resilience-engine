@@ -1,9 +1,18 @@
 {
   "workflowId": "refund",
   "expectedServices": ["frontend", "orderservice", "paymentservice", "notificationservice"],
+  "mandatoryServices": ["frontend", "orderservice", "paymentservice"],
+  "optionalServices": ["notificationservice"],
   "expectedEdges": [
     {"source": "frontend", "target": "orderservice"},
     {"source": "orderservice", "target": "paymentservice"},
+    {"source": "paymentservice", "target": "notificationservice"}
+  ],
+  "mandatoryEdges": [
+    {"source": "frontend", "target": "orderservice"},
+    {"source": "orderservice", "target": "paymentservice"}
+  ],
+  "optionalEdges": [
     {"source": "paymentservice", "target": "notificationservice"}
   ],
   "synthetic": true

@@ -43,3 +43,27 @@ def test_live_evidence_filters_before_counting_and_does_not_infer_necessity(clie
     assert result["edges"] == [{"source": "frontend", "target": "paymentservice"}]
     with pytest.raises(ValueError, match="No matching"):
         get_live_evidence("frontend", "POST /missing", "http://localhost:16686")
+
+
+def test_live_evidence_uses_injected_trace_source() -> None:
+    class Source:
+        def fetch_workflow_traces(self, **query):
+            assert query == {
+                "service_name": "gateway",
+                "operation": "",
+                "limit": 25,
+                "lookback": "30m",
+            }
+            return [trace("1", "POST", "/orders", "order-api")]
+
+    result = get_live_evidence(
+        "gateway",
+        "POST /orders",
+        "https://unused.invalid",
+        25,
+        "30m",
+        Source(),
+    )
+
+    assert result["traceCount"] == 1
+    assert result["observedServices"] == ["frontend", "order-api"]

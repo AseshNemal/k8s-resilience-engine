@@ -10,27 +10,139 @@
 
 {% block content %}
 <div class="page-header">
-    <h2 class="page-header__title">Workflow Dependency Modeling</h2>
+    <p class="workflow-kicker">Component 1 · Business workflow intelligence</p>
+    <h2 class="page-header__title">Which services does this workflow actually need?</h2>
     <p class="page-header__subtitle">
-        Reconstruct dependency candidates from scenarios and trace evidence, then compare
-        them with a separately loaded reference fixture.
+        Turn distributed traces and controlled execution outcomes into an evidence-backed
+        dependency graph for failure-impact analysis.
     </p>
     <div class="page-header__meta">
         <span class="component-owner">Owner: <strong>Member 1</strong></span>
         <span class="contract-chip">In: Distributed Traces</span>
         <span class="contract-chip contract-chip--out">Out: WorkflowGraph</span>
-        <span class="status-badge" data-role="data-source-badge">SYNTHETIC FIXTURE</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="data-source-badge">NO ACTIVE CAMPAIGN</span>
     </div>
 </div>
 
+<section class="component-brief" aria-labelledby="component-brief-title">
+    <div class="component-brief__statement">
+        <span class="component-brief__number">01</span>
+        <div>
+            <p class="component-brief__label">Component responsibility</p>
+            <h3 id="component-brief-title">Model a business workflow—not the Kubernetes deployment.</h3>
+            <p>
+                Component 1 identifies which application services participate in a business
+                outcome and validates whether each dependency is mandatory, supporting, or optional.
+            </p>
+        </div>
+    </div>
+    <div class="component-contract" aria-label="Component 1 contract">
+        <div><span>Input</span><strong>Scenarios + distributed traces</strong></div>
+        <span class="component-contract__arrow" aria-hidden="true">→</span>
+        <div><span>Decision</span><strong>Evidence-backed dependency class</strong></div>
+        <span class="component-contract__arrow" aria-hidden="true">→</span>
+        <div><span>Output to Component 3</span><strong>Approved WorkflowGraph</strong></div>
+    </div>
+</section>
+
+<section class="guided-analysis" aria-labelledby="guided-analysis-title">
+    <div class="guided-analysis__header">
+        <div>
+            <p class="workflow-kicker">Online Boutique · controlled experiment</p>
+            <h3 id="guided-analysis-title">Determine what a business workflow actually depends on</h3>
+            <p>Start from observed workflow traces, establish a stable baseline, then compare confirmed service interventions. Frequency alone never becomes a dependency claim.</p>
+        </div>
+        <span class="status-badge status-badge--muted status-badge--no-dot">Interventions require approval</span>
+    </div>
+    <ol class="experiment-path" aria-label="Workflow dependency experiment stages">
+        <li class="is-current"><span>01</span><strong>Observe</strong><small>Find workflow traces</small></li>
+        <li><span>02</span><strong>Baseline</strong><small>Prove stable success</small></li>
+        <li><span>03</span><strong>Intervene</strong><small>Test one service</small></li>
+        <li><span>04</span><strong>Classify</strong><small>Compare outcomes</small></li>
+        <li><span>05</span><strong>Approve</strong><small>Release graph</small></li>
+    </ol>
+    <div class="experiment-profile">
+        <div><span>Workflow under test</span><strong>Selected observed operation</strong></div>
+        <div><span>Business success</span><strong>Researcher-defined success contract</strong></div>
+        <div><span>Evidence source</span><strong>Recorded service activity + controlled outcomes</strong></div>
+    </div>
+    <div class="guided-discovery" data-role="guided-discovery">
+        <div>
+            <label for="guided-operation">Choose a business workflow</label>
+            <select id="guided-operation" data-role="guided-operation" aria-describedby="guided-workflow-help">
+                <option value="">Loading recorded workflows…</option>
+            </select>
+            <small id="guided-workflow-help">Ready workflows can continue through the full dependency experiment. Other workflows can still show observed participants.</small>
+        </div>
+        <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>Loading…</button>
+    </div>
+    <details class="guided-advanced">
+        <summary>Advanced connection settings</summary>
+        <form class="guided-analysis__form" data-role="guided-analysis-form">
+            <div class="guided-field">
+                <label for="guided-environment">Experiment dataset name</label>
+                <input id="guided-environment" name="environmentId" value="online-boutique-local" required>
+                <small>A label that keeps results from different test environments separate.</small>
+            </div>
+            <div class="guided-field guided-field--wide">
+                <label for="guided-jaeger-url">Workflow trace service address</label>
+                <input id="guided-jaeger-url" name="jaegerUrl" type="url"
+                       value="http://localhost:16686" aria-describedby="guided-trace-service-help" required>
+                <small id="guided-trace-service-help">Jaeger records which application services called one another. The local project normally uses this default address.</small>
+            </div>
+            <div class="guided-field">
+                <label for="guided-lookback">Trace window</label>
+                <select id="guided-lookback" name="lookback">
+                    <option value="1h" selected>Last hour</option>
+                    <option value="6h">Last 6 hours</option>
+                    <option value="24h">Last 24 hours</option>
+                    <option value="7d">Last 7 days</option>
+                </select>
+            </div>
+            <input name="entryService" value="frontend" type="hidden">
+            <input name="evidenceTier" value="experimental" type="hidden">
+            <div class="guided-analysis__action">
+                <button type="submit" class="secondary-button" data-role="guided-discover-button">Refresh workflow choices</button>
+            </div>
+        </form>
+    </details>
+    <output class="guided-selection-status" data-role="guided-analysis-status" aria-live="polite">Loading available workflows…</output>
+    <div class="guided-result" data-role="guided-result" hidden aria-live="polite"></div>
+</section>
+
+<details class="research-audit">
+<summary>
+    <span><strong>Research audit controls</strong><small>Scenarios, execution ledgers, intervention cohorts, references, and metrics</small></span>
+</summary>
+<div class="research-audit__body">
+<nav class="workflow-steps" aria-label="Workflow modeling stages">
+    <button type="button" class="workflow-step is-active" data-workflow-stage-button="define" aria-pressed="true">
+        <span>1</span><strong>Define</strong><small>Business outcome</small>
+    </button>
+    <button type="button" class="workflow-step" data-workflow-stage-button="evidence" aria-pressed="false">
+        <span>2</span><strong>Observe</strong><small>Traces &amp; executions</small>
+    </button>
+    <button type="button" class="workflow-step" data-workflow-stage-button="validate" aria-pressed="false">
+        <span>3</span><strong>Validate</strong><small>Controlled evidence</small>
+    </button>
+    <button type="button" class="workflow-step" data-workflow-stage-button="evaluate" aria-pressed="false">
+        <span>4</span><strong>Measure</strong><small>Research quality</small>
+    </button>
+</nav>
+
+<div class="workflow-stage" data-workflow-stage="evidence" hidden>
+<div class="workflow-stage__intro">
+    <p>Stage 2</p><h3>Observe real workflow executions</h3>
+    <span>Discover calls from Jaeger or use a clearly marked synthetic fixture.</span>
+</div>
 <div class="card live-config-card" style="margin-bottom: var(--space-lg);">
     <div class="live-config-card__header">
         <h4 style="margin: 0; font-size: 14px; font-weight: 600;">Tracing Source &amp; Live Ingestion</h4>
-        <span class="status-badge" data-role="jaeger-status-badge">Checking Jaeger…</span>
+        <span class="status-badge" data-role="jaeger-status-badge">Checking trace service…</span>
     </div>
     <div class="live-config-form" style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-top: var(--space-sm);">
         <div class="form-group" style="flex: 1; min-width: 220px;">
-            <label for="jaeger-url-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Jaeger Query URL</label>
+            <label for="jaeger-url-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Workflow trace service address</label>
             <input id="jaeger-url-input" type="text" data-role="jaeger-url-input" value="http://localhost:16686" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="http://localhost:16686">
         </div>
         <div class="form-group" style="width: 140px;">
@@ -82,7 +194,13 @@
         </div>
     </div>
 </div>
+</div>
 
+<div class="workflow-stage" data-workflow-stage="define">
+<div class="workflow-stage__intro">
+    <p>Stage 1</p><h3>Define what success means</h3>
+    <span>Create an immutable business contract before looking at dependency evidence.</span>
+</div>
 <section class="card scenario-registry" aria-labelledby="scenario-registry-title">
     <div class="scenario-registry__header">
         <div>
@@ -100,7 +218,7 @@
         <div class="scenario-form__field">
             <label for="scenario-workflow-id">Workflow ID</label>
             <input id="scenario-workflow-id" name="workflowId" required
-                   pattern="[a-z0-9][a-z0-9_-]{0,63}" placeholder="customer_checkout">
+                   pattern="[a-z0-9][a-z0-9_\-]{0,63}" placeholder="customer_checkout">
         </div>
         <div class="scenario-form__field scenario-form__field--wide">
             <label for="scenario-description">Business description</label>
@@ -182,7 +300,9 @@
     <div class="scenario-registry__list" data-role="scenario-registry-list"
          aria-live="polite"></div>
 </section>
+</div>
 
+<div class="workflow-stage" data-workflow-stage="evidence" hidden>
 <section class="card execution-ledger" aria-labelledby="execution-ledger-title">
     <div class="execution-ledger__header">
         <div>
@@ -205,7 +325,7 @@
         <div class="scenario-form__field">
             <label for="execution-batch-id">Batch ID (optional)</label>
             <input id="execution-batch-id" data-role="execution-batch-id"
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
                    placeholder="Generated automatically">
         </div>
         <button type="button" class="primary-button" data-role="run-benchmark-batch-button">
@@ -220,7 +340,13 @@
     <div class="execution-ledger__list" data-role="execution-ledger-list"
          aria-live="polite"></div>
 </section>
+</div>
 
+<div class="workflow-stage" data-workflow-stage="validate" hidden>
+<div class="workflow-stage__intro">
+    <p>Stage 3</p><h3>Validate dependency necessity</h3>
+    <span>Compare baseline and controlled-intervention cohorts. Uncertain evidence remains unresolved.</span>
+</div>
 <section class="card dependency-validation" aria-labelledby="dependency-validation-title">
     <div class="dependency-validation__header">
         <div>
@@ -238,13 +364,13 @@
         <div class="scenario-form__field">
             <label for="assessment-id">Assessment ID</label>
             <input id="assessment-id" name="assessmentId" required
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
                    placeholder="assessment:checkout:001">
         </div>
         <div class="scenario-form__field">
             <label for="assessment-environment">Environment ID</label>
             <input id="assessment-environment" name="environmentId" required
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
                    placeholder="test-cluster-a">
         </div>
         <div class="scenario-form__field scenario-form__field--wide">
@@ -292,10 +418,132 @@
     <div class="dependency-validation__list" data-role="dependency-assessment-list"
          aria-live="polite"></div>
 </section>
+<aside class="handoff-note">
+    <strong>Handoff boundary</strong>
+    <span>Only an approved graph is exposed to Component 3 for failure-impact prediction. Component 1 never models pod placement or Kubernetes topology.</span>
+</aside>
+</div>
 
+<div class="workflow-stage" data-workflow-stage="evaluate" hidden>
+<div class="workflow-stage__intro">
+    <p>Stage 4</p><h3>Measure research quality</h3>
+    <span>Compare frozen classifications with independent truth and test robustness across runs.</span>
+</div>
+<section class="card classification-lab" aria-labelledby="classification-lab-title">
+    <div class="classification-lab__header">
+        <div>
+            <span class="classification-lab__eyebrow">Evaluation protocol</span>
+            <h3 id="classification-lab-title">Classification Validation Lab</h3>
+            <p>
+                Register truth independently, evaluate a frozen assessment, and inspect
+                abstention, threshold sensitivity, and repeatability without changing evidence.
+            </p>
+        </div>
+        <button type="button" class="secondary-button" data-role="refresh-classification-lab">
+            Refresh Results
+        </button>
+    </div>
+    <div class="classification-lab__notice" role="note">
+        Synthetic references are engineering evidence only. Production claims require an
+        independently reviewed reference and controlled Jaeger experiment cohorts.
+    </div>
+    <div class="classification-lab__grid">
+        <form class="classification-lab__panel" data-role="dependency-reference-form">
+            <div class="classification-lab__panel-heading">
+                <span>01</span>
+                <div><h4>Independent reference</h4><p>Versioned labels loaded after prediction.</p></div>
+            </div>
+            <div class="classification-lab__fields">
+                <div class="scenario-form__field">
+                    <label for="reference-workflow-id">Workflow ID</label>
+                    <input id="reference-workflow-id" name="workflowId" required value="checkout">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="reference-scenario-version">Scenario version</label>
+                    <input id="reference-scenario-version" name="scenarioVersion" type="number" min="1" required value="1">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="reference-expected-version">Current reference version</label>
+                    <input id="reference-expected-version" name="expectedVersion" type="number" min="0" required value="0">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="reference-actor">Reviewed by</label>
+                    <input id="reference-actor" name="actor" required value="independent-reviewer">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="reference-source">Reference source</label>
+                    <input id="reference-source" name="source" required value="independent_domain_review">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="reference-labels">Service labels (JSON)</label>
+                    <textarea id="reference-labels" name="labels" rows="7" required
+                              aria-describedby="reference-labels-help"
+                              placeholder='[{"serviceName":"paymentservice","classification":"mandatory","justification":"Payment is required"}]'></textarea>
+                    <small id="reference-labels-help">Allowed labels: mandatory, optional, supporting. Each requires a justification.</small>
+                </div>
+                <label class="classification-lab__check" for="reference-synthetic">
+                    <input id="reference-synthetic" name="synthetic" type="checkbox" checked>
+                    Mark this reference as synthetic
+                </label>
+            </div>
+            <button type="submit" class="primary-button">Save Reference Version</button>
+            <span data-role="dependency-reference-status" aria-live="polite"></span>
+        </form>
+
+        <div class="classification-lab__panel">
+            <div class="classification-lab__panel-heading">
+                <span>02</span>
+                <div><h4>Evaluation &amp; robustness</h4><p>Operate only on immutable assessment IDs.</p></div>
+            </div>
+            <div class="classification-lab__fields">
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="evaluation-assessment-id">Primary assessment ID</label>
+                    <input id="evaluation-assessment-id" data-role="evaluation-assessment-id"
+                           placeholder="assessment:checkout:001">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="classification-evaluation-id">Evaluation ID</label>
+                    <input id="classification-evaluation-id" data-role="classification-evaluation-id"
+                           placeholder="evaluation:checkout:001">
+                </div>
+                <div class="scenario-form__field">
+                    <label for="evaluation-reference-version">Reference version</label>
+                    <input id="evaluation-reference-version" data-role="evaluation-reference-version"
+                           type="number" min="1" value="1">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="evaluation-actor">Evaluated by</label>
+                    <input id="evaluation-actor" data-role="classification-evaluation-actor"
+                           value="component-1-evaluator">
+                </div>
+                <div class="scenario-form__field classification-lab__wide">
+                    <label for="repeatability-assessment-ids">Repeatability assessment IDs</label>
+                    <input id="repeatability-assessment-ids" data-role="repeatability-assessment-ids"
+                           placeholder="assessment:run:001, assessment:run:002">
+                    <small>At least two runs from the same workflow, scenario, and environment.</small>
+                </div>
+            </div>
+            <div class="classification-lab__actions">
+                <button type="button" class="primary-button" data-role="run-classification-evaluation">Evaluate Classification</button>
+                <button type="button" class="secondary-button" data-role="run-policy-sensitivity">Test Policy Sensitivity</button>
+                <button type="button" class="secondary-button" data-role="run-repeatability">Check Repeatability</button>
+            </div>
+            <span data-role="classification-experiment-status" aria-live="polite"></span>
+        </div>
+    </div>
+    <div class="classification-lab__results" data-role="classification-lab-results" aria-live="polite">
+        <p class="muted">No Phase 5 classification evaluation has been recorded yet.</p>
+    </div>
+</section>
+</div>
+
+<div class="workflow-stage" data-workflow-stage="evidence" hidden>
 <div data-role="page-region">
     {{ loading_state("Loading WorkflowGraph…") }}
 </div>
+</div>
+</div>
+</details>
 
 <template data-role="page-template">
     <p class="card" data-role="evidence-note" aria-live="polite"></p>
@@ -360,11 +608,10 @@
         </div>
     </div>
 
-    <div class="section-header" data-role="benchmark-only">
-        <h3 class="section-header__title">Synthetic Fixture Comparison</h3>
-        <span class="section-header__note">Engineering checks; independent research validation is pending</span>
-    </div>
-    <div class="card" data-role="benchmark-only" style="margin-bottom: var(--space-lg);">
+    <details class="diagnostic-disclosure" data-role="benchmark-only">
+        <summary>Engineering fixture diagnostics</summary>
+        <p>Inspect frequency-threshold behavior for the selected synthetic fixture. This is not empirical validation.</p>
+    <div class="card diagnostic-disclosure__body">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-md); margin-bottom: var(--space-md); padding-bottom: var(--space-md); border-bottom: 1px solid var(--color-border);">
             <div style="display: flex; align-items: center; gap: var(--space-md);">
                 <label for="eval-threshold-slider" style="font-size: 13px; font-weight: 600;">High-frequency Candidate Threshold (θ):</label>
@@ -376,7 +623,7 @@
                     Compare Fixture Sets
                 </button>
                 <button type="button" class="secondary-button" data-role="run-sensitivity-btn">
-                    Compare Thresholds
+                    Test Assessment Policies
                 </button>
                 <button type="button" class="secondary-button" data-role="copy-markdown-btn">
                     Copy Fixture Table
@@ -416,18 +663,15 @@
         </div>
 
         <div data-role="sensitivity-table-container" style="display: none; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px dashed var(--color-border);">
-            <h4 style="margin: 0 0 var(--space-sm) 0; font-size: 13px; font-weight: 600;">Sensitivity Analysis across Threshold Range (θ):</h4>
+            <h4 style="margin: 0 0 var(--space-sm) 0; font-size: 13px; font-weight: 600;">Frozen Assessment Policy Sensitivity:</h4>
             <div class="table-scroll">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Threshold (θ)</th>
-                            <th>Precision</th>
-                            <th>Recall</th>
-                            <th>F1-Score</th>
-                            <th>Edge Accuracy</th>
-                            <th>High-frequency Candidates</th>
-                            <th>Lower-frequency Candidates</th>
+                            <th>Mandatory Effect Threshold</th>
+                            <th colspan="4">Changed Services</th>
+                            <th>Mandatory</th>
+                            <th>Optional</th>
                         </tr>
                     </thead>
                     <tbody data-role="sensitivity-table-body"></tbody>
@@ -435,27 +679,15 @@
             </div>
         </div>
     </div>
+    </details>
 
     <div class="section-header">
         <h3 class="section-header__title">Raw Data</h3>
     </div>
     {{ raw_json_panel("workflow-raw-json", "View Raw WorkflowGraph") }}
-
-
-    <div class="section-header">
-        <h3 class="section-header__title">Future Work</h3>
-    </div>
-    <div class="card">
-        <ul class="future-work-list">
-            <li>Jaeger trace selector for choosing which recorded run to analyze</li>
-            <li>Workflow selection across multiple business workflows</li>
-            <li>Validated dependency classification using success outcomes and independent references</li>
-            <li>Interactive, zoomable dependency graph</li>
-        </ul>
-    </div>
 </template>
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-3-executions" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-5-workflow-picker" defer></script>
 {% endblock %}

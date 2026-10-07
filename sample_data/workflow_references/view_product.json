@@ -1,9 +1,19 @@
 {
   "workflowId": "view_product",
   "expectedServices": ["frontend", "productcatalogservice", "currencyservice", "recommendationservice", "adservice"],
+  "mandatoryServices": ["frontend", "productcatalogservice", "currencyservice"],
+  "optionalServices": ["recommendationservice", "adservice"],
   "expectedEdges": [
     {"source": "frontend", "target": "productcatalogservice"},
     {"source": "frontend", "target": "currencyservice"},
+    {"source": "frontend", "target": "recommendationservice"},
+    {"source": "frontend", "target": "adservice"}
+  ],
+  "mandatoryEdges": [
+    {"source": "frontend", "target": "productcatalogservice"},
+    {"source": "frontend", "target": "currencyservice"}
+  ],
+  "optionalEdges": [
     {"source": "frontend", "target": "recommendationservice"},
     {"source": "frontend", "target": "adservice"}
   ],

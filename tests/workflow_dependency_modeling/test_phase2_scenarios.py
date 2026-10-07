@@ -17,6 +17,7 @@ from app.engine.workflow_dependency_modeling.scenario_repository import (
 )
 from app.engine.workflow_dependency_modeling.scenario_service import (
     create_scenario,
+    transition_scenario_lifecycle,
     update_scenario,
 )
 from app.main import app
@@ -143,6 +144,37 @@ def test_update_creates_immutable_next_version_and_detects_stale_writer() -> Non
         )
 
 
+def test_lifecycle_transition_is_explicit_audited_and_one_way() -> None:
+    repository = InMemoryScenarioRepository()
+    create_scenario(
+        scenario_payload(), actor="analyst@example.com", repository=repository, now=NOW
+    )
+
+    active = transition_scenario_lifecycle(
+        "checkout",
+        "active",
+        expected_version=1,
+        actor="reviewer@example.com",
+        rationale="Success contract reviewed",
+        repository=repository,
+        now=NOW,
+    )
+
+    assert active.version == 2
+    assert active.lifecycle.value == "active"
+    assert active.change_summary == "Success contract reviewed"
+    with pytest.raises(ValueError, match="cannot transition"):
+        transition_scenario_lifecycle(
+            "checkout",
+            "draft",
+            expected_version=2,
+            actor="reviewer@example.com",
+            rationale="Invalid rollback",
+            repository=repository,
+            now=NOW,
+        )
+
+
 def test_sqlalchemy_adapter_persists_versions_across_instances(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'scenarios.db'}")
     Base.metadata.create_all(engine)
@@ -204,3 +236,30 @@ def test_api_create_read_and_versioned_update(monkeypatch) -> None:
         },
     )
     assert stale.status_code == 412
+
+
+def test_api_promotes_scenario_lifecycle(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import scenario_service
+
+    monkeypatch.setattr(
+        scenario_service, "_default_repository", InMemoryScenarioRepository()
+    )
+    client = TestClient(app)
+    created = client.post(
+        "/api/workflows/scenarios",
+        json=scenario_payload(),
+        headers={"X-Actor": "analyst@example.com"},
+    )
+
+    promoted = client.post(
+        "/api/workflows/scenarios/checkout/lifecycle",
+        json={"lifecycle": "active", "rationale": "Reviewed for experiments"},
+        headers={
+            "X-Actor": "reviewer@example.com",
+            "If-Match": created.headers["etag"],
+        },
+    )
+
+    assert promoted.status_code == 200
+    assert promoted.json()["lifecycle"] == "active"
+    assert promoted.headers["etag"] == '"checkout:2"'

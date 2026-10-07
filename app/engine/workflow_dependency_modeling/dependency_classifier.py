@@ -53,6 +53,40 @@ class DependencyClassification:
         return self.optional_candidates
 
 
+def _validate_classification_request(
+    interactions: list[TraceInteraction], workflow_id: str, threshold: float
+) -> None:
+    if not isinstance(workflow_id, str) or not workflow_id.strip():
+        raise ValueError("workflow_id must be a non-empty string")
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise ValueError("mandatory_threshold must be numeric")
+    if not 0.0 <= float(threshold) <= 1.0:
+        raise ValueError("mandatory_threshold must be between 0 and 1")
+    if not interactions:
+        raise InsufficientEvidenceError(
+            f"No trace interactions are available for workflow '{workflow_id}'"
+        )
+
+
+def _service_appearances(
+    interactions: list[TraceInteraction], workflow_id: str
+) -> dict[str, set[str]]:
+    appearances: dict[str, set[str]] = defaultdict(set)
+    for interaction in interactions:
+        observed_services = set(interaction.observed_services) or {
+            service
+            for edge in interaction.edges
+            for service in (edge.source, edge.target)
+        }
+        for service in observed_services:
+            appearances[service].add(interaction.trace_id)
+    if not appearances:
+        raise InsufficientEvidenceError(
+            f"Trace evidence for workflow '{workflow_id}' contains no observed services"
+        )
+    return appearances
+
+
 def classify_dependencies(
     interactions: list[TraceInteraction],
     workflow_id: str,
@@ -64,29 +98,8 @@ def classify_dependencies(
     other observed services become optional candidates. No reference label,
     expected-service list, or expected-edge list is accepted by this function.
     """
-    if not isinstance(workflow_id, str) or not workflow_id.strip():
-        raise ValueError("workflow_id must be a non-empty string")
-    if isinstance(mandatory_threshold, bool) or not isinstance(
-        mandatory_threshold, (int, float)
-    ):
-        raise ValueError("mandatory_threshold must be numeric")
-    if not 0.0 <= float(mandatory_threshold) <= 1.0:
-        raise ValueError("mandatory_threshold must be between 0 and 1")
-    if not interactions:
-        raise InsufficientEvidenceError(
-            f"No trace interactions are available for workflow '{workflow_id}'"
-        )
-
-    appearances: dict[str, set[str]] = defaultdict(set)
-    for interaction in interactions:
-        for edge in interaction.edges:
-            appearances[edge.source].add(interaction.trace_id)
-            appearances[edge.target].add(interaction.trace_id)
-
-    if not appearances:
-        raise InsufficientEvidenceError(
-            f"Trace evidence for workflow '{workflow_id}' contains no cross-service interactions"
-        )
+    _validate_classification_request(interactions, workflow_id, mandatory_threshold)
+    appearances = _service_appearances(interactions, workflow_id)
 
     total_traces = len(interactions)
     mandatory: list[str] = []

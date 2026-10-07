@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -5,6 +7,7 @@ from app.main import app
 
 
 client = TestClient(app)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 PAGE_CASES = [
@@ -66,5 +69,62 @@ def test_workflow_page_uses_candidate_not_validated_necessity_language() -> None
     response = client.get("/components/workflows")
     assert response.status_code == 200
     assert "High-frequency Candidates" in response.text
+
+
+def test_workflow_page_explains_component_contract_and_stages() -> None:
+    response = client.get("/components/workflows")
+    assert response.status_code == 200
+    assert "Which services does this workflow actually need?" in response.text
+    assert "Model a business workflow—not the Kubernetes deployment." in response.text
+    assert "Output to Component 3" in response.text
+    assert 'data-workflow-stage-button="define"' in response.text
+    assert 'data-workflow-stage-button="evidence"' in response.text
+    assert 'data-workflow-stage-button="validate"' in response.text
+    assert 'data-workflow-stage-button="evaluate"' in response.text
+    assert 'data-workflow-stage="evidence" hidden' in response.text
+    assert "Future Work" not in response.text
     assert "Lower-frequency Candidates" in response.text
     assert "Mandatory Services" not in response.text
+
+
+def test_workflow_page_defaults_to_guided_analysis_not_internal_artifacts() -> None:
+    response = client.get("/components/workflows")
+    assert response.status_code == 200
+    assert 'data-role="guided-analysis-form"' in response.text
+    assert 'data-role="guided-discover-button"' in response.text
+    assert 'data-role="guided-inspect-button"' in response.text
+    assert "Determine what a business workflow actually depends on" in response.text
+    assert "Researcher-defined success contract" in response.text
+    assert "Choose a business workflow" in response.text
+    assert "Advanced connection settings" in response.text
+    assert "Refresh workflow choices" in response.text
+    assert "Workflow trace service address" in response.text
+    assert "Interventions require approval" in response.text
+    assert "Synthetic Fixture Dataset" in response.text
+    assert "NO ACTIVE CAMPAIGN" in response.text
+    assert "Research audit controls" in response.text
+    assert '<details class="research-audit">' in response.text
+
+
+def test_workflow_client_exposes_operator_gated_campaign_lifecycle() -> None:
+    script = (
+        REPOSITORY_ROOT / "app" / "static" / "js" / "components" / "workflows.js"
+    ).read_text(encoding="utf-8")
+    assert "This component never changes the cluster" in script
+    assert "Confirm intervention active" in script
+    assert "Classify dependencies" in script
+    assert "Approve WorkflowGraph" in script
+    assert "/approval" in script
+    assert "loadCampaignDecision" in script
+    assert "Campaign active" in script
+    assert "No active campaign" in script
+    assert 'benchmarkProfile: "online_boutique_checkout_v0_10_1"' in script
+    assert "Observation complete — experiment not configured" in script
+    assert "Continue with Checkout instead" in script
+    assert "ready for dependency experiment" in script
+    assert "supportsGuidedExperiment" in script
+    assert "updateGuidedSelectionAction" in script
+    assert "Open checkout experiment" in script
+    assert "Existing checkout experiment loaded" in script
+    assert "Run one normal checkout" in script
+    assert "guidedResult.replaceChildren()" in script

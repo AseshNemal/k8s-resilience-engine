@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from app.engine.workflow_dependency_modeling.models import WorkflowScenario
+from app.engine.workflow_dependency_modeling.models import (
+    ScenarioLifecycle,
+    WorkflowScenario,
+)
 from app.engine.workflow_dependency_modeling.scenario_repository import (
     ScenarioRepository,
     SqlAlchemyScenarioRepository,
@@ -93,6 +96,50 @@ def update_scenario(
         raise ValueError("An update requires a new non-empty changeSummary")
     updated = WorkflowScenario.from_mapping(payload)
     return repo.add_version(updated, expected_version)
+
+
+def transition_scenario_lifecycle(
+    workflow_id: str,
+    lifecycle: str,
+    *,
+    expected_version: int,
+    actor: str,
+    rationale: str,
+    repository: ScenarioRepository | None = None,
+    now: datetime | None = None,
+) -> WorkflowScenario:
+    """Create an audited version for an allowed lifecycle transition."""
+    try:
+        target = ScenarioLifecycle(lifecycle)
+    except ValueError as err:
+        raise ValueError("Scenario lifecycle must be active or retired") from err
+    if target is ScenarioLifecycle.DRAFT:
+        raise ValueError("A scenario cannot transition back to draft")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ValueError("Lifecycle transition requires a non-empty rationale")
+
+    repo = _repository(repository)
+    current = repo.get(workflow_id)
+    allowed = {
+        ScenarioLifecycle.DRAFT: ScenarioLifecycle.ACTIVE,
+        ScenarioLifecycle.ACTIVE: ScenarioLifecycle.RETIRED,
+    }
+    if allowed.get(current.lifecycle) is not target:
+        raise ValueError(
+            f"Scenario lifecycle cannot transition from {current.lifecycle.value} "
+            f"to {target.value}"
+        )
+    return update_scenario(
+        workflow_id,
+        {
+            "lifecycle": target.value,
+            "changeSummary": rationale.strip(),
+        },
+        expected_version=expected_version,
+        actor=actor,
+        repository=repo,
+        now=now,
+    )
 
 
 def get_versioned_scenario(
