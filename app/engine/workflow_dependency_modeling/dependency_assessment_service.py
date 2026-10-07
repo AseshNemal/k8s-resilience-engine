@@ -61,6 +61,13 @@ def _repository(
     return _default_repository
 
 
+def dependency_assessment_repository(
+    repository: DependencyAssessmentRepository | None = None,
+) -> DependencyAssessmentRepository:
+    """Return the configured repository for collaborating Component 1 services."""
+    return _repository(repository)
+
+
 def _utc(value: datetime | None = None) -> datetime:
     resolved = value or datetime.now(timezone.utc)
     if resolved.tzinfo is None:
