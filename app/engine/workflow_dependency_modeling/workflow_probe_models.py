@@ -21,6 +21,7 @@ _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 _SENSITIVE_HEADERS = frozenset(
     {"authorization", "cookie", "proxy-authorization", "x-api-key"}
 )
+_PROBE_STEP = "Probe step"
 
 
 class WorkflowRunnerType(str, Enum):
@@ -79,6 +80,58 @@ def _json_object(value: Any, field: str) -> dict[str, Any] | None:
     return json.loads(serialized)
 
 
+def _probe_identity(data: Mapping[str, Any]) -> tuple[str, str, str]:
+    name = _required_text(data, "name", _PROBE_STEP)
+    if not _NAME.fullmatch(name):
+        raise ComponentDataError("Probe step name has an invalid format")
+    method = _required_text(data, "method", _PROBE_STEP).upper()
+    if method not in _HTTP_METHODS:
+        raise ComponentDataError("Probe step HTTP method is not supported")
+    path = _required_text(data, "path", _PROBE_STEP)
+    if not path.startswith("/") or path.startswith("//") or "://" in path:
+        raise ComponentDataError("Probe step path must be relative to the application URL")
+    if "#" in path:
+        raise ComponentDataError("Probe step path cannot contain a fragment")
+    return name, method, path
+
+
+def _probe_headers(data: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    headers = _string_mapping(data.get("headers"), "headers")
+    if _SENSITIVE_HEADERS & {key.lower() for key in headers}:
+        raise ComponentDataError(
+            "Sensitive headers must use secretHeaders environment references"
+        )
+    secret_headers = _string_mapping(data.get("secretHeaders"), "secretHeaders")
+    if any(not _ENVIRONMENT_NAME.fullmatch(value) for value in secret_headers.values()):
+        raise ComponentDataError(
+            "secretHeaders values must be environment-variable names"
+        )
+    if {key.lower() for key in headers} & {key.lower() for key in secret_headers}:
+        raise ComponentDataError("A header cannot have both literal and secret values")
+    return headers, secret_headers
+
+
+def _response_markers(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item for item in value
+    ):
+        raise ComponentDataError("responseContains must be a list of non-empty text")
+    return tuple(value)
+
+
+def _response_extractions(value: Any) -> dict[str, "ResponseExtraction"]:
+    if not isinstance(value, Mapping):
+        raise ComponentDataError("extract must be an object")
+    result: dict[str, ResponseExtraction] = {}
+    for variable, definition in value.items():
+        if not isinstance(variable, str) or not _NAME.fullmatch(variable):
+            raise ComponentDataError("Extracted variable name has an invalid format")
+        if not isinstance(definition, Mapping):
+            raise ComponentDataError("Extraction definition must be an object")
+        result[variable] = ResponseExtraction.from_mapping(definition)
+    return result
+
+
 @dataclass(frozen=True)
 class ResponseExtraction:
     source: ExtractionSource
@@ -121,55 +174,12 @@ class HttpProbeStep:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "HttpProbeStep":
-        name = _required_text(data, "name", "Probe step")
-        if not _NAME.fullmatch(name):
-            raise ComponentDataError("Probe step name has an invalid format")
-        method = _required_text(data, "method", "Probe step").upper()
-        if method not in _HTTP_METHODS:
-            raise ComponentDataError("Probe step HTTP method is not supported")
-        path = _required_text(data, "path", "Probe step")
-        if not path.startswith("/") or path.startswith("//") or "://" in path:
-            raise ComponentDataError("Probe step path must be relative to the application URL")
-        if "#" in path:
-            raise ComponentDataError("Probe step path cannot contain a fragment")
-
-        headers = _string_mapping(data.get("headers"), "headers")
-        if _SENSITIVE_HEADERS & {key.lower() for key in headers}:
-            raise ComponentDataError(
-                "Sensitive headers must use secretHeaders environment references"
-            )
-        secret_headers = _string_mapping(
-            data.get("secretHeaders"), "secretHeaders"
-        )
-        if any(not _ENVIRONMENT_NAME.fullmatch(value) for value in secret_headers.values()):
-            raise ComponentDataError(
-                "secretHeaders values must be environment-variable names"
-            )
-        if {key.lower() for key in headers} & {
-            key.lower() for key in secret_headers
-        }:
-            raise ComponentDataError("A header cannot have both literal and secret values")
-
+        name, method, path = _probe_identity(data)
+        headers, secret_headers = _probe_headers(data)
         json_body = _json_object(data.get("jsonBody"), "jsonBody")
         form_body = _string_mapping(data.get("formBody"), "formBody")
         if json_body is not None and form_body:
             raise ComponentDataError("Probe step cannot combine jsonBody and formBody")
-
-        raw_markers = data.get("responseContains", [])
-        if not isinstance(raw_markers, list) or any(
-            not isinstance(item, str) or not item for item in raw_markers
-        ):
-            raise ComponentDataError("responseContains must be a list of non-empty text")
-        extract_data = data.get("extract", {})
-        if not isinstance(extract_data, Mapping):
-            raise ComponentDataError("extract must be an object")
-        extract: dict[str, ResponseExtraction] = {}
-        for variable, definition in extract_data.items():
-            if not isinstance(variable, str) or not _NAME.fullmatch(variable):
-                raise ComponentDataError("Extracted variable name has an invalid format")
-            if not isinstance(definition, Mapping):
-                raise ComponentDataError("Extraction definition must be an object")
-            extract[variable] = ResponseExtraction.from_mapping(definition)
 
         return cls(
             name=name,
@@ -181,8 +191,8 @@ class HttpProbeStep:
             secret_headers=secret_headers,
             json_body=json_body,
             form_body=form_body,
-            response_contains=tuple(raw_markers),
-            extract=extract,
+            response_contains=_response_markers(data.get("responseContains", [])),
+            extract=_response_extractions(data.get("extract", {})),
         )
 
     def to_mapping(self) -> dict[str, Any]:

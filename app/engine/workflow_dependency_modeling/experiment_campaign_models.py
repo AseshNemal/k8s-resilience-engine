@@ -208,7 +208,9 @@ class ExperimentCampaign:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExperimentCampaign":
-        services = tuple(sorted(set(str(item).strip() for item in data.get("candidateServices", []))))
+        services = tuple(
+            sorted({str(item).strip() for item in data.get("candidateServices", [])})
+        )
         if not services or any(not service for service in services):
             raise ComponentDataError("Campaign requires downstream candidate services")
         interventions = tuple(

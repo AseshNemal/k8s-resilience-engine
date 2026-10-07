@@ -163,6 +163,53 @@ def _secret_headers(
     return resolved
 
 
+def _execute_probe_step(
+    client: httpx.Client,
+    step: HttpProbeStep,
+    variables: dict[str, str],
+    secret_headers: Mapping[str, str],
+    trace_id: str,
+) -> WorkflowRunStepResult:
+    headers = {
+        key: _render_text(value, variables) for key, value in step.headers.items()
+    }
+    headers.update(secret_headers)
+    headers["traceparent"] = _traceparent(trace_id)
+    json_body = (
+        _render_json(step.json_body, variables)
+        if step.json_body is not None
+        else None
+    )
+    form_body = {
+        key: _render_text(value, variables) for key, value in step.form_body.items()
+    }
+    response = client.request(
+        method=step.method,
+        url=_render_text(step.path, variables),
+        params={
+            key: _render_text(value, variables) for key, value in step.query.items()
+        },
+        headers=headers,
+        json=json_body,
+        data=form_body or None,
+    )
+    failure = _step_failure_reason(step, response)
+    if failure is None:
+        try:
+            variables.update(_extract_variables(step, response))
+        except ValueError as err:
+            failure = str(err)
+    succeeded = failure is None
+    return WorkflowRunStepResult(
+        name=step.name,
+        method=step.method,
+        path=step.path,
+        status_code=response.status_code,
+        succeeded=succeeded,
+        reason="Step satisfied its reviewed assertions" if succeeded else failure,
+    )
+
+
 def run_http_workflow_probe(
     base_url: str,
     definition: WorkflowProbeDefinition,
@@ -192,55 +239,21 @@ def run_http_workflow_probe(
         transport=transport,
     ) as client:
         for step in definition.steps:
-            headers = {
-                key: _render_text(value, variables)
-                for key, value in step.headers.items()
-            }
-            headers.update(resolved_secrets[step.name])
-            headers["traceparent"] = _traceparent(resolved_trace_id)
-            response = client.request(
-                method=step.method,
-                url=_render_text(step.path, variables),
-                params={
-                    key: _render_text(value, variables)
-                    for key, value in step.query.items()
-                },
-                headers=headers,
-                json=_render_json(step.json_body, variables)
-                if step.json_body is not None
-                else None,
-                data={
-                    key: _render_text(value, variables)
-                    for key, value in step.form_body.items()
-                }
-                or None,
+            result = _execute_probe_step(
+                client,
+                step,
+                variables,
+                resolved_secrets[step.name],
+                resolved_trace_id,
             )
-            failure = _step_failure_reason(step, response)
-            if failure is None:
-                try:
-                    variables.update(_extract_variables(step, response))
-                except ValueError as err:
-                    failure = str(err)
-            succeeded = failure is None
-            results.append(
-                WorkflowRunStepResult(
-                    name=step.name,
-                    method=step.method,
-                    path=step.path,
-                    status_code=response.status_code,
-                    succeeded=succeeded,
-                    reason="Step satisfied its reviewed assertions"
-                    if succeeded
-                    else failure,
-                )
-            )
-            if not succeeded:
+            results.append(result)
+            if not result.succeeded:
                 return WorkflowRunResult(
                     trace_id=resolved_trace_id,
                     started_at=start,
                     finished_at=datetime.now(timezone.utc),
                     business_success=False,
-                    reason=f"Workflow stopped at step '{step.name}': {failure}",
+                    reason=f"Workflow stopped at step '{step.name}': {result.reason}",
                     steps=tuple(results),
                 )
 

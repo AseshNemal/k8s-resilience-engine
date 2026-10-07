@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import uuid4
 
 from app.engine.workflow_dependency_modeling.analysis_session_repository import (
     AnalysisSessionRepository,
+)
+from app.engine.workflow_dependency_modeling.analysis_session_models import (
+    WorkflowAnalysisSession,
 )
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
     get_workflow_analysis,
@@ -24,6 +28,9 @@ from app.engine.workflow_dependency_modeling.online_boutique_workload import (
 )
 from app.engine.workflow_dependency_modeling.workflow_onboarding import (
     build_workflow_probe,
+)
+from app.engine.workflow_dependency_modeling.workflow_probe_models import (
+    WorkflowProbeDefinition,
 )
 
 
@@ -77,6 +84,104 @@ def _timestamp(now: datetime | None) -> datetime:
     return result.astimezone(timezone.utc)
 
 
+@dataclass(frozen=True)
+class _CampaignSetup:
+    definition: WorkflowProbeDefinition
+    workflow_id: str
+    workflow_name: str
+    workload_profile: str
+    outcome: str
+    response_marker: str | None
+
+
+def _required_campaign_text(data: Mapping[str, Any], key: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} is required for a custom workflow")
+    return value.strip()
+
+
+def _custom_probe(
+    data: Mapping[str, Any], analysis: WorkflowAnalysisSession
+) -> tuple[WorkflowProbeDefinition, str]:
+    workflow_setup = data.get("workflowSetup")
+    if workflow_setup is not None:
+        if not isinstance(workflow_setup, Mapping):
+            raise ValueError("workflowSetup must be an object")
+        return (
+            build_workflow_probe(
+                analysis.entry_service, analysis.operation_name, workflow_setup
+            ),
+            str(workflow_setup.get("mode")),
+        )
+    raw_definition = data.get("executionDefinition")
+    if not isinstance(raw_definition, Mapping):
+        raise ValueError("executionDefinition must be an object")
+    return (
+        build_workflow_probe(
+            analysis.entry_service,
+            analysis.operation_name,
+            {
+                "mode": "imported_definition",
+                "executionDefinition": raw_definition,
+            },
+        ),
+        "imported_definition",
+    )
+
+
+def _campaign_setup(
+    data: Mapping[str, Any],
+    analysis: WorkflowAnalysisSession,
+    now: datetime | None,
+) -> _CampaignSetup:
+    selected = (
+        data.get("executionDefinition"),
+        data.get("workflowSetup"),
+        data.get("benchmarkProfile"),
+    )
+    if sum(item is not None for item in selected) != 1:
+        raise ValueError(
+            "Provide exactly one of workflowSetup, executionDefinition, or benchmarkProfile"
+        )
+    benchmark_profile = data.get("benchmarkProfile")
+    if benchmark_profile is None:
+        definition, setup_mode = _custom_probe(data, analysis)
+        return _CampaignSetup(
+            definition=definition,
+            workflow_id=analysis.workflow_id,
+            workflow_name=_required_campaign_text(data, "workflowName"),
+            workload_profile=f"reviewed_{setup_mode}",
+            outcome=_required_campaign_text(data, "businessOutcome"),
+            response_marker=None,
+        )
+    if benchmark_profile != ONLINE_BOUTIQUE_CHECKOUT_PROFILE:
+        raise ValueError("benchmarkProfile is not supported")
+    if "checkout" not in analysis.operation_name.lower():
+        raise ValueError(
+            "The Online Boutique benchmark requires an observed checkout operation"
+        )
+    return _CampaignSetup(
+        definition=online_boutique_checkout_probe(
+            "OLJCESPC7Z", _timestamp(now).year + 2
+        ),
+        workflow_id="checkout",
+        workflow_name="Online Boutique checkout",
+        workload_profile=ONLINE_BOUTIQUE_CHECKOUT_PROFILE,
+        outcome="Customer receives a confirmed order",
+        response_marker="Your order is complete!",
+    )
+
+
+def _required_baseline_trials(data: Mapping[str, Any]) -> int:
+    value = data.get("requiredBaselineTrials", 5)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("requiredBaselineTrials must be an integer")
+    if not 3 <= value <= 30:
+        raise ValueError("requiredBaselineTrials must be between 3 and 30")
+    return value
+
+
 def create_experiment_campaign(
     data: Mapping[str, Any],
     *,
@@ -98,69 +203,8 @@ def create_experiment_campaign(
         raise ValueError("The workflow success contract must be confirmed")
 
     analysis = get_workflow_analysis(session_id.strip(), analysis_repository)
-    raw_definition = data.get("executionDefinition")
-    workflow_setup = data.get("workflowSetup")
-    benchmark_profile = data.get("benchmarkProfile")
-    selected_inputs = sum(
-        item is not None
-        for item in (raw_definition, workflow_setup, benchmark_profile)
-    )
-    if selected_inputs != 1:
-        raise ValueError(
-            "Provide exactly one of workflowSetup, executionDefinition, or benchmarkProfile"
-        )
-
-    if benchmark_profile is not None:
-        if benchmark_profile != ONLINE_BOUTIQUE_CHECKOUT_PROFILE:
-            raise ValueError("benchmarkProfile is not supported")
-        if "checkout" not in analysis.operation_name.lower():
-            raise ValueError(
-                "The Online Boutique benchmark requires an observed checkout operation"
-            )
-        definition = online_boutique_checkout_probe(
-            "OLJCESPC7Z",
-            _timestamp(now).year + 2,
-        )
-        workflow_id = "checkout"
-        workflow_name = "Online Boutique checkout"
-        workload_profile = ONLINE_BOUTIQUE_CHECKOUT_PROFILE
-        outcome = "Customer receives a confirmed order"
-        response_marker = "Your order is complete!"
-    else:
-        if workflow_setup is not None:
-            if not isinstance(workflow_setup, Mapping):
-                raise ValueError("workflowSetup must be an object")
-            definition = build_workflow_probe(
-                analysis.entry_service,
-                analysis.operation_name,
-                workflow_setup,
-            )
-            setup_mode = str(workflow_setup.get("mode"))
-        else:
-            if not isinstance(raw_definition, Mapping):
-                raise ValueError("executionDefinition must be an object")
-            definition = build_workflow_probe(
-                analysis.entry_service,
-                analysis.operation_name,
-                {
-                    "mode": "imported_definition",
-                    "executionDefinition": raw_definition,
-                },
-            )
-            setup_mode = "imported_definition"
-        workflow_id = analysis.workflow_id
-        workflow_name = data.get("workflowName")
-        if not isinstance(workflow_name, str) or not workflow_name.strip():
-            raise ValueError("workflowName is required for a custom workflow")
-        workflow_name = workflow_name.strip()
-        outcome = data.get("businessOutcome")
-        if not isinstance(outcome, str) or not outcome.strip():
-            raise ValueError("businessOutcome is required for a custom workflow")
-        outcome = outcome.strip()
-        workload_profile = f"reviewed_{setup_mode}"
-        response_marker = None
-
-    terminal_service = definition.success_condition.terminal_service
+    setup = _campaign_setup(data, analysis, now)
+    terminal_service = setup.definition.success_condition.terminal_service
     if terminal_service not in analysis.observed_services:
         raise ValueError(
             "The success condition terminal service was not present in observed traces"
@@ -171,12 +215,7 @@ def create_experiment_campaign(
     if not candidates:
         raise ValueError("No downstream services were observed for this workflow")
 
-    required_trials = data.get("requiredBaselineTrials", 5)
-    if isinstance(required_trials, bool) or not isinstance(required_trials, int):
-        raise ValueError("requiredBaselineTrials must be an integer")
-    if not 3 <= required_trials <= 30:
-        raise ValueError("requiredBaselineTrials must be between 3 and 30")
-
+    required_trials = _required_baseline_trials(data)
     timestamp = _timestamp(now)
     token = uuid4().hex
     campaign = ExperimentCampaign.from_mapping(
@@ -184,22 +223,22 @@ def create_experiment_campaign(
             "campaignId": f"campaign:{token}",
             "analysisSessionId": analysis.session_id,
             "environmentId": analysis.environment_id,
-            "workflowId": workflow_id,
-            "workflowName": workflow_name,
-            "workloadProfile": workload_profile,
+            "workflowId": setup.workflow_id,
+            "workflowName": setup.workflow_name,
+            "workloadProfile": setup.workload_profile,
             "evidenceTier": analysis.evidence_tier.value,
             "observedTraceCount": analysis.trace_count,
             "candidateServices": list(candidates),
             "successContract": {
-                "outcome": outcome,
-                "condition": definition.success_condition.to_mapping(),
+                "outcome": setup.outcome,
+                "condition": setup.definition.success_condition.to_mapping(),
                 **(
-                    {"responseMarker": response_marker}
-                    if response_marker is not None
+                    {"responseMarker": setup.response_marker}
+                    if setup.response_marker is not None
                     else {}
                 ),
             },
-            "executionDefinition": definition.to_mapping(),
+            "executionDefinition": setup.definition.to_mapping(),
             "baseline": {
                 "batchId": f"batch:{token}:baseline",
                 "requiredTrials": required_trials,
