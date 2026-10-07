@@ -16,6 +16,18 @@ class PodModel(APIModel):
     restart_count: int = 0
 
 
+class ClusterMetadata(APIModel):
+    failure_domain_type: str = "kubernetes.io/hostname"
+    node_names: list[str]
+
+
+class ValidationMetrics(APIModel):
+    service_pod_mapping_accuracy: float
+    pod_node_mapping_accuracy: float
+    concentration_detection_accuracy: float
+    runtime_overhead_ms: float
+
+
 class ServicePlacement(APIModel):
     name: str
     declared_replicas: int
@@ -27,5 +39,9 @@ class ServicePlacement(APIModel):
 
 
 class DeploymentGraph(APIModel):
+    snapshot_id: str
+    timestamp: str
+    cluster: ClusterMetadata
+    validation: ValidationMetrics
     nodes: list[NodeModel]
     services: list[ServicePlacement]

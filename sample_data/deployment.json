@@ -1,4 +1,16 @@
 {
+  "snapshot_id": "snap-sample-static-001",
+  "timestamp": "2026-10-07T12:00:00Z",
+  "cluster": {
+    "failure_domain_type": "kubernetes.io/hostname",
+    "node_names": ["node-1", "node-2", "node-3"]
+  },
+  "validation": {
+    "service_pod_mapping_accuracy": 1.0,
+    "pod_node_mapping_accuracy": 1.0,
+    "concentration_detection_accuracy": 1.0,
+    "runtime_overhead_ms": 134.5
+  },
   "nodes": [
     {
       "name": "node-1",
