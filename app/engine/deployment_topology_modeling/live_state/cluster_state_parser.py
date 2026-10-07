@@ -1,8 +1,9 @@
 from kubernetes import client, config
-from typing import Dict, List, Any
+from typing import List, Any
+from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterNode, ClusterPod
 
 
-def get_cluster_nodes() -> List[Dict[str, Any]]:
+def get_cluster_nodes() -> List[ClusterNode]:
     """Fetch all nodes and their basic metadata from the live Kubernetes cluster."""
     config.load_kube_config()
     v1 = client.CoreV1Api()
@@ -11,8 +12,13 @@ def get_cluster_nodes() -> List[Dict[str, Any]]:
     nodes = v1.list_node().items
 
     for node in nodes:
-        name = node.metadata.name
         labels = node.metadata.labels or {}
+        
+        # Exclude control-plane nodes
+        if "node-role.kubernetes.io/control-plane" in labels or "node-role.kubernetes.io/master" in labels:
+            continue
+            
+        name = node.metadata.name
         zone = labels.get("topology.kubernetes.io/zone", "default-zone")
 
         # Extract allocatable computing capacity
@@ -20,17 +26,17 @@ def get_cluster_nodes() -> List[Dict[str, Any]]:
         cpu = allocatable.get("cpu", "0")
         memory = allocatable.get("memory", "0")
 
-        nodes_data.append({
-            "name": name,
-            "zone": zone,
-            "cpuAvailable": cpu,
-            "memoryAvailable": memory,
-        })
+        nodes_data.append(ClusterNode(
+            name=name,
+            zone=zone,
+            cpu_available=cpu,
+            memory_available=memory
+        ))
 
     return nodes_data
 
 
-def get_cluster_pods(namespace: str = "default") -> List[Dict[str, Any]]:
+def get_cluster_pods(namespace: str = "default") -> List[ClusterPod]:
     """Fetch live pods and readiness status within the specified namespace."""
     config.load_kube_config()
     v1 = client.CoreV1Api()
@@ -61,14 +67,15 @@ def get_cluster_pods(namespace: str = "default") -> List[Dict[str, Any]]:
         labels = pod.metadata.labels or {}
         app_label = labels.get("app", "")
 
-        pods_data.append({
-            "name": pod_name,
-            "node": node_name,
-            "ready": is_ready,
-            "owner_kind": owner_kind,
-            "owner_name": owner_name,
-            "app_label": app_label,
-        })
+        pods_data.append(ClusterPod(
+            name=pod_name,
+            node=node_name,
+            ready=is_ready,
+            owner_kind=owner_kind,
+            owner_name=owner_name,
+            app_label=app_label,
+            labels=labels
+        ))
 
     return pods_data
 
@@ -77,9 +84,9 @@ if __name__ == "__main__":
     print("--- LIVE NODES ---")
     nodes = get_cluster_nodes()
     for n in nodes:
-        print(f"Node: {n['name']} (Zone: {n['zone']})")
+        print(f"Node: {n.name} (Zone: {n.zone})")
 
     print("\n--- LIVE PODS (First 5) ---")
     pods = get_cluster_pods()
     for p in pods[:5]:
-        print(f"Pod: {p['name']} -> Node: {p['node']} (Ready: {p['ready']}, App: {p['app_label']})")
+        print(f"Pod: {p.name} -> Node: {p.node} (Ready: {p.ready}, App: {p.app_label})")

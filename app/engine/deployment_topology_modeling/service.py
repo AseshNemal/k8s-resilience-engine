@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 from pathlib import Path
 from app.shared.schemas.deployment import DeploymentGraph
 
@@ -35,7 +36,9 @@ def get_live_deployment_graph(namespace: str = "default") -> DeploymentGraph:
     # Maintain modular boundaries by using a strictly-typed Builder pattern.
     # The builder translates internal Python dictionary structures into standard Pydantic models.
     builder = DeploymentGraphBuilder()
-    builder.attach_nodes(raw_nodes)
+    
+    # Convert ClusterNode objects to dicts to maintain compatibility with pending graph_builder
+    builder.attach_nodes([asdict(n) for n in raw_nodes])
     
     # Advanced drift and state tracking analytics are decoupled and conditionally injected.
     baseline_drift_context = {}
