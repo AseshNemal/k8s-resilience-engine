@@ -4,8 +4,8 @@
   "criticality": 0.9,
   "successCondition": {
     "protocol": "http",
-    "terminalService": "paymentservice",
-    "operationName": "payment.charge",
+    "terminalService": "checkoutservice",
+    "operationName": "checkout.placeOrder",
     "httpStatusCodes": [200],
     "maxDurationMs": 2000,
     "requiredAttributes": []

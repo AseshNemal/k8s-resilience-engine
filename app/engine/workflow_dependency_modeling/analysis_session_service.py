@@ -16,7 +16,7 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     AnalysisSessionRepository,
     SqlAlchemyAnalysisSessionRepository,
 )
-from app.engine.workflow_dependency_modeling.auto_discovery import _slugify
+from app.engine.workflow_dependency_modeling.auto_discovery import slugify_operation
 from app.engine.workflow_dependency_modeling.trace_source import (
     JaegerTraceSource,
     TraceSourceConfiguration,
@@ -166,7 +166,7 @@ def start_workflow_analysis(
             "entryService": entry_service,
             "operationName": operation_name,
             "lookback": lookback,
-            "workflowId": _slugify(operation_name),
+            "workflowId": slugify_operation(operation_name),
             "traceCount": evidence["traceCount"],
             "observedServices": evidence["observedServices"],
             "serviceEvidence": evidence["serviceEvidence"],
