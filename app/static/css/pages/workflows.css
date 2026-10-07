@@ -1080,12 +1080,39 @@
 }
 
 .guided-discovery {
+    display: flex;
+    gap: var(--space-md);
     align-items: end;
     margin-top: var(--space-md);
     padding: var(--space-md);
     border: 1px solid #bfdbfe;
     border-radius: var(--radius-medium);
     background: #eff6ff;
+}
+
+.guided-discovery small {
+    color: var(--color-text-muted);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.guided-advanced {
+    margin-top: var(--space-sm);
+}
+
+.guided-advanced > summary {
+    width: fit-content;
+    color: var(--color-text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.guided-selection-status {
+    min-height: 20px;
+    margin: var(--space-sm) 0 0;
+    color: var(--color-text-muted);
+    font-size: 12px;
 }
 
 .guided-discovery > div {

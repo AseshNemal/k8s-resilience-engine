@@ -95,11 +95,44 @@
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const error = new Error(data.detail || `Request failed with HTTP ${response.status}`);
+            let detail = data.detail;
+            if (Array.isArray(detail)) {
+                detail = detail
+                    .map((item) => {
+                        const location = Array.isArray(item.loc)
+                            ? item.loc.filter((part) => part !== "body").join(" → ")
+                            : "request";
+                        return `${location || "request"}: ${item.msg || "invalid value"}`;
+                    })
+                    .join("; ");
+            } else if (detail && typeof detail === "object") {
+                detail = JSON.stringify(detail);
+            }
+            const error = new Error(detail || `Request failed with HTTP ${response.status}`);
             error.status = response.status;
             throw error;
         }
         return data;
+    }
+
+    function supportsGuidedExperiment(workflow) {
+        return Boolean(
+            workflow &&
+            String(workflow.operationName || "").toLowerCase().includes("checkout")
+        );
+    }
+
+    function updateGuidedSelectionAction() {
+        if (!guidedOperation || !guidedInspectButton) return;
+        const selected = guidedWorkflows.find(
+            (workflow) => workflow.operationName === guidedOperation.value
+        );
+        guidedInspectButton.disabled = !selected;
+        guidedInspectButton.textContent = !selected
+            ? "No workflow available"
+            : supportsGuidedExperiment(selected)
+                ? "Open checkout experiment"
+                : "View observed services";
     }
 
     function guidedConnectionPayload() {
@@ -124,7 +157,7 @@
     function guidedConnectionError(error) {
         const message = String(error && error.message ? error.message : error);
         if (message.includes("Could not fetch traces") || message.includes("Jaeger")) {
-            return "Jaeger is not reachable. Start the Online Boutique experiment stack or verify the approved Jaeger URL, then try again.";
+            return "The workflow trace service is unavailable. In the project folder, run: docker compose -f deploy/docker-compose.boutique.yml up -d. Wait for the demo store to start, then try again.";
         }
         return message;
     }
@@ -155,32 +188,46 @@
         heading.className = "guided-result__heading";
         const identity = document.createElement("div");
         identity.append(
-            guidedText("span", "guided-result__label", "Controlled experiment plan"),
-            guidedText("h4", "", campaign.workflowName),
-            guidedText("p", "", `${campaign.environmentId} · ${campaign.evidenceTier} evidence`)
+            guidedText("span", "guided-result__label", "Checkout dependency experiment"),
+            guidedText("h4", "", "Find which services checkout truly requires"),
+            guidedText(
+                "p",
+                "",
+                "First prove normal checkout works consistently. Later, test one service at a time and compare the outcome."
+            )
         );
+        const statusLabels = {
+            baseline_required: "Step 2: baseline needed",
+            intervention_required: "Step 3: service tests needed",
+            assessment_ready: "Step 4: ready to classify",
+            approved: "Step 5: graph approved",
+        };
         heading.append(
             identity,
-            guidedText("span", "guided-maturity", campaign.status.replaceAll("_", " "))
+            guidedText(
+                "span",
+                "guided-maturity",
+                statusLabels[campaign.status] || campaign.status.replaceAll("_", " ")
+            )
         );
 
         const metrics = document.createElement("div");
         metrics.className = "guided-result__metrics";
         metrics.append(
-            resultCard("Baseline gate", `${campaign.baseline.requiredTrials} trials`, "All traces must correlate exactly"),
-            resultCard("Candidates", String(campaign.candidateServices.length), "One intervention cohort per service"),
-            resultCard("Observed evidence", `${campaign.observedTraceCount} traces`, "Discovery only—not dependency proof")
+            resultCard("Normal checkouts needed", `${campaign.baseline.requiredTrials} runs`, "Before testing any failure"),
+            resultCard("Services to test", String(campaign.candidateServices.length), "Tested one at a time later"),
+            resultCard("Initial records", `${campaign.observedTraceCount} checkouts`, "Show participation only")
         );
 
         const contract = document.createElement("section");
         contract.className = "guided-contract guided-contract--confirmed";
         contract.append(
-            guidedText("span", "guided-result__label", "Locked success contract"),
-            guidedText("h5", "", campaign.successContract.outcome),
+            guidedText("span", "guided-result__label", "How success is measured"),
+            guidedText("h5", "", "A customer receives a confirmed order"),
             guidedText(
                 "p",
                 "",
-                `${campaign.successContract.terminalService} · ${campaign.successContract.terminalOperation} · HTTP ${campaign.successContract.acceptedStatusCodes.join(", ")}`
+                "The checkout page must complete successfully and display the order confirmation."
             )
         );
 
@@ -190,18 +237,18 @@
         const baselineHeading = document.createElement("div");
         baselineHeading.className = "baseline-console__heading";
         baselineHeading.append(
-            guidedText("div", "", "02  ·  BASELINE EVIDENCE"),
-            guidedText("strong", "", "Run a clean checkout before changing any service")
+            guidedText("div", "", "STEP 2 OF 5  ·  CONFIRM NORMAL BEHAVIOR"),
+            guidedText("strong", "", `Run ${campaign.baseline.requiredTrials} normal checkouts before testing a service failure`)
         );
         const baselineControls = document.createElement("div");
         baselineControls.className = "baseline-console__controls";
-        const frontendLabel = guidedText("label", "", "Online Boutique frontend URL");
+        const frontendLabel = guidedText("label", "", "Demo store address");
         const frontendUrl = document.createElement("input");
         frontendUrl.type = "url";
         frontendUrl.value = "http://localhost:8080";
         frontendUrl.required = true;
         frontendLabel.appendChild(frontendUrl);
-        const runButton = guidedText("button", "experiment-button", "Run baseline checkout");
+        const runButton = guidedText("button", "experiment-button", "Run one normal checkout");
         runButton.type = "button";
         const runStatus = guidedText("span", "baseline-console__status", "No cluster change is applied.");
         baselineControls.append(frontendLabel, runButton, runStatus);
@@ -211,7 +258,7 @@
         runButton.addEventListener("click", async () => {
             if (!frontendUrl.reportValidity()) return;
             runButton.disabled = true;
-            runStatus.textContent = "Executing checkout and waiting for its exact Jaeger trace…";
+        runStatus.textContent = "Running one checkout and matching it to its activity record…";
             runStatus.classList.remove("is-error");
             try {
                 const outcome = await requestScenario(
@@ -245,7 +292,7 @@
 
         const runbook = document.createElement("section");
         runbook.className = "campaign-runbook";
-        runbook.appendChild(guidedText("h5", "", "Intervention runbook"));
+        runbook.appendChild(guidedText("h5", "", "Services that will be tested after the baseline"));
         const list = document.createElement("div");
         list.className = "campaign-runbook__list";
         campaign.interventions.forEach((intervention, index) => {
@@ -254,7 +301,7 @@
             item.append(
                 guidedText("span", "campaign-runbook__number", String(index + 1).padStart(2, "0")),
                 guidedText("strong", "", intervention.targetService),
-                guidedText("small", "", "Make unavailable · confirm · collect cohort · restore")
+                guidedText("small", "", "Temporarily unavailable · run checkout · restore")
             );
             list.appendChild(item);
         });
@@ -266,7 +313,7 @@
 
         const next = document.createElement("div");
         next.className = "guided-next";
-        next.appendChild(guidedText("h5", "", "Why classification is blocked"));
+        next.appendChild(guidedText("h5", "", "What remains before the dependency result is available"));
         const blockers = document.createElement("ol");
         campaign.blockers.forEach((blocker) => blockers.appendChild(guidedText("li", "", blocker)));
         next.appendChild(blockers);
@@ -613,10 +660,24 @@
         if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · GRAPH APPROVED";
     }
 
-    async function createGuidedCampaign(sessionId, requiredTrials, button, status) {
+    async function createGuidedCampaign(session, requiredTrials, button, status) {
         button.disabled = true;
         status.textContent = "Generating baseline and intervention cohorts…";
         try {
+            const campaigns = await requestScenario("/api/workflows/experiment-campaigns");
+            const existing = campaigns.find(
+                (campaign) =>
+                    campaign.workflowId === "checkout" &&
+                    campaign.environmentId === session.environmentId &&
+                    campaign.status !== "approved"
+            );
+            if (existing) {
+                renderCampaign(existing);
+                setGuidedStatus(
+                    "Existing checkout experiment loaded. No test was run; continue with the normal checkout baseline."
+                );
+                return;
+            }
             const campaign = await requestScenario("/api/workflows/experiment-campaigns", {
                 method: "POST",
                 headers: {
@@ -624,9 +685,10 @@
                     "X-Actor": "guided-local-researcher",
                 },
                 body: JSON.stringify({
-                    analysisSessionId: sessionId,
+                    analysisSessionId: session.sessionId,
                     successContractConfirmed: true,
                     requiredBaselineTrials: requiredTrials,
+                    benchmarkProfile: "online_boutique_checkout_v0_10_1",
                 }),
             });
             renderCampaign(campaign);
@@ -669,8 +731,13 @@
         const warning = document.createElement("div");
         warning.className = "guided-result__warning";
         warning.append(
-            guidedText("strong", "", "Observed does not mean validated."),
-            guidedText("span", "", session.limitations.join(" "))
+            guidedText("strong", "", "What this result means"),
+            guidedText(
+                "span",
+                "",
+                `${session.observedServices.length} services appeared while this workflow ran. ` +
+                "They participated, but this does not yet prove the workflow needs every one of them."
+            )
         );
 
         const evidence = document.createElement("div");
@@ -696,16 +763,64 @@
 
         const contract = document.createElement("section");
         contract.className = "guided-contract";
+        const isCheckoutBenchmark = supportsGuidedExperiment(session);
         contract.append(
             guidedText("span", "guided-result__label", "Business success contract"),
-            guidedText("h5", "", "Customer receives a confirmed order"),
-            guidedText("p", "", "The checkout request completes with HTTP 200 and the checkoutservice records PlaceOrder.")
+            guidedText(
+                "h5",
+                "",
+                isCheckoutBenchmark
+                    ? "Customer receives a confirmed order"
+                    : "Observation complete — experiment not configured"
+            ),
+            guidedText(
+                "p",
+                "",
+                isCheckoutBenchmark
+                    ? "The checkout request completes with HTTP 200 and the checkoutservice records PlaceOrder."
+                    : "This workflow can be observed, but the application does not yet know how to run it safely or how to decide that it succeeded. Choose Checkout to continue with the ready-to-run dependency experiment."
+            )
         );
+
+        if (!isCheckoutBenchmark) {
+            const checkout = guidedWorkflows.find(supportsGuidedExperiment);
+            if (checkout) {
+                const switchButton = guidedText(
+                    "button",
+                    "experiment-button",
+                    "Continue with Checkout instead"
+                );
+                switchButton.type = "button";
+                switchButton.addEventListener("click", async () => {
+                    guidedOperation.value = checkout.operationName;
+                    await inspectGuidedWorkflow();
+                });
+                contract.append(
+                    switchButton,
+                    guidedText(
+                        "small",
+                        "guided-contract__status",
+                        "Checkout includes a predefined request and a measurable success rule."
+                    )
+                );
+            }
+            guidedResult.append(heading, metrics, warning, evidence, contract);
+            updateExperimentPath(0);
+            if (dataSourceBadge) {
+                dataSourceBadge.textContent = `${session.evidenceTier.toUpperCase()} · OBSERVED ONLY`;
+                dataSourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
+            }
+            return;
+        }
+
         const confirmation = document.createElement("label");
         confirmation.className = "guided-contract__confirmation";
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
-        confirmation.append(checkbox, document.createTextNode(" This correctly defines a successful checkout for this experiment."));
+        confirmation.append(
+            checkbox,
+            document.createTextNode(" This correctly defines a successful checkout for this experiment.")
+        );
         const controls = document.createElement("div");
         controls.className = "guided-contract__controls";
         const trialsLabel = guidedText("label", "", "Baseline trials");
@@ -718,12 +833,16 @@
         const planButton = guidedText("button", "experiment-button", "Create controlled experiment");
         planButton.type = "button";
         planButton.disabled = true;
-        const planStatus = guidedText("small", "guided-contract__status", "No service will be changed by this action.");
+        const planStatus = guidedText(
+            "small",
+            "guided-contract__status",
+            "This creates the experiment plan only. No service will be changed yet."
+        );
         checkbox.addEventListener("change", () => {
             planButton.disabled = !checkbox.checked;
         });
         planButton.addEventListener("click", () => {
-            createGuidedCampaign(session.sessionId, Number(trials.value), planButton, planStatus);
+            createGuidedCampaign(session, Number(trials.value), planButton, planStatus);
         });
         controls.append(trialsLabel, planButton, planStatus);
         contract.append(confirmation, controls);
@@ -737,11 +856,18 @@
     }
 
     async function discoverGuidedWorkflows(event) {
-        event.preventDefault();
+        if (event) event.preventDefault();
         if (!guidedForm || !guidedForm.reportValidity()) return;
         const button = guidedForm.querySelector('[data-role="guided-discover-button"]');
         button.disabled = true;
-        setGuidedStatus("Checking the approved Jaeger connection…");
+        guidedInspectButton.disabled = true;
+        guidedInspectButton.textContent = "Loading…";
+        guidedOperation.replaceChildren();
+        const loadingOption = document.createElement("option");
+        loadingOption.value = "";
+        loadingOption.textContent = "Loading recorded workflows…";
+        guidedOperation.appendChild(loadingOption);
+        setGuidedStatus("Loading available workflows…");
         try {
             const payload = guidedConnectionPayload();
             const discovered = await requestScenario(
@@ -752,25 +878,48 @@
                     body: JSON.stringify(payload),
                 }
             );
-            guidedWorkflows = discovered.filter((workflow) =>
-                workflow.operationName.toLowerCase().includes("checkout")
+            guidedWorkflows = [...discovered].sort(
+                (left, right) =>
+                    Number(supportsGuidedExperiment(right)) -
+                    Number(supportsGuidedExperiment(left))
             );
             guidedOperation.replaceChildren();
             guidedWorkflows.forEach((workflow) => {
                 const option = document.createElement("option");
                 option.value = workflow.operationName;
-                option.textContent = `${workflow.operationName} · ${workflow.traceCount} traces · ${workflow.participatingServices.length} services`;
+                const readiness = supportsGuidedExperiment(workflow)
+                    ? "ready for dependency experiment"
+                    : "observation only";
+                option.textContent = `${workflow.operationName} — ${readiness} · ${workflow.traceCount} traces · ${workflow.participatingServices.length} services`;
                 guidedOperation.appendChild(option);
             });
-            guidedDiscovery.hidden = guidedWorkflows.length === 0;
+            if (!guidedWorkflows.length) {
+                const emptyOption = document.createElement("option");
+                emptyOption.value = "";
+                emptyOption.textContent = "No recorded workflows in this time window";
+                guidedOperation.appendChild(emptyOption);
+            }
+            guidedDiscovery.hidden = false;
+            updateGuidedSelectionAction();
             setGuidedStatus(
                 guidedWorkflows.length
-                    ? `Found ${guidedWorkflows.length} checkout operation${guidedWorkflows.length === 1 ? "" : "s"}. Select the one representing the full customer checkout.`
-                    : "Jaeger is reachable, but no checkout operation was found in this trace window.",
+                    ? `Found ${guidedWorkflows.length} recorded workflow${guidedWorkflows.length === 1 ? "" : "s"}. Checkout is selected because its experiment is ready to run.`
+                    : "The trace service is connected, but no workflow activity was recorded in this time window.",
                 guidedWorkflows.length === 0
             );
         } catch (error) {
-            guidedDiscovery.hidden = true;
+            guidedWorkflows = [];
+            guidedDiscovery.hidden = false;
+            guidedOperation.replaceChildren();
+            const unavailableOption = document.createElement("option");
+            unavailableOption.value = "";
+            unavailableOption.textContent = "No workflows available — check advanced settings";
+            guidedOperation.appendChild(unavailableOption);
+            updateGuidedSelectionAction();
+            if (guidedResult) {
+                guidedResult.hidden = true;
+                guidedResult.replaceChildren();
+            }
             setGuidedStatus(guidedConnectionError(error), true);
         } finally {
             button.disabled = false;
@@ -780,8 +929,30 @@
     async function inspectGuidedWorkflow() {
         if (!guidedOperation || !guidedOperation.value) return;
         guidedInspectButton.disabled = true;
-        setGuidedStatus("Creating an immutable observational evidence record…");
+        const selected = guidedWorkflows.find(
+            (workflow) => workflow.operationName === guidedOperation.value
+        );
+        setGuidedStatus(
+            supportsGuidedExperiment(selected)
+                ? "Opening the checkout dependency experiment…"
+                : "Preparing the observed-service summary…"
+        );
         try {
+            if (supportsGuidedExperiment(selected)) {
+                const campaigns = await requestScenario("/api/workflows/experiment-campaigns");
+                const existing = campaigns.find(
+                    (campaign) =>
+                        campaign.workflowId === "checkout" &&
+                        campaign.environmentId === guidedConnectionPayload().environmentId
+                );
+                if (existing) {
+                    renderCampaign(existing);
+                    setGuidedStatus(
+                        "Checkout experiment opened. Continue with the highlighted step below."
+                    );
+                    return;
+                }
+            }
             const session = await requestScenario("/api/workflows/analysis-sessions", {
                 method: "POST",
                 headers: {
@@ -798,7 +969,7 @@
         } catch (error) {
             setGuidedStatus(error.message, true);
         } finally {
-            guidedInspectButton.disabled = false;
+            updateGuidedSelectionAction();
         }
     }
 
@@ -806,8 +977,21 @@
         if (!guidedResult) return;
         try {
             const campaigns = await requestScenario("/api/workflows/experiment-campaigns");
-            if (campaigns.length) {
-                renderCampaign(campaigns[0]);
+            const completedCampaign = campaigns.find(
+                (campaign) => campaign.status === "approved"
+            );
+            if (completedCampaign) {
+                renderCampaign(completedCampaign);
+                return;
+            }
+            const incompleteCampaign = campaigns.find(
+                (campaign) => campaign.status !== "approved"
+            );
+            if (incompleteCampaign) {
+                renderCampaign(incompleteCampaign);
+                setGuidedStatus(
+                    "Existing checkout experiment loaded. No test was run automatically. Continue by running the normal checkout baseline."
+                );
                 return;
             }
             const sessions = await requestScenario("/api/workflows/analysis-sessions");
@@ -1827,14 +2011,14 @@
             const url = `/api/workflows/jaeger/status?jaeger_url=${encodeURIComponent(jaegerUrlInput.value.trim())}`;
             const res = await fetchJson(url);
             if (res.healthy) {
-                jaegerStatusBadge.textContent = "Jaeger Online";
+                jaegerStatusBadge.textContent = "Trace service connected";
                 jaegerStatusBadge.className = "status-badge status-badge--success";
             } else {
-                jaegerStatusBadge.textContent = "Jaeger Offline";
+                jaegerStatusBadge.textContent = "Trace service unavailable";
                 jaegerStatusBadge.className = "status-badge status-badge--danger";
             }
         } catch (err) {
-            jaegerStatusBadge.textContent = "Jaeger Offline";
+            jaegerStatusBadge.textContent = "Trace service unavailable";
             jaegerStatusBadge.className = "status-badge status-badge--danger";
         }
     }
@@ -1983,9 +2167,9 @@
             const f1El = document.querySelector('[data-role="eval-f1"]');
             const edgeAccEl = document.querySelector('[data-role="eval-edge-acc"]');
 
-            if (precisionEl) precisionEl.textContent = formatRatioAsPercentage(data.serviceMetrics.precision);
-            if (recallEl) recallEl.textContent = formatRatioAsPercentage(data.serviceMetrics.recall);
-            if (f1El) f1El.textContent = data.serviceMetrics.f1.toFixed(2);
+            if (precisionEl) precisionEl.textContent = formatRatioAsPercentage(data.mandatoryServiceMetrics.precision);
+            if (recallEl) recallEl.textContent = formatRatioAsPercentage(data.mandatoryServiceMetrics.recall);
+            if (f1El) f1El.textContent = data.mandatoryServiceMetrics.f1.toFixed(2);
             if (edgeAccEl) edgeAccEl.textContent = formatRatioAsPercentage(data.edgeMetrics.accuracy);
         } catch (err) {
             alert(`Evaluation failed: ${err.message}`);
@@ -2000,34 +2184,51 @@
     async function handleRunSensitivity() {
         if (liveMode) return;
         const version = renderVersion;
-        const workflowId = benchmarkSelect ? benchmarkSelect.value : "checkout";
+        const { assessmentId } = evaluationInputs();
         const btn = document.querySelector('[data-role="run-sensitivity-btn"]');
+        if (!assessmentId) {
+            alert("Enter a primary assessment ID in the Classification Validation Lab first.");
+            return;
+        }
         if (btn) {
             btn.disabled = true;
             btn.textContent = "Running…";
         }
 
         try {
-            const url = `/api/workflows/evaluation/sensitivity?workflow_id=${encodeURIComponent(workflowId)}`;
-            const steps = await fetchJson(url);
+            const thresholds = [0.5, 0.6, 0.7, 0.8, 0.9];
+            const report = await requestScenario("/api/workflows/dependency-experiments/sensitivity", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    assessmentId,
+                    cases: thresholds.map((threshold) => ({
+                        caseId: `mandatory-effect-${threshold.toFixed(2)}`,
+                        policy: {
+                            mandatoryEffectThreshold: threshold,
+                            optionalEffectTolerance: Math.min(0.1, threshold / 2),
+                        },
+                    })),
+                }),
+            });
             if (liveMode || version !== renderVersion) return;
-            lastSensitivitySteps = steps;
+            lastSensitivitySteps = report.cases;
 
             const container = document.querySelector('[data-role="sensitivity-table-container"]');
             const tbody = document.querySelector('[data-role="sensitivity-table-body"]');
 
             if (container && tbody) {
                 tbody.innerHTML = "";
-                steps.forEach((step) => {
+                report.cases.forEach((sensitivityCase) => {
+                    const classifications = Object.values(sensitivityCase.classifications);
+                    const mandatoryCount = classifications.filter((value) => value === "mandatory").length;
+                    const optionalCount = classifications.filter((value) => value === "optional").length;
                     const tr = document.createElement("tr");
                     tr.innerHTML = `
-                        <td><strong>${step.threshold.toFixed(2)}</strong></td>
-                        <td>${formatRatioAsPercentage(step.precision)}</td>
-                        <td>${formatRatioAsPercentage(step.recall)}</td>
-                        <td><strong>${step.f1.toFixed(2)}</strong></td>
-                        <td>${formatRatioAsPercentage(step.edgeAccuracy)}</td>
-                        <td><span class="contract-chip">${step.mandatoryServicesCount}</span></td>
-                        <td><span class="contract-chip">${step.optionalServicesCount}</span></td>
+                        <td><strong>${sensitivityCase.policy.mandatoryEffectThreshold.toFixed(2)}</strong></td>
+                        <td colspan="4">${sensitivityCase.changedServices.join(", ") || "No label changes"}</td>
+                        <td><span class="contract-chip">${mandatoryCount}</span></td>
+                        <td><span class="contract-chip">${optionalCount}</span></td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -2038,32 +2239,34 @@
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = "Compare Thresholds";
+                btn.textContent = "Test Assessment Policies";
             }
         }
     }
 
     function handleCopyMarkdownTable() {
         if (liveMode || !lastSensitivitySteps.length) {
-            alert("Run a fixture threshold comparison before copying its results.");
+            alert("Run an assessment policy comparison before copying its results.");
             return;
         }
-        const workflowId = benchmarkSelect ? benchmarkSelect.value : "checkout";
-        let markdown = `### Synthetic fixture threshold comparison: \`${workflowId}\`\n\n`;
-        markdown += 'Engineering fixture only. Prediction is reference-independent, but frequency-based candidates do not prove logical necessity. Combined-service scores do not measure mandatory classification or empirical benchmark accuracy.\n\n';
-        markdown += `| Candidate Threshold (θ) | Precision | Recall | F1-Score | Edge Accuracy | High-frequency Count | Lower-frequency Count |\n`;
-        markdown += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+        let markdown = `### Frozen assessment policy sensitivity\n\n`;
+        markdown += 'Classifications are recomputed from frozen cohort summaries; stored evidence is unchanged.\n\n';
+        markdown += `| Mandatory Effect Threshold | Changed Services | Mandatory Count | Optional Count |\n`;
+        markdown += `| :--- | :--- | :--- | :--- |\n`;
 
         if (lastSensitivitySteps.length > 0) {
-            lastSensitivitySteps.forEach((s) => {
-                markdown += `| **${s.threshold.toFixed(2)}** | ${(s.precision * 100).toFixed(1)}% | ${(s.recall * 100).toFixed(1)}% | **${s.f1.toFixed(2)}** | ${(s.edgeAccuracy * 100).toFixed(1)}% | ${s.mandatoryServicesCount} | ${s.optionalServicesCount} |\n`;
+            lastSensitivitySteps.forEach((sensitivityCase) => {
+                const classifications = Object.values(sensitivityCase.classifications);
+                const mandatoryCount = classifications.filter((value) => value === "mandatory").length;
+                const optionalCount = classifications.filter((value) => value === "optional").length;
+                markdown += `| **${sensitivityCase.policy.mandatoryEffectThreshold.toFixed(2)}** | ${sensitivityCase.changedServices.join(", ") || "None"} | ${mandatoryCount} | ${optionalCount} |\n`;
             });
         } else {
             return;
         }
 
         navigator.clipboard.writeText(markdown).then(() => {
-            alert("Fixture table copied with its research limitations. These are not empirical results.");
+            alert("Assessment policy sensitivity table copied.");
         }).catch(() => {
             prompt("Copy this Markdown table:", markdown);
         });
@@ -2140,6 +2343,7 @@
     if (runRepeatability) runRepeatability.addEventListener("click", evaluateRepeatability);
     if (guidedForm) guidedForm.addEventListener("submit", discoverGuidedWorkflows);
     if (guidedInspectButton) guidedInspectButton.addEventListener("click", inspectGuidedWorkflow);
+    if (guidedOperation) guidedOperation.addEventListener("change", updateGuidedSelectionAction);
     if (researchAudit) {
         researchAudit.addEventListener("toggle", () => {
             if (!researchAudit.open || researchAuditInitialized) return;
@@ -2164,6 +2368,6 @@
         activateWorkflowStage("define");
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
         if (sourcePill) sourcePill.textContent = "No active campaign";
-        loadLatestExperiment();
+        discoverGuidedWorkflows().then(loadLatestExperiment);
     });
 })();

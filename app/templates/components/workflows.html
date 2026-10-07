@@ -49,58 +49,64 @@
     <div class="guided-analysis__header">
         <div>
             <p class="workflow-kicker">Online Boutique · controlled experiment</p>
-            <h3 id="guided-analysis-title">Determine what checkout actually depends on</h3>
-            <p>Start from checkout traces, establish a stable baseline, then compare confirmed service interventions. Frequency alone never becomes a dependency claim.</p>
+            <h3 id="guided-analysis-title">Determine what a business workflow actually depends on</h3>
+            <p>Start from observed workflow traces, establish a stable baseline, then compare confirmed service interventions. Frequency alone never becomes a dependency claim.</p>
         </div>
         <span class="status-badge status-badge--muted status-badge--no-dot">Interventions require approval</span>
     </div>
-    <ol class="experiment-path" aria-label="Checkout dependency experiment stages">
-        <li class="is-current"><span>01</span><strong>Observe</strong><small>Find checkout traces</small></li>
+    <ol class="experiment-path" aria-label="Workflow dependency experiment stages">
+        <li class="is-current"><span>01</span><strong>Observe</strong><small>Find workflow traces</small></li>
         <li><span>02</span><strong>Baseline</strong><small>Prove stable success</small></li>
         <li><span>03</span><strong>Intervene</strong><small>Test one service</small></li>
         <li><span>04</span><strong>Classify</strong><small>Compare outcomes</small></li>
         <li><span>05</span><strong>Approve</strong><small>Release graph</small></li>
     </ol>
     <div class="experiment-profile">
-        <div><span>Workflow under test</span><strong>Customer checkout</strong></div>
-        <div><span>Business success</span><strong>Customer receives a confirmed order</strong></div>
-        <div><span>Evidence source</span><strong>Jaeger traces + controlled outcomes</strong></div>
+        <div><span>Workflow under test</span><strong>Selected observed operation</strong></div>
+        <div><span>Business success</span><strong>Researcher-defined success contract</strong></div>
+        <div><span>Evidence source</span><strong>Recorded service activity + controlled outcomes</strong></div>
     </div>
-    <form class="guided-analysis__form" data-role="guided-analysis-form">
-        <div class="guided-field">
-            <label for="guided-environment">Experiment environment</label>
-            <input id="guided-environment" name="environmentId" value="online-boutique-local" required>
-            <small>Used to prevent evidence from different deployments being mixed.</small>
-        </div>
-        <div class="guided-field guided-field--wide">
-            <label for="guided-jaeger-url">Jaeger Query URL</label>
-            <input id="guided-jaeger-url" name="jaegerUrl" type="url"
-                   value="http://localhost:16686" required>
-            <small>The backend accepts only administrator-approved Jaeger hosts.</small>
-        </div>
-        <div class="guided-field">
-            <label for="guided-lookback">Trace window</label>
-            <select id="guided-lookback" name="lookback">
-                <option value="1h" selected>Last hour</option>
-                <option value="6h">Last 6 hours</option>
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-            </select>
-        </div>
-        <input name="entryService" value="frontend" type="hidden">
-        <input name="evidenceTier" value="experimental" type="hidden">
-        <div class="guided-analysis__action">
-            <button type="submit" class="experiment-button" data-role="guided-discover-button">Connect to checkout traces</button>
-            <span data-role="guided-analysis-status" aria-live="polite"></span>
-        </div>
-    </form>
-    <div class="guided-discovery" data-role="guided-discovery" hidden>
+    <div class="guided-discovery" data-role="guided-discovery">
         <div>
-            <label for="guided-operation">Observed checkout operation</label>
-            <select id="guided-operation" data-role="guided-operation"></select>
+            <label for="guided-operation">Choose a business workflow</label>
+            <select id="guided-operation" data-role="guided-operation" aria-describedby="guided-workflow-help">
+                <option value="">Loading recorded workflows…</option>
+            </select>
+            <small id="guided-workflow-help">Ready workflows can continue through the full dependency experiment. Other workflows can still show observed participants.</small>
         </div>
-        <button type="button" class="experiment-button" data-role="guided-inspect-button">Use this checkout evidence</button>
+        <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>Loading…</button>
     </div>
+    <details class="guided-advanced">
+        <summary>Advanced connection settings</summary>
+        <form class="guided-analysis__form" data-role="guided-analysis-form">
+            <div class="guided-field">
+                <label for="guided-environment">Experiment dataset name</label>
+                <input id="guided-environment" name="environmentId" value="online-boutique-local" required>
+                <small>A label that keeps results from different test environments separate.</small>
+            </div>
+            <div class="guided-field guided-field--wide">
+                <label for="guided-jaeger-url">Workflow trace service address</label>
+                <input id="guided-jaeger-url" name="jaegerUrl" type="url"
+                       value="http://localhost:16686" aria-describedby="guided-trace-service-help" required>
+                <small id="guided-trace-service-help">Jaeger records which application services called one another. The local project normally uses this default address.</small>
+            </div>
+            <div class="guided-field">
+                <label for="guided-lookback">Trace window</label>
+                <select id="guided-lookback" name="lookback">
+                    <option value="1h" selected>Last hour</option>
+                    <option value="6h">Last 6 hours</option>
+                    <option value="24h">Last 24 hours</option>
+                    <option value="7d">Last 7 days</option>
+                </select>
+            </div>
+            <input name="entryService" value="frontend" type="hidden">
+            <input name="evidenceTier" value="experimental" type="hidden">
+            <div class="guided-analysis__action">
+                <button type="submit" class="secondary-button" data-role="guided-discover-button">Refresh workflow choices</button>
+            </div>
+        </form>
+    </details>
+    <p class="guided-selection-status" data-role="guided-analysis-status" role="status" aria-live="polite">Loading available workflows…</p>
     <div class="guided-result" data-role="guided-result" hidden aria-live="polite"></div>
 </section>
 
@@ -132,11 +138,11 @@
 <div class="card live-config-card" style="margin-bottom: var(--space-lg);">
     <div class="live-config-card__header">
         <h4 style="margin: 0; font-size: 14px; font-weight: 600;">Tracing Source &amp; Live Ingestion</h4>
-        <span class="status-badge" data-role="jaeger-status-badge">Checking Jaeger…</span>
+        <span class="status-badge" data-role="jaeger-status-badge">Checking trace service…</span>
     </div>
     <div class="live-config-form" style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-top: var(--space-sm);">
         <div class="form-group" style="flex: 1; min-width: 220px;">
-            <label for="jaeger-url-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Jaeger Query URL</label>
+            <label for="jaeger-url-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Workflow trace service address</label>
             <input id="jaeger-url-input" type="text" data-role="jaeger-url-input" value="http://localhost:16686" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="http://localhost:16686">
         </div>
         <div class="form-group" style="width: 140px;">
@@ -212,7 +218,7 @@
         <div class="scenario-form__field">
             <label for="scenario-workflow-id">Workflow ID</label>
             <input id="scenario-workflow-id" name="workflowId" required
-                   pattern="[a-z0-9][a-z0-9_-]{0,63}" placeholder="customer_checkout">
+                   pattern="[a-z0-9][a-z0-9_\-]{0,63}" placeholder="customer_checkout">
         </div>
         <div class="scenario-form__field scenario-form__field--wide">
             <label for="scenario-description">Business description</label>
@@ -319,7 +325,7 @@
         <div class="scenario-form__field">
             <label for="execution-batch-id">Batch ID (optional)</label>
             <input id="execution-batch-id" data-role="execution-batch-id"
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
                    placeholder="Generated automatically">
         </div>
         <button type="button" class="primary-button" data-role="run-benchmark-batch-button">
@@ -358,13 +364,13 @@
         <div class="scenario-form__field">
             <label for="assessment-id">Assessment ID</label>
             <input id="assessment-id" name="assessmentId" required
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
                    placeholder="assessment:checkout:001">
         </div>
         <div class="scenario-form__field">
             <label for="assessment-environment">Environment ID</label>
             <input id="assessment-environment" name="environmentId" required
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
                    placeholder="test-cluster-a">
         </div>
         <div class="scenario-form__field scenario-form__field--wide">
@@ -617,7 +623,7 @@
                     Compare Fixture Sets
                 </button>
                 <button type="button" class="secondary-button" data-role="run-sensitivity-btn">
-                    Compare Thresholds
+                    Test Assessment Policies
                 </button>
                 <button type="button" class="secondary-button" data-role="copy-markdown-btn">
                     Copy Fixture Table
@@ -657,18 +663,15 @@
         </div>
 
         <div data-role="sensitivity-table-container" style="display: none; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px dashed var(--color-border);">
-            <h4 style="margin: 0 0 var(--space-sm) 0; font-size: 13px; font-weight: 600;">Sensitivity Analysis across Threshold Range (θ):</h4>
+            <h4 style="margin: 0 0 var(--space-sm) 0; font-size: 13px; font-weight: 600;">Frozen Assessment Policy Sensitivity:</h4>
             <div class="table-scroll">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Threshold (θ)</th>
-                            <th>Precision</th>
-                            <th>Recall</th>
-                            <th>F1-Score</th>
-                            <th>Edge Accuracy</th>
-                            <th>High-frequency Candidates</th>
-                            <th>Lower-frequency Candidates</th>
+                            <th>Mandatory Effect Threshold</th>
+                            <th colspan="4">Changed Services</th>
+                            <th>Mandatory</th>
+                            <th>Optional</th>
                         </tr>
                     </thead>
                     <tbody data-role="sensitivity-table-body"></tbody>
@@ -686,5 +689,5 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-5-baseline-workspace" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-5-workflow-picker" defer></script>
 {% endblock %}

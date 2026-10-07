@@ -93,9 +93,12 @@ def test_workflow_page_defaults_to_guided_analysis_not_internal_artifacts() -> N
     assert 'data-role="guided-analysis-form"' in response.text
     assert 'data-role="guided-discover-button"' in response.text
     assert 'data-role="guided-inspect-button"' in response.text
-    assert "Determine what checkout actually depends on" in response.text
-    assert "Customer receives a confirmed order" in response.text
-    assert "Connect to checkout traces" in response.text
+    assert "Determine what a business workflow actually depends on" in response.text
+    assert "Researcher-defined success contract" in response.text
+    assert "Choose a business workflow" in response.text
+    assert "Advanced connection settings" in response.text
+    assert "Refresh workflow choices" in response.text
+    assert "Workflow trace service address" in response.text
     assert "Interventions require approval" in response.text
     assert "Synthetic Fixture Dataset" in response.text
     assert "NO ACTIVE CAMPAIGN" in response.text
@@ -115,3 +118,13 @@ def test_workflow_client_exposes_operator_gated_campaign_lifecycle() -> None:
     assert "loadCampaignDecision" in script
     assert "Campaign active" in script
     assert "No active campaign" in script
+    assert 'benchmarkProfile: "online_boutique_checkout_v0_10_1"' in script
+    assert "Observation complete — experiment not configured" in script
+    assert "Continue with Checkout instead" in script
+    assert "ready for dependency experiment" in script
+    assert "supportsGuidedExperiment" in script
+    assert "updateGuidedSelectionAction" in script
+    assert "Open checkout experiment" in script
+    assert "Existing checkout experiment loaded" in script
+    assert "Run one normal checkout" in script
+    assert "guidedResult.replaceChildren()" in script
