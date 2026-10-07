@@ -78,10 +78,11 @@ def test_rejects_unapproved_frontend_before_network_access() -> None:
         called = True
         return httpx.Response(200)
 
+    transport = httpx.MockTransport(handler)
     with pytest.raises(ValueError, match="not approved"):
         run_online_boutique_checkout(
             "http://169.254.169.254/latest/meta-data",
-            transport=httpx.MockTransport(handler),
+            transport=transport,
         )
     assert called is False
 

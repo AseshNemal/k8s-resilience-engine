@@ -119,11 +119,13 @@ def test_rejects_missing_secret_before_network_access() -> None:
         called = True
         return httpx.Response(201)
 
+    definition = _definition()
+    transport = httpx.MockTransport(handler)
     with pytest.raises(ValueError, match="SHOP_API_TOKEN"):
         run_http_workflow_probe(
             "http://localhost:9000",
-            _definition(),
-            transport=httpx.MockTransport(handler),
+            definition,
+            transport=transport,
             secrets={},
         )
     assert called is False
@@ -137,11 +139,13 @@ def test_rejects_unapproved_target_before_network_access() -> None:
         called = True
         return httpx.Response(201)
 
+    definition = _definition()
+    transport = httpx.MockTransport(handler)
     with pytest.raises(ValueError, match="not approved"):
         run_http_workflow_probe(
             "http://169.254.169.254/latest/meta-data",
-            _definition(),
-            transport=httpx.MockTransport(handler),
+            definition,
+            transport=transport,
             secrets={"SHOP_API_TOKEN": "secret"},
         )
     assert called is False

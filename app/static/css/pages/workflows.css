@@ -313,6 +313,9 @@
     display: grid;
     gap: var(--space-sm);
     margin-top: var(--space-md);
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 .execution-record {
@@ -817,12 +820,6 @@
     box-shadow: none;
 }
 
-.execution-ledger__list {
-    max-height: 420px;
-    overflow-y: auto;
-    padding-right: 4px;
-}
-
 .handoff-note {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -1075,7 +1072,7 @@
 .experiment-button:disabled {
     border-color: #cbd5e1;
     background: #e2e8f0;
-    color: #64748b;
+    color: #475569;
     cursor: not-allowed;
 }
 
