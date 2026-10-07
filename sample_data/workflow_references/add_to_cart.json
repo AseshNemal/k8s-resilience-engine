@@ -1,10 +1,18 @@
 {
   "workflowId": "add_to_cart",
   "expectedServices": ["frontend", "cartservice", "productcatalogservice", "currencyservice"],
+  "mandatoryServices": ["frontend", "cartservice", "productcatalogservice", "currencyservice"],
+  "optionalServices": [],
   "expectedEdges": [
     {"source": "frontend", "target": "cartservice"},
     {"source": "frontend", "target": "productcatalogservice"},
     {"source": "cartservice", "target": "currencyservice"}
   ],
+  "mandatoryEdges": [
+    {"source": "frontend", "target": "cartservice"},
+    {"source": "frontend", "target": "productcatalogservice"},
+    {"source": "cartservice", "target": "currencyservice"}
+  ],
+  "optionalEdges": [],
   "synthetic": true
 }
