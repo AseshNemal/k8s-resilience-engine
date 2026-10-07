@@ -196,15 +196,17 @@ def test_service_rejects_non_checkout_observation() -> None:
     payload["sessionId"] = "analysis:product"
     payload["operationName"] = "GET /product/{id}"
     analyses.create(WorkflowAnalysisSession.from_mapping(payload))
+    campaigns = InMemoryExperimentCampaignRepository()
+    request = {
+        "analysisSessionId": "analysis:product",
+        "successContractConfirmed": True,
+        "benchmarkProfile": "online_boutique_checkout_v0_10_1",
+    }
     with pytest.raises(ValueError, match="checkout operation"):
         create_experiment_campaign(
-            {
-                "analysisSessionId": "analysis:product",
-                "successContractConfirmed": True,
-                "benchmarkProfile": "online_boutique_checkout_v0_10_1",
-            },
+            request,
             actor="researcher",
-            repository=InMemoryExperimentCampaignRepository(),
+            repository=campaigns,
             analysis_repository=analyses,
         )
 
@@ -212,14 +214,16 @@ def test_service_rejects_non_checkout_observation() -> None:
 def test_service_never_assumes_benchmark_when_setup_is_missing() -> None:
     analyses = InMemoryAnalysisSessionRepository()
     analyses.create(_analysis())
+    campaigns = InMemoryExperimentCampaignRepository()
+    request = {
+        "analysisSessionId": "analysis:checkout",
+        "successContractConfirmed": True,
+    }
     with pytest.raises(ValueError, match="exactly one"):
         create_experiment_campaign(
-            {
-                "analysisSessionId": "analysis:checkout",
-                "successContractConfirmed": True,
-            },
+            request,
             actor="researcher",
-            repository=InMemoryExperimentCampaignRepository(),
+            repository=campaigns,
             analysis_repository=analyses,
         )
 

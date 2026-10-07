@@ -334,16 +334,18 @@ def test_freeze_rejects_caller_supplied_provenance(monkeypatch) -> None:
         now=NOW,
     )
 
+    freeze_repository = InMemoryGraphFreezeRepository()
+    freeze_payload = {
+        "freezeId": "freeze:checkout:spoofed",
+        "assessmentId": created.assessment_id,
+        "mandatoryThreshold": 1.0,
+    }
     with pytest.raises(ValueError, match="server-derived"):
         freeze_workflow_graph(
             "checkout",
-            {
-                "freezeId": "freeze:checkout:spoofed",
-                "assessmentId": created.assessment_id,
-                "mandatoryThreshold": 1.0,
-            },
+            freeze_payload,
             actor="lead-researcher",
-            repository=InMemoryGraphFreezeRepository(),
+            repository=freeze_repository,
             dependency_repository=assessments,
             execution_repository=executions,
             now=NOW,
@@ -370,17 +372,20 @@ def test_freeze_rejects_missing_evidence_batch(monkeypatch) -> None:
         now=NOW,
     )
 
+    freeze_repository = InMemoryGraphFreezeRepository()
+    empty_execution_repository = InMemoryExecutionRepository()
+    freeze_payload = {
+        "freezeId": "freeze:checkout:missing-evidence",
+        "assessmentId": created.assessment_id,
+    }
     with pytest.raises(LookupError, match="was not found while freezing provenance"):
         freeze_workflow_graph(
             "checkout",
-            {
-                "freezeId": "freeze:checkout:missing-evidence",
-                "assessmentId": created.assessment_id,
-            },
+            freeze_payload,
             actor="lead-researcher",
-            repository=InMemoryGraphFreezeRepository(),
+            repository=freeze_repository,
             dependency_repository=assessments,
-            execution_repository=InMemoryExecutionRepository(),
+            execution_repository=empty_execution_repository,
             now=NOW,
         )
 

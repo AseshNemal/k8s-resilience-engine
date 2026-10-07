@@ -124,11 +124,12 @@ def test_unapproved_jaeger_host_is_rejected_before_network_access(monkeypatch) -
 
     monkeypatch.setattr(service, "get_live_evidence", fetch)
     payload = {**_payload(), "jaegerUrl": "http://169.254.169.254/latest/meta-data"}
+    repository = InMemoryAnalysisSessionRepository()
     with pytest.raises(ValueError, match="not approved"):
         start_workflow_analysis(
             payload,
             actor="operator",
-            repository=InMemoryAnalysisSessionRepository(),
+            repository=repository,
             now=NOW,
         )
     assert called is False

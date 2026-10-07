@@ -227,6 +227,8 @@ def test_completed_campaign_creates_explainable_assessment() -> None:
 
 def test_incomplete_intervention_cannot_be_assessed() -> None:
     analyses, campaigns, executions, _ = _repositories()
+    events = InMemoryInterventionEventRepository()
+    assessments = InMemoryDependencyAssessmentRepository()
     with pytest.raises(ValueError, match="incomplete for: paymentservice"):
         assess_experiment_campaign(
             "campaign:checkout1",
@@ -234,8 +236,8 @@ def test_incomplete_intervention_cannot_be_assessed() -> None:
             campaign_repository=campaigns,
             analysis_repository=analyses,
             execution_repository_override=executions,
-            event_repository=InMemoryInterventionEventRepository(),
-            repository=InMemoryDependencyAssessmentRepository(),
+            event_repository=events,
+            repository=assessments,
             now=NOW,
         )
 
