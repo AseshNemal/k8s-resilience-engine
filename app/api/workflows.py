@@ -21,6 +21,7 @@ from app.engine.workflow_dependency_modeling.service import (
     discover_live_workflows,
     discover_analysis_workflows,
     evaluate_workflow_by_id,
+    freeze_workflow_graph,
     get_live_workflow,
     get_workflow_analysis,
     get_live_evidence,
@@ -28,6 +29,7 @@ from app.engine.workflow_dependency_modeling.service import (
     get_experiment_campaign,
     get_experiment_campaign_assessment,
     get_experiment_campaign_approval,
+    get_frozen_workflow_graph,
     get_dependency_assessment,
     get_dependency_classification_evaluation,
     get_dependency_classification_reference,
@@ -51,6 +53,7 @@ from app.engine.workflow_dependency_modeling.service import (
     run_campaign_baseline_trial,
     run_campaign_intervention_trial,
     scenario_etag,
+    transition_scenario_lifecycle,
     update_scenario,
 )
 from app.engine.workflow_dependency_modeling.analysis_session_repository import (
@@ -72,6 +75,10 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
 from app.engine.workflow_dependency_modeling.experiment_campaign_repository import (
     ExperimentCampaignConflictError,
     ExperimentCampaignNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
+    FrozenGraphAlreadyExistsError,
+    FrozenGraphNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.intervention_event_repository import (
     InterventionEventConflictError,
@@ -395,6 +402,40 @@ def create_workflow_dependency_reference(
         raise HTTPException(status_code=404, detail=str(err)) from err
     except ClassificationArtifactConflictError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/scenarios/{workflow_id}/lifecycle",
+    responses={
+        **SCENARIO_NOT_FOUND_RESPONSE,
+        **SCENARIO_PRECONDITION_RESPONSE,
+        **SCENARIO_VALIDATION_RESPONSE,
+    },
+)
+def change_workflow_scenario_lifecycle(
+    workflow_id: str,
+    response: Response,
+    payload: dict[str, Any] = Body(...),
+    if_match: str = Header(..., alias="If-Match"),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Promote or retire a scenario through an explicit audited transition."""
+    try:
+        expected_version = parse_scenario_etag(if_match, workflow_id)
+        scenario = transition_scenario_lifecycle(
+            workflow_id,
+            str(payload.get("lifecycle", "")),
+            expected_version=expected_version,
+            actor=actor,
+            rationale=payload.get("rationale"),
+        )
+        return _scenario_payload(response, scenario)
+    except ScenarioNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ScenarioVersionConflictError as err:
+        raise HTTPException(status_code=412, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
@@ -797,6 +838,44 @@ def run_workflow_dependency_sensitivity(
 
 
 @router.post(
+    "/{workflow_id}/freeze",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Approved assessment was not found"},
+        409: {"description": "Freeze ID already exists"},
+        422: {"description": "Graph is not ready to freeze"},
+    },
+)
+def freeze_approved_workflow_graph(
+    workflow_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Freeze an approved graph together with exact evidence provenance."""
+    try:
+        return freeze_workflow_graph(
+            workflow_id, payload, actor=actor
+        ).to_mapping()
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except FrozenGraphAlreadyExistsError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (ExecutionNotFoundError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/{workflow_id}/frozen",
+    responses={404: {"description": "Frozen workflow graph was not found"}},
+)
+def read_frozen_workflow_graph(workflow_id: str) -> dict[str, Any]:
+    try:
+        return get_frozen_workflow_graph(workflow_id).to_mapping()
+    except FrozenGraphNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
     "/dependency-experiments/repeatability",
     responses={
         404: {"description": "Dependency assessment was not found"},
@@ -891,7 +970,7 @@ def evaluate_workflow_accuracy(
     return {
         "workflowId": workflow_id,
         "mandatoryThreshold": mandatory_threshold,
-        "serviceMetrics": {
+        "discoveryServiceMetrics": {
             "precision": result.service_metrics.precision,
             "recall": result.service_metrics.recall,
             "f1": result.service_metrics.f1,
@@ -899,6 +978,24 @@ def evaluate_workflow_accuracy(
             "truePositives": result.service_metrics.true_positives,
             "falsePositives": result.service_metrics.false_positives,
             "falseNegatives": result.service_metrics.false_negatives,
+        },
+        "serviceMetrics": {
+            "precision": result.mandatory_service_metrics.precision,
+            "recall": result.mandatory_service_metrics.recall,
+            "f1": result.mandatory_service_metrics.f1,
+            "accuracy": result.mandatory_service_metrics.accuracy,
+            "truePositives": result.mandatory_service_metrics.true_positives,
+            "falsePositives": result.mandatory_service_metrics.false_positives,
+            "falseNegatives": result.mandatory_service_metrics.false_negatives,
+        },
+        "mandatoryServiceMetrics": {
+            "precision": result.mandatory_service_metrics.precision,
+            "recall": result.mandatory_service_metrics.recall,
+            "f1": result.mandatory_service_metrics.f1,
+            "accuracy": result.mandatory_service_metrics.accuracy,
+            "truePositives": result.mandatory_service_metrics.true_positives,
+            "falsePositives": result.mandatory_service_metrics.false_positives,
+            "falseNegatives": result.mandatory_service_metrics.false_negatives,
         },
         "edgeMetrics": {
             "precision": result.edge_metrics.precision,
@@ -909,21 +1006,37 @@ def evaluate_workflow_accuracy(
             "falsePositives": result.edge_metrics.false_positives,
             "falseNegatives": result.edge_metrics.false_negatives,
         },
+        "mandatoryEdgeMetrics": {
+            "precision": result.mandatory_edge_metrics.precision,
+            "recall": result.mandatory_edge_metrics.recall,
+            "f1": result.mandatory_edge_metrics.f1,
+            "accuracy": result.mandatory_edge_metrics.accuracy,
+            "truePositives": result.mandatory_edge_metrics.true_positives,
+            "falsePositives": result.mandatory_edge_metrics.false_positives,
+            "falseNegatives": result.mandatory_edge_metrics.false_negatives,
+        },
         "truePositiveServices": result.true_positive_services,
         "falsePositiveServices": result.false_positive_services,
         "falseNegativeServices": result.false_negative_services,
+        "truePositiveMandatoryServices": result.true_positive_mandatory_services,
+        "falsePositiveMandatoryServices": result.false_positive_mandatory_services,
+        "falseNegativeMandatoryServices": result.false_negative_mandatory_services,
+        "truePositiveMandatoryEdges": result.true_positive_mandatory_edges,
+        "falsePositiveMandatoryEdges": result.false_positive_mandatory_edges,
+        "falseNegativeMandatoryEdges": result.false_negative_mandatory_edges,
     }
 
 
 @router.get(
     "/evaluation/sensitivity",
     summary="Run sensitivity analysis across threshold range",
+    deprecated=True,
     responses=NOT_FOUND_RESPONSE,
 )
 def get_sensitivity_analysis(
     workflow_id: str = Query("checkout", description="Benchmark workflow ID"),
 ) -> list[dict[str, Any]]:
-    """Run sensitivity analysis varying threshold from 0.5 to 1.0 to generate thesis comparison curves."""
+    """Run mandatory-aware synthetic fixture sensitivity for compatibility."""
     try:
         steps = run_sensitivity_analysis(workflow_id)
         return [

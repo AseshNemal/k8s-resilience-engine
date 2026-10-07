@@ -16,9 +16,9 @@ from app.engine.workflow_dependency_modeling.analysis_session_service import (
     start_workflow_analysis,
 )
 from app.engine.workflow_dependency_modeling.auto_discovery import (
-    _slugify,
     discover_root_workflows,
     select_workflow_traces,
+    slugify_operation,
 )
 from app.engine.workflow_dependency_modeling.classification_evaluation_service import (
     configure_classification_evaluation_repository,
@@ -94,9 +94,19 @@ from app.engine.workflow_dependency_modeling.scenario_service import (
     get_versioned_scenario,
     list_versioned_scenarios,
     scenario_etag,
+    transition_scenario_lifecycle,
     update_scenario,
 )
 from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
+from app.engine.workflow_dependency_modeling.trace_validator import (
+    eligible_traces,
+    validate_trace_quality,
+)
+from app.engine.workflow_dependency_modeling.graph_freeze_service import (
+    configure_graph_freeze_repository,
+    freeze_workflow_graph,
+    get_frozen_workflow_graph,
+)
 from app.engine.workflow_dependency_modeling.trace_source import TraceSource
 from app.integrations.jaeger.client import JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
@@ -119,7 +129,14 @@ def build_workflow_graph(
 ) -> WorkflowGraph:
     """Build a candidate graph without loading or accepting reference truth."""
     typed_scenario = _as_scenario(scenario)
-    spans = parse_spans(traces)
+    quality = validate_trace_quality(traces)
+    valid_traces = eligible_traces(traces, quality)
+    if not valid_traces:
+        raise ValueError(
+            f"No valid trace evidence remains for workflow '{typed_scenario.workflow_id}'; "
+            f"excluded {quality.excluded_count} trace(s)"
+        )
+    spans = parse_spans(valid_traces)
     interactions = extract_interactions(spans)
     observed = aggregate_edges(interactions)
     classification = classify_dependencies(
@@ -197,7 +214,7 @@ def get_live_workflow(
         )
     operation_name = operation or "live_workflow"
     scenario = WorkflowScenario(
-        workflow_id=_slugify(operation_name),
+        workflow_id=slugify_operation(operation_name),
         description="Candidate operation discovered from live trace evidence.",
         criticality=criticality,
         success_condition=SuccessCondition.from_mapping(
@@ -326,6 +343,7 @@ __all__ = [
     "configure_classification_evaluation_repository",
     "configure_execution_repository",
     "configure_experiment_campaign_repository",
+    "configure_graph_freeze_repository",
     "configure_intervention_event_repository",
     "configure_scenario_repository",
     "create_dependency_assessment",
@@ -337,6 +355,7 @@ __all__ = [
     "discover_live_workflows",
     "discover_analysis_workflows",
     "evaluate_workflow_by_id",
+    "freeze_workflow_graph",
     "get_evidence_source",
     "get_dependency_assessment",
     "get_dependency_classification_evaluation",
@@ -345,6 +364,7 @@ __all__ = [
     "get_experiment_campaign",
     "get_experiment_campaign_assessment",
     "get_experiment_campaign_approval",
+    "get_frozen_workflow_graph",
     "get_live_evidence",
     "get_live_workflow",
     "get_sample_workflow",
@@ -372,5 +392,6 @@ __all__ = [
     "run_campaign_intervention_trial",
     "scenario_etag",
     "start_workflow_analysis",
+    "transition_scenario_lifecycle",
     "update_scenario",
 ]

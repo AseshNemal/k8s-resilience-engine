@@ -32,6 +32,12 @@ from app.engine.workflow_dependency_modeling.execution_models import (
 from app.engine.workflow_dependency_modeling.execution_repository import (
     InMemoryExecutionRepository,
 )
+from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
+    InMemoryGraphFreezeRepository,
+)
+from app.engine.workflow_dependency_modeling.graph_freeze_service import (
+    freeze_workflow_graph,
+)
 from app.engine.workflow_dependency_modeling.models import WorkflowScenario
 from app.engine.workflow_dependency_modeling.scenario_repository import (
     InMemoryScenarioRepository,
@@ -267,6 +273,118 @@ def test_assessment_is_immutable_and_approval_projects_validated_graph(
     assert approval.excluded_supporting_services == ("inventoryservice",)
 
 
+def test_freeze_records_approved_graph_and_exact_trace_provenance(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import scenario_service
+
+    scenarios, executions, assessments = _repositories()
+    monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
+    created = create_dependency_assessment(
+        _assessment_payload(),
+        actor="researcher",
+        repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    approval = approve_dependency_assessment(
+        created.assessment_id,
+        actor="lead-researcher",
+        rationale="Evidence reviewed",
+        repository=assessments,
+        now=NOW,
+    )
+
+    frozen = freeze_workflow_graph(
+        "checkout",
+        {
+            "freezeId": "freeze:checkout:1",
+            "assessmentId": created.assessment_id,
+        },
+        actor="lead-researcher",
+        repository=InMemoryGraphFreezeRepository(),
+        dependency_repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+
+    assert frozen.graph == approval.approved_graph
+    assert frozen.valid_trace_count == 12
+    assert frozen.excluded_trace_count == 0
+    assert len(frozen.trace_ids) == 12
+    assert frozen.algorithm_version == "workflow-dependency-modeling/phase-5"
+    assert frozen.mandatory_threshold == created.policy.mandatory_effect_threshold
+
+
+def test_freeze_rejects_caller_supplied_provenance(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import scenario_service
+
+    scenarios, executions, assessments = _repositories()
+    monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
+    created = create_dependency_assessment(
+        _assessment_payload(),
+        actor="researcher",
+        repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    approve_dependency_assessment(
+        created.assessment_id,
+        actor="lead-researcher",
+        rationale="Evidence reviewed",
+        repository=assessments,
+        now=NOW,
+    )
+
+    with pytest.raises(ValueError, match="server-derived"):
+        freeze_workflow_graph(
+            "checkout",
+            {
+                "freezeId": "freeze:checkout:spoofed",
+                "assessmentId": created.assessment_id,
+                "mandatoryThreshold": 1.0,
+            },
+            actor="lead-researcher",
+            repository=InMemoryGraphFreezeRepository(),
+            dependency_repository=assessments,
+            execution_repository=executions,
+            now=NOW,
+        )
+
+
+def test_freeze_rejects_missing_evidence_batch(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import scenario_service
+
+    scenarios, executions, assessments = _repositories()
+    monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
+    created = create_dependency_assessment(
+        _assessment_payload(),
+        actor="researcher",
+        repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    approve_dependency_assessment(
+        created.assessment_id,
+        actor="lead-researcher",
+        rationale="Evidence reviewed",
+        repository=assessments,
+        now=NOW,
+    )
+
+    with pytest.raises(LookupError, match="was not found while freezing provenance"):
+        freeze_workflow_graph(
+            "checkout",
+            {
+                "freezeId": "freeze:checkout:missing-evidence",
+                "assessmentId": created.assessment_id,
+            },
+            actor="lead-researcher",
+            repository=InMemoryGraphFreezeRepository(),
+            dependency_repository=assessments,
+            execution_repository=InMemoryExecutionRepository(),
+            now=NOW,
+        )
+
+
 def test_approval_rejects_unresolved_candidate(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import scenario_service
 
@@ -359,6 +477,7 @@ def test_dependency_assessment_api_and_validated_graph(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import (
         dependency_assessment_service,
         execution_service,
+        graph_freeze_service,
         scenario_service,
     )
 
@@ -367,6 +486,9 @@ def test_dependency_assessment_api_and_validated_graph(monkeypatch) -> None:
     monkeypatch.setattr(execution_service, "_default_repository", executions)
     monkeypatch.setattr(
         dependency_assessment_service, "_default_repository", assessments
+    )
+    monkeypatch.setattr(
+        graph_freeze_service, "_default_repository", InMemoryGraphFreezeRepository()
     )
     client = TestClient(app)
     created = client.post(
@@ -386,6 +508,43 @@ def test_dependency_assessment_api_and_validated_graph(monkeypatch) -> None:
     assert graph.status_code == 200
     assert graph.json()["mandatoryServices"] == ["paymentservice"]
     assert graph.json()["optionalServices"] == ["emailservice"]
+    spoofed = client.post(
+        "/api/workflows/checkout/freeze",
+        json={
+            "freezeId": "freeze:checkout:spoofed-api",
+            "assessmentId": assessment_id,
+            "mandatoryThreshold": 1.0,
+        },
+        headers={"X-Actor": "api-approver"},
+    )
+    assert spoofed.status_code == 422
+    assert "server-derived" in spoofed.json()["detail"]
+    frozen = client.post(
+        "/api/workflows/checkout/freeze",
+        json={
+            "freezeId": "freeze:checkout:api",
+            "assessmentId": assessment_id,
+        },
+        headers={"X-Actor": "api-approver"},
+    )
+    assert frozen.status_code == 201
+    assert frozen.json()["validTraceCount"] == 12
+    assert client.get("/api/workflows/checkout/frozen").status_code == 200
+
+
+def test_validated_graph_without_approval_returns_not_found(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import dependency_assessment_service
+
+    monkeypatch.setattr(
+        dependency_assessment_service,
+        "_default_repository",
+        InMemoryDependencyAssessmentRepository(),
+    )
+
+    response = TestClient(app).get("/api/workflows/checkout/validated-graph")
+
+    assert response.status_code == 404
+    assert "No approved dependency assessment" in response.json()["detail"]
 
 
 def test_dependency_assessment_api_reports_missing_batch_as_not_found(
