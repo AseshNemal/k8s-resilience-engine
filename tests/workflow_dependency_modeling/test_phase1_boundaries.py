@@ -24,10 +24,16 @@ def changed_reference(workflow_id: str) -> ReferenceWorkflow:
     return ReferenceWorkflow.from_mapping(
         {
             "workflowId": workflow_id,
-            "expectedServices": ["unrelated-service"],
+            "expectedServices": ["unrelated-service", "missing-service"],
+            "mandatoryServices": ["unrelated-service", "missing-service"],
+            "optionalServices": [],
             "expectedEdges": [
                 {"source": "unrelated-service", "target": "missing-service"}
             ],
+            "mandatoryEdges": [
+                {"source": "unrelated-service", "target": "missing-service"}
+            ],
+            "optionalEdges": [],
             "synthetic": True,
         }
     )

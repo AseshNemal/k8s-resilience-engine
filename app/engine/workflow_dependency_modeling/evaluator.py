@@ -24,12 +24,20 @@ class GraphEvaluationResult:
     workflow_id: str
     edge_metrics: EvaluationMetrics
     service_metrics: EvaluationMetrics
+    mandatory_service_metrics: EvaluationMetrics
+    mandatory_edge_metrics: EvaluationMetrics
     true_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_negative_edges: list[tuple[str, str]] = field(default_factory=list)
     true_positive_services: list[str] = field(default_factory=list)
     false_positive_services: list[str] = field(default_factory=list)
     false_negative_services: list[str] = field(default_factory=list)
+    true_positive_mandatory_services: list[str] = field(default_factory=list)
+    false_positive_mandatory_services: list[str] = field(default_factory=list)
+    false_negative_mandatory_services: list[str] = field(default_factory=list)
+    true_positive_mandatory_edges: list[tuple[str, str]] = field(default_factory=list)
+    false_positive_mandatory_edges: list[tuple[str, str]] = field(default_factory=list)
+    false_negative_mandatory_edges: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -70,17 +78,52 @@ def evaluate_graph(
         generated.mandatory_services + generated.optional_services
     )
     reference_services = set(reference.expected_services)
+    predicted_mandatory_services = set(generated.mandatory_services)
+    reference_mandatory_services = set(reference.mandatory_services)
+    predicted_mandatory_edges = {
+        (edge.source, edge.target)
+        for edge in generated.edges
+        if edge.source in predicted_mandatory_services
+        and edge.target in predicted_mandatory_services
+    }
+    reference_mandatory_edges = {
+        (edge.source, edge.target) for edge in reference.mandatory_edges
+    }
 
     return GraphEvaluationResult(
         workflow_id=generated.workflow_id,
         edge_metrics=_compute_metrics(predicted_edges, reference_edges),
         service_metrics=_compute_metrics(predicted_services, reference_services),
+        mandatory_service_metrics=_compute_metrics(
+            predicted_mandatory_services, reference_mandatory_services
+        ),
+        mandatory_edge_metrics=_compute_metrics(
+            predicted_mandatory_edges, reference_mandatory_edges
+        ),
         true_positive_edges=sorted(predicted_edges & reference_edges),
         false_positive_edges=sorted(predicted_edges - reference_edges),
         false_negative_edges=sorted(reference_edges - predicted_edges),
         true_positive_services=sorted(predicted_services & reference_services),
         false_positive_services=sorted(predicted_services - reference_services),
         false_negative_services=sorted(reference_services - predicted_services),
+        true_positive_mandatory_services=sorted(
+            predicted_mandatory_services & reference_mandatory_services
+        ),
+        false_positive_mandatory_services=sorted(
+            predicted_mandatory_services - reference_mandatory_services
+        ),
+        false_negative_mandatory_services=sorted(
+            reference_mandatory_services - predicted_mandatory_services
+        ),
+        true_positive_mandatory_edges=sorted(
+            predicted_mandatory_edges & reference_mandatory_edges
+        ),
+        false_positive_mandatory_edges=sorted(
+            predicted_mandatory_edges - reference_mandatory_edges
+        ),
+        false_negative_mandatory_edges=sorted(
+            reference_mandatory_edges - predicted_mandatory_edges
+        ),
     )
 
 
@@ -88,10 +131,11 @@ def run_sensitivity_analysis(
     workflow_id: str,
     thresholds: list[float] | None = None,
 ) -> list[SensitivityStep]:
-    """Evaluate fixture set reconstruction across frequency thresholds.
+    """Evaluate mandatory-label reconstruction across fixture thresholds.
 
-    Phase 1 retains the legacy combined-service metric. Correct mandatory-label
-    sensitivity is explicitly Phase 5 work and is not claimed here.
+    This compatibility helper is limited to synthetic fixture diagnostics. New
+    empirical experiments should use ``run_dependency_sensitivity_analysis``
+    against a frozen dependency assessment.
     """
     from app.engine.workflow_dependency_modeling.fixture_repository import get_reference
     from app.engine.workflow_dependency_modeling.service import get_workflow_by_id
@@ -107,9 +151,9 @@ def run_sensitivity_analysis(
         steps.append(
             SensitivityStep(
                 threshold=threshold,
-                precision=result.service_metrics.precision,
-                recall=result.service_metrics.recall,
-                f1=result.service_metrics.f1,
+                precision=result.mandatory_service_metrics.precision,
+                recall=result.mandatory_service_metrics.recall,
+                f1=result.mandatory_service_metrics.f1,
                 edge_accuracy=result.edge_metrics.accuracy,
                 mandatory_services_count=len(graph.mandatory_services),
                 optional_services_count=len(graph.optional_services),
