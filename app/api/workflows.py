@@ -409,9 +409,9 @@ def create_workflow_dependency_reference(
 @router.post(
     "/scenarios/{workflow_id}/lifecycle",
     responses={
-        **SCENARIO_NOT_FOUND_RESPONSE,
-        **SCENARIO_PRECONDITION_RESPONSE,
-        **SCENARIO_VALIDATION_RESPONSE,
+        404: {"description": "Scenario or version not found"},
+        412: {"description": "Scenario version changed"},
+        422: {"description": "Scenario definition is invalid"},
     },
 )
 def change_workflow_scenario_lifecycle(

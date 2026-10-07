@@ -84,81 +84,127 @@ def _parent_id(span: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _trace_parts(
+    trace: Mapping[str, Any], index: int
+) -> tuple[str, bool, list[Mapping[str, Any]], Mapping[str, Any]]:
+    raw_trace_id = str(trace.get("traceID", "")).strip()
+    raw_spans = trace.get("spans")
+    spans = raw_spans if isinstance(raw_spans, list) else []
+    raw_processes = trace.get("processes")
+    processes = raw_processes if isinstance(raw_processes, Mapping) else {}
+    return raw_trace_id or f"missing-trace-id:{index}", bool(raw_trace_id), spans, processes
+
+
+def _span_metrics(
+    spans: list[Mapping[str, Any]], processes: Mapping[str, Any]
+) -> tuple[int, bool, int, int, int]:
+    span_ids = [str(span.get("spanID", "")).strip() for span in spans]
+    usable_span_ids = {span_id for span_id in span_ids if span_id}
+    populated_span_ids = [span_id for span_id in span_ids if span_id]
+    duplicate_ids = len(usable_span_ids) != len(populated_span_ids)
+    missing_span_ids = len(spans) - len(populated_span_ids)
+    root_count = sum(_parent_id(span) is None for span in spans)
+    broken_parent_count = sum(
+        1
+        for span in spans
+        if (parent_id := _parent_id(span)) is not None
+        and parent_id not in usable_span_ids
+    )
+    unknown_service_count = sum(
+        1
+        for span in spans
+        if not str(
+            processes.get(span.get("processID"), {}).get("serviceName", "")
+        ).strip()
+    )
+    return (
+        missing_span_ids,
+        duplicate_ids,
+        root_count,
+        broken_parent_count,
+        unknown_service_count,
+    )
+
+
+def _quality_reasons(
+    has_trace_id: bool,
+    spans: list[Mapping[str, Any]],
+    missing_span_ids: int,
+    duplicate_ids: bool,
+    root_count: int,
+    broken_parent_count: int,
+    unknown_service_count: int,
+) -> list[str]:
+    reasons: list[str] = []
+    if not has_trace_id:
+        reasons.append("Trace ID is missing")
+    if not spans:
+        reasons.append("Trace contains no spans")
+    if missing_span_ids:
+        reasons.append(f"{missing_span_ids} span(s) have no span ID")
+    if duplicate_ids:
+        reasons.append("Trace contains duplicate span IDs")
+    if spans and root_count == 0:
+        reasons.append("Trace has no root span")
+    if broken_parent_count:
+        reasons.append(f"{broken_parent_count} span(s) reference a missing parent")
+    if unknown_service_count:
+        reasons.append(
+            f"{unknown_service_count} span(s) have unresolved service identity"
+        )
+    if root_count > 1:
+        reasons.append(f"Trace contains {root_count} root spans")
+    return reasons
+
+
+def _trace_quality(
+    structurally_invalid: bool,
+    broken_parent_count: int,
+    unknown_service_count: int,
+    root_count: int,
+) -> TraceQuality:
+    if structurally_invalid:
+        return TraceQuality.INVALID
+    if broken_parent_count or unknown_service_count or root_count != 1:
+        return TraceQuality.PARTIAL
+    return TraceQuality.VALID
+
+
 def validate_trace_quality(raw_traces: Sequence[Mapping[str, Any]]) -> TraceQualitySummary:
     """Classify raw Jaeger traces without inventing missing relationships."""
     results: list[TraceQualityResult] = []
     for index, trace in enumerate(raw_traces):
-        trace_id = str(trace.get("traceID", "")).strip() or f"missing-trace-id:{index}"
-        raw_spans = trace.get("spans")
-        spans = raw_spans if isinstance(raw_spans, list) else []
-        processes = trace.get("processes")
-        process_map = processes if isinstance(processes, Mapping) else {}
-        reasons: list[str] = []
-
-        span_ids = [str(span.get("spanID", "")).strip() for span in spans]
-        usable_span_ids = {span_id for span_id in span_ids if span_id}
-        duplicate_ids = len(usable_span_ids) != len([item for item in span_ids if item])
-        missing_span_ids = sum(not span_id for span_id in span_ids)
-        root_count = sum(_parent_id(span) is None for span in spans)
-        broken_parent_count = sum(
-            1
-            for span in spans
-            if (parent_id := _parent_id(span)) is not None
-            and parent_id not in usable_span_ids
-        )
-        unknown_service_count = sum(
-            1
-            for span in spans
-            if not str(
-                process_map.get(span.get("processID"), {}).get("serviceName", "")
-            ).strip()
-        )
-
-        if not str(trace.get("traceID", "")).strip():
-            reasons.append("Trace ID is missing")
-        if not spans:
-            reasons.append("Trace contains no spans")
-        if missing_span_ids:
-            reasons.append(f"{missing_span_ids} span(s) have no span ID")
-        if duplicate_ids:
-            reasons.append("Trace contains duplicate span IDs")
-        if spans and root_count == 0:
-            reasons.append("Trace has no root span")
-
+        trace_id, has_trace_id, spans, process_map = _trace_parts(trace, index)
+        metrics = _span_metrics(spans, process_map)
+        missing_span_ids, duplicate_ids, root_count, broken_parents, unknown_services = metrics
         structurally_invalid = bool(
-            not str(trace.get("traceID", "")).strip()
+            not has_trace_id
             or not spans
             or missing_span_ids
             or duplicate_ids
             or (spans and root_count == 0)
         )
-        if broken_parent_count:
-            reasons.append(
-                f"{broken_parent_count} span(s) reference a missing parent"
-            )
-        if unknown_service_count:
-            reasons.append(
-                f"{unknown_service_count} span(s) have unresolved service identity"
-            )
-
-        quality = (
-            TraceQuality.INVALID
-            if structurally_invalid
-            else TraceQuality.PARTIAL
-            if broken_parent_count or unknown_service_count or root_count != 1
-            else TraceQuality.VALID
-        )
-        if root_count > 1:
-            reasons.append(f"Trace contains {root_count} root spans")
         results.append(
             TraceQualityResult(
                 trace_id=trace_id,
-                quality=quality,
+                quality=_trace_quality(
+                    structurally_invalid, broken_parents, unknown_services, root_count
+                ),
                 span_count=len(spans),
                 root_span_count=root_count,
-                broken_parent_count=broken_parent_count,
-                unknown_service_count=unknown_service_count,
-                reasons=tuple(reasons),
+                broken_parent_count=broken_parents,
+                unknown_service_count=unknown_services,
+                reasons=tuple(
+                    _quality_reasons(
+                        has_trace_id,
+                        spans,
+                        missing_span_ids,
+                        duplicate_ids,
+                        root_count,
+                        broken_parents,
+                        unknown_services,
+                    )
+                ),
             )
         )
 

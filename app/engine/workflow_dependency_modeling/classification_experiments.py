@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from math import isclose
 from typing import Any, Mapping, Sequence
 
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
@@ -215,7 +216,7 @@ def analyze_repeatability(
                 service_name=service_name,
                 classifications=dict(sorted(counts.items())),
                 agreement_rate=agreement,
-                stable=agreement == 1.0,
+                stable=isclose(agreement, 1.0),
             )
         )
     mean_agreement = (

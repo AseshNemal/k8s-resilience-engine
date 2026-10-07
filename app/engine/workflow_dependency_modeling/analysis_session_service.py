@@ -24,7 +24,7 @@ from app.engine.workflow_dependency_modeling.trace_source import (
 
 
 _default_repository: AnalysisSessionRepository | None = None
-_LOOKBACK = re.compile(r"^[1-9][0-9]*[smhdw]$")
+_LOOKBACK = re.compile(r"^[1-9]\d*[smhdw]$")
 _SERVER_FIELDS = {
     "sessionId",
     "workflowId",
