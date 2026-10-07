@@ -79,13 +79,20 @@ def classify_dependencies(
 
     appearances: dict[str, set[str]] = defaultdict(set)
     for interaction in interactions:
-        for edge in interaction.edges:
-            appearances[edge.source].add(interaction.trace_id)
-            appearances[edge.target].add(interaction.trace_id)
+        observed_services = set(interaction.observed_services)
+        if not observed_services:
+            # Compatibility for callers constructing TraceInteraction directly.
+            observed_services = {
+                service
+                for edge in interaction.edges
+                for service in (edge.source, edge.target)
+            }
+        for service in observed_services:
+            appearances[service].add(interaction.trace_id)
 
     if not appearances:
         raise InsufficientEvidenceError(
-            f"Trace evidence for workflow '{workflow_id}' contains no cross-service interactions"
+            f"Trace evidence for workflow '{workflow_id}' contains no observed services"
         )
 
     total_traces = len(interactions)

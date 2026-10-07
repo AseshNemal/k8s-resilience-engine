@@ -52,6 +52,12 @@ class TraceInteraction:
     edges: list[ServiceEdge] = field(default_factory=list)
     """Deduplicated directed edges for this trace (sorted for stability)."""
 
+    observed_services: list[str] = field(default_factory=list)
+    """All services participating in the trace, including root-only services."""
+
+    broken_parent_count: int = 0
+    """Spans whose declared parent was absent from the trace export."""
+
 
 @dataclass
 class ObservedEdge:
@@ -111,6 +117,7 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
 
         # Collect unique (source, target) pairs as a set to deduplicate --
         edge_set: set[tuple[str, str]] = set()
+        broken_parent_count = 0
 
         for span in trace_spans:
             if span.parent_span_id is None:
@@ -118,8 +125,9 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
 
             parent = span_index.get(span.parent_span_id)
             if parent is None:
-                # Parent span is not present in this trace export (e.g.
-                # an external upstream not instrumented). Skip silently.
+                # Preserve the quality signal even though no edge can be
+                # reconstructed without inventing a relationship.
+                broken_parent_count += 1
                 continue
 
             if parent.service_name == span.service_name:
@@ -133,7 +141,16 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
             ServiceEdge(source=src, target=tgt)
             for src, tgt in sorted(edge_set)
         ]
-        interactions.append(TraceInteraction(trace_id=trace_id, edges=edges))
+        interactions.append(
+            TraceInteraction(
+                trace_id=trace_id,
+                edges=edges,
+                observed_services=sorted(
+                    {span.service_name for span in trace_spans if span.service_name}
+                ),
+                broken_parent_count=broken_parent_count,
+            )
+        )
 
     # Stable output — sorted by trace_id ---------------------------------
     interactions.sort(key=lambda ti: ti.trace_id)
