@@ -15,7 +15,10 @@ def test_evaluate_workflow_accuracy_checkout():
     assert data["serviceMetrics"]["precision"] == 1.0
     assert data["serviceMetrics"]["recall"] == 1.0
     assert data["serviceMetrics"]["f1"] == 1.0
+    assert data["mandatoryServiceMetrics"]["f1"] == 1.0
+    assert data["discoveryServiceMetrics"]["f1"] == 1.0
     assert data["edgeMetrics"]["accuracy"] == 1.0
+    assert data["mandatoryEdgeMetrics"]["f1"] == 1.0
 
 
 def test_evaluate_workflow_accuracy_view_product():
@@ -45,6 +48,17 @@ def test_get_sensitivity_analysis():
         assert "recall" in s
         assert "f1" in s
         assert "edgeAccuracy" in s
+
+
+def test_accuracy_distinguishes_discovery_from_mandatory_classification():
+    response = client.get(
+        "/api/workflows/evaluation/accuracy?workflow_id=checkout&mandatory_threshold=0.5"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["discoveryServiceMetrics"]["recall"] == pytest.approx(1.0)
+    assert data["mandatoryServiceMetrics"]["precision"] < 1.0
 
 
 @pytest.mark.parametrize("threshold", [-0.01, 1.01])
