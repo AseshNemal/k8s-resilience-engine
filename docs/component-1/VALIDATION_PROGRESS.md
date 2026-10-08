@@ -17,11 +17,18 @@ manifest-driven experiments planned for Phase 6. It does not replace Phases
 - Duplicate correlated trace identities remain a freeze-time error, including
   duplicates attached to excluded outcomes.
 
+### Structural evaluation metrics
+
+- Graph evaluation now reports complete root-to-leaf path precision, recall,
+  and F1 in addition to service and edge metrics.
+- Per-workflow reconstruction accuracy is `1.0` only when both the discovered
+  service set and directed edge set exactly match the independent reference.
+- The existing `accuracy` field remains compatible, while the same set-based
+  value is now named explicitly as `jaccard_similarity` for research reporting.
+
 ## Remaining validation work
 
 - Correct mandatory-edge semantics instead of deriving them solely from the
   endpoint service labels.
-- Clarify set-reconstruction and selective-classification metric names.
-- Add the missing path and complete-workflow reconstruction metrics without
-  mixing reference truth into prediction.
+- Clarify selective-classification accuracy in exported evaluation results.
 - Re-run the focused and repository-owned suites after every cohesive change.

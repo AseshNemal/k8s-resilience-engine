@@ -56,7 +56,10 @@ def test_perfect_reference_match() -> None:
     assert result.service_metrics.f1 == pytest.approx(1.0)
     assert result.mandatory_service_metrics.f1 == pytest.approx(1.0)
     assert result.edge_metrics.accuracy == pytest.approx(1.0)
+    assert result.edge_metrics.jaccard_similarity == pytest.approx(1.0)
     assert result.mandatory_edge_metrics.f1 == pytest.approx(1.0)
+    assert result.path_metrics.f1 == pytest.approx(1.0)
+    assert result.workflow_reconstruction_accuracy == pytest.approx(1.0)
 
 
 def test_false_positive_and_false_negative_details() -> None:
@@ -73,6 +76,39 @@ def test_false_positive_and_false_negative_details() -> None:
     assert result.false_negative_edges == [("frontend", "payment")]
     assert result.service_metrics.precision == pytest.approx(0.5)
     assert result.service_metrics.recall == pytest.approx(0.5)
+    assert result.path_metrics.f1 == pytest.approx(0.0)
+    assert result.workflow_reconstruction_accuracy == pytest.approx(0.0)
+
+
+def test_path_metrics_compare_complete_root_to_leaf_paths() -> None:
+    generated = WorkflowGraph(
+        workflow_id="checkout",
+        criticality=0.9,
+        mandatory_services=["frontend", "checkout", "payment"],
+        optional_services=["email"],
+        edges=[
+            WorkflowEdge(source="frontend", target="checkout"),
+            WorkflowEdge(source="checkout", target="payment"),
+            WorkflowEdge(source="checkout", target="email"),
+        ],
+    )
+    result = evaluate_graph(
+        generated,
+        reference(
+            services=["frontend", "checkout", "payment", "inventory"],
+            mandatory_services=["frontend", "checkout", "payment", "inventory"],
+            edges=[
+                {"source": "frontend", "target": "checkout"},
+                {"source": "checkout", "target": "payment"},
+                {"source": "payment", "target": "inventory"},
+            ],
+        ),
+    )
+
+    assert result.path_metrics.precision == pytest.approx(0.0)
+    assert result.path_metrics.recall == pytest.approx(0.0)
+    assert result.path_metrics.f1 == pytest.approx(0.0)
+    assert result.workflow_reconstruction_accuracy == pytest.approx(0.0)
 
 
 def test_mandatory_service_metrics_detect_optional_misclassification() -> None:

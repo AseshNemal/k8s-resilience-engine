@@ -14,6 +14,7 @@ class EvaluationMetrics:
     recall: float
     f1: float
     accuracy: float
+    jaccard_similarity: float
     true_positives: int
     false_positives: int
     false_negatives: int
@@ -26,6 +27,8 @@ class GraphEvaluationResult:
     service_metrics: EvaluationMetrics
     mandatory_service_metrics: EvaluationMetrics
     mandatory_edge_metrics: EvaluationMetrics
+    path_metrics: EvaluationMetrics
+    workflow_reconstruction_accuracy: float
     true_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_negative_edges: list[tuple[str, str]] = field(default_factory=list)
@@ -60,8 +63,52 @@ def _compute_metrics(predicted: set, reference: set) -> EvaluationMetrics:
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
-    accuracy = tp / (tp + fp + fn) if tp + fp + fn else 0.0
-    return EvaluationMetrics(precision, recall, f1, accuracy, tp, fp, fn)
+    jaccard = tp / (tp + fp + fn) if tp + fp + fn else 0.0
+    return EvaluationMetrics(
+        precision,
+        recall,
+        f1,
+        jaccard,
+        jaccard,
+        tp,
+        fp,
+        fn,
+    )
+
+
+def _root_to_leaf_paths(
+    edges: set[tuple[str, str]],
+) -> set[tuple[str, ...]]:
+    """Return deterministic simple source-to-sink paths for a directed graph.
+
+    Cyclic graphs have no source-to-sink workflow path under this definition;
+    they therefore produce no paths instead of permitting unbounded traversal.
+    """
+    if not edges:
+        return set()
+    nodes = {name for edge in edges for name in edge}
+    targets = {target for _, target in edges}
+    roots = sorted(nodes - targets)
+    if not roots:
+        return set()
+    adjacency: dict[str, set[str]] = {node: set() for node in nodes}
+    for source, target in edges:
+        adjacency[source].add(target)
+
+    paths: set[tuple[str, ...]] = set()
+
+    def visit(node: str, path: tuple[str, ...]) -> None:
+        children = sorted(adjacency[node] - set(path))
+        if not children:
+            if len(path) > 1:
+                paths.add(path)
+            return
+        for child in children:
+            visit(child, (*path, child))
+
+    for root in roots:
+        visit(root, (root,))
+    return paths
 
 
 def evaluate_graph(
@@ -89,6 +136,8 @@ def evaluate_graph(
     reference_mandatory_edges = {
         (edge.source, edge.target) for edge in reference.mandatory_edges
     }
+    predicted_paths = _root_to_leaf_paths(predicted_edges)
+    reference_paths = _root_to_leaf_paths(reference_edges)
 
     return GraphEvaluationResult(
         workflow_id=generated.workflow_id,
@@ -99,6 +148,11 @@ def evaluate_graph(
         ),
         mandatory_edge_metrics=_compute_metrics(
             predicted_mandatory_edges, reference_mandatory_edges
+        ),
+        path_metrics=_compute_metrics(predicted_paths, reference_paths),
+        workflow_reconstruction_accuracy=float(
+            predicted_services == reference_services
+            and predicted_edges == reference_edges
         ),
         true_positive_edges=sorted(predicted_edges & reference_edges),
         false_positive_edges=sorted(predicted_edges - reference_edges),
