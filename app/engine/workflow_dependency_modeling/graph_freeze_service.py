@@ -32,7 +32,7 @@ from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
 )
 
 
-ALGORITHM_VERSION = "workflow-dependency-modeling/phase-5"
+ALGORITHM_VERSION = "workflow-dependency-modeling/phase-5-validation-1"
 _default_repository: GraphFreezeRepository | None = None
 
 

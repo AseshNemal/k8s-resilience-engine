@@ -33,8 +33,25 @@ manifest-driven experiments planned for Phase 6. It does not replace Phases
 - `classifiedCount` and `expectedCount` accompany coverage and abstention so a
   high conditional score cannot conceal unevaluated reference services.
 
-## Remaining validation work
+### Mandatory-edge validity
 
-- Correct mandatory-edge semantics instead of deriving them solely from the
-  endpoint service labels.
-- Re-run the focused and repository-owned suites after every cohesive change.
+- Mandatory-edge metrics are no longer inferred from the labels of their
+  endpoint services.
+- Evaluation reports `not_evaluated_no_predicted_edge_labels` until an explicit
+  mandatory-edge prediction is supplied, preventing unsupported accuracy
+  claims while retaining overall observed-edge and path evaluation.
+- Explicit predicted mandatory edges must exist in the generated graph.
+
+### Validated artifact version
+
+Frozen artifacts produced after these corrections use algorithm version
+`workflow-dependency-modeling/phase-5-validation-1` so their provenance is
+distinguishable from the original Phase 5 behavior.
+
+## Remaining roadmap boundary
+
+Explicit mandatory-edge discovery and classification requires new edge-level
+evidence rather than endpoint inference. That belongs in the reproducible
+experiment and evidence work planned for Phase 6. Phases 7 and 8 remain the
+operational handoff and final empirical study described in the development
+plan.

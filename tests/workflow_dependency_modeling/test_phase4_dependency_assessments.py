@@ -325,7 +325,10 @@ def test_freeze_records_approved_graph_and_exact_trace_provenance(monkeypatch) -
     assert frozen.excluded_trace_count == 1
     assert len(frozen.trace_ids) == 12
     assert indeterminate.matched_trace_id not in frozen.trace_ids
-    assert frozen.algorithm_version == "workflow-dependency-modeling/phase-5"
+    assert (
+        frozen.algorithm_version
+        == "workflow-dependency-modeling/phase-5-validation-1"
+    )
     assert frozen.mandatory_threshold == created.policy.mandatory_effect_threshold
 
 
