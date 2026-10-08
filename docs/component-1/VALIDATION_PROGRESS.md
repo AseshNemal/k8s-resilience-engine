@@ -26,9 +26,15 @@ manifest-driven experiments planned for Phase 6. It does not replace Phases
 - The existing `accuracy` field remains compatible, while the same set-based
   value is now named explicitly as `jaccard_similarity` for research reporting.
 
+### Coverage-aware classification reporting
+
+- Multiclass `accuracy` remains available for compatibility and is now also
+  exposed explicitly as `selectiveAccuracy`.
+- `classifiedCount` and `expectedCount` accompany coverage and abstention so a
+  high conditional score cannot conceal unevaluated reference services.
+
 ## Remaining validation work
 
 - Correct mandatory-edge semantics instead of deriving them solely from the
   endpoint service labels.
-- Clarify selective-classification accuracy in exported evaluation results.
 - Re-run the focused and repository-owned suites after every cohesive change.

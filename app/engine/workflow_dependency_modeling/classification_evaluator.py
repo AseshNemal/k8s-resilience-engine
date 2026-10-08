@@ -112,6 +112,8 @@ def evaluate_dependency_classification(
         confusion_matrix=matrix,
         per_class=per_class,
         accuracy=correct / classified_count if classified_count else 0.0,
+        classified_count=classified_count,
+        expected_count=expected_count,
         macro_f1=sum(item.f1 for item in per_class.values()) / len(per_class),
         micro_f1=micro_f1,
         coverage=classified_count / expected_count if expected_count else 0.0,

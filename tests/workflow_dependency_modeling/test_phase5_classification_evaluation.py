@@ -157,6 +157,9 @@ def test_perfect_multiclass_evaluation() -> None:
         _assessment(), _reference(), evaluation_id="evaluation:perfect", actor="tester", now=NOW
     )
     assert result.accuracy == pytest.approx(1.0)
+    assert result.selective_accuracy == pytest.approx(1.0)
+    assert result.classified_count == 3
+    assert result.expected_count == 3
     assert result.macro_f1 == pytest.approx(1.0)
     assert result.micro_f1 == pytest.approx(1.0)
     assert result.coverage == pytest.approx(1.0)
@@ -173,11 +176,18 @@ def test_abstention_reduces_coverage_without_becoming_misclassification() -> Non
         now=NOW,
     )
     assert result.accuracy == pytest.approx(1.0)
+    assert result.selective_accuracy == pytest.approx(1.0)
+    assert result.classified_count == 2
+    assert result.expected_count == 3
     assert result.coverage == pytest.approx(2 / 3)
     assert result.abstention_rate == pytest.approx(1 / 3)
     assert result.abstained_services == ("emailservice",)
     assert result.misclassified_services == ()
     assert result.per_class["optional"].support == 0
+    mapping = result.to_mapping()
+    assert mapping["selectiveAccuracy"] == pytest.approx(1.0)
+    assert mapping["classifiedCount"] == 2
+    assert mapping["expectedCount"] == 3
 
 
 def test_reference_versions_are_immutable_and_optimistic(monkeypatch) -> None:
