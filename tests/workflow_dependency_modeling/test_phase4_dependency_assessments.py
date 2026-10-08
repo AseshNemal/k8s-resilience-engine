@@ -277,6 +277,20 @@ def test_freeze_records_approved_graph_and_exact_trace_provenance(monkeypatch) -
     from app.engine.workflow_dependency_modeling import scenario_service
 
     scenarios, executions, assessments = _repositories()
+    indeterminate = _outcome(
+        "batch:baseline:indeterminate", "batch:baseline", False
+    )
+    executions.create(
+        ExecutionOutcome(
+            registration=indeterminate.registration,
+            status=ExecutionOutcomeStatus.INDETERMINATE,
+            correlation_status=CorrelationStatus.MATCHED,
+            recorded_at=NOW,
+            matched_trace_id=indeterminate.matched_trace_id,
+            evidence_id=indeterminate.evidence_id,
+            reasons=("Multiple terminal spans matched the success condition",),
+        )
+    )
     monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
     created = create_dependency_assessment(
         _assessment_payload(),
@@ -308,8 +322,9 @@ def test_freeze_records_approved_graph_and_exact_trace_provenance(monkeypatch) -
 
     assert frozen.graph == approval.approved_graph
     assert frozen.valid_trace_count == 12
-    assert frozen.excluded_trace_count == 0
+    assert frozen.excluded_trace_count == 1
     assert len(frozen.trace_ids) == 12
+    assert indeterminate.matched_trace_id not in frozen.trace_ids
     assert frozen.algorithm_version == "workflow-dependency-modeling/phase-5"
     assert frozen.mandatory_threshold == created.policy.mandatory_effect_threshold
 
