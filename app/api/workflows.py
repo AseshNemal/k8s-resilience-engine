@@ -1005,16 +1005,32 @@ def evaluate_workflow_accuracy(
             "truePositives": result.edge_metrics.true_positives,
             "falsePositives": result.edge_metrics.false_positives,
             "falseNegatives": result.edge_metrics.false_negatives,
+            "jaccardSimilarity": result.edge_metrics.jaccard_similarity,
         },
-        "mandatoryEdgeMetrics": {
-            "precision": result.mandatory_edge_metrics.precision,
-            "recall": result.mandatory_edge_metrics.recall,
-            "f1": result.mandatory_edge_metrics.f1,
-            "accuracy": result.mandatory_edge_metrics.accuracy,
-            "truePositives": result.mandatory_edge_metrics.true_positives,
-            "falsePositives": result.mandatory_edge_metrics.false_positives,
-            "falseNegatives": result.mandatory_edge_metrics.false_negatives,
+        "pathMetrics": {
+            "precision": result.path_metrics.precision,
+            "recall": result.path_metrics.recall,
+            "f1": result.path_metrics.f1,
+            "jaccardSimilarity": result.path_metrics.jaccard_similarity,
         },
+        "workflowReconstructionAccuracy": result.workflow_reconstruction_accuracy,
+        "mandatoryEdgeEvaluationStatus": result.mandatory_edge_evaluation_status,
+        "mandatoryEdgeMetrics": (
+            {
+                "precision": result.mandatory_edge_metrics.precision,
+                "recall": result.mandatory_edge_metrics.recall,
+                "f1": result.mandatory_edge_metrics.f1,
+                "accuracy": result.mandatory_edge_metrics.accuracy,
+                "jaccardSimilarity": (
+                    result.mandatory_edge_metrics.jaccard_similarity
+                ),
+                "truePositives": result.mandatory_edge_metrics.true_positives,
+                "falsePositives": result.mandatory_edge_metrics.false_positives,
+                "falseNegatives": result.mandatory_edge_metrics.false_negatives,
+            }
+            if result.mandatory_edge_metrics is not None
+            else None
+        ),
         "truePositiveServices": result.true_positive_services,
         "falsePositiveServices": result.false_positive_services,
         "falseNegativeServices": result.false_negative_services,

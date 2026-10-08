@@ -18,7 +18,14 @@ def test_evaluate_workflow_accuracy_checkout():
     assert data["mandatoryServiceMetrics"]["f1"] == 1.0
     assert data["discoveryServiceMetrics"]["f1"] == 1.0
     assert data["edgeMetrics"]["accuracy"] == 1.0
-    assert data["mandatoryEdgeMetrics"]["f1"] == 1.0
+    assert data["edgeMetrics"]["jaccardSimilarity"] == 1.0
+    assert data["pathMetrics"]["f1"] == 1.0
+    assert data["workflowReconstructionAccuracy"] == 1.0
+    assert data["mandatoryEdgeMetrics"] is None
+    assert (
+        data["mandatoryEdgeEvaluationStatus"]
+        == "not_evaluated_no_predicted_edge_labels"
+    )
 
 
 def test_evaluate_workflow_accuracy_view_product():

@@ -57,7 +57,11 @@ def test_perfect_reference_match() -> None:
     assert result.mandatory_service_metrics.f1 == pytest.approx(1.0)
     assert result.edge_metrics.accuracy == pytest.approx(1.0)
     assert result.edge_metrics.jaccard_similarity == pytest.approx(1.0)
-    assert result.mandatory_edge_metrics.f1 == pytest.approx(1.0)
+    assert result.mandatory_edge_metrics is None
+    assert (
+        result.mandatory_edge_evaluation_status
+        == "not_evaluated_no_predicted_edge_labels"
+    )
     assert result.path_metrics.f1 == pytest.approx(1.0)
     assert result.workflow_reconstruction_accuracy == pytest.approx(1.0)
 
@@ -151,11 +155,23 @@ def test_mandatory_edge_metrics_exclude_optional_reference_edges() -> None:
             mandatory_edges=[{"source": "frontend", "target": "checkout"}],
             optional_edges=[{"source": "checkout", "target": "email"}],
         ),
+        predicted_mandatory_edges={("frontend", "checkout")},
     )
 
     assert result.edge_metrics.f1 == pytest.approx(1.0)
+    assert result.mandatory_edge_metrics is not None
     assert result.mandatory_edge_metrics.f1 == pytest.approx(1.0)
+    assert result.mandatory_edge_evaluation_status == "evaluated"
     assert result.true_positive_mandatory_edges == [("frontend", "checkout")]
+
+
+def test_mandatory_edge_evaluation_rejects_edges_absent_from_prediction() -> None:
+    with pytest.raises(ValueError, match="present in the generated graph"):
+        evaluate_graph(
+            graph(),
+            reference(),
+            predicted_mandatory_edges={("checkout", "payment")},
+        )
 
 
 def test_evaluator_rejects_reference_for_another_workflow() -> None:

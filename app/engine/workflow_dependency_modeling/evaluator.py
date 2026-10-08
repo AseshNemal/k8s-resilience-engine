@@ -26,7 +26,8 @@ class GraphEvaluationResult:
     edge_metrics: EvaluationMetrics
     service_metrics: EvaluationMetrics
     mandatory_service_metrics: EvaluationMetrics
-    mandatory_edge_metrics: EvaluationMetrics
+    mandatory_edge_metrics: EvaluationMetrics | None
+    mandatory_edge_evaluation_status: str
     path_metrics: EvaluationMetrics
     workflow_reconstruction_accuracy: float
     true_positive_edges: list[tuple[str, str]] = field(default_factory=list)
@@ -114,6 +115,8 @@ def _root_to_leaf_paths(
 def evaluate_graph(
     generated: WorkflowGraph,
     reference: ReferenceWorkflow,
+    *,
+    predicted_mandatory_edges: set[tuple[str, str]] | None = None,
 ) -> GraphEvaluationResult:
     """Compare a completed prediction with a separately loaded reference."""
     if generated.workflow_id != reference.workflow_id:
@@ -127,12 +130,12 @@ def evaluate_graph(
     reference_services = set(reference.expected_services)
     predicted_mandatory_services = set(generated.mandatory_services)
     reference_mandatory_services = set(reference.mandatory_services)
-    predicted_mandatory_edges = {
-        (edge.source, edge.target)
-        for edge in generated.edges
-        if edge.source in predicted_mandatory_services
-        and edge.target in predicted_mandatory_services
-    }
+    if predicted_mandatory_edges is not None:
+        unknown_edges = predicted_mandatory_edges - predicted_edges
+        if unknown_edges:
+            raise ValueError(
+                "Predicted mandatory edges must be present in the generated graph"
+            )
     reference_mandatory_edges = {
         (edge.source, edge.target) for edge in reference.mandatory_edges
     }
@@ -146,8 +149,15 @@ def evaluate_graph(
         mandatory_service_metrics=_compute_metrics(
             predicted_mandatory_services, reference_mandatory_services
         ),
-        mandatory_edge_metrics=_compute_metrics(
-            predicted_mandatory_edges, reference_mandatory_edges
+        mandatory_edge_metrics=(
+            _compute_metrics(predicted_mandatory_edges, reference_mandatory_edges)
+            if predicted_mandatory_edges is not None
+            else None
+        ),
+        mandatory_edge_evaluation_status=(
+            "evaluated"
+            if predicted_mandatory_edges is not None
+            else "not_evaluated_no_predicted_edge_labels"
         ),
         path_metrics=_compute_metrics(predicted_paths, reference_paths),
         workflow_reconstruction_accuracy=float(
@@ -170,13 +180,15 @@ def evaluate_graph(
             reference_mandatory_services - predicted_mandatory_services
         ),
         true_positive_mandatory_edges=sorted(
-            predicted_mandatory_edges & reference_mandatory_edges
+            (predicted_mandatory_edges or set()) & reference_mandatory_edges
         ),
         false_positive_mandatory_edges=sorted(
-            predicted_mandatory_edges - reference_mandatory_edges
+            (predicted_mandatory_edges or set()) - reference_mandatory_edges
         ),
         false_negative_mandatory_edges=sorted(
-            reference_mandatory_edges - predicted_mandatory_edges
+            reference_mandatory_edges - (predicted_mandatory_edges or set())
+            if predicted_mandatory_edges is not None
+            else set()
         ),
     )
 
