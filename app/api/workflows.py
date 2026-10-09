@@ -3,6 +3,7 @@ import httpx
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Response, status
 
 from app.engine.workflow_dependency_modeling.evaluator import (
+    GraphEvaluationResult,
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
@@ -21,6 +22,7 @@ from app.engine.workflow_dependency_modeling.service import (
     discover_live_workflows,
     discover_analysis_workflows,
     evaluate_workflow_by_id,
+    evaluate_approved_dependency_assessment,
     freeze_workflow_graph,
     get_live_workflow,
     get_workflow_analysis,
@@ -124,6 +126,90 @@ def _campaign_application_url(payload: dict[str, Any]) -> Any:
         if application_url != legacy_url:
             raise ValueError("applicationUrl and frontendUrl cannot conflict")
     return application_url if application_url is not None else legacy_url
+
+
+def _graph_evaluation_payload(
+    result: GraphEvaluationResult,
+    *,
+    mandatory_threshold: float | None = None,
+    graph_processing_time_ms: float | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "workflowId": result.workflow_id,
+        "discoveryServiceMetrics": {
+            "precision": result.service_metrics.precision,
+            "recall": result.service_metrics.recall,
+            "f1": result.service_metrics.f1,
+            "accuracy": result.service_metrics.accuracy,
+            "truePositives": result.service_metrics.true_positives,
+            "falsePositives": result.service_metrics.false_positives,
+            "falseNegatives": result.service_metrics.false_negatives,
+        },
+        "serviceMetrics": {
+            "precision": result.mandatory_service_metrics.precision,
+            "recall": result.mandatory_service_metrics.recall,
+            "f1": result.mandatory_service_metrics.f1,
+            "accuracy": result.mandatory_service_metrics.accuracy,
+            "truePositives": result.mandatory_service_metrics.true_positives,
+            "falsePositives": result.mandatory_service_metrics.false_positives,
+            "falseNegatives": result.mandatory_service_metrics.false_negatives,
+        },
+        "mandatoryServiceMetrics": {
+            "precision": result.mandatory_service_metrics.precision,
+            "recall": result.mandatory_service_metrics.recall,
+            "f1": result.mandatory_service_metrics.f1,
+            "accuracy": result.mandatory_service_metrics.accuracy,
+            "truePositives": result.mandatory_service_metrics.true_positives,
+            "falsePositives": result.mandatory_service_metrics.false_positives,
+            "falseNegatives": result.mandatory_service_metrics.false_negatives,
+        },
+        "edgeMetrics": {
+            "precision": result.edge_metrics.precision,
+            "recall": result.edge_metrics.recall,
+            "f1": result.edge_metrics.f1,
+            "accuracy": result.edge_metrics.accuracy,
+            "truePositives": result.edge_metrics.true_positives,
+            "falsePositives": result.edge_metrics.false_positives,
+            "falseNegatives": result.edge_metrics.false_negatives,
+            "jaccardSimilarity": result.edge_metrics.jaccard_similarity,
+        },
+        "pathMetrics": {
+            "precision": result.path_metrics.precision,
+            "recall": result.path_metrics.recall,
+            "f1": result.path_metrics.f1,
+            "jaccardSimilarity": result.path_metrics.jaccard_similarity,
+        },
+        "workflowReconstructionAccuracy": result.workflow_reconstruction_accuracy,
+        "mandatoryEdgeEvaluationStatus": result.mandatory_edge_evaluation_status,
+        "mandatoryEdgeMetrics": (
+            {
+                "precision": result.mandatory_edge_metrics.precision,
+                "recall": result.mandatory_edge_metrics.recall,
+                "f1": result.mandatory_edge_metrics.f1,
+                "accuracy": result.mandatory_edge_metrics.accuracy,
+                "jaccardSimilarity": result.mandatory_edge_metrics.jaccard_similarity,
+                "truePositives": result.mandatory_edge_metrics.true_positives,
+                "falsePositives": result.mandatory_edge_metrics.false_positives,
+                "falseNegatives": result.mandatory_edge_metrics.false_negatives,
+            }
+            if result.mandatory_edge_metrics is not None
+            else None
+        ),
+        "truePositiveServices": result.true_positive_services,
+        "falsePositiveServices": result.false_positive_services,
+        "falseNegativeServices": result.false_negative_services,
+        "truePositiveMandatoryServices": result.true_positive_mandatory_services,
+        "falsePositiveMandatoryServices": result.false_positive_mandatory_services,
+        "falseNegativeMandatoryServices": result.false_negative_mandatory_services,
+        "truePositiveMandatoryEdges": result.true_positive_mandatory_edges,
+        "falsePositiveMandatoryEdges": result.false_positive_mandatory_edges,
+        "falseNegativeMandatoryEdges": result.false_negative_mandatory_edges,
+    }
+    if mandatory_threshold is not None:
+        payload["mandatoryThreshold"] = mandatory_threshold
+    if graph_processing_time_ms is not None:
+        payload["graphProcessingTimeMs"] = graph_processing_time_ms
+    return payload
 
 
 @router.post(
@@ -334,6 +420,24 @@ def read_workflow_dependency_assessment(assessment_id: str) -> dict[str, Any]:
     try:
         return get_dependency_assessment(assessment_id).to_mapping()
     except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get(
+    "/dependency-assessments/{assessment_id}/graph-evaluation",
+    responses={404: {"description": "Assessment, approval, or reference was not found"}},
+)
+def evaluate_approved_workflow_dependency_graph(
+    assessment_id: str,
+) -> dict[str, Any]:
+    """Evaluate an approved graph and its explicit mandatory-edge predictions."""
+    try:
+        result = evaluate_approved_dependency_assessment(assessment_id)
+        return {
+            "assessmentId": assessment_id,
+            **_graph_evaluation_payload(result),
+        }
+    except (DependencyAssessmentNotFoundError, FileNotFoundError) as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
@@ -967,81 +1071,11 @@ def evaluate_workflow_accuracy(
     except FileNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
-    return {
-        "workflowId": workflow_id,
-        "mandatoryThreshold": mandatory_threshold,
-        "discoveryServiceMetrics": {
-            "precision": result.service_metrics.precision,
-            "recall": result.service_metrics.recall,
-            "f1": result.service_metrics.f1,
-            "accuracy": result.service_metrics.accuracy,
-            "truePositives": result.service_metrics.true_positives,
-            "falsePositives": result.service_metrics.false_positives,
-            "falseNegatives": result.service_metrics.false_negatives,
-        },
-        "serviceMetrics": {
-            "precision": result.mandatory_service_metrics.precision,
-            "recall": result.mandatory_service_metrics.recall,
-            "f1": result.mandatory_service_metrics.f1,
-            "accuracy": result.mandatory_service_metrics.accuracy,
-            "truePositives": result.mandatory_service_metrics.true_positives,
-            "falsePositives": result.mandatory_service_metrics.false_positives,
-            "falseNegatives": result.mandatory_service_metrics.false_negatives,
-        },
-        "mandatoryServiceMetrics": {
-            "precision": result.mandatory_service_metrics.precision,
-            "recall": result.mandatory_service_metrics.recall,
-            "f1": result.mandatory_service_metrics.f1,
-            "accuracy": result.mandatory_service_metrics.accuracy,
-            "truePositives": result.mandatory_service_metrics.true_positives,
-            "falsePositives": result.mandatory_service_metrics.false_positives,
-            "falseNegatives": result.mandatory_service_metrics.false_negatives,
-        },
-        "edgeMetrics": {
-            "precision": result.edge_metrics.precision,
-            "recall": result.edge_metrics.recall,
-            "f1": result.edge_metrics.f1,
-            "accuracy": result.edge_metrics.accuracy,
-            "truePositives": result.edge_metrics.true_positives,
-            "falsePositives": result.edge_metrics.false_positives,
-            "falseNegatives": result.edge_metrics.false_negatives,
-            "jaccardSimilarity": result.edge_metrics.jaccard_similarity,
-        },
-        "pathMetrics": {
-            "precision": result.path_metrics.precision,
-            "recall": result.path_metrics.recall,
-            "f1": result.path_metrics.f1,
-            "jaccardSimilarity": result.path_metrics.jaccard_similarity,
-        },
-        "workflowReconstructionAccuracy": result.workflow_reconstruction_accuracy,
-        "graphProcessingTimeMs": result.graph_processing_time_ms,
-        "mandatoryEdgeEvaluationStatus": result.mandatory_edge_evaluation_status,
-        "mandatoryEdgeMetrics": (
-            {
-                "precision": result.mandatory_edge_metrics.precision,
-                "recall": result.mandatory_edge_metrics.recall,
-                "f1": result.mandatory_edge_metrics.f1,
-                "accuracy": result.mandatory_edge_metrics.accuracy,
-                "jaccardSimilarity": (
-                    result.mandatory_edge_metrics.jaccard_similarity
-                ),
-                "truePositives": result.mandatory_edge_metrics.true_positives,
-                "falsePositives": result.mandatory_edge_metrics.false_positives,
-                "falseNegatives": result.mandatory_edge_metrics.false_negatives,
-            }
-            if result.mandatory_edge_metrics is not None
-            else None
-        ),
-        "truePositiveServices": result.true_positive_services,
-        "falsePositiveServices": result.false_positive_services,
-        "falseNegativeServices": result.false_negative_services,
-        "truePositiveMandatoryServices": result.true_positive_mandatory_services,
-        "falsePositiveMandatoryServices": result.false_positive_mandatory_services,
-        "falseNegativeMandatoryServices": result.false_negative_mandatory_services,
-        "truePositiveMandatoryEdges": result.true_positive_mandatory_edges,
-        "falsePositiveMandatoryEdges": result.false_positive_mandatory_edges,
-        "falseNegativeMandatoryEdges": result.false_negative_mandatory_edges,
-    }
+    return _graph_evaluation_payload(
+        result,
+        mandatory_threshold=mandatory_threshold,
+        graph_processing_time_ms=result.graph_processing_time_ms,
+    )
 
 
 @router.get(

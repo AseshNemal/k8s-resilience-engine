@@ -19,6 +19,7 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_repository im
 from app.engine.workflow_dependency_modeling.dependency_assessment_service import (
     approve_dependency_assessment,
     create_dependency_assessment,
+    evaluate_approved_dependency_assessment,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessor import (
     assess_service_dependency,
@@ -338,6 +339,16 @@ def test_explicit_edge_interventions_create_independent_edge_labels(
     assert set(approval.mandatory_edges) <= {
         (edge.source, edge.target) for edge in approval.approved_graph.edges
     }
+
+    evaluation = evaluate_approved_dependency_assessment(
+        created.assessment_id,
+        repository=assessments,
+    )
+    assert evaluation.mandatory_edge_evaluation_status == "evaluated"
+    assert evaluation.mandatory_edge_metrics is not None
+    assert evaluation.false_positive_mandatory_edges == [
+        ("paymentservice", "emailservice")
+    ]
 
     frozen = freeze_workflow_graph(
         "checkout",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     AssessmentApproval,
@@ -30,10 +30,14 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
 from app.engine.workflow_dependency_modeling.execution_service import (
     list_executions,
 )
+from app.engine.workflow_dependency_modeling.fixture_repository import get_reference
 from app.engine.workflow_dependency_modeling.scenario_service import (
     get_versioned_scenario,
 )
 from app.shared.schemas.workflow import WorkflowGraph
+
+if TYPE_CHECKING:
+    from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
 
 
 _default_repository: DependencyAssessmentRepository | None = None
@@ -437,3 +441,24 @@ def get_validated_workflow_graph(
     repository: DependencyAssessmentRepository | None = None,
 ) -> WorkflowGraph:
     return _repository(repository).latest_approval(workflow_id).approved_graph
+
+
+def evaluate_approved_dependency_assessment(
+    assessment_id: str,
+    repository: DependencyAssessmentRepository | None = None,
+) -> GraphEvaluationResult:
+    """Score one approved prediction against its independent reference graph."""
+    from app.engine.workflow_dependency_modeling.evaluator import evaluate_graph
+
+    repo = _repository(repository)
+    assessment = repo.get_assessment(assessment_id)
+    approval = repo.get_approval(assessment_id)
+    reference = get_reference(assessment.workflow_id)
+    predicted_mandatory_edges = (
+        set(approval.mandatory_edges) if assessment.edge_interventions else None
+    )
+    return evaluate_graph(
+        approval.approved_graph,
+        reference,
+        predicted_mandatory_edges=predicted_mandatory_edges,
+    )
