@@ -239,14 +239,13 @@ def run_http_workflow_probe(
         follow_redirects=False,
         transport=transport,
     ) as client:
-        final_step_index = len(definition.steps) - 1
-        for step_index, step in enumerate(definition.steps):
+        for step in definition.steps:
             result = _execute_probe_step(
                 client,
                 step,
                 variables,
                 resolved_secrets[step.name],
-                resolved_trace_id if step_index == final_step_index else None,
+                resolved_trace_id if step.name == definition.measured_step else None,
             )
             results.append(result)
             if not result.succeeded:
