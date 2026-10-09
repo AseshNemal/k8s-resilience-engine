@@ -48,6 +48,17 @@ Frozen artifacts produced after these corrections use algorithm version
 `workflow-dependency-modeling/phase-5-validation-1` so their provenance is
 distinguishable from the original Phase 5 behavior.
 
+### Real Jaeger evidence correlation
+
+- A real Online Boutique checkout completed successfully and its injected trace
+  ID resolved directly in Jaeger with 56 spans.
+- The original campaign fetcher discarded that trace ID and searched a bounded
+  service/operation result set, producing a false `missing` correlation while
+  the exact evidence existed.
+- Campaign trials now retrieve `/api/traces/{trace_id}` evidence directly and
+  poll for a bounded ingestion window before declaring it unavailable.
+- Outcome timestamps cannot precede the completed workflow invocation.
+
 ## Remaining roadmap boundary
 
 Explicit mandatory-edge discovery and classification requires new edge-level
