@@ -452,6 +452,11 @@ class AssessmentApproval:
     approved_by: str
     rationale: str
     excluded_supporting_services: tuple[str, ...] = field(default_factory=tuple)
+    mandatory_edges: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    optional_edges: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    excluded_supporting_edges: tuple[tuple[str, str], ...] = field(
+        default_factory=tuple
+    )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -463,6 +468,18 @@ class AssessmentApproval:
             "approvedBy": self.approved_by,
             "rationale": self.rationale,
             "excludedSupportingServices": list(self.excluded_supporting_services),
+            "mandatoryEdges": [
+                {"source": source, "target": target}
+                for source, target in self.mandatory_edges
+            ],
+            "optionalEdges": [
+                {"source": source, "target": target}
+                for source, target in self.optional_edges
+            ],
+            "excludedSupportingEdges": [
+                {"source": source, "target": target}
+                for source, target in self.excluded_supporting_edges
+            ],
         }
 
     @classmethod
@@ -481,4 +498,26 @@ class AssessmentApproval:
             excluded_supporting_services=tuple(
                 str(item) for item in data.get("excludedSupportingServices", [])
             ),
+            mandatory_edges=_approval_edges(data.get("mandatoryEdges", [])),
+            optional_edges=_approval_edges(data.get("optionalEdges", [])),
+            excluded_supporting_edges=_approval_edges(
+                data.get("excludedSupportingEdges", [])
+            ),
         )
+
+
+def _approval_edges(value: Any) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, list):
+        raise ComponentDataError("Approved edge classifications must be a list")
+    edges: list[tuple[str, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ComponentDataError("Approved edge classification must be an object")
+        source = _identifier(item, "source")
+        target = _identifier(item, "target")
+        if source == target:
+            raise ComponentDataError("Approved edges cannot be self-referential")
+        edges.append((source, target))
+    if len(edges) != len(set(edges)):
+        raise ComponentDataError("Approved edge classifications contain duplicates")
+    return tuple(edges)

@@ -273,6 +273,87 @@ def test_assessment_is_immutable_and_approval_projects_validated_graph(
     assert approval.excluded_supporting_services == ("inventoryservice",)
 
 
+def test_explicit_edge_interventions_create_independent_edge_labels(
+    monkeypatch,
+) -> None:
+    from app.engine.workflow_dependency_modeling import scenario_service
+
+    scenarios, executions, assessments = _repositories()
+    monkeypatch.setattr(scenario_service, "_default_repository", scenarios)
+    for batch_id, results in {
+        "batch:email-required": [False, False, False],
+        "batch:edge-required": [False, False, False],
+        "batch:edge-optional": [True, True, True],
+    }.items():
+        for index, succeeded in enumerate(results, start=1):
+            executions.create(_outcome(f"{batch_id}:{index}", batch_id, succeeded))
+
+    payload = _assessment_payload()
+    payload["interventions"][2] = _cohort(
+        "emailservice", "batch:email-required"
+    ).to_mapping()
+    payload["edgeInterventions"] = [
+        {
+            "sourceService": "inventoryservice",
+            "targetService": "paymentservice",
+            "interventionType": "call_omitted",
+            "batchIds": ["batch:edge-optional"],
+            "interventionConfirmed": True,
+            "confirmationEvidence": "proxy-rule:optional-edge",
+        },
+        {
+            "sourceService": "paymentservice",
+            "targetService": "emailservice",
+            "interventionType": "call_omitted",
+            "batchIds": ["batch:edge-required"],
+            "interventionConfirmed": True,
+            "confirmationEvidence": "proxy-rule:required-edge",
+        },
+    ]
+
+    created = create_dependency_assessment(
+        payload,
+        actor="researcher",
+        repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    edge_labels = {item.edge: item.classification for item in created.edges}
+    assert edge_labels == {
+        ("inventoryservice", "paymentservice"): ValidatedDependencyType.OPTIONAL,
+        ("paymentservice", "emailservice"): ValidatedDependencyType.MANDATORY,
+    }
+
+    approval = approve_dependency_assessment(
+        created.assessment_id,
+        actor="lead-researcher",
+        rationale="Service and edge interventions reviewed.",
+        repository=assessments,
+        now=NOW,
+    )
+    assert approval.mandatory_edges == (
+        ("paymentservice", "emailservice"),
+    )
+    assert approval.optional_edges == ()
+    assert set(approval.mandatory_edges) <= {
+        (edge.source, edge.target) for edge in approval.approved_graph.edges
+    }
+
+    frozen = freeze_workflow_graph(
+        "checkout",
+        {
+            "freezeId": "freeze:checkout:edge-evidence",
+            "assessmentId": created.assessment_id,
+        },
+        actor="lead-researcher",
+        repository=InMemoryGraphFreezeRepository(),
+        dependency_repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    assert frozen.valid_trace_count == 18
+
+
 def test_freeze_records_approved_graph_and_exact_trace_provenance(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import scenario_service
 
@@ -327,7 +408,7 @@ def test_freeze_records_approved_graph_and_exact_trace_provenance(monkeypatch) -
     assert indeterminate.matched_trace_id not in frozen.trace_ids
     assert (
         frozen.algorithm_version
-        == "workflow-dependency-modeling/phase-5-validation-1"
+        == "workflow-dependency-modeling/phase-5-validation-2"
     )
     assert frozen.mandatory_threshold == created.policy.mandatory_effect_threshold
 

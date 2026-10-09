@@ -32,7 +32,7 @@ from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
 )
 
 
-ALGORITHM_VERSION = "workflow-dependency-modeling/phase-5-validation-1"
+ALGORITHM_VERSION = "workflow-dependency-modeling/phase-5-validation-2"
 _default_repository: GraphFreezeRepository | None = None
 
 
@@ -96,6 +96,11 @@ def _assessment_batch_ids(assessment: DependencyAssessment) -> set[str]:
         *(
             batch_id
             for cohort in assessment.interventions
+            for batch_id in cohort.batch_ids
+        ),
+        *(
+            batch_id
+            for cohort in assessment.edge_interventions
             for batch_id in cohort.batch_ids
         ),
     }
