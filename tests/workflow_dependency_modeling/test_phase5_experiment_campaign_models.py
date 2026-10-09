@@ -151,6 +151,14 @@ def _analysis() -> WorkflowAnalysisSession:
             "lookback": "1h",
             "workflowId": "post_cart_checkout",
             "traceCount": 12,
+            "traceQuality": {
+                "totalCount": 12,
+                "validCount": 12,
+                "partialCount": 0,
+                "invalidCount": 0,
+                "excludedCount": 0,
+                "results": [],
+            },
             "observedServices": ["paymentservice", "frontend", "checkoutservice"],
             "serviceEvidence": [],
             "edges": [],
@@ -207,6 +215,28 @@ def test_service_rejects_non_checkout_observation() -> None:
             request,
             actor="researcher",
             repository=campaigns,
+            analysis_repository=analyses,
+        )
+
+
+def test_service_rejects_incomplete_trace_evidence() -> None:
+    analyses = InMemoryAnalysisSessionRepository()
+    payload = _analysis().to_mapping()
+    payload["sessionId"] = "analysis:partial"
+    payload["traceQuality"]["validCount"] = 0
+    payload["traceQuality"]["partialCount"] = 12
+    payload["traceQuality"]["excludedCount"] = 12
+    analyses.create(WorkflowAnalysisSession.from_mapping(payload))
+
+    with pytest.raises(ValueError, match="complete trace evidence"):
+        create_experiment_campaign(
+            {
+                "analysisSessionId": "analysis:partial",
+                "successContractConfirmed": True,
+                "benchmarkProfile": "online_boutique_checkout_v0_10_1",
+            },
+            actor="researcher",
+            repository=InMemoryExperimentCampaignRepository(),
             analysis_repository=analyses,
         )
 
