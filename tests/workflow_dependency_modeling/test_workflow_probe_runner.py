@@ -58,7 +58,7 @@ def _definition() -> WorkflowProbeDefinition:
     )
 
 
-def test_executes_unrelated_multistep_workflow_with_one_trace() -> None:
+def test_traces_only_measured_terminal_step_not_setup_requests() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -81,10 +81,8 @@ def test_executes_unrelated_multistep_workflow_with_one_trace() -> None:
         "/api/carts",
         "/api/orders",
     ]
-    assert all(
-        request.headers["traceparent"].startswith(f"00-{TRACE_ID}-")
-        for request in requests
-    )
+    assert "traceparent" not in requests[0].headers
+    assert requests[1].headers["traceparent"].startswith(f"00-{TRACE_ID}-")
     assert requests[0].headers["authorization"] == "Bearer test-secret"
     assert requests[1].headers["x-cart"] == "cart-7"
     assert requests[1].content == b'{"cartId":"cart-7"}'

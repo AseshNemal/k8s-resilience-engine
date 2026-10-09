@@ -168,13 +168,14 @@ def _execute_probe_step(
     step: HttpProbeStep,
     variables: dict[str, str],
     secret_headers: Mapping[str, str],
-    trace_id: str,
+    trace_id: str | None,
 ) -> WorkflowRunStepResult:
     headers = {
         key: _render_text(value, variables) for key, value in step.headers.items()
     }
     headers.update(secret_headers)
-    headers["traceparent"] = _traceparent(trace_id)
+    if trace_id is not None:
+        headers["traceparent"] = _traceparent(trace_id)
     json_body = (
         _render_json(step.json_body, variables)
         if step.json_body is not None
@@ -238,13 +239,14 @@ def run_http_workflow_probe(
         follow_redirects=False,
         transport=transport,
     ) as client:
-        for step in definition.steps:
+        final_step_index = len(definition.steps) - 1
+        for step_index, step in enumerate(definition.steps):
             result = _execute_probe_step(
                 client,
                 step,
                 variables,
                 resolved_secrets[step.name],
-                resolved_trace_id,
+                resolved_trace_id if step_index == final_step_index else None,
             )
             results.append(result)
             if not result.succeeded:
