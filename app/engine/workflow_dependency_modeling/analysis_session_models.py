@@ -62,6 +62,7 @@ class WorkflowAnalysisSession:
     trace_count: int
     observed_services: tuple[str, ...]
     service_evidence: tuple[dict[str, Any], ...]
+    trace_quality: dict[str, Any]
     edges: tuple[dict[str, str], ...]
     maturity: AnalysisMaturity
     next_action: str
@@ -89,6 +90,7 @@ class WorkflowAnalysisSession:
             "traceCount": self.trace_count,
             "observedServices": list(self.observed_services),
             "serviceEvidence": list(self.service_evidence),
+            "traceQuality": dict(self.trace_quality),
             "edges": list(self.edges),
             "maturity": self.maturity.value,
             "nextAction": self.next_action,
@@ -118,6 +120,18 @@ class WorkflowAnalysisSession:
                 "endpoint": _text(data, "jaegerUrl"),
                 "authentication": {"type": "none"},
             }
+        trace_quality = data.get("traceQuality")
+        if not isinstance(trace_quality, Mapping):
+            trace_quality = {
+                "status": "NOT_ASSESSED",
+                "eligibleForDependencyValidation": False,
+                "totalCount": trace_count,
+                "validCount": 0,
+                "partialCount": 0,
+                "invalidCount": 0,
+                "excludedCount": trace_count,
+                "results": [],
+            }
         return cls(
             session_id=_text(data, "sessionId"),
             environment_id=_text(data, "environmentId"),
@@ -130,6 +144,7 @@ class WorkflowAnalysisSession:
             trace_count=trace_count,
             observed_services=services,
             service_evidence=tuple(dict(item) for item in data.get("serviceEvidence", [])),
+            trace_quality=dict(trace_quality),
             edges=tuple(dict(item) for item in data.get("edges", [])),
             maturity=maturity,
             next_action=_text(data, "nextAction"),

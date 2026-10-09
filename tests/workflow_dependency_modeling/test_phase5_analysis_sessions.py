@@ -31,6 +31,14 @@ def _evidence() -> dict:
             {"service": "paymentservice", "traceCount": 12, "frequency": 1.0},
         ],
         "traceCount": 12,
+        "traceQuality": {
+            "totalCount": 12,
+            "validCount": 12,
+            "partialCount": 0,
+            "invalidCount": 0,
+            "excludedCount": 0,
+            "results": [],
+        },
         "edges": [
             {"source": "frontend", "target": "checkoutservice"},
             {"source": "checkoutservice", "target": "paymentservice"},
@@ -72,8 +80,35 @@ def test_session_is_server_managed_and_evidence_honest(monkeypatch) -> None:
     assert result.workflow_id == "post_cart_checkout"
     assert result.maturity.value == "observed"
     assert result.next_action == "confirm_success_condition"
+    assert result.trace_quality["validCount"] == 12
     assert "participation, not dependency necessity" in result.limitations[0]
     assert repository.get(result.session_id) == result
+
+
+def test_incomplete_trace_evidence_requires_instrumentation_repair(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import service
+
+    evidence = _evidence()
+    evidence["traceQuality"] = {
+        "totalCount": 12,
+        "validCount": 0,
+        "partialCount": 12,
+        "invalidCount": 0,
+        "excludedCount": 12,
+        "results": [],
+    }
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args: evidence)
+
+    result = start_workflow_analysis(
+        _payload(),
+        actor="operator",
+        repository=InMemoryAnalysisSessionRepository(),
+        now=NOW,
+    )
+
+    assert result.next_action == "repair_trace_instrumentation"
+    assert "incomplete" in result.limitations[-1]
+    assert "Repair trace" in result.required_actions[0]
 
 
 def test_session_uses_generic_trace_source_contract(monkeypatch) -> None:

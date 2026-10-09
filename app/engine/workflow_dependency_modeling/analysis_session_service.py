@@ -31,6 +31,7 @@ _SERVER_FIELDS = {
     "traceCount",
     "observedServices",
     "serviceEvidence",
+    "traceQuality",
     "edges",
     "maturity",
     "nextAction",
@@ -157,6 +158,25 @@ def start_workflow_analysis(
         JaegerTraceSource.from_configuration(trace_source),
     )
     timestamp = _timestamp(now)
+    trace_quality = evidence.get("traceQuality", {})
+    evidence_eligible = trace_quality.get("excludedCount") == 0
+    limitations = [
+        "Observed calls show participation, not dependency necessity.",
+        "No controlled intervention evidence has been collected.",
+    ]
+    required_actions = [
+        "Confirm the business success condition.",
+        "Collect a stable baseline execution cohort.",
+        "Collect confirmed intervention cohorts for candidate services.",
+    ]
+    if not evidence_eligible:
+        limitations.append(
+            "Trace evidence is incomplete and cannot support dependency validation."
+        )
+        required_actions.insert(
+            0,
+            "Repair trace propagation or missing service instrumentation and create a new analysis.",
+        )
     analysis = WorkflowAnalysisSession.from_mapping(
         {
             "sessionId": f"analysis:{uuid4().hex}",
@@ -170,18 +190,16 @@ def start_workflow_analysis(
             "traceCount": evidence["traceCount"],
             "observedServices": evidence["observedServices"],
             "serviceEvidence": evidence["serviceEvidence"],
+            "traceQuality": trace_quality,
             "edges": evidence["edges"],
             "maturity": "observed",
-            "nextAction": "confirm_success_condition",
-            "limitations": [
-                "Observed calls show participation, not dependency necessity.",
-                "No controlled intervention evidence has been collected.",
-            ],
-            "requiredActions": [
-                "Confirm the business success condition.",
-                "Collect a stable baseline execution cohort.",
-                "Collect confirmed intervention cohorts for candidate services.",
-            ],
+            "nextAction": (
+                "confirm_success_condition"
+                if evidence_eligible
+                else "repair_trace_instrumentation"
+            ),
+            "limitations": limitations,
+            "requiredActions": required_actions,
             "createdAt": timestamp.isoformat(),
             "createdBy": actor,
         }

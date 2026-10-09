@@ -67,6 +67,10 @@ distinguishable from the original Phase 5 behavior.
   reported explicitly instead of disappearing from the candidate graph.
 - Live evidence exposes its per-trace quality summary before any dependency
   necessity claim is allowed.
+- Analysis sessions persist that summary and route incomplete evidence to
+  `repair_trace_instrumentation` instead of success-condition confirmation.
+- Legacy sessions without a quality assessment remain readable but are marked
+  `NOT_ASSESSED` and ineligible for dependency validation.
 
 ## Remaining roadmap boundary
 
