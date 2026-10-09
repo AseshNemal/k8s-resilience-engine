@@ -30,6 +30,7 @@ class GraphEvaluationResult:
     mandatory_edge_evaluation_status: str
     path_metrics: EvaluationMetrics
     workflow_reconstruction_accuracy: float
+    graph_processing_time_ms: float = 0.0
     true_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_negative_edges: list[tuple[str, str]] = field(default_factory=list)
@@ -117,10 +118,13 @@ def evaluate_graph(
     reference: ReferenceWorkflow,
     *,
     predicted_mandatory_edges: set[tuple[str, str]] | None = None,
+    graph_processing_time_ms: float = 0.0,
 ) -> GraphEvaluationResult:
     """Compare a completed prediction with a separately loaded reference."""
     if generated.workflow_id != reference.workflow_id:
         raise ValueError("Generated graph and reference workflow IDs do not match")
+    if graph_processing_time_ms < 0:
+        raise ValueError("Graph processing time cannot be negative")
 
     predicted_edges = {(edge.source, edge.target) for edge in generated.edges}
     reference_edges = {(edge.source, edge.target) for edge in reference.expected_edges}
@@ -164,6 +168,7 @@ def evaluate_graph(
             predicted_services == reference_services
             and predicted_edges == reference_edges
         ),
+        graph_processing_time_ms=graph_processing_time_ms,
         true_positive_edges=sorted(predicted_edges & reference_edges),
         false_positive_edges=sorted(predicted_edges - reference_edges),
         false_negative_edges=sorted(reference_edges - predicted_edges),

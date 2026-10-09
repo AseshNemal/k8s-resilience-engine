@@ -1014,6 +1014,7 @@ def evaluate_workflow_accuracy(
             "jaccardSimilarity": result.path_metrics.jaccard_similarity,
         },
         "workflowReconstructionAccuracy": result.workflow_reconstruction_accuracy,
+        "graphProcessingTimeMs": result.graph_processing_time_ms,
         "mandatoryEdgeEvaluationStatus": result.mandatory_edge_evaluation_status,
         "mandatoryEdgeMetrics": (
             {

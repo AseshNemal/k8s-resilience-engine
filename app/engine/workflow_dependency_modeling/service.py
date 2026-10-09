@@ -6,6 +6,7 @@ Independent reference fixtures are loaded only by evaluation endpoints.
 
 from __future__ import annotations
 
+from time import perf_counter_ns
 from typing import TYPE_CHECKING, Any, Mapping
 
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
@@ -319,14 +320,26 @@ def evaluate_workflow_by_id(
     workflow_id: str,
     mandatory_threshold: float = 1.0,
 ) -> GraphEvaluationResult:
-    """Generate a fixture prediction first, then evaluate it separately."""
+    """Measure fixture graph reconstruction, then evaluate it separately."""
     from app.engine.workflow_dependency_modeling.evaluator import evaluate_graph
 
-    generated = get_workflow_by_id(
-        workflow_id, mandatory_threshold=mandatory_threshold
+    # Fixture I/O and independent reference loading are not part of the
+    # reconstruction algorithm's processing-time measurement.
+    scenario = get_scenario(workflow_id)
+    traces = load_fixture_traces(workflow_id)
+    started_ns = perf_counter_ns()
+    generated = build_workflow_graph(
+        scenario,
+        traces,
+        mandatory_threshold=mandatory_threshold,
     )
+    processing_time_ms = (perf_counter_ns() - started_ns) / 1_000_000
     reference = get_reference(workflow_id)
-    return evaluate_graph(generated, reference)
+    return evaluate_graph(
+        generated,
+        reference,
+        graph_processing_time_ms=processing_time_ms,
+    )
 
 
 def get_sample_workflow() -> WorkflowGraph:

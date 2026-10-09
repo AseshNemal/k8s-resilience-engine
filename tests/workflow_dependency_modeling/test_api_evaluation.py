@@ -21,6 +21,7 @@ def test_evaluate_workflow_accuracy_checkout():
     assert data["edgeMetrics"]["jaccardSimilarity"] == 1.0
     assert data["pathMetrics"]["f1"] == 1.0
     assert data["workflowReconstructionAccuracy"] == 1.0
+    assert data["graphProcessingTimeMs"] >= 0.0
     assert data["mandatoryEdgeMetrics"] is None
     assert (
         data["mandatoryEdgeEvaluationStatus"]
