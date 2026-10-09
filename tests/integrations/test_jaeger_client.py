@@ -126,3 +126,38 @@ def test_jaeger_client_fetch_traces_success(mock_client_cls):
             "lookback": "2h",
         },
     )
+
+
+@patch("httpx.Client")
+def test_jaeger_client_fetches_exact_trace_by_id(mock_client_cls):
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    trace_id = "0123456789abcdef0123456789abcdef"
+    mock_response.json.return_value = {"data": [{"traceID": trace_id, "spans": []}]}
+    mock_client.get.return_value = mock_response
+    mock_client_cls.return_value.__enter__.return_value = mock_client
+
+    traces = JaegerClient("http://localhost:16686").fetch_trace(trace_id.upper())
+
+    assert traces == [{"traceID": trace_id, "spans": []}]
+    mock_client.get.assert_called_once_with(
+        f"http://localhost:16686/api/traces/{trace_id}"
+    )
+
+
+@patch("httpx.Client")
+def test_jaeger_client_treats_missing_exact_trace_as_pending(mock_client_cls):
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_client.get.return_value = mock_response
+    mock_client_cls.return_value.__enter__.return_value = mock_client
+
+    trace_id = "0123456789abcdef0123456789abcdef"
+    assert JaegerClient("http://localhost:16686").fetch_trace(trace_id) == []
+
+
+def test_jaeger_client_rejects_unsafe_trace_id() -> None:
+    with pytest.raises(ValueError, match="hexadecimal"):
+        JaegerClient("http://localhost:16686").fetch_trace("../../api/services")
