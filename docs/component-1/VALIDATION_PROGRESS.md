@@ -37,16 +37,26 @@ manifest-driven experiments planned for Phase 6. It does not replace Phases
 
 - Mandatory-edge metrics are no longer inferred from the labels of their
   endpoint services.
-- Evaluation reports `not_evaluated_no_predicted_edge_labels` until an explicit
-  mandatory-edge prediction is supplied, preventing unsupported accuracy
-  claims while retaining overall observed-edge and path evaluation.
-- Explicit predicted mandatory edges must exist in the generated graph.
+- Each directed edge requires its own confirmed intervention cohort before it
+  can be classified as mandatory, optional, or supporting.
+- Missing edge-level intervention evidence remains `insufficient_evidence`;
+  service classifications are never copied onto adjacent edges.
+- Explicit edge-validation runs cannot be approved while candidate edges are
+  unresolved, reuse an intervention batch, target an unobserved edge, or
+  contradict the validated service labels.
+- Approved mandatory and optional edge labels are persisted independently and
+  mandatory edges must exist in the exported graph.
+- Approved graphs can now be evaluated against the independent reference graph
+  through the dependency-assessment graph-evaluation endpoint, producing real
+  mandatory-edge precision, recall, F1, and accuracy.
+- Legacy frequency-only evaluations continue to report
+  `not_evaluated_no_predicted_edge_labels` rather than fabricating labels.
 
 ### Validated artifact version
 
-Frozen artifacts produced after these corrections use algorithm version
-`workflow-dependency-modeling/phase-5-validation-1` so their provenance is
-distinguishable from the original Phase 5 behavior.
+Frozen artifacts produced after the edge-validation corrections use algorithm
+version `workflow-dependency-modeling/phase-5-validation-2` so their provenance
+is distinguishable from the original Phase 5 and earlier validation behavior.
 
 ### Real Jaeger evidence correlation
 
@@ -74,8 +84,9 @@ distinguishable from the original Phase 5 behavior.
 
 ## Remaining roadmap boundary
 
-Explicit mandatory-edge discovery and classification requires new edge-level
-evidence rather than endpoint inference. That belongs in the reproducible
-experiment and evidence work planned for Phase 6. Phases 7 and 8 remain the
-operational handoff and final empirical study described in the development
-plan.
+The validation branch now contains the corrected service, graph, path, and
+explicit mandatory-edge evaluation semantics. Phase 6 remains responsible for
+manifest-driven reproducibility, deterministic partial-trace degradation,
+evidence-count experiments, immutable raw inputs, and machine-readable result
+packages. Phases 7 and 8 remain the operational handoff and final empirical
+study described in the development plan.

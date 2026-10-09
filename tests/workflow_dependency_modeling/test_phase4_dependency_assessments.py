@@ -350,6 +350,20 @@ def test_explicit_edge_interventions_create_independent_edge_labels(
         ("paymentservice", "emailservice")
     ]
 
+    from app.api.workflows import evaluate_approved_workflow_dependency_graph
+    from app.engine.workflow_dependency_modeling import dependency_assessment_service
+
+    monkeypatch.setattr(
+        dependency_assessment_service, "_default_repository", assessments
+    )
+    api_payload = evaluate_approved_workflow_dependency_graph(created.assessment_id)
+    assert api_payload["assessmentId"] == created.assessment_id
+    assert api_payload["mandatoryEdgeEvaluationStatus"] == "evaluated"
+    assert api_payload["mandatoryEdgeMetrics"] is not None
+    assert api_payload["falsePositiveMandatoryEdges"] == [
+        ("paymentservice", "emailservice")
+    ]
+
     frozen = freeze_workflow_graph(
         "checkout",
         {

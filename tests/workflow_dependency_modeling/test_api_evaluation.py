@@ -69,6 +69,16 @@ def test_accuracy_distinguishes_discovery_from_mandatory_classification():
     assert data["mandatoryServiceMetrics"]["precision"] < 1.0
 
 
+def test_approved_graph_evaluation_route_is_documented() -> None:
+    schema = app.openapi()
+
+    operation = schema["paths"][
+        "/api/workflows/dependency-assessments/{assessment_id}/graph-evaluation"
+    ]["get"]
+    assert operation["responses"]["200"]
+    assert operation["responses"]["404"]
+
+
 @pytest.mark.parametrize("threshold", [-0.01, 1.01])
 def test_evaluation_rejects_out_of_range_threshold(threshold):
     response = client.get(
