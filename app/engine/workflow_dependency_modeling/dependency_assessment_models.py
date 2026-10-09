@@ -166,6 +166,59 @@ class InterventionCohort:
 
 
 @dataclass(frozen=True)
+class EdgeInterventionCohort:
+    """A confirmed experiment that disrupts one directed service call."""
+
+    source_service: str
+    target_service: str
+    intervention_type: InterventionType
+    batch_ids: tuple[str, ...]
+    intervention_confirmed: bool
+    confirmation_evidence: str | None = None
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "EdgeInterventionCohort":
+        try:
+            intervention_type = InterventionType(data.get("interventionType"))
+        except ValueError as err:
+            raise ComponentDataError("interventionType is not supported") from err
+        confirmed = data.get("interventionConfirmed")
+        if not isinstance(confirmed, bool):
+            raise ComponentDataError("interventionConfirmed must be boolean")
+        evidence = data.get("confirmationEvidence")
+        if confirmed and (not isinstance(evidence, str) or not evidence.strip()):
+            raise ComponentDataError(
+                "Confirmed edge interventions require confirmationEvidence"
+            )
+        if evidence is not None and not isinstance(evidence, str):
+            raise ComponentDataError("confirmationEvidence must be text")
+        source = _identifier(data, "sourceService")
+        target = _identifier(data, "targetService")
+        if source == target:
+            raise ComponentDataError(
+                "Edge interventions require different source and target services"
+            )
+        return cls(
+            source_service=source,
+            target_service=target,
+            intervention_type=intervention_type,
+            batch_ids=_batch_ids(data.get("batchIds"), "batchIds"),
+            intervention_confirmed=confirmed,
+            confirmation_evidence=evidence.strip() if evidence else None,
+        )
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "sourceService": self.source_service,
+            "targetService": self.target_service,
+            "interventionType": self.intervention_type.value,
+            "batchIds": list(self.batch_ids),
+            "interventionConfirmed": self.intervention_confirmed,
+            "confirmationEvidence": self.confirmation_evidence,
+        }
+
+
+@dataclass(frozen=True)
 class CohortStatistics:
     total_records: int
     eligible_records: int
@@ -250,6 +303,64 @@ class ServiceDependencyAssessment:
 
 
 @dataclass(frozen=True)
+class EdgeDependencyAssessment:
+    source_service: str
+    target_service: str
+    classification: ValidatedDependencyType
+    baseline: CohortStatistics
+    intervention: CohortStatistics
+    intervention_type: InterventionType | None
+    failure_effect: float | None
+    evidence_strength: float
+    reasons: tuple[str, ...]
+    excluded_execution_ids: tuple[str, ...] = ()
+
+    @property
+    def edge(self) -> tuple[str, str]:
+        return (self.source_service, self.target_service)
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "sourceService": self.source_service,
+            "targetService": self.target_service,
+            "classification": self.classification.value,
+            "baseline": self.baseline.to_mapping(),
+            "intervention": self.intervention.to_mapping(),
+            "interventionType": (
+                self.intervention_type.value if self.intervention_type else None
+            ),
+            "failureEffect": self.failure_effect,
+            "evidenceStrength": self.evidence_strength,
+            "reasons": list(self.reasons),
+            "excludedExecutionIds": list(self.excluded_execution_ids),
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "EdgeDependencyAssessment":
+        intervention_type = data.get("interventionType")
+        return cls(
+            source_service=_identifier(data, "sourceService"),
+            target_service=_identifier(data, "targetService"),
+            classification=ValidatedDependencyType(data.get("classification")),
+            baseline=CohortStatistics.from_mapping(data.get("baseline", {})),
+            intervention=CohortStatistics.from_mapping(data.get("intervention", {})),
+            intervention_type=(
+                InterventionType(intervention_type) if intervention_type else None
+            ),
+            failure_effect=(
+                float(data["failureEffect"])
+                if data.get("failureEffect") is not None
+                else None
+            ),
+            evidence_strength=float(data.get("evidenceStrength", 0.0)),
+            reasons=tuple(str(item) for item in data.get("reasons", [])),
+            excluded_execution_ids=tuple(
+                str(item) for item in data.get("excludedExecutionIds", [])
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class DependencyAssessment:
     assessment_id: str
     workflow_id: str
@@ -260,8 +371,10 @@ class DependencyAssessment:
     structural_entry_service: str | None
     baseline_batch_ids: tuple[str, ...]
     interventions: tuple[InterventionCohort, ...]
+    edge_interventions: tuple[EdgeInterventionCohort, ...]
     policy: AssessmentPolicy
     services: tuple[ServiceDependencyAssessment, ...]
+    edges: tuple[EdgeDependencyAssessment, ...]
     created_at: datetime
     created_by: str
 
@@ -276,8 +389,12 @@ class DependencyAssessment:
             "structuralEntryService": self.structural_entry_service,
             "baselineBatchIds": list(self.baseline_batch_ids),
             "interventions": [item.to_mapping() for item in self.interventions],
+            "edgeInterventions": [
+                item.to_mapping() for item in self.edge_interventions
+            ],
             "policy": self.policy.to_mapping(),
             "services": [item.to_mapping() for item in self.services],
+            "edges": [item.to_mapping() for item in self.edges],
             "createdAt": _iso(self.created_at),
             "createdBy": self.created_by,
         }
@@ -307,10 +424,18 @@ class DependencyAssessment:
                 InterventionCohort.from_mapping(item)
                 for item in data.get("interventions", [])
             ),
+            edge_interventions=tuple(
+                EdgeInterventionCohort.from_mapping(item)
+                for item in data.get("edgeInterventions", [])
+            ),
             policy=AssessmentPolicy.from_mapping(data.get("policy")),
             services=tuple(
                 ServiceDependencyAssessment.from_mapping(item)
                 for item in data.get("services", [])
+            ),
+            edges=tuple(
+                EdgeDependencyAssessment.from_mapping(item)
+                for item in data.get("edges", [])
             ),
             created_at=_timestamp(data.get("createdAt"), "createdAt"),
             created_by=_required_text(data, "createdBy"),
