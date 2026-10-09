@@ -21,6 +21,7 @@ class TraceQualityResult:
     root_span_count: int
     broken_parent_count: int
     unknown_service_count: int
+    missing_service_identities: tuple[str, ...]
     reasons: tuple[str, ...]
 
     @property
@@ -37,6 +38,7 @@ class TraceQualityResult:
             "rootSpanCount": self.root_span_count,
             "brokenParentCount": self.broken_parent_count,
             "unknownServiceCount": self.unknown_service_count,
+            "missingServiceIdentities": list(self.missing_service_identities),
             "reasons": list(self.reasons),
         }
 
@@ -97,19 +99,19 @@ def _trace_parts(
 
 def _span_metrics(
     spans: list[Mapping[str, Any]], processes: Mapping[str, Any]
-) -> tuple[int, bool, int, int, int]:
+) -> tuple[int, bool, int, int, int, tuple[str, ...]]:
     span_ids = [str(span.get("spanID", "")).strip() for span in spans]
     usable_span_ids = {span_id for span_id in span_ids if span_id}
     populated_span_ids = [span_id for span_id in span_ids if span_id]
     duplicate_ids = len(usable_span_ids) != len(populated_span_ids)
     missing_span_ids = len(spans) - len(populated_span_ids)
-    root_count = sum(_parent_id(span) is None for span in spans)
-    broken_parent_count = sum(
-        1
+    root_count = sum(
+        _parent_id(span) is None or _parent_id(span) not in usable_span_ids
         for span in spans
-        if (parent_id := _parent_id(span)) is not None
-        and parent_id not in usable_span_ids
     )
+    # A single missing parent is the normal W3C remote-parent boundary for an
+    # externally initiated trace. Additional local roots expose partial data.
+    broken_parent_count = max(root_count - 1, 0)
     unknown_service_count = sum(
         1
         for span in spans
@@ -117,12 +119,33 @@ def _span_metrics(
             processes.get(span.get("processID"), {}).get("serviceName", "")
         ).strip()
     )
+    observed_services = {
+        str(process.get("serviceName", "")).strip().lower()
+        for process in processes.values()
+        if isinstance(process, Mapping)
+    }
+    missing_service_identities: set[str] = set()
+    for span in spans:
+        tags = {
+            str(tag.get("key", "")): tag.get("value")
+            for tag in span.get("tags", [])
+            if isinstance(tag, Mapping)
+        }
+        if str(tags.get("span.kind", "")).lower() != "client":
+            continue
+        raw_target = tags.get("server.address") or tags.get("net.peer.name")
+        if not isinstance(raw_target, str):
+            continue
+        target = raw_target.strip().lower().split(".", 1)[0].split(":", 1)[0]
+        if target and target not in observed_services and target != "localhost":
+            missing_service_identities.add(target)
     return (
         missing_span_ids,
         duplicate_ids,
         root_count,
         broken_parent_count,
         unknown_service_count,
+        tuple(sorted(missing_service_identities)),
     )
 
 
@@ -134,6 +157,7 @@ def _quality_reasons(
     root_count: int,
     broken_parent_count: int,
     unknown_service_count: int,
+    missing_service_identities: tuple[str, ...],
 ) -> list[str]:
     reasons: list[str] = []
     if not has_trace_id:
@@ -152,6 +176,11 @@ def _quality_reasons(
         reasons.append(
             f"{unknown_service_count} span(s) have unresolved service identity"
         )
+    if missing_service_identities:
+        reasons.append(
+            "Client spans have no server-side service identity for: "
+            + ", ".join(missing_service_identities)
+        )
     if root_count > 1:
         reasons.append(f"Trace contains {root_count} root spans")
     return reasons
@@ -162,10 +191,16 @@ def _trace_quality(
     broken_parent_count: int,
     unknown_service_count: int,
     root_count: int,
+    missing_service_identities: tuple[str, ...],
 ) -> TraceQuality:
     if structurally_invalid:
         return TraceQuality.INVALID
-    if broken_parent_count or unknown_service_count or root_count != 1:
+    if (
+        broken_parent_count
+        or unknown_service_count
+        or root_count != 1
+        or missing_service_identities
+    ):
         return TraceQuality.PARTIAL
     return TraceQuality.VALID
 
@@ -176,7 +211,14 @@ def validate_trace_quality(raw_traces: Sequence[Mapping[str, Any]]) -> TraceQual
     for index, trace in enumerate(raw_traces):
         trace_id, has_trace_id, spans, process_map = _trace_parts(trace, index)
         metrics = _span_metrics(spans, process_map)
-        missing_span_ids, duplicate_ids, root_count, broken_parents, unknown_services = metrics
+        (
+            missing_span_ids,
+            duplicate_ids,
+            root_count,
+            broken_parents,
+            unknown_services,
+            missing_service_identities,
+        ) = metrics
         structurally_invalid = bool(
             not has_trace_id
             or not spans
@@ -188,12 +230,17 @@ def validate_trace_quality(raw_traces: Sequence[Mapping[str, Any]]) -> TraceQual
             TraceQualityResult(
                 trace_id=trace_id,
                 quality=_trace_quality(
-                    structurally_invalid, broken_parents, unknown_services, root_count
+                    structurally_invalid,
+                    broken_parents,
+                    unknown_services,
+                    root_count,
+                    missing_service_identities,
                 ),
                 span_count=len(spans),
                 root_span_count=root_count,
                 broken_parent_count=broken_parents,
                 unknown_service_count=unknown_services,
+                missing_service_identities=missing_service_identities,
                 reasons=tuple(
                     _quality_reasons(
                         has_trace_id,
@@ -203,6 +250,7 @@ def validate_trace_quality(raw_traces: Sequence[Mapping[str, Any]]) -> TraceQual
                         root_count,
                         broken_parents,
                         unknown_services,
+                        missing_service_identities,
                     )
                 ),
             )

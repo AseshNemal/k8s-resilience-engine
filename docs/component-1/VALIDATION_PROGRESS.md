@@ -59,6 +59,15 @@ distinguishable from the original Phase 5 behavior.
   poll for a bounded ingestion window before declaring it unavailable.
 - Outcome timestamps cannot precede the completed workflow invocation.
 
+### Real trace-quality eligibility
+
+- One external W3C parent is treated as a valid distributed-trace boundary;
+  additional local roots remain partial evidence.
+- Client targets without corresponding server-side process identities are now
+  reported explicitly instead of disappearing from the candidate graph.
+- Live evidence exposes its per-trace quality summary before any dependency
+  necessity claim is allowed.
+
 ## Remaining roadmap boundary
 
 Explicit mandatory-edge discovery and classification requires new edge-level

@@ -262,6 +262,7 @@ def get_live_evidence(
             "No matching traces in this window. Refresh discovery or widen the lookback."
         )
     spans = parse_spans(selected)
+    quality = validate_trace_quality(selected)
     services = sorted({span.service_name for span in spans})
     evidence = []
     for name in services:
@@ -288,6 +289,7 @@ def get_live_evidence(
         "classificationStatus": "not_classified",
         "evaluationStatus": "not_evaluated",
         "source": "live_unverified",
+        "traceQuality": quality.to_mapping(),
         "edges": [{"source": edge.source, "target": edge.target} for edge in edges],
     }
 

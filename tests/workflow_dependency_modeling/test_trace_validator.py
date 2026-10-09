@@ -26,6 +26,7 @@ def _span(span_id: str, parent_id: str | None = None, process_id: str = "p1") ->
         "references": references,
         "processID": process_id,
         "operationName": "operation",
+        "tags": [],
     }
 
 
@@ -63,3 +64,27 @@ def test_root_only_service_remains_observable() -> None:
 
     assert interaction.observed_services == ["frontend"]
     assert interaction.edges == []
+
+
+def test_one_external_parent_is_a_valid_distributed_trace_boundary() -> None:
+    summary = validate_trace_quality(
+        [_trace("external", [_span("entry", "remote-parent")])]
+    )
+
+    assert summary.results[0].quality is TraceQuality.VALID
+    assert summary.results[0].root_span_count == 1
+    assert summary.results[0].broken_parent_count == 0
+
+
+def test_client_target_without_server_process_is_partial_evidence() -> None:
+    client = _span("client")
+    client["tags"] = [
+        {"key": "span.kind", "value": "client"},
+        {"key": "net.peer.name", "value": "paymentservice"},
+    ]
+
+    result = validate_trace_quality([_trace("missing-server", [client])]).results[0]
+
+    assert result.quality is TraceQuality.PARTIAL
+    assert result.missing_service_identities == ("paymentservice",)
+    assert "paymentservice" in result.reasons[-1]
