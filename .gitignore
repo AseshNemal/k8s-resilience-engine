@@ -1,5 +1,8 @@
 *.pyc
 
+# Markdown files are for reference only — not tracked
+*.md
+
 # Local environment configuration
 .env
 
@@ -7,3 +10,12 @@
 data/*.db
 data/*.db-wal
 data/*.db-shm
+
+# Python virtual environment
+.venv/
+
+# Ignore definition of done tracking files
+phase*_def_of_done.txt
+
+# Ignore massive third-party YAML test payloads
+deploy/kubernetes/boutique.yaml
