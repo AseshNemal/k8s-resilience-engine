@@ -19,6 +19,7 @@ from app.engine.workflow_dependency_modeling.service import (
     create_dependency_classification_evaluation,
     create_dependency_classification_reference,
     create_experiment_campaign,
+    create_experiment_manifest,
     discover_live_workflows,
     discover_analysis_workflows,
     evaluate_workflow_by_id,
@@ -29,6 +30,7 @@ from app.engine.workflow_dependency_modeling.service import (
     get_live_evidence,
     get_execution,
     get_experiment_campaign,
+    get_experiment_manifest,
     get_experiment_campaign_assessment,
     get_experiment_campaign_approval,
     get_frozen_workflow_graph,
@@ -42,6 +44,7 @@ from app.engine.workflow_dependency_modeling.service import (
     list_benchmark_workflows,
     list_executions,
     list_experiment_campaigns,
+    list_experiment_manifests,
     list_dependency_assessments,
     list_dependency_classification_evaluations,
     list_dependency_classification_references,
@@ -57,6 +60,7 @@ from app.engine.workflow_dependency_modeling.service import (
     scenario_etag,
     transition_scenario_lifecycle,
     update_scenario,
+    verify_experiment_manifest,
 )
 from app.engine.workflow_dependency_modeling.analysis_session_repository import (
     AnalysisSessionConflictError,
@@ -77,6 +81,10 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
 from app.engine.workflow_dependency_modeling.experiment_campaign_repository import (
     ExperimentCampaignConflictError,
     ExperimentCampaignNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.experiment_manifest_repository import (
+    ExperimentManifestConflictError,
+    ExperimentManifestNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
     FrozenGraphAlreadyExistsError,
@@ -659,6 +667,56 @@ def read_workflow_experiment_campaign(campaign_id: str) -> dict[str, Any]:
     try:
         return get_experiment_campaign(campaign_id).to_mapping()
     except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+def _manifest_payload(manifest) -> dict[str, Any]:
+    return {
+        **manifest.to_mapping(),
+        "integrityVerified": verify_experiment_manifest(manifest),
+    }
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/manifest",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "A different manifest already uses this identity"},
+        422: {"description": "Reproducibility controls are invalid"},
+    },
+)
+def create_workflow_experiment_manifest(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(default={}),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Freeze a campaign and its evidence query into a reproducible artifact."""
+    try:
+        return _manifest_payload(
+            create_experiment_manifest(campaign_id, payload, actor=actor)
+        )
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExperimentManifestConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (TypeError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/experiment-manifests")
+def read_workflow_experiment_manifests() -> list[dict[str, Any]]:
+    return [_manifest_payload(item) for item in list_experiment_manifests()]
+
+
+@router.get(
+    "/experiment-manifests/{manifest_id}",
+    responses={404: {"description": "Experiment manifest was not found"}},
+)
+def read_workflow_experiment_manifest(manifest_id: str) -> dict[str, Any]:
+    try:
+        return _manifest_payload(get_experiment_manifest(manifest_id))
+    except ExperimentManifestNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 

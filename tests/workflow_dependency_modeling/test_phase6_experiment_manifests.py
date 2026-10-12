@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
+from fastapi import FastAPI
+from fastapi import HTTPException
 
 from app.engine.workflow_dependency_modeling.analysis_session_models import (
     WorkflowAnalysisSession,
@@ -28,7 +30,17 @@ from app.engine.workflow_dependency_modeling.experiment_manifest_service import 
     create_experiment_manifest,
     verify_experiment_manifest,
 )
+from app.api.workflows import router as workflow_router
+from app.api.workflows import (
+    create_workflow_experiment_manifest,
+    read_workflow_experiment_manifest,
+    read_workflow_experiment_manifests,
+)
 from app.shared.persistence.models import Base
+
+
+app = FastAPI()
+app.include_router(workflow_router)
 
 
 def _analysis() -> WorkflowAnalysisSession:
@@ -226,3 +238,58 @@ def test_manifest_repository_round_trips_with_sqlalchemy(tmp_path) -> None:
     assert database.create(manifest) == manifest
     assert database.get(manifest.manifest_id) == manifest
     assert database.list() == [manifest]
+
+
+def test_manifest_api_exports_verified_artifact(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import (
+        analysis_session_service,
+        experiment_campaign_service,
+        experiment_manifest_service,
+    )
+
+    analyses, campaigns, manifests = _repositories()
+    monkeypatch.setattr(analysis_session_service, "_default_repository", analyses)
+    monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
+    monkeypatch.setattr(experiment_manifest_service, "_default_repository", manifests)
+    body = create_workflow_experiment_manifest(
+        "campaign:orders",
+        {
+            "randomSeed": 42,
+            "degradationRates": [0, 0.1, 0.2],
+            "repetitionsPerCondition": 3,
+        },
+        "researcher@example.test",
+    )
+
+    assert body["integrityVerified"] is True
+    assert body["conditionCount"] == 9
+    assert body["algorithmVersion"].startswith("workflow-dependency-modeling/phase-6")
+    assert read_workflow_experiment_manifests() == [body]
+    assert read_workflow_experiment_manifest(body["manifestId"]) == body
+    assert (
+        "/api/workflows/experiment-campaigns/{campaign_id}/manifest"
+        in app.openapi()["paths"]
+    )
+
+
+def test_manifest_api_rejects_invalid_controls(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import (
+        analysis_session_service,
+        experiment_campaign_service,
+        experiment_manifest_service,
+    )
+
+    analyses, campaigns, manifests = _repositories()
+    monkeypatch.setattr(analysis_session_service, "_default_repository", analyses)
+    monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
+    monkeypatch.setattr(experiment_manifest_service, "_default_repository", manifests)
+
+    with pytest.raises(HTTPException) as raised:
+        create_workflow_experiment_manifest(
+            "campaign:orders",
+            {"degradationRates": [0.2, 0.1]},
+            "researcher@example.test",
+        )
+
+    assert raised.value.status_code == 422
+    assert "ascending" in raised.value.detail

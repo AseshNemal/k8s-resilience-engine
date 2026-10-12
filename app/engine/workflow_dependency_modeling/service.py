@@ -75,6 +75,13 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
     list_experiment_campaigns,
     preview_workflow_probe,
 )
+from app.engine.workflow_dependency_modeling.experiment_manifest_service import (
+    configure_experiment_manifest_repository,
+    create_experiment_manifest,
+    get_experiment_manifest,
+    list_experiment_manifests,
+    verify_experiment_manifest,
+)
 from app.engine.workflow_dependency_modeling.fixture_repository import (
     get_evidence_source,
     get_reference,
@@ -359,6 +366,7 @@ __all__ = [
     "configure_classification_evaluation_repository",
     "configure_execution_repository",
     "configure_experiment_campaign_repository",
+    "configure_experiment_manifest_repository",
     "configure_graph_freeze_repository",
     "configure_intervention_event_repository",
     "configure_scenario_repository",
@@ -368,6 +376,7 @@ __all__ = [
     "create_dependency_classification_reference",
     "create_scenario",
     "create_experiment_campaign",
+    "create_experiment_manifest",
     "preview_workflow_probe",
     "discover_live_workflows",
     "discover_analysis_workflows",
@@ -379,6 +388,7 @@ __all__ = [
     "get_dependency_classification_reference",
     "get_execution",
     "get_experiment_campaign",
+    "get_experiment_manifest",
     "get_experiment_campaign_assessment",
     "get_experiment_campaign_approval",
     "get_frozen_workflow_graph",
@@ -393,6 +403,7 @@ __all__ = [
     "list_benchmark_workflows",
     "list_executions",
     "list_experiment_campaigns",
+    "list_experiment_manifests",
     "intervention_status",
     "record_intervention_event",
     "list_dependency_assessments",
@@ -411,4 +422,5 @@ __all__ = [
     "start_workflow_analysis",
     "transition_scenario_lifecycle",
     "update_scenario",
+    "verify_experiment_manifest",
 ]
