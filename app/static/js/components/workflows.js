@@ -169,6 +169,19 @@
         return element;
     }
 
+    function downloadJsonArtifact(filename, value) {
+        const blob = new Blob([JSON.stringify(value, null, 2)], {
+            type: "application/json",
+        });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(link.href);
+    }
+
     function updateExperimentPath(activeIndex) {
         document.querySelectorAll(".experiment-path li").forEach((item, index) => {
             item.classList.toggle("is-current", index === activeIndex);
@@ -188,19 +201,20 @@
         heading.className = "guided-result__heading";
         const identity = document.createElement("div");
         identity.append(
-            guidedText("span", "guided-result__label", "Checkout dependency experiment"),
-            guidedText("h4", "", "Find which services checkout truly requires"),
+            guidedText("span", "guided-result__label", "Controlled dependency experiment"),
+            guidedText("h4", "", campaign.workflowName),
             guidedText(
                 "p",
                 "",
-                "First prove normal checkout works consistently. Later, test one service at a time and compare the outcome."
+                `${campaign.environmentId} · First prove the workflow succeeds consistently, then test one candidate dependency at a time.`
             )
         );
         const statusLabels = {
             baseline_required: "Step 2: baseline needed",
-            intervention_required: "Step 3: service tests needed",
-            assessment_ready: "Step 4: ready to classify",
-            approved: "Step 5: graph approved",
+            interventions_required: "Step 3: dependency tests needed",
+            ready_for_assessment: "Step 4: ready to review",
+            reviewed: "Step 5: approval needed",
+            approved: "Step 5: graph exported",
         };
         heading.append(
             identity,
@@ -214,22 +228,26 @@
         const metrics = document.createElement("div");
         metrics.className = "guided-result__metrics";
         metrics.append(
-            resultCard("Normal checkouts needed", `${campaign.baseline.requiredTrials} runs`, "Before testing any failure"),
-            resultCard("Services to test", String(campaign.candidateServices.length), "Tested one at a time later"),
-            resultCard("Initial records", `${campaign.observedTraceCount} checkouts`, "Show participation only")
+            resultCard("Baseline needed", `${campaign.baseline.requiredTrials} runs`, "Before any intervention"),
+            resultCard("Candidates", String(campaign.candidateServices.length), "Validated one at a time"),
+            resultCard("Observed evidence", `${campaign.observedTraceCount} traces`, "Participation, not necessity")
         );
 
         const contract = document.createElement("section");
         contract.className = "guided-contract guided-contract--confirmed";
         contract.append(
             guidedText("span", "guided-result__label", "How success is measured"),
-            guidedText("h5", "", "A customer receives a confirmed order"),
+            guidedText("h5", "", campaign.successContract.outcome),
             guidedText(
                 "p",
                 "",
-                "The checkout page must complete successfully and display the order confirmation."
+                `${campaign.successContract.condition.terminalService} · ${campaign.successContract.condition.operationName}`
             )
         );
+
+        const manifestGate = document.createElement("section");
+        manifestGate.className = "manifest-gate";
+        manifestGate.setAttribute("aria-live", "polite");
 
         const baseline = document.createElement("section");
         baseline.className = "baseline-console";
@@ -238,19 +256,20 @@
         baselineHeading.className = "baseline-console__heading";
         baselineHeading.append(
             guidedText("div", "", "STEP 2 OF 5  ·  CONFIRM NORMAL BEHAVIOR"),
-            guidedText("strong", "", `Run ${campaign.baseline.requiredTrials} normal checkouts before testing a service failure`)
+            guidedText("strong", "", `Run ${campaign.baseline.requiredTrials} normal workflow executions before testing a dependency`)
         );
         const baselineControls = document.createElement("div");
         baselineControls.className = "baseline-console__controls";
-        const frontendLabel = guidedText("label", "", "Demo store address");
+        const frontendLabel = guidedText("label", "", "Application base address");
         const frontendUrl = document.createElement("input");
         frontendUrl.type = "url";
         frontendUrl.value = "http://localhost:8080";
         frontendUrl.required = true;
         frontendLabel.appendChild(frontendUrl);
-        const runButton = guidedText("button", "experiment-button", "Run one normal checkout");
+        const runButton = guidedText("button", "experiment-button", "Run one baseline execution");
         runButton.type = "button";
-        const runStatus = guidedText("span", "baseline-console__status", "No cluster change is applied.");
+        runButton.disabled = true;
+        const runStatus = guidedText("span", "baseline-console__status", "Freeze the reproducibility record first.");
         baselineControls.append(frontendLabel, runButton, runStatus);
         const readiness = document.createElement("div");
         readiness.className = "baseline-readiness";
@@ -292,7 +311,7 @@
 
         const runbook = document.createElement("section");
         runbook.className = "campaign-runbook";
-        runbook.appendChild(guidedText("h5", "", "Services that will be tested after the baseline"));
+        runbook.appendChild(guidedText("h5", "", "Candidate dependencies to validate after the baseline"));
         const list = document.createElement("div");
         list.className = "campaign-runbook__list";
         campaign.interventions.forEach((intervention, index) => {
@@ -318,7 +337,8 @@
         campaign.blockers.forEach((blocker) => blockers.appendChild(guidedText("li", "", blocker)));
         next.appendChild(blockers);
 
-        guidedResult.append(heading, metrics, contract, baseline, runbook, interventionConsole, next);
+        guidedResult.append(heading, metrics, contract, manifestGate, baseline, runbook, interventionConsole, next);
+        loadManifestGate(campaign, manifestGate, runButton, runStatus);
         loadBaselineReadiness(
             campaign,
             readiness,
@@ -330,6 +350,88 @@
         if (dataSourceBadge) {
             dataSourceBadge.textContent = "EXPERIMENT · BASELINE REQUIRED";
             dataSourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
+        }
+    }
+
+    function renderVerifiedManifest(manifest, target, runButton, runStatus) {
+        target.classList.add("manifest-gate--verified");
+        target.replaceChildren();
+        const identity = document.createElement("div");
+        identity.append(
+            guidedText("span", "guided-result__label", "Reproducibility record"),
+            guidedText("h5", "", "Inputs frozen and integrity verified"),
+            guidedText("p", "", `${manifest.manifestId} · ${manifest.conditionCount} deterministic experiment conditions`)
+        );
+        const badge = guidedText("span", "manifest-gate__badge", "VERIFIED");
+        const details = document.createElement("div");
+        details.className = "manifest-gate__details";
+        details.append(
+            resultCard("Algorithm", manifest.algorithmVersion.split("/").at(-1), "Recorded with the artifact"),
+            resultCard("Random seed", String(manifest.randomSeed), "Repeatable degradation"),
+            resultCard("Integrity", manifest.contentDigest.slice(0, 22) + "…", "SHA-256 protected")
+        );
+        const exportButton = guidedText("button", "secondary-button", "Download manifest JSON");
+        exportButton.type = "button";
+        exportButton.addEventListener("click", () => {
+            downloadJsonArtifact(`${manifest.workflowId}-experiment-manifest.json`, manifest);
+        });
+        target.append(identity, badge, details, exportButton);
+        runButton.disabled = !manifest.integrityVerified;
+        runStatus.textContent = manifest.integrityVerified
+            ? "Manifest verified. Baseline collection is unlocked."
+            : "Manifest integrity failed. Create a new campaign before collecting evidence.";
+        runStatus.classList.toggle("is-error", !manifest.integrityVerified);
+    }
+
+    async function loadManifestGate(campaign, target, runButton, runStatus) {
+        target.replaceChildren(
+            guidedText("span", "guided-result__label", "Reproducibility gate"),
+            guidedText("h5", "", "Freeze the experiment before collecting evidence"),
+            guidedText("p", "", "Records the workflow contract, trace query, candidate services, thresholds, algorithm version, random seed, and missing-telemetry test matrix.")
+        );
+        try {
+            const manifests = await requestScenario("/api/workflows/experiment-manifests");
+            const existing = manifests.find((item) => item.campaignId === campaign.campaignId);
+            if (existing) {
+                renderVerifiedManifest(existing, target, runButton, runStatus);
+                return;
+            }
+            const actions = document.createElement("div");
+            actions.className = "manifest-gate__actions";
+            const freezeButton = guidedText("button", "experiment-button", "Freeze experiment manifest");
+            freezeButton.type = "button";
+            const help = guidedText("small", "", "Uses a recorded seed and five telemetry-completeness levels. Advanced values remain available in the downloaded JSON.");
+            actions.append(freezeButton, help);
+            target.appendChild(actions);
+            freezeButton.addEventListener("click", async () => {
+                freezeButton.disabled = true;
+                freezeButton.textContent = "Freezing inputs…";
+                try {
+                    const manifest = await requestScenario(
+                        `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/manifest`,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "X-Actor": "guided-local-researcher",
+                            },
+                            body: JSON.stringify({
+                                randomSeed: 1729,
+                                degradationRates: [0, 0.05, 0.1, 0.2, 0.3],
+                                repetitionsPerCondition: 5,
+                            }),
+                        }
+                    );
+                    renderVerifiedManifest(manifest, target, runButton, runStatus);
+                } catch (error) {
+                    freezeButton.disabled = false;
+                    freezeButton.textContent = "Try freezing again";
+                    runStatus.textContent = error.message;
+                    runStatus.classList.add("is-error");
+                }
+            });
+        } catch (error) {
+            target.appendChild(guidedText("p", "baseline-console__status is-error", error.message));
         }
     }
 
@@ -652,9 +754,15 @@
             resultCard("Optional", graph.optionalServices.join(", ") || "None", "No material outcome effect observed"),
             resultCard("Retained edges", String(graph.edges.length), "Only between approved services")
         );
+        const exportButton = guidedText("button", "experiment-button", "Download validated graph JSON");
+        exportButton.type = "button";
+        exportButton.addEventListener("click", () => {
+            downloadJsonArtifact(`${graph.workflowId}-validated-workflow-graph.json`, graph);
+        });
         target.append(
             summary,
-            guidedText("p", "assessment-console__entry", `Approved by ${approval.approvedBy}. ${approval.rationale}`)
+            guidedText("p", "assessment-console__entry", `Approved by ${approval.approvedBy}. ${approval.rationale}`),
+            exportButton
         );
         updateExperimentPath(5);
         if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · GRAPH APPROVED";
@@ -674,7 +782,7 @@
             if (existing) {
                 renderCampaign(existing);
                 setGuidedStatus(
-                    "Existing checkout experiment loaded. No test was run; continue with the normal checkout baseline."
+                    "Existing experiment loaded. No test was run automatically; continue from the highlighted stage."
                 );
                 return;
             }
@@ -692,7 +800,7 @@
                 }),
             });
             renderCampaign(campaign);
-            setGuidedStatus("Experiment planned. Baseline evidence is now required.");
+                setGuidedStatus("Experiment planned. Freeze its reproducibility record before collecting baseline evidence.");
         } catch (error) {
             status.textContent = error.message;
             status.classList.add("is-error");
@@ -903,7 +1011,7 @@
             updateGuidedSelectionAction();
             setGuidedStatus(
                 guidedWorkflows.length
-                    ? `Found ${guidedWorkflows.length} recorded workflow${guidedWorkflows.length === 1 ? "" : "s"}. Checkout is selected because its experiment is ready to run.`
+                    ? `Found ${guidedWorkflows.length} recorded workflow${guidedWorkflows.length === 1 ? "" : "s"}. Select one to inspect its evidence maturity.`
                     : "The trace service is connected, but no workflow activity was recorded in this time window.",
                 guidedWorkflows.length === 0
             );
@@ -948,7 +1056,7 @@
                 if (existing) {
                     renderCampaign(existing);
                     setGuidedStatus(
-                        "Checkout experiment opened. Continue with the highlighted step below."
+                        "Existing experiment opened. Continue with the highlighted step below."
                     );
                     return;
                 }
@@ -990,7 +1098,7 @@
             if (incompleteCampaign) {
                 renderCampaign(incompleteCampaign);
                 setGuidedStatus(
-                    "Existing checkout experiment loaded. No test was run automatically. Continue by running the normal checkout baseline."
+                    "Existing experiment loaded. No test was run automatically. Continue from the highlighted stage."
                 );
                 return;
             }

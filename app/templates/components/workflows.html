@@ -48,18 +48,36 @@
 <section class="guided-analysis" aria-labelledby="guided-analysis-title">
     <div class="guided-analysis__header">
         <div>
-            <p class="workflow-kicker">Online Boutique · controlled experiment</p>
-            <h3 id="guided-analysis-title">Determine what a business workflow actually depends on</h3>
-            <p>Start from observed workflow traces, establish a stable baseline, then compare confirmed service interventions. Frequency alone never becomes a dependency claim.</p>
+            <p class="workflow-kicker">Evidence-backed workflow experiment</p>
+            <h3 id="guided-analysis-title">Discover, validate, and export one workflow dependency graph</h3>
+            <p>Follow one guided path from live traces to an approved graph. Every dependency claim remains tied to its workflow definition, runtime evidence, and controlled validation.</p>
         </div>
         <span class="status-badge status-badge--muted status-badge--no-dot">Interventions require approval</span>
     </div>
+    <div class="operator-preflight" aria-label="Requirements before starting">
+        <div class="operator-preflight__intro">
+            <span>Before you start</span>
+            <strong>Three facts make the result defensible</strong>
+        </div>
+        <div class="operator-preflight__item">
+            <span class="operator-preflight__number" aria-hidden="true">01</span>
+            <div><strong>Workflow is callable</strong><small>The application entry point can be exercised safely.</small></div>
+        </div>
+        <div class="operator-preflight__item">
+            <span class="operator-preflight__number" aria-hidden="true">02</span>
+            <div><strong>Telemetry is complete</strong><small>OpenTelemetry service identities reach Jaeger.</small></div>
+        </div>
+        <div class="operator-preflight__item">
+            <span class="operator-preflight__number" aria-hidden="true">03</span>
+            <div><strong>Success is measurable</strong><small>An operator can state when the business outcome succeeded.</small></div>
+        </div>
+    </div>
     <ol class="experiment-path" aria-label="Workflow dependency experiment stages">
         <li class="is-current"><span>01</span><strong>Observe</strong><small>Find workflow traces</small></li>
-        <li><span>02</span><strong>Baseline</strong><small>Prove stable success</small></li>
-        <li><span>03</span><strong>Intervene</strong><small>Test one service</small></li>
-        <li><span>04</span><strong>Classify</strong><small>Compare outcomes</small></li>
-        <li><span>05</span><strong>Approve</strong><small>Release graph</small></li>
+        <li><span>02</span><strong>Freeze &amp; baseline</strong><small>Lock inputs, prove success</small></li>
+        <li><span>03</span><strong>Validate</strong><small>Test one dependency</small></li>
+        <li><span>04</span><strong>Review</strong><small>Inspect evidence</small></li>
+        <li><span>05</span><strong>Export</strong><small>Release graph</small></li>
     </ol>
     <div class="experiment-profile">
         <div><span>Workflow under test</span><strong>Selected observed operation</strong></div>
@@ -72,7 +90,7 @@
             <select id="guided-operation" data-role="guided-operation" aria-describedby="guided-workflow-help">
                 <option value="">Loading recorded workflows…</option>
             </select>
-            <small id="guided-workflow-help">Ready workflows can continue through the full dependency experiment. Other workflows can still show observed participants.</small>
+            <small id="guided-workflow-help">A workflow needs a reviewed execution definition and success condition before controlled validation can begin.</small>
         </div>
         <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>Loading…</button>
     </div>
@@ -80,9 +98,9 @@
         <summary>Advanced connection settings</summary>
         <form class="guided-analysis__form" data-role="guided-analysis-form">
             <div class="guided-field">
-                <label for="guided-environment">Experiment dataset name</label>
+                <label for="guided-environment">Environment label</label>
                 <input id="guided-environment" name="environmentId" value="online-boutique-local" required>
-                <small>A label that keeps results from different test environments separate.</small>
+                <small>Keeps evidence from development, staging, and benchmark environments separate.</small>
             </div>
             <div class="guided-field guided-field--wide">
                 <label for="guided-jaeger-url">Workflow trace service address</label>
