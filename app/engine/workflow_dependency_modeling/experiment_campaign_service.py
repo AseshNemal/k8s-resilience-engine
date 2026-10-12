@@ -203,6 +203,12 @@ def create_experiment_campaign(
         raise ValueError("The workflow success contract must be confirmed")
 
     analysis = get_workflow_analysis(session_id.strip(), analysis_repository)
+    excluded_traces = analysis.trace_quality.get("excludedCount")
+    if excluded_traces != 0:
+        raise ValueError(
+            "Dependency validation requires complete trace evidence; repair "
+            "instrumentation and create a new analysis session"
+        )
     setup = _campaign_setup(data, analysis, now)
     terminal_service = setup.definition.success_condition.terminal_service
     if terminal_service not in analysis.observed_services:

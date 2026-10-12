@@ -18,7 +18,15 @@ def test_evaluate_workflow_accuracy_checkout():
     assert data["mandatoryServiceMetrics"]["f1"] == 1.0
     assert data["discoveryServiceMetrics"]["f1"] == 1.0
     assert data["edgeMetrics"]["accuracy"] == 1.0
-    assert data["mandatoryEdgeMetrics"]["f1"] == 1.0
+    assert data["edgeMetrics"]["jaccardSimilarity"] == 1.0
+    assert data["pathMetrics"]["f1"] == 1.0
+    assert data["workflowReconstructionAccuracy"] == 1.0
+    assert data["graphProcessingTimeMs"] >= 0.0
+    assert data["mandatoryEdgeMetrics"] is None
+    assert (
+        data["mandatoryEdgeEvaluationStatus"]
+        == "not_evaluated_no_predicted_edge_labels"
+    )
 
 
 def test_evaluate_workflow_accuracy_view_product():
@@ -59,6 +67,16 @@ def test_accuracy_distinguishes_discovery_from_mandatory_classification():
     data = response.json()
     assert data["discoveryServiceMetrics"]["recall"] == pytest.approx(1.0)
     assert data["mandatoryServiceMetrics"]["precision"] < 1.0
+
+
+def test_approved_graph_evaluation_route_is_documented() -> None:
+    schema = app.openapi()
+
+    operation = schema["paths"][
+        "/api/workflows/dependency-assessments/{assessment_id}/graph-evaluation"
+    ]["get"]
+    assert operation["responses"]["200"]
+    assert operation["responses"]["404"]
 
 
 @pytest.mark.parametrize("threshold", [-0.01, 1.01])

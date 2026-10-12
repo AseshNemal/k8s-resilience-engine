@@ -58,7 +58,7 @@ def _definition() -> WorkflowProbeDefinition:
     )
 
 
-def test_executes_unrelated_multistep_workflow_with_one_trace() -> None:
+def test_traces_only_measured_terminal_step_not_setup_requests() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -81,13 +81,43 @@ def test_executes_unrelated_multistep_workflow_with_one_trace() -> None:
         "/api/carts",
         "/api/orders",
     ]
-    assert all(
-        request.headers["traceparent"].startswith(f"00-{TRACE_ID}-")
-        for request in requests
-    )
+    assert "traceparent" not in requests[0].headers
+    assert requests[1].headers["traceparent"].startswith(f"00-{TRACE_ID}-")
     assert requests[0].headers["authorization"] == "Bearer test-secret"
     assert requests[1].headers["x-cart"] == "cart-7"
     assert requests[1].content == b'{"cartId":"cart-7"}'
+
+
+def test_explicit_measured_step_controls_trace_scope() -> None:
+    payload = _definition().to_mapping()
+    payload["measuredStep"] = "create_cart"
+    definition = WorkflowProbeDefinition.from_mapping(payload)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/carts":
+            return httpx.Response(201, json={"cart": {"id": "cart-7"}})
+        return httpx.Response(201, text="order confirmed")
+
+    run_http_workflow_probe(
+        "http://localhost:9000",
+        definition,
+        trace_id=TRACE_ID,
+        transport=httpx.MockTransport(handler),
+        secrets={"SHOP_API_TOKEN": "secret"},
+    )
+
+    assert requests[0].headers["traceparent"].startswith(f"00-{TRACE_ID}-")
+    assert "traceparent" not in requests[1].headers
+
+
+def test_rejects_unknown_measured_step() -> None:
+    payload = _definition().to_mapping()
+    payload["measuredStep"] = "missing_step"
+
+    with pytest.raises(ValueError, match="measuredStep"):
+        WorkflowProbeDefinition.from_mapping(payload)
 
 
 def test_stops_after_first_failed_assertion() -> None:

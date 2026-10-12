@@ -13,6 +13,7 @@ from app.engine.workflow_dependency_modeling.execution_models import (
     ExecutionRegistration,
     InvocationStatus,
 )
+from app.engine.workflow_dependency_modeling.auto_discovery import operation_key
 from app.engine.workflow_dependency_modeling.models import (
     SuccessCondition,
     SuccessProtocol,
@@ -132,7 +133,13 @@ def _matched_trace_outcome(
         span
         for span in spans
         if span.service_name == condition.terminal_service
-        and span.operation_name == condition.operation_name
+        and (
+            span.operation_name == condition.operation_name
+            or (
+                condition.protocol.value == "http"
+                and operation_key(span) == condition.operation_name
+            )
+        )
     ]
     evidence_id = f"trace:{registration.expected_trace_id}"
     if not terminals:

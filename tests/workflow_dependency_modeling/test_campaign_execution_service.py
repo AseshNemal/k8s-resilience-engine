@@ -57,6 +57,14 @@ def _analysis_repository() -> InMemoryAnalysisSessionRepository:
                 "lookback": "1h",
                 "workflowId": "post_cart_checkout",
                 "traceCount": 8,
+                "traceQuality": {
+                    "totalCount": 8,
+                    "validCount": 8,
+                    "partialCount": 0,
+                    "invalidCount": 0,
+                    "excludedCount": 0,
+                    "results": [],
+                },
                 "observedServices": ["frontend", "checkoutservice", "paymentservice"],
                 "serviceEvidence": [],
                 "edges": [],
@@ -154,6 +162,7 @@ def test_baseline_trial_executes_correlates_and_persists() -> None:
     assert outcome.correlation_status is CorrelationStatus.MATCHED
     assert outcome.matched_trace_id == TRACE_ID
     assert outcome.registration.source == "controlled_workflow_experiment"
+    assert outcome.recorded_at >= outcome.registration.finished_at
     assert received_definition == campaign.execution_definition
     assert executions.list(batch_id=campaign.baseline.batch_id) == [outcome]
     assert baseline_readiness(campaign, executions)["eligibleTrials"] == 1
@@ -166,9 +175,9 @@ def test_default_trace_fetcher_uses_saved_trace_source(monkeypatch) -> None:
     captured = None
 
     class Source:
-        def fetch_workflow_traces(self, **query):
+        def fetch_trace(self, trace_id):
             nonlocal captured
-            captured = query
+            captured = trace_id
             return []
 
     monkeypatch.setattr(
@@ -180,12 +189,36 @@ def test_default_trace_fetcher_uses_saved_trace_source(monkeypatch) -> None:
     assert campaign_execution_service._default_trace_fetcher(
         analysis, TRACE_ID
     ) == []
-    assert captured == {
-        "service_name": "frontend",
-        "operation": "POST /cart/checkout",
-        "lookback": "1h",
-        "limit": 100,
-    }
+    assert captured == TRACE_ID
+
+
+def test_baseline_polls_exact_trace_until_jaeger_indexes_it() -> None:
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    attempts = 0
+    delays = []
+
+    def fetcher(analysis, trace_id):
+        nonlocal attempts
+        attempts += 1
+        return [] if attempts < 3 else [_trace(trace_id=trace_id)]
+
+    outcome = run_campaign_baseline_trial(
+        campaign.campaign_id,
+        "http://localhost:8080",
+        actor="runner",
+        campaign_repository=campaigns,
+        analysis_repository=analyses,
+        repository=InMemoryExecutionRepository(),
+        workload_runner=lambda *args, **kwargs: _run(),
+        trace_fetcher=fetcher,
+        sleeper=delays.append,
+        now=NOW,
+    )
+
+    assert outcome.status is ExecutionOutcomeStatus.SUCCEEDED
+    assert attempts == 3
+    assert delays == [0.25, 0.5]
 
 
 def test_missing_trace_is_indeterminate_and_blocks_readiness() -> None:

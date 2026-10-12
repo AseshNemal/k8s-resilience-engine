@@ -218,6 +218,7 @@ class HttpProbeStep:
 class WorkflowProbeDefinition:
     runner_type: WorkflowRunnerType
     steps: tuple[HttpProbeStep, ...]
+    measured_step: str
     success_condition: SuccessCondition
     initial_variables: dict[str, str]
 
@@ -237,9 +238,13 @@ class WorkflowProbeDefinition:
         steps = tuple(HttpProbeStep.from_mapping(item) for item in raw_steps)
         if len({item.name for item in steps}) != len(steps):
             raise ComponentDataError("Probe step names must be unique")
+        measured_step = str(data.get("measuredStep", steps[-1].name)).strip()
+        if measured_step not in {item.name for item in steps}:
+            raise ComponentDataError("measuredStep must identify one probe step")
         return cls(
             runner_type=runner_type,
             steps=steps,
+            measured_step=measured_step,
             success_condition=SuccessCondition.from_mapping(
                 data.get("successCondition", {})
             ),
@@ -251,6 +256,7 @@ class WorkflowProbeDefinition:
     def to_mapping(self) -> dict[str, Any]:
         return {
             "runnerType": self.runner_type.value,
+            "measuredStep": self.measured_step,
             "steps": [item.to_mapping() for item in self.steps],
             "successCondition": self.success_condition.to_mapping(),
             "initialVariables": dict(self.initial_variables),

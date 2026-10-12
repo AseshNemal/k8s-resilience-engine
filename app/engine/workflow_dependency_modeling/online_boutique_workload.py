@@ -103,6 +103,7 @@ def online_boutique_checkout_probe(
     return WorkflowProbeDefinition.from_mapping(
         {
             "runnerType": "http_sequence",
+            "measuredStep": "checkout",
             "initialVariables": {
                 "product_id": product_id,
                 "expiration_year": str(expiration_year),

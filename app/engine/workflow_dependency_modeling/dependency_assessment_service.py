@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     AssessmentApproval,
     AssessmentPolicy,
     DependencyAssessment,
+    EdgeInterventionCohort,
     InterventionCohort,
     ValidatedDependencyType,
 )
@@ -18,6 +19,7 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_repository im
     SqlAlchemyDependencyAssessmentRepository,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessor import (
+    assess_edge_dependency,
     assess_service_dependency,
 )
 from app.engine.workflow_dependency_modeling.execution_models import ExecutionOutcome
@@ -28,14 +30,18 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
 from app.engine.workflow_dependency_modeling.execution_service import (
     list_executions,
 )
+from app.engine.workflow_dependency_modeling.fixture_repository import get_reference
 from app.engine.workflow_dependency_modeling.scenario_service import (
     get_versioned_scenario,
 )
 from app.shared.schemas.workflow import WorkflowGraph
 
+if TYPE_CHECKING:
+    from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
+
 
 _default_repository: DependencyAssessmentRepository | None = None
-_SERVER_FIELDS = {"services", "createdAt", "createdBy"}
+_SERVER_FIELDS = {"services", "edges", "createdAt", "createdBy"}
 
 
 def configure_dependency_assessment_repository(
@@ -115,16 +121,26 @@ def _assessment_scope(
     graph: WorkflowGraph,
     baseline_ids: tuple[str, ...],
     interventions: tuple[InterventionCohort, ...],
+    edge_interventions: tuple[EdgeInterventionCohort, ...],
     structural_entry_service: str | None,
 ) -> set[str]:
     intervention_services = [item.target_service for item in interventions]
     if len(intervention_services) != len(set(intervention_services)):
         raise ValueError("Only one intervention cohort is allowed per candidate service")
-    intervention_batches = {
-        batch_id for item in interventions for batch_id in item.batch_ids
-    }
+    edge_keys = [
+        (item.source_service, item.target_service) for item in edge_interventions
+    ]
+    if len(edge_keys) != len(set(edge_keys)):
+        raise ValueError("Only one intervention cohort is allowed per candidate edge")
+    all_interventions = (*interventions, *edge_interventions)
+    intervention_batch_list = [
+        batch_id for item in all_interventions for batch_id in item.batch_ids
+    ]
+    intervention_batches = set(intervention_batch_list)
     if set(baseline_ids) & intervention_batches:
         raise ValueError("Baseline and intervention batches must not overlap")
+    if len(intervention_batch_list) != len(intervention_batches):
+        raise ValueError("An intervention batch may belong to only one cohort")
     candidate_services = set(graph.mandatory_services + graph.optional_services)
     if not candidate_services:
         raise ValueError("Candidate graph must contain at least one service")
@@ -133,6 +149,16 @@ def _assessment_scope(
         raise ValueError(
             "Interventions target services outside the candidate graph: "
             + ", ".join(sorted(unknown))
+        )
+    candidate_edges = {(edge.source, edge.target) for edge in graph.edges}
+    unknown_edges = set(edge_keys) - candidate_edges
+    if unknown_edges:
+        formatted = ", ".join(
+            f"{source}->{target}" for source, target in sorted(unknown_edges)
+        )
+        raise ValueError(
+            "Edge interventions target dependencies outside the candidate graph: "
+            + formatted
         )
     if structural_entry_service not in candidate_services | {None}:
         raise ValueError("Structural entry service must be present in the candidate graph")
@@ -177,9 +203,17 @@ def create_dependency_assessment(
         InterventionCohort.from_mapping(item)
         for item in data.get("interventions", [])
     )
+    edge_interventions = tuple(
+        EdgeInterventionCohort.from_mapping(item)
+        for item in data.get("edgeInterventions", [])
+    )
     structural_entry_service = data.get("structuralEntryService")
     candidate_services = _assessment_scope(
-        graph, baseline_ids, interventions, structural_entry_service
+        graph,
+        baseline_ids,
+        interventions,
+        edge_interventions,
+        structural_entry_service,
     )
 
     baseline_records = _records_for_batches(baseline_ids, execution_repository)
@@ -209,11 +243,40 @@ def create_dependency_assessment(
             )
         )
 
+    edge_results = []
+    for edge in sorted(graph.edges, key=lambda item: (item.source, item.target)):
+        intervention = next(
+            (
+                item
+                for item in edge_interventions
+                if (item.source_service, item.target_service)
+                == (edge.source, edge.target)
+            ),
+            None,
+        )
+        records = (
+            _records_for_batches(intervention.batch_ids, execution_repository)
+            if intervention
+            else []
+        )
+        _validate_records(records, workflow_id, scenario_version, environment_id)
+        edge_results.append(
+            assess_edge_dependency(
+                edge.source,
+                edge.target,
+                baseline_records,
+                intervention,
+                records,
+                policy,
+            )
+        )
+
     assessment = DependencyAssessment.from_mapping(
         {
             **data,
             "policy": policy.to_mapping(),
             "services": [item.to_mapping() for item in service_results],
+            "edges": [item.to_mapping() for item in edge_results],
             "createdAt": _utc(now).isoformat(),
             "createdBy": actor,
         }
@@ -255,6 +318,17 @@ def approve_dependency_assessment(
         raise DependencyAssessmentNotApprovableError(
             "Assessment has insufficient evidence for: " + ", ".join(unresolved)
         )
+    if assessment.edge_interventions:
+        unresolved_edges = [
+            f"{item.source_service}->{item.target_service}"
+            for item in assessment.edges
+            if item.classification is ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+        ]
+        if unresolved_edges:
+            raise DependencyAssessmentNotApprovableError(
+                "Assessment has insufficient edge evidence for: "
+                + ", ".join(unresolved_edges)
+            )
     if not isinstance(rationale, str) or not rationale.strip():
         raise ValueError("Approval requires a non-empty rationale")
 
@@ -285,6 +359,52 @@ def approve_dependency_assessment(
         )
     )
     retained = set(mandatory + optional)
+    explicit_edge_labels = bool(assessment.edge_interventions)
+    edge_labels = {
+        item.edge: item.classification for item in assessment.edges
+    }
+    contradictory_mandatory_edges = sorted(
+        edge
+        for edge, classification in edge_labels.items()
+        if classification is ValidatedDependencyType.MANDATORY
+        and not set(edge) <= set(mandatory)
+    )
+    if explicit_edge_labels and contradictory_mandatory_edges:
+        formatted = ", ".join(
+            f"{source}->{target}"
+            for source, target in contradictory_mandatory_edges
+        )
+        raise DependencyAssessmentNotApprovableError(
+            "Mandatory edge evidence conflicts with non-mandatory service labels: "
+            + formatted
+        )
+    retained_edge_labels = {
+        edge: classification
+        for edge, classification in edge_labels.items()
+        if set(edge) <= retained
+    }
+    mandatory_edges = tuple(
+        sorted(
+            edge
+            for edge, classification in retained_edge_labels.items()
+            if classification is ValidatedDependencyType.MANDATORY
+        )
+    ) if explicit_edge_labels else ()
+    optional_edges = tuple(
+        sorted(
+            edge
+            for edge, classification in retained_edge_labels.items()
+            if classification is ValidatedDependencyType.OPTIONAL
+        )
+    ) if explicit_edge_labels else ()
+    supporting_edges = tuple(
+        sorted(
+            edge
+            for edge, classification in edge_labels.items()
+            if classification is ValidatedDependencyType.SUPPORTING
+        )
+    ) if explicit_edge_labels else ()
+    approved_edge_set = set(mandatory_edges + optional_edges)
     graph = WorkflowGraph(
         workflow_id=assessment.workflow_id,
         criticality=assessment.candidate_graph.criticality,
@@ -294,6 +414,10 @@ def approve_dependency_assessment(
             edge
             for edge in assessment.candidate_graph.edges
             if edge.source in retained and edge.target in retained
+            and (
+                not explicit_edge_labels
+                or (edge.source, edge.target) in approved_edge_set
+            )
         ],
     )
     approval = AssessmentApproval(
@@ -305,6 +429,9 @@ def approve_dependency_assessment(
         approved_by=actor,
         rationale=rationale.strip(),
         excluded_supporting_services=supporting,
+        mandatory_edges=mandatory_edges,
+        optional_edges=optional_edges,
+        excluded_supporting_edges=supporting_edges,
     )
     return repo.create_approval(approval)
 
@@ -314,3 +441,24 @@ def get_validated_workflow_graph(
     repository: DependencyAssessmentRepository | None = None,
 ) -> WorkflowGraph:
     return _repository(repository).latest_approval(workflow_id).approved_graph
+
+
+def evaluate_approved_dependency_assessment(
+    assessment_id: str,
+    repository: DependencyAssessmentRepository | None = None,
+) -> GraphEvaluationResult:
+    """Score one approved prediction against its independent reference graph."""
+    from app.engine.workflow_dependency_modeling.evaluator import evaluate_graph
+
+    repo = _repository(repository)
+    assessment = repo.get_assessment(assessment_id)
+    approval = repo.get_approval(assessment_id)
+    reference = get_reference(assessment.workflow_id)
+    predicted_mandatory_edges = (
+        set(approval.mandatory_edges) if assessment.edge_interventions else None
+    )
+    return evaluate_graph(
+        approval.approved_graph,
+        reference,
+        predicted_mandatory_edges=predicted_mandatory_edges,
+    )

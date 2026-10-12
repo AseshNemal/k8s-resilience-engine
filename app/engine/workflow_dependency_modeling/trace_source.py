@@ -95,6 +95,8 @@ class TraceSource(Protocol):
         limit: int,
     ) -> list[dict[str, Any]]: ...
 
+    def fetch_trace(self, trace_id: str) -> list[dict[str, Any]]: ...
+
 
 @dataclass(frozen=True)
 class JaegerTraceSource:
@@ -147,3 +149,7 @@ class JaegerTraceSource:
             lookback=lookback,
             limit=limit,
         )
+
+    def fetch_trace(self, trace_id: str) -> list[dict[str, Any]]:
+        """Return only evidence addressed by the registered trace ID."""
+        return self.client.fetch_trace(trace_id)

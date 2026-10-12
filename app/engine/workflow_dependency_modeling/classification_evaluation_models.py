@@ -178,6 +178,8 @@ class ClassificationEvaluation:
     confusion_matrix: dict[str, dict[str, int]]
     per_class: dict[str, ClassificationMetrics]
     accuracy: float
+    classified_count: int
+    expected_count: int
     macro_f1: float
     micro_f1: float
     coverage: float
@@ -188,6 +190,11 @@ class ClassificationEvaluation:
     unexpected_services: tuple[str, ...]
     created_at: datetime
     created_by: str
+
+    @property
+    def selective_accuracy(self) -> float:
+        """Accuracy over classified reference services, excluding abstentions."""
+        return self.accuracy
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -205,6 +212,9 @@ class ClassificationEvaluation:
                 for label, metrics in self.per_class.items()
             },
             "accuracy": self.accuracy,
+            "selectiveAccuracy": self.selective_accuracy,
+            "classifiedCount": self.classified_count,
+            "expectedCount": self.expected_count,
             "macroF1": self.macro_f1,
             "microF1": self.micro_f1,
             "coverage": self.coverage,
@@ -236,7 +246,9 @@ class ClassificationEvaluation:
                 str(label): ClassificationMetrics.from_mapping(metrics)
                 for label, metrics in data.get("perClass", {}).items()
             },
-            accuracy=float(data.get("accuracy", 0.0)),
+            accuracy=float(data.get("selectiveAccuracy", data.get("accuracy", 0.0))),
+            classified_count=int(data.get("classifiedCount", 0)),
+            expected_count=int(data.get("expectedCount", 0)),
             macro_f1=float(data.get("macroF1", 0.0)),
             micro_f1=float(data.get("microF1", 0.0)),
             coverage=float(data.get("coverage", 0.0)),

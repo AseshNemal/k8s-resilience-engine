@@ -118,6 +118,36 @@ def test_completed_execution_records_success_and_evidence() -> None:
     assert all(item.passed for item in result.assertions)
 
 
+def test_http_success_matches_semantic_route_for_generic_server_span() -> None:
+    configured = scenario()
+    configured_payload = configured.to_mapping()
+    configured_payload["successCondition"].update(
+        {
+            "terminalService": "frontend",
+            "operationName": "POST /cart/checkout",
+        }
+    )
+    evidence = trace(
+        tags=[
+            {"key": "http.request.method", "type": "string", "value": "POST"},
+            {"key": "http.route", "type": "string", "value": "/cart/checkout"},
+            {"key": "http.response.status_code", "type": "int64", "value": 200},
+        ]
+    )
+    evidence["processes"]["payment"]["serviceName"] = "frontend"
+    evidence["spans"][0]["operationName"] = "frontend"
+
+    result = evaluate_execution(
+        registration(),
+        WorkflowScenario.from_mapping(configured_payload),
+        [evidence],
+        now=NOW,
+    )
+
+    assert result.status is ExecutionOutcomeStatus.SUCCEEDED
+    assert result.correlation_status is CorrelationStatus.MATCHED
+
+
 def test_missing_trace_remains_visible_as_indeterminate() -> None:
     result = evaluate_execution(registration(), scenario(), [], now=NOW)
     assert result.status is ExecutionOutcomeStatus.INDETERMINATE

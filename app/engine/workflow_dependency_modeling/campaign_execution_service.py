@@ -56,6 +56,7 @@ from app.engine.workflow_dependency_modeling.intervention_event_repository impor
 WorkloadRunner = Callable[..., WorkflowRunResult]
 TraceFetcher = Callable[[Any, str], list[dict[str, Any]]]
 Sleeper = Callable[[float], None]
+TRACE_POLL_DELAYS_SECONDS = (0.25, 0.5, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0)
 _default_intervention_repository: InterventionEventRepository | None = None
 
 
@@ -109,14 +110,8 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
 
 
 def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]:
-    del trace_id
-    return JaegerTraceSource.from_configuration(
-        analysis.trace_source
-    ).fetch_workflow_traces(
-        service_name=analysis.entry_service,
-        operation=analysis.operation_name,
-        limit=100,
-        lookback=analysis.lookback,
+    return JaegerTraceSource.from_configuration(analysis.trace_source).fetch_trace(
+        trace_id
     )
 
 
@@ -143,12 +138,12 @@ def _record_campaign_trial(
     resolved_sleeper = sleeper or time.sleep
     run = resolved_runner(application_url, definition, started_at=timestamp)
     traces: list[dict[str, Any]] = []
-    for attempt in range(5):
+    for attempt in range(len(TRACE_POLL_DELAYS_SECONDS) + 1):
         traces = resolved_fetcher(analysis, run.trace_id)
         if any(trace.get("traceID") == run.trace_id for trace in traces):
             break
-        if attempt < 4:
-            resolved_sleeper(0.4)
+        if attempt < len(TRACE_POLL_DELAYS_SECONDS):
+            resolved_sleeper(TRACE_POLL_DELAYS_SECONDS[attempt])
 
     registration = ExecutionRegistration.from_mapping(
         {
@@ -166,7 +161,13 @@ def _record_campaign_trial(
             "registeredBy": actor,
         }
     )
-    outcome = evaluate_execution(registration, _scenario(campaign), traces, now=timestamp)
+    recorded_at = max(_utc(now), run.finished_at)
+    outcome = evaluate_execution(
+        registration,
+        _scenario(campaign),
+        traces,
+        now=recorded_at,
+    )
     if (
         not run.business_success
         and outcome.correlation_status is CorrelationStatus.MATCHED

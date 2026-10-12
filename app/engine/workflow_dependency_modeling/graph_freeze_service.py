@@ -18,6 +18,7 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_service impor
 from app.engine.workflow_dependency_modeling.execution_models import (
     CorrelationStatus,
     ExecutionOutcome,
+    ExecutionOutcomeStatus,
 )
 from app.engine.workflow_dependency_modeling.execution_repository import (
     ExecutionNotFoundError,
@@ -31,7 +32,7 @@ from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
 )
 
 
-ALGORITHM_VERSION = "workflow-dependency-modeling/phase-5"
+ALGORITHM_VERSION = "workflow-dependency-modeling/phase-5-validation-2"
 _default_repository: GraphFreezeRepository | None = None
 
 
@@ -97,6 +98,11 @@ def _assessment_batch_ids(assessment: DependencyAssessment) -> set[str]:
             for cohort in assessment.interventions
             for batch_id in cohort.batch_ids
         ),
+        *(
+            batch_id
+            for cohort in assessment.edge_interventions
+            for batch_id in cohort.batch_ids
+        ),
     }
 
 
@@ -128,14 +134,20 @@ def _trace_provenance(
             "An approved graph cannot be frozen when multiple executions reference "
             "the same matched trace"
         )
-    valid_trace_ids = tuple(sorted(matched_trace_ids))
-    if not valid_trace_ids:
-        raise ValueError("An approved graph cannot be frozen without correlated trace evidence")
-    excluded_count = sum(
-        outcome.correlation_status is not CorrelationStatus.MATCHED
-        or not outcome.matched_trace_id
+    eligible_trace_ids = [
+        outcome.matched_trace_id
         for outcome in outcomes
-    )
+        if outcome.correlation_status is CorrelationStatus.MATCHED
+        and outcome.status
+        in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
+        and outcome.matched_trace_id
+    ]
+    valid_trace_ids = tuple(sorted(eligible_trace_ids))
+    if not valid_trace_ids:
+        raise ValueError(
+            "An approved graph cannot be frozen without eligible correlated trace evidence"
+        )
+    excluded_count = len(outcomes) - len(valid_trace_ids)
     return valid_trace_ids, excluded_count
 
 

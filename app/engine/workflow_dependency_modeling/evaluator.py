@@ -14,6 +14,7 @@ class EvaluationMetrics:
     recall: float
     f1: float
     accuracy: float
+    jaccard_similarity: float
     true_positives: int
     false_positives: int
     false_negatives: int
@@ -25,7 +26,11 @@ class GraphEvaluationResult:
     edge_metrics: EvaluationMetrics
     service_metrics: EvaluationMetrics
     mandatory_service_metrics: EvaluationMetrics
-    mandatory_edge_metrics: EvaluationMetrics
+    mandatory_edge_metrics: EvaluationMetrics | None
+    mandatory_edge_evaluation_status: str
+    path_metrics: EvaluationMetrics
+    workflow_reconstruction_accuracy: float
+    graph_processing_time_ms: float = 0.0
     true_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_positive_edges: list[tuple[str, str]] = field(default_factory=list)
     false_negative_edges: list[tuple[str, str]] = field(default_factory=list)
@@ -60,17 +65,66 @@ def _compute_metrics(predicted: set, reference: set) -> EvaluationMetrics:
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
-    accuracy = tp / (tp + fp + fn) if tp + fp + fn else 0.0
-    return EvaluationMetrics(precision, recall, f1, accuracy, tp, fp, fn)
+    jaccard = tp / (tp + fp + fn) if tp + fp + fn else 0.0
+    return EvaluationMetrics(
+        precision,
+        recall,
+        f1,
+        jaccard,
+        jaccard,
+        tp,
+        fp,
+        fn,
+    )
+
+
+def _root_to_leaf_paths(
+    edges: set[tuple[str, str]],
+) -> set[tuple[str, ...]]:
+    """Return deterministic simple source-to-sink paths for a directed graph.
+
+    Cyclic graphs have no source-to-sink workflow path under this definition;
+    they therefore produce no paths instead of permitting unbounded traversal.
+    """
+    if not edges:
+        return set()
+    nodes = {name for edge in edges for name in edge}
+    targets = {target for _, target in edges}
+    roots = sorted(nodes - targets)
+    if not roots:
+        return set()
+    adjacency: dict[str, set[str]] = {node: set() for node in nodes}
+    for source, target in edges:
+        adjacency[source].add(target)
+
+    paths: set[tuple[str, ...]] = set()
+
+    def visit(node: str, path: tuple[str, ...]) -> None:
+        children = sorted(adjacency[node] - set(path))
+        if not children:
+            if len(path) > 1:
+                paths.add(path)
+            return
+        for child in children:
+            visit(child, (*path, child))
+
+    for root in roots:
+        visit(root, (root,))
+    return paths
 
 
 def evaluate_graph(
     generated: WorkflowGraph,
     reference: ReferenceWorkflow,
+    *,
+    predicted_mandatory_edges: set[tuple[str, str]] | None = None,
+    graph_processing_time_ms: float = 0.0,
 ) -> GraphEvaluationResult:
     """Compare a completed prediction with a separately loaded reference."""
     if generated.workflow_id != reference.workflow_id:
         raise ValueError("Generated graph and reference workflow IDs do not match")
+    if graph_processing_time_ms < 0:
+        raise ValueError("Graph processing time cannot be negative")
 
     predicted_edges = {(edge.source, edge.target) for edge in generated.edges}
     reference_edges = {(edge.source, edge.target) for edge in reference.expected_edges}
@@ -80,15 +134,17 @@ def evaluate_graph(
     reference_services = set(reference.expected_services)
     predicted_mandatory_services = set(generated.mandatory_services)
     reference_mandatory_services = set(reference.mandatory_services)
-    predicted_mandatory_edges = {
-        (edge.source, edge.target)
-        for edge in generated.edges
-        if edge.source in predicted_mandatory_services
-        and edge.target in predicted_mandatory_services
-    }
+    if predicted_mandatory_edges is not None:
+        unknown_edges = predicted_mandatory_edges - predicted_edges
+        if unknown_edges:
+            raise ValueError(
+                "Predicted mandatory edges must be present in the generated graph"
+            )
     reference_mandatory_edges = {
         (edge.source, edge.target) for edge in reference.mandatory_edges
     }
+    predicted_paths = _root_to_leaf_paths(predicted_edges)
+    reference_paths = _root_to_leaf_paths(reference_edges)
 
     return GraphEvaluationResult(
         workflow_id=generated.workflow_id,
@@ -97,9 +153,22 @@ def evaluate_graph(
         mandatory_service_metrics=_compute_metrics(
             predicted_mandatory_services, reference_mandatory_services
         ),
-        mandatory_edge_metrics=_compute_metrics(
-            predicted_mandatory_edges, reference_mandatory_edges
+        mandatory_edge_metrics=(
+            _compute_metrics(predicted_mandatory_edges, reference_mandatory_edges)
+            if predicted_mandatory_edges is not None
+            else None
         ),
+        mandatory_edge_evaluation_status=(
+            "evaluated"
+            if predicted_mandatory_edges is not None
+            else "not_evaluated_no_predicted_edge_labels"
+        ),
+        path_metrics=_compute_metrics(predicted_paths, reference_paths),
+        workflow_reconstruction_accuracy=float(
+            predicted_services == reference_services
+            and predicted_edges == reference_edges
+        ),
+        graph_processing_time_ms=graph_processing_time_ms,
         true_positive_edges=sorted(predicted_edges & reference_edges),
         false_positive_edges=sorted(predicted_edges - reference_edges),
         false_negative_edges=sorted(reference_edges - predicted_edges),
@@ -116,13 +185,15 @@ def evaluate_graph(
             reference_mandatory_services - predicted_mandatory_services
         ),
         true_positive_mandatory_edges=sorted(
-            predicted_mandatory_edges & reference_mandatory_edges
+            (predicted_mandatory_edges or set()) & reference_mandatory_edges
         ),
         false_positive_mandatory_edges=sorted(
-            predicted_mandatory_edges - reference_mandatory_edges
+            (predicted_mandatory_edges or set()) - reference_mandatory_edges
         ),
         false_negative_mandatory_edges=sorted(
-            reference_mandatory_edges - predicted_mandatory_edges
+            reference_mandatory_edges - (predicted_mandatory_edges or set())
+            if predicted_mandatory_edges is not None
+            else set()
         ),
     )
 

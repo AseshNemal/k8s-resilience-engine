@@ -7,6 +7,7 @@ to retrieve services, operations, and raw distributed traces.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Mapping
 import httpx
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_JAEGER_URL = "http://localhost:16686"
 SERVICE_NAME_KEY = "service.name"
+TRACE_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{16,32}$")
 
 
 class JaegerClient:
@@ -133,6 +135,36 @@ class JaegerClient:
             logger.exception("Failed to fetch traces from Jaeger at %s", self.base_url)
             raise ConnectionError(
                 f"Could not fetch traces from Jaeger at {self.base_url}: {err}"
+            ) from err
+
+    def fetch_trace(self, trace_id: str) -> list[dict[str, Any]]:
+        """Fetch one trace through Jaeger's exact trace-ID endpoint.
+
+        Discovery may use bounded service queries, but execution correlation must
+        not: a valid trace can be absent from a busy service query even while it
+        is directly addressable by ID.
+        """
+        if not isinstance(trace_id, str) or not TRACE_ID_PATTERN.fullmatch(trace_id):
+            raise ValueError("trace_id must be a 16- or 32-character hexadecimal ID")
+        try:
+            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+                response = client.get(f"{self.base_url}/api/traces/{trace_id.lower()}")
+                if response.status_code == 404:
+                    return []
+                response.raise_for_status()
+                data = response.json().get("data", [])
+                return data if isinstance(data, list) else []
+        except ValueError:
+            raise
+        except Exception as err:
+            logger.exception(
+                "Failed to fetch trace '%s' from Jaeger at %s",
+                trace_id,
+                self.base_url,
+            )
+            raise ConnectionError(
+                f"Could not fetch trace '{trace_id}' from Jaeger at "
+                f"{self.base_url}: {err}"
             ) from err
 
     def seed_demo_traces(self, otlp_url: str = "http://localhost:4318") -> bool:
