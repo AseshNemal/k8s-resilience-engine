@@ -15,6 +15,40 @@ class ResourceContentionDetector(BaseDriftDetector):
     vulnerabilities, risking unexpected OOMKills and involuntary pod evictions.
     """
 
+    @staticmethod
+    def _extract_resources(declared_intent: Any | None) -> list[Any]:
+        if hasattr(declared_intent, "resources"):
+            return getattr(declared_intent, "resources", [])
+        if isinstance(declared_intent, dict):
+            return declared_intent.get("resources", [])
+        return []
+
+    @staticmethod
+    def _check_container_limits(
+        service_name: str, idx: int, res_entry: Any
+    ) -> DriftViolation | None:
+        limits = res_entry.get("limits", {}) if isinstance(res_entry, dict) else {}
+        missing = []
+        if "cpu" not in limits:
+            missing.append("cpu")
+        if "memory" not in limits:
+            missing.append("memory")
+
+        if not missing:
+            return None
+
+        severity = DriftSeverity.LOW if len(missing) == 1 else DriftSeverity.MEDIUM
+        return DriftViolation(
+            drift_type=DriftType.RESOURCE_CONTENTION_DRIFT,
+            severity=severity,
+            description=(
+                f"Container {idx} in service '{service_name}' is missing resource limits: "
+                f"{', '.join(missing)}."
+            ),
+            expected="cpu and memory limits configured",
+            actual=f"missing {', '.join(missing)}",
+        )
+
     def detect(
         self,
         service_name: str,
@@ -22,20 +56,12 @@ class ResourceContentionDetector(BaseDriftDetector):
         runtime_pods: list[dict[str, Any]],
         cluster_nodes: list[dict[str, Any]],
     ) -> list[DriftViolation]:
-        violations: list[DriftViolation] = []
-
         if not self.config.enforce_resource_limits or not declared_intent:
-            return violations
+            return []
 
-        if hasattr(declared_intent, "resources"):
-            resources_list = getattr(declared_intent, "resources", [])
-        elif isinstance(declared_intent, dict):
-            resources_list = declared_intent.get("resources", [])
-        else:
-            resources_list = []
-
+        resources_list = self._extract_resources(declared_intent)
         if not resources_list:
-            violations.append(
+            return [
                 DriftViolation(
                     drift_type=DriftType.RESOURCE_CONTENTION_DRIFT,
                     severity=DriftSeverity.MEDIUM,
@@ -46,31 +72,12 @@ class ResourceContentionDetector(BaseDriftDetector):
                     expected="cpu/memory limits configured",
                     actual="no resources declared",
                 )
-            )
-            return violations
+            ]
 
+        violations: list[DriftViolation] = []
         for idx, res_entry in enumerate(resources_list):
-            limits = res_entry.get("limits", {}) if isinstance(res_entry, dict) else {}
-            has_cpu_limit = "cpu" in limits
-            has_mem_limit = "memory" in limits
-
-            if not has_cpu_limit or not has_mem_limit:
-                missing = []
-                if not has_cpu_limit:
-                    missing.append("cpu")
-                if not has_mem_limit:
-                    missing.append("memory")
-                violations.append(
-                    DriftViolation(
-                        drift_type=DriftType.RESOURCE_CONTENTION_DRIFT,
-                        severity=DriftSeverity.LOW if len(missing) == 1 else DriftSeverity.MEDIUM,
-                        description=(
-                            f"Container {idx} in service '{service_name}' is missing resource limits: "
-                            f"{', '.join(missing)}."
-                        ),
-                        expected="cpu and memory limits configured",
-                        actual=f"missing {', '.join(missing)}",
-                    )
-                )
+            violation = self._check_container_limits(service_name, idx, res_entry)
+            if violation:
+                violations.append(violation)
 
         return violations

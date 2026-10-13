@@ -76,7 +76,6 @@ class FailureDomainExposureEngine:
         self,
         service_name: str,
         runtime_pods: list[dict[str, Any]],
-        cluster_nodes: list[dict[str, Any]],
         violations: list[DriftViolation] | None = None,
     ) -> ServiceExposureResult:
         violations = violations or []

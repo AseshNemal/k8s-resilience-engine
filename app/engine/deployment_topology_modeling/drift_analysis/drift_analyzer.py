@@ -72,7 +72,6 @@ class DriftAnalyzer:
         exposure_result = self.exposure_engine.evaluate_service_exposure(
             service_name=service_name,
             runtime_pods=runtime_pods,
-            cluster_nodes=cluster_nodes,
             violations=violations,
         )
         return exposure_result

@@ -8,7 +8,7 @@ from app.engine.deployment_topology_modeling.drift_analysis.constants import Exp
 def test_failure_domain_exposure_single_replica():
     engine = FailureDomainExposureEngine()
     runtime_pods = [{"name": "cart-1", "is_ready": True, "node_name": "worker-1"}]
-    res = engine.evaluate_service_exposure("cart", runtime_pods, [])
+    res = engine.evaluate_service_exposure("cart", runtime_pods)
     assert res.service_name == "cart"
     assert res.ready_replicas == 1
     assert res.exposure_level == ExposureLevel.SINGLE_REPLICA_EXPOSURE
@@ -24,7 +24,7 @@ def test_failure_domain_exposure_co_located_multi_replica():
         {"name": "pay-1", "is_ready": True, "node_name": "worker-1"},
         {"name": "pay-2", "is_ready": True, "node_name": "worker-1"},
     ]
-    res = engine.evaluate_service_exposure("payment", runtime_pods, [])
+    res = engine.evaluate_service_exposure("payment", runtime_pods)
     assert res.exposure_level == ExposureLevel.FULL_EXPOSURE
     assert res.replica_concentration == pytest.approx(1.0)
     assert res.exposed_failure_domains == ["worker-1"]
@@ -39,7 +39,7 @@ def test_failure_domain_exposure_partial_exposure():
         {"name": "ui-2", "is_ready": True, "node_name": "worker-1"},
         {"name": "ui-3", "is_ready": True, "node_name": "worker-2"},
     ]
-    res = engine.evaluate_service_exposure("ui", runtime_pods, [])
+    res = engine.evaluate_service_exposure("ui", runtime_pods)
     assert res.exposure_level == ExposureLevel.PARTIAL_EXPOSURE
     assert res.replica_concentration == pytest.approx(0.6667, rel=1e-3)
     assert len(res.exposed_failure_domains) == 0
@@ -56,7 +56,7 @@ def test_failure_domain_exposure_resilient():
         {"name": "cat-3", "is_ready": True, "node_name": "worker-3"},
         {"name": "cat-4", "is_ready": True, "node_name": "worker-4"},
     ]
-    res = engine.evaluate_service_exposure("catalog", runtime_pods, [])
+    res = engine.evaluate_service_exposure("catalog", runtime_pods)
     assert res.exposure_level == ExposureLevel.RESILIENT
     assert res.replica_concentration == pytest.approx(0.25)
     assert len(res.exposed_failure_domains) == 0
