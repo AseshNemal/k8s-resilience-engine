@@ -69,6 +69,8 @@ def _validate_records(
             raise ValueError("Campaign evidence contains a different environment")
         if registration.scenario_version != 1:
             raise ValueError("Campaign evidence contains an unsupported scenario version")
+        if registration.condition_id != "default":
+            raise ValueError("Guided campaigns support the default condition only; use condition-aware assessments for separate business conditions")
 
 
 def _candidate_edges(
