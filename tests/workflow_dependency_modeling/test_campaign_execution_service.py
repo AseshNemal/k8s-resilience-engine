@@ -181,8 +181,8 @@ def test_default_trace_fetcher_uses_saved_trace_source(monkeypatch) -> None:
             return []
 
     monkeypatch.setattr(
-        campaign_execution_service.JaegerTraceSource,
-        "from_configuration",
+        campaign_execution_service,
+        "create_trace_source",
         lambda configuration: Source(),
     )
 
@@ -219,6 +219,39 @@ def test_baseline_polls_exact_trace_until_jaeger_indexes_it() -> None:
     assert outcome.status is ExecutionOutcomeStatus.SUCCEEDED
     assert attempts == 3
     assert delays == [0.25, 0.5]
+
+
+def test_baseline_polls_until_incremental_trace_contains_terminal_span() -> None:
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    attempts = 0
+    delays = []
+
+    partial = _trace()
+    partial["processes"]["p1"]["serviceName"] = "checkoutservice"
+    partial["spans"][0]["operationName"] = "CheckoutService/PlaceOrder"
+
+    def fetcher(analysis, trace_id):
+        nonlocal attempts
+        attempts += 1
+        return [partial] if attempts == 1 else [_trace(trace_id=trace_id)]
+
+    outcome = run_campaign_baseline_trial(
+        campaign.campaign_id,
+        "http://localhost:8080",
+        actor="runner",
+        campaign_repository=campaigns,
+        analysis_repository=analyses,
+        repository=InMemoryExecutionRepository(),
+        workload_runner=lambda *args, **kwargs: _run(),
+        trace_fetcher=fetcher,
+        sleeper=delays.append,
+        now=NOW,
+    )
+
+    assert outcome.status is ExecutionOutcomeStatus.SUCCEEDED
+    assert attempts == 2
+    assert delays == [0.25]
 
 
 def test_missing_trace_is_indeterminate_and_blocks_readiness() -> None:

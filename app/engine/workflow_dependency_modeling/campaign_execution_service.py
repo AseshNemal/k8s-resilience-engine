@@ -36,7 +36,10 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
     get_experiment_campaign,
 )
 from app.engine.workflow_dependency_modeling.models import WorkflowScenario
-from app.engine.workflow_dependency_modeling.outcome_evaluator import evaluate_execution
+from app.engine.workflow_dependency_modeling.outcome_evaluator import (
+    evaluate_execution,
+    trace_has_terminal_evidence,
+)
 from app.engine.workflow_dependency_modeling.workflow_probe_models import (
     WorkflowProbeDefinition,
     WorkflowRunResult,
@@ -44,7 +47,7 @@ from app.engine.workflow_dependency_modeling.workflow_probe_models import (
 from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
     run_http_workflow_probe,
 )
-from app.engine.workflow_dependency_modeling.trace_source import JaegerTraceSource
+from app.engine.workflow_dependency_modeling.trace_source import create_trace_source
 from app.engine.workflow_dependency_modeling.intervention_event_models import (
     InterventionEvent,
     InterventionEventType,
@@ -97,7 +100,7 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
             "workflowId": campaign.workflow_id,
             "description": campaign.workflow_name,
             "criticality": 1.0,
-            "entryService": contract.terminal_service,
+            "entryService": campaign.entry_service,
             "successCondition": contract.condition.to_mapping(),
             "version": 1,
             "lifecycle": "active",
@@ -110,9 +113,7 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
 
 
 def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]:
-    return JaegerTraceSource.from_configuration(analysis.trace_source).fetch_trace(
-        trace_id
-    )
+    return create_trace_source(analysis.trace_source).fetch_trace(trace_id)
 
 
 def _record_campaign_trial(
@@ -137,10 +138,18 @@ def _record_campaign_trial(
     resolved_fetcher = trace_fetcher or _default_trace_fetcher
     resolved_sleeper = sleeper or time.sleep
     run = resolved_runner(application_url, definition, started_at=timestamp)
+    scenario = _scenario(campaign)
     traces: list[dict[str, Any]] = []
     for attempt in range(len(TRACE_POLL_DELAYS_SECONDS) + 1):
         traces = resolved_fetcher(analysis, run.trace_id)
-        if any(trace.get("traceID") == run.trace_id for trace in traces):
+        matching_trace = next(
+            (trace for trace in traces if trace.get("traceID") == run.trace_id),
+            None,
+        )
+        if matching_trace is not None and trace_has_terminal_evidence(
+            matching_trace,
+            scenario.success_condition,
+        ):
             break
         if attempt < len(TRACE_POLL_DELAYS_SECONDS):
             resolved_sleeper(TRACE_POLL_DELAYS_SECONDS[attempt])
@@ -153,7 +162,11 @@ def _record_campaign_trial(
             "scenarioVersion": 1,
             "invocationStatus": "completed",
             "source": "controlled_workflow_experiment",
-            "evidenceLocator": f"{analysis.jaeger_url}/api/traces/{run.trace_id}",
+            "evidenceLocator": (
+                f"{analysis.trace_source.endpoint.rstrip('/')}"
+                + {"jaeger": "/api/traces/", "zipkin": "/api/v2/trace/", "tempo": "/api/v2/traces/"}[analysis.trace_source.kind.value]
+                + run.trace_id
+            ),
             "environmentId": campaign.environment_id,
             "expectedTraceId": run.trace_id,
             "startedAt": run.started_at.isoformat(),
@@ -164,7 +177,7 @@ def _record_campaign_trial(
     recorded_at = max(_utc(now), run.finished_at)
     outcome = evaluate_execution(
         registration,
-        _scenario(campaign),
+        scenario,
         traces,
         now=recorded_at,
     )
@@ -180,6 +193,7 @@ def _record_campaign_trial(
             recorded_at=outcome.recorded_at,
             matched_trace_id=outcome.matched_trace_id,
             evidence_id=outcome.evidence_id,
+            evidence_snapshot=outcome.evidence_snapshot,
             assertions=outcome.assertions,
             reasons=(*outcome.reasons, run.reason),
         )
