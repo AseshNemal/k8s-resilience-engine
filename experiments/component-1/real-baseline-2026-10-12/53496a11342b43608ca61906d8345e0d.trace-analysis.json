@@ -1,0 +1,48 @@
+{
+  "evidenceClass": "REAL_EMPIRICAL",
+  "traceId": "53496a11342b43608ca61906d8345e0d",
+  "quality": "PARTIAL",
+  "eligibleForPrimaryClassification": false,
+  "spanCount": 29,
+  "rootSpanCount": 1,
+  "brokenParentCount": 0,
+  "unknownServiceCount": 0,
+  "missingServerSideServiceIdentities": [
+    "cartservice",
+    "shippingservice"
+  ],
+  "rootSpan": {
+    "service": "frontend",
+    "operationName": "frontend",
+    "semanticOperation": "POST /cart/checkout",
+    "httpStatusCode": 200
+  },
+  "observedServices": [
+    "cartservice",
+    "checkoutservice",
+    "currencyservice",
+    "emailservice",
+    "frontend",
+    "paymentservice",
+    "productcatalogservice",
+    "recommendationservice",
+    "shippingservice"
+  ],
+  "observedEdges": [
+    {"source": "checkoutservice", "target": "cartservice"},
+    {"source": "checkoutservice", "target": "emailservice"},
+    {"source": "checkoutservice", "target": "paymentservice"},
+    {"source": "checkoutservice", "target": "productcatalogservice"},
+    {"source": "checkoutservice", "target": "shippingservice"},
+    {"source": "frontend", "target": "checkoutservice"},
+    {"source": "frontend", "target": "currencyservice"},
+    {"source": "frontend", "target": "productcatalogservice"},
+    {"source": "frontend", "target": "recommendationservice"},
+    {"source": "recommendationservice", "target": "productcatalogservice"}
+  ],
+  "peerResolvedEdges": [
+    {"source": "checkoutservice", "target": "cartservice"},
+    {"source": "checkoutservice", "target": "shippingservice"}
+  ],
+  "interpretation": "The workflow outcome and exact trace are correlated. Client spans explicitly identify cartservice and shippingservice through OpenTelemetry net.peer.name attributes, so their call edges are observed without guessing from operation names. The trace remains PARTIAL because those pinned v0.10.1 services emitted no server spans; it is excluded from primary dependency classification."
+}
