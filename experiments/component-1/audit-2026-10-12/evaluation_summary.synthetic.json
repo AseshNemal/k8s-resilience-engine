@@ -1,0 +1,59 @@
+{
+  "evidenceKind": "synthetic_fixture_evaluation",
+  "generatedOn": "2026-10-12",
+  "command": "python -c <fixture evaluation using evaluate_workflow_by_id>",
+  "candidateEdgeUniverse": "All directed non-self edges among each fixture reference's expectedServices, explicitly stored as expectedEdges plus evaluatedNonEdges.",
+  "unknownReferenceEdgesExcluded": true,
+  "workflows": [
+    {
+      "workflowId": "add_to_cart",
+      "mandatoryServiceConfusion": {"tp": 4, "fp": 0, "fn": 0, "tn": 0, "evaluated": 4},
+      "edgeConfusion": {"tp": 3, "fp": 0, "fn": 0, "tn": 9, "evaluated": 12},
+      "mandatoryServicePrecision": 1.0,
+      "mandatoryServiceRecall": 1.0,
+      "mandatoryServiceF1": 1.0,
+      "edgeAccuracy": 1.0
+    },
+    {
+      "workflowId": "checkout",
+      "mandatoryServiceConfusion": {"tp": 4, "fp": 0, "fn": 0, "tn": 1, "evaluated": 5},
+      "edgeConfusion": {"tp": 4, "fp": 0, "fn": 0, "tn": 16, "evaluated": 20},
+      "mandatoryServicePrecision": 1.0,
+      "mandatoryServiceRecall": 1.0,
+      "mandatoryServiceF1": 1.0,
+      "edgeAccuracy": 1.0
+    },
+    {
+      "workflowId": "refund",
+      "mandatoryServiceConfusion": {"tp": 3, "fp": 0, "fn": 0, "tn": 1, "evaluated": 4},
+      "edgeConfusion": {"tp": 3, "fp": 0, "fn": 0, "tn": 9, "evaluated": 12},
+      "mandatoryServicePrecision": 1.0,
+      "mandatoryServiceRecall": 1.0,
+      "mandatoryServiceF1": 1.0,
+      "edgeAccuracy": 1.0
+    },
+    {
+      "workflowId": "view_product",
+      "mandatoryServiceConfusion": {"tp": 3, "fp": 0, "fn": 0, "tn": 2, "evaluated": 5},
+      "edgeConfusion": {"tp": 4, "fp": 0, "fn": 0, "tn": 16, "evaluated": 20},
+      "mandatoryServicePrecision": 1.0,
+      "mandatoryServiceRecall": 1.0,
+      "mandatoryServiceF1": 1.0,
+      "edgeAccuracy": 1.0
+    }
+  ],
+  "aggregate": {
+    "mandatoryServiceConfusion": {"tp": 14, "fp": 0, "fn": 0, "tn": 4, "evaluated": 18},
+    "edgeConfusion": {"tp": 14, "fp": 0, "fn": 0, "tn": 50, "evaluated": 64},
+    "mandatoryServicePrecision": 1.0,
+    "mandatoryServiceRecall": 1.0,
+    "mandatoryServiceF1": 1.0,
+    "edgeAccuracy": 1.0
+  },
+  "mandatoryEdgeEvaluationStatus": "not_evaluated_no_predicted_edge_labels",
+  "limitations": [
+    "All evaluated references and trace fixtures are synthetic.",
+    "The scores demonstrate deterministic implementation behavior, not empirical Online Boutique accuracy.",
+    "Validated mandatory-edge metrics require separately approved edge intervention evidence."
+  ]
+}

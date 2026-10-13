@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "LIVE_VERIFICATION_SUMMARY",
+  "verifiedAt": "2026-10-13T04:02:47.148621Z",
+  "workflowId": "checkout",
+  "traceId": "76473a579eed490aa8846025f085fe1a",
+  "checkoutImage": {
+    "name": "k8s-resilience/checkoutservice-context:v0.10.1",
+    "imageId": "sha256:b7b206ca4f38c5528ba3b6f02cfc90fb46e88824233296ab827b78ceab8ba982",
+    "upstreamCommit": "39efed435e697bcdcd31c5e45f4d36dc35c98a63",
+    "change": "Propagate the active request context to CurrencyService.Convert instead of context.TODO()."
+  },
+  "workflowOutcome": {
+    "productStatus": 200,
+    "cartStatus": 302,
+    "checkoutStatus": 200,
+    "businessSuccess": true
+  },
+  "finalTraceQuality": {
+    "quality": "VALID",
+    "spanCount": 37,
+    "rootSpanCount": 1,
+    "brokenParentCount": 0,
+    "unknownServiceCount": 0,
+    "missingServiceIdentities": []
+  },
+  "observedEdgeCount": 11,
+  "recoveredEdge": {
+    "source": "checkoutservice",
+    "target": "currencyservice"
+  },
+  "note": "An earlier read of this exact trace returned an incremental 27-span PARTIAL snapshot. The final settled Jaeger response contained 37 spans and passed every structural gate."
+}
