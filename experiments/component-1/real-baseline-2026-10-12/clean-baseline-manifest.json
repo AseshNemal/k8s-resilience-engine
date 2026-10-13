@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "real-baseline:campaign:05b1cca886af4f0cad302d4ac806c424",
+  "evidenceClass": "REAL_EMPIRICAL",
+  "experimentStatus": "BASELINE_READY_REFERENCE_REVIEW_PENDING",
+  "createdAt": "2026-10-12T10:37:43.205282Z",
+  "campaignId": "campaign:05b1cca886af4f0cad302d4ac806c424",
+  "analysisSessionId": "analysis:ad844e88e13943e99aa12f1d5a377455",
+  "batchId": "batch:05b1cca886af4f0cad302d4ac806c424:baseline",
+  "workflowId": "checkout",
+  "workloadProfile": "online_boutique_checkout_v0_10_1_non_empty_cart_usd",
+  "environment": {
+    "environmentId": "online-boutique-local-instrumented-v0.10.1",
+    "deploymentType": "docker-compose",
+    "applicationUrl": "http://localhost:8080",
+    "jaegerUrl": "http://127.0.0.1:16686",
+    "applicationVersion": "v0.10.1",
+    "upstreamSourceCommit": "39efed435e697bcdcd31c5e45f4d36dc35c98a63",
+    "loadGeneratorStateDuringTrials": "stopped_for_isolation"
+  },
+  "instrumentation": {
+    "cartservice": {
+      "image": "k8s-resilience/cartservice-otel:v0.10.1",
+      "imageId": "sha256:437485d2839f931ed129217bb9f3493391b0bc716be8cdf99776940720e270a4",
+      "mechanism": "OpenTelemetry ASP.NET Core server instrumentation with OTLP/gRPC export",
+      "otelExporterVersion": "1.15.3",
+      "otelHostingVersion": "1.15.0",
+      "otelAspNetCoreVersion": "1.15.0"
+    },
+    "shippingservice": {
+      "image": "k8s-resilience/shippingservice-otel:v0.10.1",
+      "imageId": "sha256:e9d1f77c940ead83231f7dc878b0182718ea828f77cbe1e0ec9ee13665310e1d",
+      "mechanism": "OpenTelemetry gRPC StatsHandler server instrumentation with W3C propagation and OTLP/gRPC export",
+      "otelSdkVersion": "1.24.0",
+      "otelGrpcVersion": "0.49.0"
+    }
+  },
+  "results": {
+    "recordedTrials": 3,
+    "eligibleTrials": 3,
+    "successfulTrials": 3,
+    "failedTrials": 0,
+    "excludedTrials": 0,
+    "successRate": 1.0,
+    "campaignBaselineReady": true,
+    "allTraceIdsMatchedExactly": true,
+    "allTraceStructuresValid": true,
+    "allObservedEdgesStable": true,
+    "observedServiceCount": 9,
+    "observedEdgeCount": 10,
+    "sharedWorkflowGraphGenerated": true,
+    "classificationStatus": "frequency_candidates_not_intervention_validated",
+    "referenceStatus": "AWAITING_HUMAN_REVIEW",
+    "experimentReadyForIntervention": false
+  },
+  "semanticCompletenessCaveat": {
+    "status": "OPEN",
+    "detail": "Pinned checkout source calls CurrencyService.Convert with context.TODO(), so checkoutservice-to-currencyservice is not correlated into the checkout trace even though source review expects the call.",
+    "requiredTreatment": "Do not treat the absent edge as a negative. Review the draft reference before intervention design."
+  },
+  "sourceDigests": {
+    "580ba0a99a1e42c48fb157200c45d485.raw-jaeger.json": "sha256:005d87843fb7f65dcf83f7100698c51c34c19a8c1e7cf8ecc52c13c8702141e7",
+    "135bae36a85f4a11876183e235cb4d13.raw-jaeger.json": "sha256:fb2e6b5112d4d9bfcbaef839318aa97738cde16f3bc96e40d3eca01fb805a88b",
+    "935743cf3e74400c816067986f745ea6.raw-jaeger.json": "sha256:7626c6a5ec17fb5f7a987b14de00698f993e52b91caf78d67860a3cc33b3494c",
+    "clean-baseline-outcomes.json": "sha256:eb1e9484c621edb2db12b0399760d4988138d119b9feeb50062ea55ead5e3186",
+    "clean-baseline-trace-analysis.json": "sha256:6e5671afed38c438612aa5ec8fc5fe0053b7ae9938b7dc631de6aa2eea402bfb",
+    "clean-baseline-workflow-graph.json": "sha256:4144f41bae88a5444a8e0201894491da164301df636d82398e5886891e33c2b8",
+    "reference-workflow.draft.json": "sha256:dafddb607a9ab28d4069040a1f2f1b0174643358243db64592f5063ecc10ec1e"
+  },
+  "gates": {
+    "baselineEvidence": "PASS",
+    "referenceReview": "PENDING",
+    "developerApprovalForInterventions": "PENDING",
+    "faultInjection": "NOT_RUN"
+  },
+  "postBaselineUpdate": "The context-propagation defect was fixed and live-verified on 2026-10-13; the original three baseline traces remain historical evidence of the pre-fix behavior.",
+  "nextAction": "Human-review reference-workflow.draft.json and explicitly approve the controlled intervention plan."
+}

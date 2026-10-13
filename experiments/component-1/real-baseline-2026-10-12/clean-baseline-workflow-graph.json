@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "REAL_EMPIRICAL",
+  "workflowId": "checkout",
+  "status": "BASELINE_FREQUENCY_CANDIDATE",
+  "classificationStatus": "frequency_candidates_not_intervention_validated",
+  "candidateThreshold": 1.0,
+  "candidateServices": [
+    "cartservice",
+    "checkoutservice",
+    "currencyservice",
+    "emailservice",
+    "frontend",
+    "paymentservice",
+    "productcatalogservice",
+    "recommendationservice",
+    "shippingservice"
+  ],
+  "candidateEdges": [
+    {"source": "checkoutservice", "target": "cartservice"},
+    {"source": "checkoutservice", "target": "emailservice"},
+    {"source": "checkoutservice", "target": "paymentservice"},
+    {"source": "checkoutservice", "target": "productcatalogservice"},
+    {"source": "checkoutservice", "target": "shippingservice"},
+    {"source": "frontend", "target": "checkoutservice"},
+    {"source": "frontend", "target": "currencyservice"},
+    {"source": "frontend", "target": "productcatalogservice"},
+    {"source": "frontend", "target": "recommendationservice"},
+    {"source": "recommendationservice", "target": "productcatalogservice"}
+  ],
+  "validatedMandatoryServices": [],
+  "validatedOptionalServices": [],
+  "validatedSupportingServices": [],
+  "validatedConditionalServices": [],
+  "validatedMandatoryEdges": [],
+  "validatedOptionalEdges": [],
+  "validatedSupportingEdges": [],
+  "validatedConditionalEdges": [],
+  "unknownExpectedEdges": [
+    {
+      "source": "checkoutservice",
+      "target": "currencyservice",
+      "reason": "Present in pinned application source but absent from correlated traces because context.TODO() breaks propagation."
+    }
+  ],
+  "warning": "Frequency 1.0 is repeatable observation, not proof of mandatory failure impact. Controlled interventions have not run."
+}

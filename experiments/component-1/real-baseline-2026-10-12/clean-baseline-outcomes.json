@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "REAL_EMPIRICAL",
+  "campaignId": "campaign:05b1cca886af4f0cad302d4ac806c424",
+  "batchId": "batch:05b1cca886af4f0cad302d4ac806c424:baseline",
+  "workflowId": "checkout",
+  "environmentId": "online-boutique-local-instrumented-v0.10.1",
+  "successContract": {
+    "protocol": "http",
+    "terminalService": "frontend",
+    "operationName": "POST /cart/checkout",
+    "httpStatusCodes": [200],
+    "responseMarkerRequired": true
+  },
+  "trials": [
+    {
+      "executionId": "execution:05b1cca886af4f0cad302d4ac806c424:2e4e6b83280a",
+      "expectedTraceId": "580ba0a99a1e42c48fb157200c45d485",
+      "matchedTraceId": "580ba0a99a1e42c48fb157200c45d485",
+      "startedAt": "2026-10-12T10:37:32.041646Z",
+      "finishedAt": "2026-10-12T10:37:32.576542Z",
+      "workflowOutcome": "succeeded",
+      "correlationStatus": "matched",
+      "terminalHttpStatus": 200,
+      "terminalAssertionPassed": true,
+      "traceQuality": "VALID",
+      "spanCount": 33
+    },
+    {
+      "executionId": "execution:05b1cca886af4f0cad302d4ac806c424:85fcc157a4cd",
+      "expectedTraceId": "135bae36a85f4a11876183e235cb4d13",
+      "matchedTraceId": "135bae36a85f4a11876183e235cb4d13",
+      "startedAt": "2026-10-12T10:37:37.381013Z",
+      "finishedAt": "2026-10-12T10:37:37.826720Z",
+      "workflowOutcome": "succeeded",
+      "correlationStatus": "matched",
+      "terminalHttpStatus": 200,
+      "terminalAssertionPassed": true,
+      "traceQuality": "VALID",
+      "spanCount": 33
+    },
+    {
+      "executionId": "execution:05b1cca886af4f0cad302d4ac806c424:1ae7e0309692",
+      "expectedTraceId": "935743cf3e74400c816067986f745ea6",
+      "matchedTraceId": "935743cf3e74400c816067986f745ea6",
+      "startedAt": "2026-10-12T10:37:42.744997Z",
+      "finishedAt": "2026-10-12T10:37:43.205282Z",
+      "workflowOutcome": "succeeded",
+      "correlationStatus": "matched",
+      "terminalHttpStatus": 200,
+      "terminalAssertionPassed": true,
+      "traceQuality": "VALID",
+      "spanCount": 33
+    }
+  ],
+  "readiness": {
+    "requiredTrials": 3,
+    "recordedTrials": 3,
+    "eligibleTrials": 3,
+    "successfulTrials": 3,
+    "failedTrials": 0,
+    "excludedTrials": 0,
+    "duplicateTraceIds": [],
+    "successRate": 1.0,
+    "ready": true,
+    "blockers": []
+  }
+}
