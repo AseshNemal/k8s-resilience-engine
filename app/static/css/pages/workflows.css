@@ -3,6 +3,75 @@
  * Owned by: Member 1 (A.D. Perera).
  */
 
+.dependency-legend {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+}
+.dependency-legend article {
+    padding: 20px;
+    border: 1px solid var(--color-border, #cbd5e1);
+    border-radius: var(--radius-medium, 8px);
+    background: var(--color-surface, #fff);
+    min-width: 0;
+}
+.dependency-legend__index {
+    font: 600 14px/1.5 monospace;
+    color: var(--color-primary, #1d4ed8);
+}
+.dependency-legend h3 { margin: 8px 0; font-size: 16px; }
+.dependency-legend p { margin: 0; font-size: 14px; line-height: 1.6; }
+.workflow-request-details, .workflow-evidence-details {
+    padding: 16px;
+    border: 1px solid var(--color-border, #cbd5e1);
+    border-radius: var(--radius-medium, 8px);
+    margin-top: 16px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.workflow-request-details summary, .workflow-evidence-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 8px 0;
+    min-height: 44px;
+}
+.workflow-request-details label, .workflow-evidence-details small {
+    display: block;
+    margin-top: 12px;
+}
+.guided-contract input:not([type="checkbox"]), .guided-contract textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 44px;
+    margin: 8px 0 16px;
+    padding: 12px;
+    border: 1px solid var(--color-border, #cbd5e1);
+    border-radius: var(--radius-small, 6px);
+    background: var(--color-surface, #fff);
+    color: var(--color-text, #0f172a);
+    font: inherit;
+}
+.guided-contract textarea { resize: vertical; }
+.guided-contract label { display: block; font-weight: 600; }
+.guided-analysis :is(input, button, textarea, select, summary):focus-visible,
+.research-audit :is(input, button, textarea, select, summary):focus-visible {
+    outline: 3px solid var(--color-primary, #1d4ed8);
+    outline-offset: 3px;
+    scroll-margin: 80px;
+}
+.guided-analysis button:disabled { cursor: not-allowed; opacity: .6; }
+.guided-contract__status.is-error { color: var(--color-danger, #b91c1c); }
+@media (max-width: 1000px) { .dependency-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+    .dependency-legend { grid-template-columns: 1fr; }
+    .guided-contract input, .guided-contract textarea { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .guided-analysis *, .research-audit * { animation: none !important; transition: none !important; }
+}
+
 .workflow-dag-container {
     width: 100%;
     min-height: 280px;
@@ -1021,6 +1090,7 @@
 
 .guided-field input,
 .guided-field select,
+.guided-field textarea,
 .guided-discovery select {
     width: 100%;
     min-height: 44px;
@@ -1029,6 +1099,50 @@
     border-radius: var(--radius-small);
     background: #fff;
     color: var(--color-text);
+}
+
+.guided-field textarea {
+    resize: vertical;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+}
+
+.telemetry-onboarding {
+    margin-top: var(--space-lg);
+    padding: var(--space-lg);
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-medium);
+    background: #f8fbff;
+}
+
+.telemetry-onboarding h4,
+.telemetry-onboarding p {
+    margin: 0;
+}
+
+.telemetry-capabilities {
+    display: flex;
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: #fff;
+}
+
+.telemetry-capabilities legend {
+    padding: 0 6px;
+    color: var(--color-text-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.telemetry-capabilities label {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 11px;
 }
 
 .guided-field small {
