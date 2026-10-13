@@ -1,0 +1,21 @@
+{
+  "evidenceClass": "REAL_EMPIRICAL",
+  "workflowId": "checkout",
+  "status": "not_generated_ineligible_trace",
+  "workflowGraph": null,
+  "reason": "The only correlated trace was classified PARTIAL and excluded by the existing trace-quality gate.",
+  "excludedTraceIds": [
+    "f02061202f0745149ed704b5d4d56dc0"
+  ],
+  "observedEdgeCandidatesForDiagnosisOnly": [
+    {"source": "checkoutservice", "target": "emailservice"},
+    {"source": "checkoutservice", "target": "paymentservice"},
+    {"source": "checkoutservice", "target": "productcatalogservice"},
+    {"source": "frontend", "target": "checkoutservice"},
+    {"source": "frontend", "target": "currencyservice"},
+    {"source": "frontend", "target": "productcatalogservice"},
+    {"source": "frontend", "target": "recommendationservice"},
+    {"source": "recommendationservice", "target": "productcatalogservice"}
+  ],
+  "warning": "These observed candidates are not a validated WorkflowGraph and must not be used as mandatory dependencies."
+}

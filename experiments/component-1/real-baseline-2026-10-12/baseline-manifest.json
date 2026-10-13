@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "real-baseline:f02061202f0745149ed704b5d4d56dc0",
+  "evidenceClass": "REAL_EMPIRICAL",
+  "experimentStatus": "FAILED_EVIDENCE_GATES",
+  "createdAt": "2026-10-12T05:57:34.852339Z",
+  "createdBy": "codex-evidence-first-2026-10-12",
+  "campaignId": "campaign:d8b9718a9da446088b9d7f374efa19bf",
+  "analysisSessionId": "analysis:4fb403eafa4a4dd69012b42acaa75cac",
+  "executionId": "execution:d8b9718a9da446088b9d7f374efa19bf:94369e4f9c70",
+  "workflowId": "checkout",
+  "workloadProfile": "online_boutique_checkout_v0_10_1",
+  "environment": {
+    "environmentId": "online-boutique-local",
+    "deploymentType": "docker-compose",
+    "applicationUrl": "http://localhost:8080",
+    "jaegerUrl": "http://127.0.0.1:16686",
+    "kubernetesAvailable": false,
+    "containers": [
+      {
+        "name": "boutique-frontend",
+        "image": "gcr.io/google-samples/microservices-demo/frontend:v0.10.1",
+        "imageDigest": "sha256:c68fa7338008110b8255793a49b9fc945460e3dd43ca16d1eb63d46d6bed9994"
+      },
+      {
+        "name": "boutique-checkoutservice",
+        "image": "gcr.io/google-samples/microservices-demo/checkoutservice:v0.10.1",
+        "imageDigest": "sha256:3ec48884a578c7cdadad9fc3a2fb3c916aeceaee9c7b5b6ab9fea7837cfdf8c6"
+      },
+      {
+        "name": "boutique-cartservice",
+        "image": "gcr.io/google-samples/microservices-demo/cartservice:v0.10.1",
+        "imageDigest": "sha256:320f489912a65cee07773a33ab012aba04e61a913db2a5f08a01d52de798a159"
+      },
+      {
+        "name": "boutique-shippingservice",
+        "image": "gcr.io/google-samples/microservices-demo/shippingservice:v0.10.1",
+        "imageDigest": "sha256:d56183f51c4b4e2b9347608fb6cb1492ffb93e095c76501147a03a383f3032fd"
+      },
+      {
+        "name": "jaeger",
+        "image": "jaegertracing/all-in-one:1.56",
+        "imageDigest": "sha256:854fc203f0ccc39e2bee2f340fdf3c58961fa3dd798bafb670e4125f4257dcf8"
+      }
+    ]
+  },
+  "correlation": {
+    "expectedTraceId": "f02061202f0745149ed704b5d4d56dc0",
+    "matchedTraceId": "f02061202f0745149ed704b5d4d56dc0",
+    "traceIdMatches": true,
+    "traceTimingWithinInvocation": true
+  },
+  "results": {
+    "workflowOutcome": "failed",
+    "traceQuality": "PARTIAL",
+    "traceEligible": false,
+    "graphGenerated": false,
+    "empiricalMetricsCalculated": false,
+    "baselineReady": false
+  },
+  "sourceDigests": {
+    "f02061202f0745149ed704b5d4d56dc0.raw-jaeger.json": "sha256:af5006523b2a90a7bb8a2ae23e8990fabca76b3342faf8cd04a40c563b3c6634",
+    "trace-analysis.json": "sha256:af48fe0dd3dcb07717ea8cffe491e6e88be91ec9fb3ff4b8e6690eea6af5bbc9",
+    "workflow-graph.json": "sha256:efa16da5d282f8edfdaf1afbabf7a59168ae6d50b1186bd8b57559a6971aa977",
+    "workflow-outcome.json": "sha256:a04f277959b34a914ba2d6e802b0f640350c709035cd05aa5d3a1819e981c184"
+  },
+  "blockers": [
+    "The registered terminal operation POST /cart/checkout is not the operation name emitted by the frontend instrumentation.",
+    "The trace is partial because cartservice and shippingservice have client spans but no server-side service identities.",
+    "The campaign baseline has zero successful trials and exceeds its stability gate.",
+    "No independently reviewed real reference workflow is available, so empirical accuracy cannot be calculated."
+  ]
+}

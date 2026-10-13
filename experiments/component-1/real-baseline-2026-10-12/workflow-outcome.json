@@ -1,0 +1,32 @@
+{
+  "evidenceClass": "REAL_EMPIRICAL",
+  "executionId": "execution:d8b9718a9da446088b9d7f374efa19bf:94369e4f9c70",
+  "campaignId": "campaign:d8b9718a9da446088b9d7f374efa19bf",
+  "batchId": "batch:d8b9718a9da446088b9d7f374efa19bf:baseline",
+  "workflowId": "checkout",
+  "environmentId": "online-boutique-local",
+  "source": "controlled_workflow_experiment",
+  "invocationStatus": "completed",
+  "workflowOutcome": "failed",
+  "correlationStatus": "matched",
+  "expectedTraceId": "f02061202f0745149ed704b5d4d56dc0",
+  "matchedTraceId": "f02061202f0745149ed704b5d4d56dc0",
+  "evidenceId": "trace:f02061202f0745149ed704b5d4d56dc0",
+  "evidenceLocator": "http://127.0.0.1:16686/api/traces/f02061202f0745149ed704b5d4d56dc0",
+  "startedAt": "2026-10-12T05:57:33.912788Z",
+  "finishedAt": "2026-10-12T05:57:34.575339Z",
+  "recordedAt": "2026-10-12T05:57:34.852339Z",
+  "traceFirstSpanStartedAt": "2026-10-12T05:57:34.509920Z",
+  "traceLastSpanFinishedAt": "2026-10-12T05:57:34.574330Z",
+  "correlationVerification": {
+    "traceIdMatches": true,
+    "traceTimingWithinInvocation": true,
+    "rawTraceCount": 1,
+    "rawSpanCount": 29
+  },
+  "assertions": [],
+  "reasons": [
+    "Terminal service and operation were not observed"
+  ],
+  "interpretation": "The invocation and exact trace are correlated, but the registered trace-based success assertion failed. This record is not a successful baseline sample."
+}
