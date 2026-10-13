@@ -30,6 +30,12 @@ def test_guided_flow_gates_collection_and_exports_research_artifacts() -> None:
     assert "Download manifest JSON" in script
     assert "Download validated graph JSON" in script
     assert 'guidedText("h4", "", campaign.workflowName)' in script
+    assert 'name="traceSourceType"' in TEMPLATE.read_text(encoding="utf-8")
+    assert 'name="traceEndpoint"' in TEMPLATE.read_text(encoding="utf-8")
+    assert 'name="traceAuthentication"' in TEMPLATE.read_text(encoding="utf-8")
+    assert 'name="traceSecretEnv"' in TEMPLATE.read_text(encoding="utf-8")
+    assert "traceSource:" in script
+    assert 'values.get("traceSourceType")' in script
 
 
 def test_guided_flow_has_keyboard_mobile_and_reduced_motion_rules() -> None:
