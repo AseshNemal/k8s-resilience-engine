@@ -51,6 +51,15 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class SpanLink:
+    """A non-parent causal reference, such as OTel link or FOLLOWS_FROM."""
+
+    trace_id: str
+    span_id: str
+    reference_type: str
+
+
 @dataclass
 class Span:
     """A single OpenTelemetry / Jaeger span, normalised from the raw export."""
@@ -78,6 +87,9 @@ class Span:
 
     error: bool = False
     """``True`` when the span's ``error`` tag is set to ``True``."""
+
+    links: tuple[SpanLink, ...] = ()
+    """Explicit non-parent references kept separate from synchronous calls."""
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +141,23 @@ def _parent_span_id(raw_span: dict) -> str | None:
     return child_reference.get("spanID") or None
 
 
+def _span_links(raw_span: dict, trace_id: str) -> tuple[SpanLink, ...]:
+    links: list[SpanLink] = []
+    for reference in raw_span.get("references", []):
+        reference_type = str(reference.get("refType", "")).upper()
+        span_id = str(reference.get("spanID", "")).strip()
+        if reference_type == "CHILD_OF" or not span_id:
+            continue
+        links.append(
+            SpanLink(
+                trace_id=str(reference.get("traceID") or trace_id),
+                span_id=span_id,
+                reference_type=reference_type or "SPAN_LINK",
+            )
+        )
+    return tuple(links)
+
+
 def _span_tags(raw_span: dict) -> tuple[dict[str, str], bool]:
     """Flatten Jaeger tags and report whether the error tag is true."""
     raw_tags = raw_span.get("tags", [])
@@ -153,6 +182,7 @@ def _parse_span(raw_span: dict, trace_id: str, processes: dict[str, dict]) -> Sp
         duration_us=raw_span.get("duration", 0),
         tags=tags,
         error=has_error,
+        links=_span_links(raw_span, trace_id),
     )
 
 

@@ -34,6 +34,8 @@ from app.engine.workflow_dependency_modeling.interaction_extractor import (
 from app.engine.workflow_dependency_modeling.trace_reader import (
     load_traces_from_file,
     parse_spans,
+    Span,
+    SpanLink,
 )
 
 TRACES_DIR = Path("sample_data/traces")
@@ -295,3 +297,57 @@ class TestAggregateEdgesEdgeCases:
         assert len(observed) == 1
         assert observed[0].frequency == pytest.approx(1.0)
         assert observed[0].occurrence_count == 1
+
+
+def test_span_links_are_preserved_separately_from_synchronous_edges() -> None:
+    spans = [
+        Span("t1", "producer", None, "orderservice", "publish", 10),
+        Span(
+            "t1",
+            "consumer",
+            None,
+            "emailservice",
+            "consume",
+            10,
+            links=(SpanLink("t1", "producer", "SPAN_LINK"),),
+        ),
+    ]
+    interaction = extract_interactions(spans)[0]
+    assert interaction.edges == []
+    assert interaction.linked_edges == [
+        ServiceEdge(source="orderservice", target="emailservice")
+    ]
+
+
+def test_retry_attempt_counts_do_not_double_count_client_and_server_spans() -> None:
+    spans = [Span("t1", "root", None, "frontend", "checkout", 100)]
+    for attempt in ("1", "2"):
+        spans.extend(
+            [
+                Span(
+                    "t1",
+                    f"client-{attempt}",
+                    "root",
+                    "frontend",
+                    "POST cart",
+                    20,
+                    tags={"span.kind": "client", "server.address": "cartservice"},
+                ),
+                Span(
+                    "t1",
+                    f"server-{attempt}",
+                    f"client-{attempt}",
+                    "cartservice",
+                    "POST cart",
+                    15,
+                ),
+            ]
+        )
+    interaction = extract_interactions(spans)[0]
+    assert interaction.call_counts[("frontend", "cartservice")] == 2
+    observed = aggregate_edges([interaction])[0]
+    assert observed.occurrence_count == 1
+    assert observed.frequency == pytest.approx(1.0)
+    assert observed.total_call_count == 2
+    assert observed.max_calls_per_trace == 2
+    assert observed.repeated_trace_count == 1
