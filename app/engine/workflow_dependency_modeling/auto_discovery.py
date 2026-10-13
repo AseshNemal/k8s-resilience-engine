@@ -52,16 +52,32 @@ def slugify_operation(text: str) -> str:
 _slugify = slugify_operation
 
 
+_DYNAMIC_PATH_SEGMENT = re.compile(
+    r"^(?:\d+|[0-9a-f]{8,}|[0-9a-f]{8}-[0-9a-f-]{27,})$",
+    re.IGNORECASE,
+)
+
+
+def _normalized_http_path(path: str) -> str:
+    """Normalize only strong identifier shapes without application-name rules."""
+    segments = path.split("/")
+    return "/".join(
+        "{id}" if _DYNAMIC_PATH_SEGMENT.fullmatch(segment) else segment
+        for segment in segments
+    )
+
+
 def operation_key(root: Span) -> str | None:
     """Group requests by method and route, excluding health and telemetry traffic."""
     method = root.tags.get("http.request.method", root.tags.get("http.method"))
-    target = root.tags.get("http.route") or root.tags.get("http.target") or root.tags.get("url.full")
+    route = root.tags.get("http.route") or root.tags.get("url.template")
+    target = route or root.tags.get("http.target") or root.tags.get("url.full")
     if method and target:
         path = urlsplit(target).path
         if path in {"/_healthz", "/healthz", "/health", "/readyz", "/metrics"} or path.startswith("/static/"):
             return None
-        # Online Boutique product IDs identify resources, not different workflows.
-        path = re.sub(r"^/product/[^/]+$", "/product/{id}", path)
+        if not route:
+            path = _normalized_http_path(path)
         return f"{method.upper()} {path}"
     if "TraceService/Export" in root.operation_name or root.tags.get("span.kind") == "client":
         return None

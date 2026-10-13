@@ -53,6 +53,7 @@ from app.engine.workflow_dependency_modeling.dependency_classifier import (
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_service import (
     approve_dependency_assessment,
+    build_condition_scoped_workflow_graph,
     configure_dependency_assessment_repository,
     create_dependency_assessment,
     evaluate_approved_dependency_assessment,
@@ -94,6 +95,7 @@ from app.engine.workflow_dependency_modeling.graph_builder import (
 )
 from app.engine.workflow_dependency_modeling.interaction_extractor import (
     aggregate_edges,
+    aggregate_linked_edges,
     extract_interactions,
 )
 from app.engine.workflow_dependency_modeling.models import SuccessCondition, WorkflowScenario
@@ -117,6 +119,14 @@ from app.engine.workflow_dependency_modeling.graph_freeze_service import (
     get_frozen_workflow_graph,
 )
 from app.engine.workflow_dependency_modeling.trace_source import TraceSource
+from app.engine.workflow_dependency_modeling.telemetry_readiness import (
+    assess_telemetry_readiness,
+    telemetry_source_capabilities,
+)
+from app.engine.workflow_dependency_modeling.telemetry_normalizer import (
+    inspect_telemetry_payload,
+    normalize_telemetry_payload,
+)
 from app.integrations.jaeger.client import JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
 
@@ -283,7 +293,9 @@ def get_live_evidence(
                 "frequency": count / len(selected),
             }
         )
-    edges = aggregate_edges(extract_interactions(spans))
+    interactions = extract_interactions(spans)
+    edges = aggregate_edges(interactions)
+    linked_edges = aggregate_linked_edges(interactions)
     return {
         "workflowId": operation,
         "criticality": None,
@@ -300,6 +312,28 @@ def get_live_evidence(
         "source": "live_unverified",
         "traceQuality": quality.to_mapping(),
         "edges": [{"source": edge.source, "target": edge.target} for edge in edges],
+        "edgeEvidence": [
+            {
+                "source": edge.source,
+                "target": edge.target,
+                "occurrenceCount": edge.occurrence_count,
+                "frequency": edge.frequency,
+                "totalCallCount": edge.total_call_count,
+                "maxCallsPerTrace": edge.max_calls_per_trace,
+                "repeatedTraceCount": edge.repeated_trace_count,
+            }
+            for edge in edges
+        ],
+        "linkedEdges": [
+            {
+                "source": edge.source,
+                "target": edge.target,
+                "evidenceType": "SPAN_LINK",
+                "occurrenceCount": edge.occurrence_count,
+                "frequency": edge.frequency,
+            }
+            for edge in linked_edges
+        ],
     }
 
 
@@ -356,11 +390,13 @@ def get_sample_workflow() -> WorkflowGraph:
 
 
 __all__ = [
+    "assess_telemetry_readiness",
     "assess_experiment_campaign",
     "approve_experiment_campaign",
     "build_workflow_graph",
     "baseline_readiness",
     "approve_dependency_assessment",
+    "build_condition_scoped_workflow_graph",
     "configure_dependency_assessment_repository",
     "configure_analysis_session_repository",
     "configure_classification_evaluation_repository",
@@ -405,12 +441,14 @@ __all__ = [
     "list_experiment_campaigns",
     "list_experiment_manifests",
     "intervention_status",
+    "inspect_telemetry_payload",
     "record_intervention_event",
     "list_dependency_assessments",
     "list_dependency_classification_evaluations",
     "list_dependency_classification_references",
     "list_versioned_scenarios",
     "list_workflow_analyses",
+    "normalize_telemetry_payload",
     "record_execution",
     "register_jaeger_execution",
     "run_dependency_repeatability_analysis",
@@ -421,6 +459,7 @@ __all__ = [
     "scenario_etag",
     "start_workflow_analysis",
     "transition_scenario_lifecycle",
+    "telemetry_source_capabilities",
     "update_scenario",
     "verify_experiment_manifest",
 ]

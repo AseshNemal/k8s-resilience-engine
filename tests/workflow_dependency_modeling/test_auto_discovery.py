@@ -4,6 +4,7 @@ from app.engine.workflow_dependency_modeling.auto_discovery import (
     _slugify,
     discover_root_workflows,
     find_root_spans,
+    operation_key,
 )
 from app.engine.workflow_dependency_modeling.trace_reader import (
     Span,
@@ -53,3 +54,22 @@ def test_discover_root_workflows_with_checkout_traces():
 
 def test_discover_root_workflows_empty():
     assert discover_root_workflows([]) == []
+
+
+def test_operation_normalization_uses_generic_identifier_shapes_only():
+    numeric = Span(
+        "t1", "s1", None, "gateway", "GET /orders/123", 10,
+        tags={"http.request.method": "GET", "http.target": "/orders/123"},
+    )
+    named = Span(
+        "t2", "s2", None, "gateway", "GET /users/profile", 10,
+        tags={"http.request.method": "GET", "http.target": "/users/profile"},
+    )
+    templated = Span(
+        "t3", "s3", None, "gateway", "GET order", 10,
+        tags={"http.request.method": "GET", "http.route": "/orders/{orderId}"},
+    )
+
+    assert operation_key(numeric) == "GET /orders/{id}"
+    assert operation_key(named) == "GET /users/profile"
+    assert operation_key(templated) == "GET /orders/{orderId}"

@@ -18,8 +18,8 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
 )
 from app.engine.workflow_dependency_modeling.auto_discovery import slugify_operation
 from app.engine.workflow_dependency_modeling.trace_source import (
-    JaegerTraceSource,
     TraceSourceConfiguration,
+    create_trace_source,
 )
 
 
@@ -61,24 +61,30 @@ def _repository(repository: AnalysisSessionRepository | None) -> AnalysisSession
     return _default_repository
 
 
-def _jaeger_url(value: Any) -> str:
+def _trace_endpoint(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError("jaegerUrl is required")
+        raise ValueError("trace source endpoint is required")
     parsed = urlsplit(value.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("jaegerUrl must be an absolute HTTP or HTTPS URL")
+        raise ValueError("trace source endpoint must be an absolute HTTP or HTTPS URL")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError("jaegerUrl cannot contain credentials, a query, or a fragment")
+        raise ValueError(
+            "trace source endpoint cannot contain credentials, a query, or a fragment"
+        )
     allowed = {
         item.strip().lower()
         for item in os.getenv(
-            "WORKFLOW_JAEGER_ALLOWED_HOSTS", "localhost,127.0.0.1,::1,jaeger"
+            "WORKFLOW_TRACE_ALLOWED_HOSTS",
+            os.getenv(
+                "WORKFLOW_JAEGER_ALLOWED_HOSTS",
+                "localhost,127.0.0.1,::1,jaeger,zipkin,tempo",
+            ),
         ).split(",")
         if item.strip()
     }
     if parsed.hostname.lower() not in allowed:
         raise ValueError(
-            "Jaeger host is not approved; configure WORKFLOW_JAEGER_ALLOWED_HOSTS"
+            "Trace source host is not approved; configure WORKFLOW_TRACE_ALLOWED_HOSTS"
         )
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
 
@@ -98,7 +104,7 @@ def _trace_source(data: Mapping[str, Any]) -> TraceSourceConfiguration:
         )
     else:
         source = TraceSourceConfiguration.from_mapping(raw_source)
-    endpoint = _jaeger_url(source.endpoint)
+    endpoint = _trace_endpoint(source.endpoint)
     return TraceSourceConfiguration(
         kind=source.kind,
         endpoint=endpoint,
@@ -155,7 +161,7 @@ def start_workflow_analysis(
         trace_source.endpoint,
         limit,
         lookback,
-        JaegerTraceSource.from_configuration(trace_source),
+        create_trace_source(trace_source),
     )
     timestamp = _timestamp(now)
     trace_quality = evidence.get("traceQuality", {})
@@ -225,7 +231,7 @@ def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]
         jaeger_url=trace_source.endpoint,
         limit=limit,
         lookback=lookback,
-        trace_source=JaegerTraceSource.from_configuration(trace_source),
+        trace_source=create_trace_source(trace_source),
     )
 
 
