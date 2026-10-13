@@ -1,0 +1,24 @@
+services:
+  checkoutservice:
+    image: k8s-resilience/checkoutservice-context:v0.10.1
+    build:
+      context: ./instrumented-boutique/checkoutservice
+      args:
+        UPSTREAM_COMMIT: 39efed435e697bcdcd31c5e45f4d36dc35c98a63
+
+  cartservice:
+    image: k8s-resilience/cartservice-otel:v0.10.1
+    build:
+      context: ./instrumented-boutique/cartservice
+      args:
+        UPSTREAM_COMMIT: 39efed435e697bcdcd31c5e45f4d36dc35c98a63
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+
+  shippingservice:
+    image: k8s-resilience/shippingservice-otel:v0.10.1
+    build:
+      context: ./instrumented-boutique/shippingservice
+      args:
+        UPSTREAM_COMMIT: 39efed435e697bcdcd31c5e45f4d36dc35c98a63
