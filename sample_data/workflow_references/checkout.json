@@ -17,5 +17,23 @@
   "optionalEdges": [
     {"source": "checkoutservice", "target": "emailservice"}
   ],
+  "evaluatedNonEdges": [
+    {"source": "frontend", "target": "checkoutservice"},
+    {"source": "frontend", "target": "paymentservice"},
+    {"source": "frontend", "target": "emailservice"},
+    {"source": "cartservice", "target": "frontend"},
+    {"source": "cartservice", "target": "paymentservice"},
+    {"source": "cartservice", "target": "emailservice"},
+    {"source": "checkoutservice", "target": "frontend"},
+    {"source": "checkoutservice", "target": "cartservice"},
+    {"source": "paymentservice", "target": "frontend"},
+    {"source": "paymentservice", "target": "cartservice"},
+    {"source": "paymentservice", "target": "checkoutservice"},
+    {"source": "paymentservice", "target": "emailservice"},
+    {"source": "emailservice", "target": "frontend"},
+    {"source": "emailservice", "target": "cartservice"},
+    {"source": "emailservice", "target": "checkoutservice"},
+    {"source": "emailservice", "target": "paymentservice"}
+  ],
   "synthetic": true
 }

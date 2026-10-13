@@ -15,6 +15,7 @@ def reference(
     edges: list[dict[str, str]] | None = None,
     mandatory_edges: list[dict[str, str]] | None = None,
     optional_edges: list[dict[str, str]] | None = None,
+    evaluated_non_edges: list[dict[str, str]] | None = None,
 ) -> ReferenceWorkflow:
     expected_services = services or ["frontend", "checkout"]
     expected_mandatory = mandatory_services
@@ -34,6 +35,7 @@ def reference(
             "expectedEdges": expected_edges,
             "mandatoryEdges": expected_mandatory_edges,
             "optionalEdges": optional_edges or [],
+            "evaluatedNonEdges": evaluated_non_edges or [],
             "synthetic": True,
         }
     )
@@ -163,6 +165,37 @@ def test_mandatory_edge_metrics_exclude_optional_reference_edges() -> None:
     assert result.mandatory_edge_metrics.f1 == pytest.approx(1.0)
     assert result.mandatory_edge_evaluation_status == "evaluated"
     assert result.true_positive_mandatory_edges == [("frontend", "checkout")]
+    assert result.mandatory_edge_metrics.true_negatives == 1
+    assert result.mandatory_edge_metrics.evaluated_count == 2
+    assert result.mandatory_edge_metrics.accuracy_definition == (
+        "confusion_matrix_over_explicit_universe"
+    )
+
+
+def test_edge_accuracy_uses_explicit_negative_universe() -> None:
+    generated = graph().model_copy(
+        update={
+            "edges": [
+                WorkflowEdge(source="frontend", target="checkout"),
+                WorkflowEdge(source="checkout", target="frontend"),
+            ]
+        }
+    )
+    result = evaluate_graph(
+        generated,
+        reference(
+            evaluated_non_edges=[
+                {"source": "checkout", "target": "frontend"},
+            ]
+        ),
+    )
+
+    assert result.edge_metrics.true_positives == 1
+    assert result.edge_metrics.false_positives == 1
+    assert result.edge_metrics.true_negatives == 0
+    assert result.edge_metrics.evaluated_count == 2
+    assert result.edge_metrics.accuracy == pytest.approx(0.5)
+    assert result.edge_metrics.jaccard_similarity == pytest.approx(0.5)
 
 
 def test_mandatory_edge_evaluation_rejects_edges_absent_from_prediction() -> None:

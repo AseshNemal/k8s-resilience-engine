@@ -15,5 +15,16 @@
   "optionalEdges": [
     {"source": "paymentservice", "target": "notificationservice"}
   ],
+  "evaluatedNonEdges": [
+    {"source": "frontend", "target": "paymentservice"},
+    {"source": "frontend", "target": "notificationservice"},
+    {"source": "orderservice", "target": "frontend"},
+    {"source": "orderservice", "target": "notificationservice"},
+    {"source": "paymentservice", "target": "frontend"},
+    {"source": "paymentservice", "target": "orderservice"},
+    {"source": "notificationservice", "target": "frontend"},
+    {"source": "notificationservice", "target": "orderservice"},
+    {"source": "notificationservice", "target": "paymentservice"}
+  ],
   "synthetic": true
 }
