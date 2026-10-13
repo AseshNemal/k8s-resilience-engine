@@ -88,3 +88,27 @@ def test_client_target_without_server_process_is_partial_evidence() -> None:
     assert result.quality is TraceQuality.PARTIAL
     assert result.missing_service_identities == ("paymentservice",)
     assert "paymentservice" in result.reasons[-1]
+
+
+def test_client_target_recovers_observed_edge_without_inventing_server_span() -> None:
+    client = _span("client")
+    client["tags"] = [
+        {"key": "span.kind", "value": "client"},
+        {"key": "rpc.system", "value": "grpc"},
+        {"key": "server.address", "value": "paymentservice.default.svc.cluster.local"},
+    ]
+
+    interaction = extract_interactions(
+        parse_spans([_trace("missing-server", [client])])
+    )[0]
+
+    assert [(edge.source, edge.target) for edge in interaction.edges] == [
+        ("frontend", "paymentservice")
+    ]
+    assert interaction.observed_services == ["frontend", "paymentservice"]
+
+    client["tags"][2]["value"] = "10.0.0.25"
+    ip_interaction = extract_interactions(
+        parse_spans([_trace("ip-only-peer", [client])])
+    )[0]
+    assert ip_interaction.edges == []
