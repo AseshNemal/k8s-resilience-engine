@@ -8,9 +8,13 @@ from typing import TYPE_CHECKING, Any, Mapping
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     AssessmentApproval,
     AssessmentPolicy,
+    CohortStatistics,
     DependencyAssessment,
+    DependencyConditionResult,
+    EdgeDependencyAssessment,
     EdgeInterventionCohort,
     InterventionCohort,
+    ServiceDependencyAssessment,
     ValidatedDependencyType,
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
@@ -117,6 +121,131 @@ def _validate_records(
             )
 
 
+def _validate_condition_records(
+    records: list[ExecutionOutcome], condition_id: str
+) -> None:
+    mismatched = [
+        item.registration.execution_id
+        for item in records
+        if item.registration.condition_id != condition_id
+    ]
+    if mismatched:
+        raise ValueError(
+            f"Execution cohort for condition '{condition_id}' contains mismatched executions: "
+            + ", ".join(sorted(mismatched))
+        )
+
+
+def _combine_statistics(items: list[CohortStatistics]) -> CohortStatistics:
+    eligible = sum(item.eligible_records for item in items)
+    succeeded = sum(item.succeeded_records for item in items)
+    return CohortStatistics(
+        total_records=sum(item.total_records for item in items),
+        eligible_records=eligible,
+        excluded_records=sum(item.excluded_records for item in items),
+        succeeded_records=succeeded,
+        failed_records=sum(item.failed_records for item in items),
+        success_rate=succeeded / eligible if eligible else None,
+        eligible_execution_ids=tuple(
+            execution_id
+            for item in items
+            for execution_id in item.eligible_execution_ids
+        ),
+        eligible_trace_ids=tuple(
+            trace_id for item in items for trace_id in item.eligible_trace_ids
+        ),
+    )
+
+
+def _condition_result(
+    condition_id: str,
+    assessment: ServiceDependencyAssessment | EdgeDependencyAssessment,
+) -> DependencyConditionResult:
+    return DependencyConditionResult(
+        condition_id=condition_id,
+        classification=assessment.classification,
+        baseline=assessment.baseline,
+        intervention=assessment.intervention,
+        intervention_type=assessment.intervention_type,
+        failure_effect=assessment.failure_effect,
+        evidence_strength=assessment.evidence_strength,
+        reasons=assessment.reasons,
+        excluded_execution_ids=assessment.excluded_execution_ids,
+    )
+
+
+def _aggregate_classification(
+    results: list[DependencyConditionResult],
+) -> ValidatedDependencyType:
+    labels = {item.classification for item in results}
+    if ValidatedDependencyType.INSUFFICIENT_EVIDENCE in labels:
+        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+    if len(labels) == 1:
+        return next(iter(labels))
+    return ValidatedDependencyType.CONDITIONAL
+
+
+def _aggregate_service(
+    service_name: str, results: list[DependencyConditionResult]
+) -> ServiceDependencyAssessment:
+    classification = _aggregate_classification(results)
+    return ServiceDependencyAssessment(
+        service_name=service_name,
+        classification=classification,
+        baseline=_combine_statistics([item.baseline for item in results]),
+        intervention=_combine_statistics([item.intervention for item in results]),
+        intervention_type=(
+            results[0].intervention_type
+            if len({item.intervention_type for item in results}) == 1
+            else None
+        ),
+        failure_effect=results[0].failure_effect if len(results) == 1 else None,
+        evidence_strength=min(item.evidence_strength for item in results),
+        reasons=(
+            ("Dependency classification differs across declared workflow conditions",)
+            if classification is ValidatedDependencyType.CONDITIONAL
+            else tuple(reason for item in results for reason in item.reasons)
+        ),
+        excluded_execution_ids=tuple(
+            execution_id
+            for item in results
+            for execution_id in item.excluded_execution_ids
+        ),
+        condition_results=tuple(results),
+    )
+
+
+def _aggregate_edge(
+    source: str, target: str, results: list[DependencyConditionResult]
+) -> EdgeDependencyAssessment:
+    classification = _aggregate_classification(results)
+    return EdgeDependencyAssessment(
+        source_service=source,
+        target_service=target,
+        classification=classification,
+        baseline=_combine_statistics([item.baseline for item in results]),
+        intervention=_combine_statistics([item.intervention for item in results]),
+        intervention_type=(
+            results[0].intervention_type
+            if len({item.intervention_type for item in results}) == 1
+            else None
+        ),
+        failure_effect=results[0].failure_effect if len(results) == 1 else None,
+        evidence_strength=min(item.evidence_strength for item in results),
+        reasons=(
+            ("Dependency classification differs across declared workflow conditions",)
+            if classification is ValidatedDependencyType.CONDITIONAL
+            else tuple(reason for item in results for reason in item.reasons)
+        ),
+        excluded_execution_ids=tuple(
+            execution_id
+            for item in results
+            for execution_id in item.excluded_execution_ids
+        ),
+        condition_results=tuple(results),
+    )
+
+
 def _assessment_scope(
     graph: WorkflowGraph,
     baseline_ids: tuple[str, ...],
@@ -125,13 +254,21 @@ def _assessment_scope(
     structural_entry_service: str | None,
 ) -> set[str]:
     intervention_services = [item.target_service for item in interventions]
-    if len(intervention_services) != len(set(intervention_services)):
-        raise ValueError("Only one intervention cohort is allowed per candidate service")
+    service_condition_keys = [
+        (item.target_service, item.condition_id) for item in interventions
+    ]
+    if len(service_condition_keys) != len(set(service_condition_keys)):
+        raise ValueError(
+            "Only one intervention cohort is allowed per candidate service and condition"
+        )
     edge_keys = [
-        (item.source_service, item.target_service) for item in edge_interventions
+        (item.source_service, item.target_service, item.condition_id)
+        for item in edge_interventions
     ]
     if len(edge_keys) != len(set(edge_keys)):
-        raise ValueError("Only one intervention cohort is allowed per candidate edge")
+        raise ValueError(
+            "Only one intervention cohort is allowed per candidate edge and condition"
+        )
     all_interventions = (*interventions, *edge_interventions)
     intervention_batch_list = [
         batch_id for item in all_interventions for batch_id in item.batch_ids
@@ -151,7 +288,7 @@ def _assessment_scope(
             + ", ".join(sorted(unknown))
         )
     candidate_edges = {(edge.source, edge.target) for edge in graph.edges}
-    unknown_edges = set(edge_keys) - candidate_edges
+    unknown_edges = {(source, target) for source, target, _ in edge_keys} - candidate_edges
     if unknown_edges:
         formatted = ", ".join(
             f"{source}->{target}" for source, target in sorted(unknown_edges)
@@ -189,7 +326,8 @@ def create_dependency_assessment(
         raise ValueError("Candidate graph workflow ID does not match the assessment")
     if not isinstance(scenario_version, int) or isinstance(scenario_version, bool):
         raise ValueError("scenarioVersion must be a positive integer")
-    get_versioned_scenario(workflow_id, scenario_version)
+    scenario = get_versioned_scenario(workflow_id, scenario_version)
+    condition_ids = tuple(item.condition_id for item in scenario.conditions)
 
     baseline_ids = DependencyAssessment.from_mapping(
         {
@@ -220,56 +358,85 @@ def create_dependency_assessment(
     _validate_records(
         baseline_records, workflow_id, scenario_version, environment_id
     )
+    undeclared_conditions = {
+        item.registration.condition_id for item in baseline_records
+    } - set(condition_ids)
+    undeclared_conditions |= {
+        item.condition_id for item in (*interventions, *edge_interventions)
+    } - set(condition_ids)
+    if undeclared_conditions:
+        raise ValueError(
+            "Assessment evidence uses undeclared workflow conditions: "
+            + ", ".join(sorted(undeclared_conditions))
+        )
     policy = AssessmentPolicy.from_mapping(data.get("policy"))
     service_results = []
     for service_name in sorted(candidate_services - {structural_entry_service}):
-        intervention = next(
-            (item for item in interventions if item.target_service == service_name),
-            None,
-        )
-        records = (
-            _records_for_batches(intervention.batch_ids, execution_repository)
-            if intervention
-            else []
-        )
-        _validate_records(records, workflow_id, scenario_version, environment_id)
-        service_results.append(
-            assess_service_dependency(
+        condition_results = []
+        for condition_id in condition_ids:
+            intervention = next(
+                (
+                    item for item in interventions
+                    if item.target_service == service_name
+                    and item.condition_id == condition_id
+                ),
+                None,
+            )
+            records = (
+                _records_for_batches(intervention.batch_ids, execution_repository)
+                if intervention
+                else []
+            )
+            _validate_records(records, workflow_id, scenario_version, environment_id)
+            _validate_condition_records(records, condition_id)
+            baseline_for_condition = [
+                item for item in baseline_records
+                if item.registration.condition_id == condition_id
+            ]
+            result = assess_service_dependency(
                 service_name,
-                baseline_records,
+                baseline_for_condition,
                 intervention,
                 records,
                 policy,
             )
-        )
+            condition_results.append(_condition_result(condition_id, result))
+        service_results.append(_aggregate_service(service_name, condition_results))
 
     edge_results = []
     for edge in sorted(graph.edges, key=lambda item: (item.source, item.target)):
-        intervention = next(
-            (
-                item
-                for item in edge_interventions
-                if (item.source_service, item.target_service)
-                == (edge.source, edge.target)
-            ),
-            None,
-        )
-        records = (
-            _records_for_batches(intervention.batch_ids, execution_repository)
-            if intervention
-            else []
-        )
-        _validate_records(records, workflow_id, scenario_version, environment_id)
-        edge_results.append(
-            assess_edge_dependency(
+        condition_results = []
+        for condition_id in condition_ids:
+            intervention = next(
+                (
+                    item
+                    for item in edge_interventions
+                    if (item.source_service, item.target_service, item.condition_id)
+                    == (edge.source, edge.target, condition_id)
+                ),
+                None,
+            )
+            records = (
+                _records_for_batches(intervention.batch_ids, execution_repository)
+                if intervention
+                else []
+            )
+            _validate_records(records, workflow_id, scenario_version, environment_id)
+            _validate_condition_records(records, condition_id)
+            baseline_for_condition = [
+                item for item in baseline_records
+                if item.registration.condition_id == condition_id
+            ]
+            result = assess_edge_dependency(
                 edge.source,
                 edge.target,
-                baseline_records,
+                baseline_for_condition,
                 intervention,
                 records,
                 policy,
             )
-        )
+            condition_results.append(_condition_result(condition_id, result))
+        edge_results.append(_aggregate_edge(edge.source, edge.target, condition_results))
 
     assessment = DependencyAssessment.from_mapping(
         {
@@ -318,6 +485,16 @@ def approve_dependency_assessment(
         raise DependencyAssessmentNotApprovableError(
             "Assessment has insufficient evidence for: " + ", ".join(unresolved)
         )
+    conditional = [
+        item.service_name
+        for item in assessment.services
+        if item.classification is ValidatedDependencyType.CONDITIONAL
+    ]
+    if conditional:
+        raise DependencyAssessmentNotApprovableError(
+            "Conditional dependencies require a condition-scoped graph export: "
+            + ", ".join(conditional)
+        )
     if assessment.edge_interventions:
         unresolved_edges = [
             f"{item.source_service}->{item.target_service}"
@@ -328,6 +505,16 @@ def approve_dependency_assessment(
             raise DependencyAssessmentNotApprovableError(
                 "Assessment has insufficient edge evidence for: "
                 + ", ".join(unresolved_edges)
+            )
+        conditional_edges = [
+            f"{item.source_service}->{item.target_service}"
+            for item in assessment.edges
+            if item.classification is ValidatedDependencyType.CONDITIONAL
+        ]
+        if conditional_edges:
+            raise DependencyAssessmentNotApprovableError(
+                "Conditional edge dependencies require a condition-scoped graph export: "
+                + ", ".join(conditional_edges)
             )
     if not isinstance(rationale, str) or not rationale.strip():
         raise ValueError("Approval requires a non-empty rationale")
@@ -441,6 +628,113 @@ def get_validated_workflow_graph(
     repository: DependencyAssessmentRepository | None = None,
 ) -> WorkflowGraph:
     return _repository(repository).latest_approval(workflow_id).approved_graph
+
+
+def build_condition_scoped_workflow_graph(
+    assessment_id: str,
+    condition_id: str,
+    repository: DependencyAssessmentRepository | None = None,
+) -> WorkflowGraph:
+    """Project one declared condition without weakening the shared graph contract.
+
+    The caller receives an ordinary ``WorkflowGraph`` whose meaning is explicitly
+    scoped by the requested condition. It is not persisted as an approved graph.
+    """
+    assessment = _repository(repository).get_assessment(assessment_id)
+
+    def service_result(item: ServiceDependencyAssessment) -> DependencyConditionResult:
+        try:
+            return next(
+                result for result in item.condition_results
+                if result.condition_id == condition_id
+            )
+        except StopIteration as err:
+            raise ValueError(
+                f"Assessment has no service evidence for condition '{condition_id}'"
+            ) from err
+
+    def edge_result(item: EdgeDependencyAssessment) -> DependencyConditionResult:
+        try:
+            return next(
+                result for result in item.condition_results
+                if result.condition_id == condition_id
+            )
+        except StopIteration as err:
+            raise ValueError(
+                f"Assessment has no edge evidence for condition '{condition_id}'"
+            ) from err
+
+    service_results = [(item, service_result(item)) for item in assessment.services]
+    if not service_results and condition_id != "default":
+        raise ValueError("Assessment has no evidence for the requested condition")
+    unresolved = [
+        item.service_name
+        for item, result in service_results
+        if result.classification in {ValidatedDependencyType.INSUFFICIENT_EVIDENCE, ValidatedDependencyType.CONDITIONAL}
+    ]
+    if unresolved:
+        raise DependencyAssessmentNotApprovableError(
+            f"Condition '{condition_id}' has insufficient evidence for: "
+            + ", ".join(unresolved)
+        )
+    mandatory = sorted(
+        {
+            *(
+                [assessment.structural_entry_service]
+                if assessment.structural_entry_service
+                else []
+            ),
+            *(
+                item.service_name
+                for item, result in service_results
+                if result.classification is ValidatedDependencyType.MANDATORY
+            ),
+        }
+    )
+    optional = sorted(
+        item.service_name
+        for item, result in service_results
+        if result.classification is ValidatedDependencyType.OPTIONAL
+    )
+    retained = set(mandatory + optional)
+    explicit_edge_labels = bool(assessment.edge_interventions)
+    retained_edges: set[tuple[str, str]] = set()
+    if explicit_edge_labels:
+        edge_results = [(item, edge_result(item)) for item in assessment.edges]
+        unresolved_edges = [
+            f"{item.source_service}->{item.target_service}"
+            for item, result in edge_results
+            if result.classification in {ValidatedDependencyType.INSUFFICIENT_EVIDENCE, ValidatedDependencyType.CONDITIONAL}
+        ]
+        if unresolved_edges:
+            raise DependencyAssessmentNotApprovableError(
+                f"Condition '{condition_id}' has insufficient edge evidence for: "
+                + ", ".join(unresolved_edges)
+            )
+        if any(result.classification is ValidatedDependencyType.MANDATORY and not set(item.edge) <= set(mandatory) for item, result in edge_results):
+            raise DependencyAssessmentNotApprovableError("Mandatory edge evidence conflicts with condition-specific service labels")
+        retained_edges = {
+            item.edge
+            for item, result in edge_results
+            if result.classification
+            in {ValidatedDependencyType.MANDATORY, ValidatedDependencyType.OPTIONAL}
+        }
+    return WorkflowGraph(
+        workflow_id=assessment.workflow_id,
+        criticality=assessment.candidate_graph.criticality,
+        mandatory_services=mandatory,
+        optional_services=optional,
+        edges=[
+            edge
+            for edge in assessment.candidate_graph.edges
+            if edge.source in retained
+            and edge.target in retained
+            and (
+                not explicit_edge_labels
+                or (edge.source, edge.target) in retained_edges
+            )
+        ],
+    )
 
 
 def evaluate_approved_dependency_assessment(

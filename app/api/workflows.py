@@ -7,11 +7,14 @@ from app.engine.workflow_dependency_modeling.evaluator import (
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
+    assess_telemetry_readiness,
     approve_experiment_campaign,
     assess_experiment_campaign,
     approve_dependency_assessment,
+    build_condition_scoped_workflow_graph,
     baseline_readiness,
     intervention_status,
+    inspect_telemetry_payload,
     record_intervention_event,
     start_workflow_analysis,
     create_scenario,
@@ -50,6 +53,7 @@ from app.engine.workflow_dependency_modeling.service import (
     list_dependency_classification_references,
     list_versioned_scenarios,
     list_workflow_analyses,
+    normalize_telemetry_payload,
     preview_workflow_probe,
     register_jaeger_execution,
     run_dependency_repeatability_analysis,
@@ -59,6 +63,7 @@ from app.engine.workflow_dependency_modeling.service import (
     run_campaign_intervention_trial,
     scenario_etag,
     transition_scenario_lifecycle,
+    telemetry_source_capabilities,
     update_scenario,
     verify_experiment_manifest,
 )
@@ -72,6 +77,7 @@ from app.engine.workflow_dependency_modeling.classification_evaluation_repositor
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
     DependencyAssessmentAlreadyExistsError,
+    DependencyAssessmentNotApprovableError,
     DependencyAssessmentNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.execution_repository import (
@@ -152,6 +158,9 @@ def _graph_evaluation_payload(
             "truePositives": result.service_metrics.true_positives,
             "falsePositives": result.service_metrics.false_positives,
             "falseNegatives": result.service_metrics.false_negatives,
+            "trueNegatives": result.service_metrics.true_negatives,
+            "evaluatedCount": result.service_metrics.evaluated_count,
+            "accuracyDefinition": result.service_metrics.accuracy_definition,
         },
         "serviceMetrics": {
             "precision": result.mandatory_service_metrics.precision,
@@ -161,6 +170,9 @@ def _graph_evaluation_payload(
             "truePositives": result.mandatory_service_metrics.true_positives,
             "falsePositives": result.mandatory_service_metrics.false_positives,
             "falseNegatives": result.mandatory_service_metrics.false_negatives,
+            "trueNegatives": result.mandatory_service_metrics.true_negatives,
+            "evaluatedCount": result.mandatory_service_metrics.evaluated_count,
+            "accuracyDefinition": result.mandatory_service_metrics.accuracy_definition,
         },
         "mandatoryServiceMetrics": {
             "precision": result.mandatory_service_metrics.precision,
@@ -170,6 +182,9 @@ def _graph_evaluation_payload(
             "truePositives": result.mandatory_service_metrics.true_positives,
             "falsePositives": result.mandatory_service_metrics.false_positives,
             "falseNegatives": result.mandatory_service_metrics.false_negatives,
+            "trueNegatives": result.mandatory_service_metrics.true_negatives,
+            "evaluatedCount": result.mandatory_service_metrics.evaluated_count,
+            "accuracyDefinition": result.mandatory_service_metrics.accuracy_definition,
         },
         "edgeMetrics": {
             "precision": result.edge_metrics.precision,
@@ -179,6 +194,9 @@ def _graph_evaluation_payload(
             "truePositives": result.edge_metrics.true_positives,
             "falsePositives": result.edge_metrics.false_positives,
             "falseNegatives": result.edge_metrics.false_negatives,
+            "trueNegatives": result.edge_metrics.true_negatives,
+            "evaluatedCount": result.edge_metrics.evaluated_count,
+            "accuracyDefinition": result.edge_metrics.accuracy_definition,
             "jaccardSimilarity": result.edge_metrics.jaccard_similarity,
         },
         "pathMetrics": {
@@ -199,6 +217,9 @@ def _graph_evaluation_payload(
                 "truePositives": result.mandatory_edge_metrics.true_positives,
                 "falsePositives": result.mandatory_edge_metrics.false_positives,
                 "falseNegatives": result.mandatory_edge_metrics.false_negatives,
+                "trueNegatives": result.mandatory_edge_metrics.true_negatives,
+                "evaluatedCount": result.mandatory_edge_metrics.evaluated_count,
+                "accuracyDefinition": result.mandatory_edge_metrics.accuracy_definition,
             }
             if result.mandatory_edge_metrics is not None
             else None
@@ -335,7 +356,7 @@ def execute_benchmark_batch(
         404: {"description": "Scenario or version was not found"},
         409: {"description": "Execution ID already exists"},
         422: {"description": "Execution registration is invalid"},
-        503: {"description": "Jaeger service is unavailable"},
+        503: {"description": "Selected trace-query service is unavailable"},
     },
 )
 def register_workflow_execution(
@@ -490,6 +511,30 @@ def read_validated_workflow_graph(workflow_id: str) -> WorkflowGraph:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
+@router.get(
+    "/dependency-assessments/{assessment_id}/conditions/{condition_id}/graph",
+    response_model=WorkflowGraph,
+    response_model_by_alias=True,
+    responses={
+        404: {"description": "Dependency assessment was not found"},
+        422: {"description": "Condition evidence is missing or insufficient"},
+    },
+)
+def read_condition_scoped_workflow_graph(
+    assessment_id: str, condition_id: str, response: Response
+) -> WorkflowGraph:
+    """Return a graph projection whose labels apply only to one business condition."""
+    try:
+        graph = build_condition_scoped_workflow_graph(assessment_id, condition_id)
+        response.headers["X-Workflow-Approval"] = "unapproved-condition-projection"
+        response.headers["Cache-Control"] = "no-store"
+        return graph
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except (DependencyAssessmentNotApprovableError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
 @router.post(
     "/dependency-references",
     status_code=status.HTTP_201_CREATED,
@@ -558,7 +603,7 @@ def change_workflow_scenario_lifecycle(
     responses={
         409: {"description": "Analysis session already exists"},
         422: {"description": "Connection or operation input is invalid"},
-        503: {"description": "Jaeger service is unavailable"},
+        503: {"description": "Selected trace-query service is unavailable"},
     },
 )
 def create_workflow_analysis_session(
@@ -1166,6 +1211,63 @@ def get_sensitivity_analysis(
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
+
+
+@router.get(
+    "/telemetry/source-types",
+    summary="List supported telemetry evidence sources and adapter status",
+)
+def read_telemetry_source_types() -> list[dict[str, Any]]:
+    """Describe live, offline-import, and explicitly non-causal adapters."""
+    return telemetry_source_capabilities()
+
+
+@router.post(
+    "/telemetry/readiness",
+    summary="Assess telemetry readiness without fabricating unsupported evidence",
+    responses={
+        422: {"description": "The telemetry declaration is invalid"},
+        503: {"description": "The selected live telemetry source is unavailable"},
+    },
+)
+def check_telemetry_readiness(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Return the maximum defensible analysis level for a project's evidence."""
+    try:
+        return assess_telemetry_readiness(payload).to_mapping()
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/telemetry/normalize",
+    summary="Normalize supported trace or non-causal observation exports",
+    responses={422: {"description": "The telemetry payload is invalid"}},
+)
+def normalize_telemetry(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Normalize evidence while retaining its causal or non-causal label."""
+    try:
+        return normalize_telemetry_payload(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/telemetry/inspect",
+    summary="Inspect normalized evidence as a causal or non-causal candidate graph",
+    responses={422: {"description": "The telemetry payload is invalid"}},
+)
+def inspect_telemetry(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Return quality, services, workflows, and candidate edges when defensible."""
+    try:
+        return inspect_telemetry_payload(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.get(

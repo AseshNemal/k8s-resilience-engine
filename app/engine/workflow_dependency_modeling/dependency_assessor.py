@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from collections import Counter
 
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     AssessmentPolicy,
@@ -24,10 +25,16 @@ def _statistics(
     records: Iterable[ExecutionOutcome],
 ) -> tuple[CohortStatistics, tuple[str, ...]]:
     outcomes = list(records)
+    execution_counts = Counter(item.registration.execution_id for item in outcomes)
+    trace_counts = Counter(item.matched_trace_id for item in outcomes)
     eligible = [
         item
         for item in outcomes
         if item.correlation_status is CorrelationStatus.MATCHED
+        and item.matched_trace_id is not None
+        and item.matched_trace_id == item.registration.expected_trace_id
+        and execution_counts[item.registration.execution_id] == 1
+        and trace_counts[item.matched_trace_id] == 1
         and item.status
         in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
     ]
@@ -46,6 +53,14 @@ def _statistics(
             succeeded_records=succeeded,
             failed_records=failed,
             success_rate=succeeded / len(eligible) if eligible else None,
+            eligible_execution_ids=tuple(
+                item.registration.execution_id for item in eligible
+            ),
+            eligible_trace_ids=tuple(
+                item.matched_trace_id
+                for item in eligible
+                if item.matched_trace_id is not None
+            ),
         ),
         excluded,
     )
@@ -67,6 +82,13 @@ def _strength(
     return round(correlation_quality * sample_coverage, 4)
 
 
+def _cohorts_overlap(baseline: CohortStatistics, intervention: CohortStatistics) -> bool:
+    return bool(
+        set(baseline.eligible_execution_ids) & set(intervention.eligible_execution_ids)
+        or set(baseline.eligible_trace_ids) & set(intervention.eligible_trace_ids)
+    )
+
+
 def assess_service_dependency(
     service_name: str,
     baseline_records: list[ExecutionOutcome],
@@ -79,6 +101,8 @@ def assess_service_dependency(
     intervention_stats, intervention_excluded = _statistics(intervention_records)
     excluded = baseline_excluded + intervention_excluded
     reasons: list[str] = []
+    if _cohorts_overlap(baseline, intervention_stats):
+        reasons.append("Baseline and intervention reuse the same execution or trace evidence")
 
     if intervention is None:
         reasons.append("No intervention cohort was registered for this candidate service")
@@ -111,6 +135,8 @@ def assess_service_dependency(
                 reasons.append(
                     "Large failure effect conflicts with successful intervention executions"
                 )
+        elif effect < -policy.optional_effect_tolerance:
+            reasons.append("Intervention improved success materially; investigate confounding before classification")
         elif effect <= policy.optional_effect_tolerance:
             classification = ValidatedDependencyType.OPTIONAL
             reasons.append(
@@ -160,6 +186,8 @@ def assess_edge_dependency(
     intervention_stats, intervention_excluded = _statistics(intervention_records)
     excluded = baseline_excluded + intervention_excluded
     reasons: list[str] = []
+    if _cohorts_overlap(baseline, intervention_stats):
+        reasons.append("Baseline and intervention reuse the same execution or trace evidence")
 
     if intervention is None:
         reasons.append("No intervention cohort was registered for this candidate edge")
@@ -191,6 +219,8 @@ def assess_edge_dependency(
                 reasons.append(
                     "Large edge failure effect conflicts with successful intervention executions"
                 )
+        elif effect < -policy.optional_effect_tolerance:
+            reasons.append("Intervention improved success materially; investigate confounding before classification")
         elif effect <= policy.optional_effect_tolerance:
             classification = ValidatedDependencyType.OPTIONAL
             reasons.append(

@@ -262,6 +262,11 @@ def test_assessment_is_immutable_and_approval_projects_validated_graph(
         "inventoryservice": ValidatedDependencyType.SUPPORTING,
         "paymentservice": ValidatedDependencyType.MANDATORY,
     }
+    assessment_payload = created.to_mapping()
+    assert assessment_payload["mandatoryServices"] == ["paymentservice"]
+    assert assessment_payload["supportingServices"] == ["inventoryservice"]
+    assert assessment_payload["optionalServices"] == ["emailservice"]
+    assert assessment_payload["insufficientEvidenceServices"] == []
     approval = approve_dependency_assessment(
         created.assessment_id,
         actor="lead-researcher",
@@ -272,6 +277,10 @@ def test_assessment_is_immutable_and_approval_projects_validated_graph(
     assert approval.approved_graph.mandatory_services == ["paymentservice"]
     assert approval.approved_graph.optional_services == ["emailservice"]
     assert approval.excluded_supporting_services == ("inventoryservice",)
+    approval_payload = approval.to_mapping()
+    assert approval_payload["mandatoryServices"] == ["paymentservice"]
+    assert approval_payload["supportingServices"] == ["inventoryservice"]
+    assert approval_payload["optionalServices"] == ["emailservice"]
 
 
 def test_explicit_edge_interventions_create_independent_edge_labels(
