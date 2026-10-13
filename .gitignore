@@ -2,6 +2,7 @@
 
 # Markdown files are for reference only — not tracked
 *.md
+docs/*SOURCE_OF_TRUTH*
 
 # Local environment configuration
 .env
@@ -18,4 +19,5 @@ data/*.db-shm
 phase*_def_of_done.txt
 
 # Ignore massive third-party YAML test payloads
+
 deploy/kubernetes/boutique.yaml

@@ -203,13 +203,28 @@
             badge.textContent = exposure.text.replace(" Exposure", "");
             exposureCell.appendChild(badge);
 
+            const driftCell = document.createElement("td");
+            const driftBadge = document.createElement("span");
+            if (service.driftDetected) {
+                driftBadge.className = "status-badge status-badge--warning";
+                driftBadge.textContent = "Drift Detected";
+                if (service.driftReasons && service.driftReasons.length) {
+                    driftBadge.title = service.driftReasons.join("; ");
+                }
+            } else {
+                driftBadge.className = "status-badge status-badge--success";
+                driftBadge.textContent = "Compliant";
+            }
+            driftCell.appendChild(driftBadge);
+
             row.append(
                 nameCell,
                 declaredCell,
                 readyCell,
                 nodesCell,
                 concentrationCell,
-                exposureCell
+                exposureCell,
+                driftCell
             );
             tbody.appendChild(row);
         });
