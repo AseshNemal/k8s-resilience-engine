@@ -1,3 +1,4 @@
+from dataclasses import FrozenInstanceError
 import pytest
 from app.engine.deployment_topology_modeling.drift_analysis.drift_config import DriftConfig
 
@@ -35,5 +36,5 @@ def test_drift_config_custom_values():
 
 def test_drift_config_immutability():
     config = DriftConfig()
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         config.concentration_threshold = 0.8  # type: ignore

@@ -27,13 +27,12 @@ class ResourceContentionDetector(BaseDriftDetector):
         if not self.config.enforce_resource_limits or not declared_intent:
             return violations
 
-        resources_list = (
-            getattr(declared_intent, "resources", [])
-            if hasattr(declared_intent, "resources")
-            else declared_intent.get("resources", [])
-            if isinstance(declared_intent, dict)
-            else []
-        )
+        if hasattr(declared_intent, "resources"):
+            resources_list = getattr(declared_intent, "resources", [])
+        elif isinstance(declared_intent, dict):
+            resources_list = declared_intent.get("resources", [])
+        else:
+            resources_list = []
 
         if not resources_list:
             violations.append(

@@ -1,6 +1,5 @@
 """
 Component 2 Dedicated Endpoints Router.
-Owned by: Member 2 (P.A.M. Minara).
 
 Provides component-internal HTTP endpoints for Phase 3 Resilience Drift Engine:
 - GET /drift: Detailed cluster failure-domain exposure report
@@ -29,7 +28,6 @@ router = APIRouter(
 
 @router.get(
     "/drift",
-    response_model=ClusterExposureReport,
     response_model_by_alias=True,
     summary="Compute live cluster resilience drift and failure-domain exposure",
 )
@@ -43,7 +41,6 @@ def get_resilience_drift_report(
 
 @router.get(
     "/baseline-b2",
-    response_model=BaselineB2Result,
     response_model_by_alias=True,
     summary="Retrieve Baseline B2 deployment-only vulnerability ranking",
 )
@@ -57,7 +54,6 @@ def get_baseline_b2_ranking(
 
 @router.post(
     "/diff",
-    response_model=PlacementDriftDiffReport,
     response_model_by_alias=True,
     summary="Diff two cluster snapshots to calculate D_rate and state transitions",
 )

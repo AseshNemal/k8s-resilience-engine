@@ -122,7 +122,7 @@ def get_live_deployment_graph(
 
     # Run Phase 3 Resilience Drift Engine
     analyzer = DriftAnalyzer()
-    cluster_report, baseline_b2 = analyzer.analyze_cluster(
+    cluster_report, _ = analyzer.analyze_cluster(
         manifests_by_service=manifest_map,
         runtime_pods_by_service=pods_by_service,
         cluster_nodes=nodes_dicts,

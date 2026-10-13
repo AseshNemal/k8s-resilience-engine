@@ -28,13 +28,12 @@ class AffinityDriftDetector(BaseDriftDetector):
         if not declared_intent or len(runtime_pods) <= 1:
             return violations
 
-        affinity_spec = (
-            getattr(declared_intent, "affinity", {})
-            if hasattr(declared_intent, "affinity")
-            else declared_intent.get("affinity", {})
-            if isinstance(declared_intent, dict)
-            else {}
-        )
+        if hasattr(declared_intent, "affinity"):
+            affinity_spec = getattr(declared_intent, "affinity", {})
+        elif isinstance(declared_intent, dict):
+            affinity_spec = declared_intent.get("affinity", {})
+        else:
+            affinity_spec = {}
 
         pod_anti_affinity = affinity_spec.get("podAntiAffinity", {}) if isinstance(affinity_spec, dict) else {}
         if not pod_anti_affinity:
