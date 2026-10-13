@@ -19,8 +19,8 @@ def trace(tid, method, path, callee=None):
 
 
 def test_discovery_separates_requests_normalizes_products_excludes_health():
-    traces = [trace("1", "GET", "/product/a?currency=USD"),
-              trace("2", "GET", "/product/b"),
+    traces = [trace("1", "GET", "/product/123?currency=USD"),
+              trace("2", "GET", "/product/456"),
               trace("3", "POST", "/cart/checkout", "paymentservice"),
               trace("4", "GET", "/_healthz")]
     results = {r.operation_name: r.trace_count for r in discover_root_workflows(traces)}

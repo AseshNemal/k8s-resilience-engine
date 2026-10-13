@@ -14,5 +14,16 @@
     {"source": "cartservice", "target": "currencyservice"}
   ],
   "optionalEdges": [],
+  "evaluatedNonEdges": [
+    {"source": "frontend", "target": "currencyservice"},
+    {"source": "cartservice", "target": "frontend"},
+    {"source": "cartservice", "target": "productcatalogservice"},
+    {"source": "productcatalogservice", "target": "frontend"},
+    {"source": "productcatalogservice", "target": "cartservice"},
+    {"source": "productcatalogservice", "target": "currencyservice"},
+    {"source": "currencyservice", "target": "frontend"},
+    {"source": "currencyservice", "target": "cartservice"},
+    {"source": "currencyservice", "target": "productcatalogservice"}
+  ],
   "synthetic": true
 }
