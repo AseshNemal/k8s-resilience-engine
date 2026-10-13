@@ -26,13 +26,12 @@ class ScaleDriftDetector(BaseDriftDetector):
             return violations
 
         # Extract declared replica count (supports object attributes or dict keys)
-        declared_replicas = (
-            getattr(declared_intent, "replicas", None)
-            if hasattr(declared_intent, "replicas")
-            else declared_intent.get("replicas", None)
-            if isinstance(declared_intent, dict)
-            else None
-        )
+        if hasattr(declared_intent, "replicas"):
+            declared_replicas = getattr(declared_intent, "replicas", None)
+        elif isinstance(declared_intent, dict):
+            declared_replicas = declared_intent.get("replicas", None)
+        else:
+            declared_replicas = None
 
         if declared_replicas is None:
             return violations
