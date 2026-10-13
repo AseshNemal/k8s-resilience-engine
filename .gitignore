@@ -18,6 +18,17 @@ data/*.db-shm
 # Ignore definition of done tracking files
 phase*_def_of_done.txt
 
-# Ignore massive third-party YAML test payloads
+# Scratch text files and reference PDFs
+*.pdf
+curr*.txt
+status*.txt
+pytest*.txt
+git_status*.txt
+service_output.txt
+p1_schema.txt
+p2_schema.txt
+pdf_*.txt
+current_branch.txt
 
+# Ignore massive third-party YAML test payloads
 deploy/kubernetes/boutique.yaml
