@@ -83,6 +83,7 @@ def get_chaos_benchmarks(
 @router.post(
     "/chaos/run/{scenario_id}",
     summary="Execute an isolated Section 10 disruption scenario by ID",
+    responses={404: {"description": "Scenario not found"}},
 )
 def run_chaos_scenario_endpoint(
     scenario_id: str,

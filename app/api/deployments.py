@@ -105,6 +105,7 @@ def list_topology_nodes(
     "/topology/nodes/{node_name}",
     tags=[TAG_TOPOLOGY],
     summary="[Phase 1] Inspect detailed workload placement for an individual worker node",
+    responses={404: {"description": "Worker node not found"}},
 )
 def get_node_topology_detail(
     node_name: str,
@@ -156,6 +157,7 @@ def list_topology_services(
     "/topology/services/{service_name}",
     tags=[TAG_TOPOLOGY],
     summary="[Phase 1] Inspect detailed physical placement for a single microservice",
+    responses={404: {"description": "Service not found"}},
 )
 def get_service_topology_detail(
     service_name: str,
@@ -218,6 +220,7 @@ def list_manifest_service_constraints() -> List[Dict[str, Any]]:
     "/manifests/services/{service_name}",
     tags=[TAG_MANIFEST],
     summary="[Phase 2] Inspect declared constraints for an individual microservice",
+    responses={404: {"description": "Service not found in manifests"}},
 )
 def get_manifest_service_detail_endpoint(
     service_name: str,
@@ -335,6 +338,7 @@ def list_node_risk_rankings(
     "/drift/exposure/{service_name}",
     tags=[TAG_DRIFT],
     summary="[Phase 3] Inspect failure domain exposure for an individual service",
+    responses={404: {"description": "Service not evaluated in drift report"}},
 )
 def get_service_exposure_detail(
     service_name: str,
@@ -404,6 +408,7 @@ def list_chaos_scenarios() -> List[Dict[str, Any]]:
     "/chaos/scenarios/{scenario_id}",
     tags=[TAG_CHAOS],
     summary="[Phase 4] Inspect scenario specification, parameters, and rollback design",
+    responses={404: {"description": "Scenario not found"}},
 )
 def get_chaos_scenario_detail(
     scenario_id: str,
@@ -428,6 +433,7 @@ def get_chaos_scenario_detail(
     "/chaos/run/{scenario_id}",
     tags=[TAG_CHAOS],
     summary="[Phase 4] Execute a single designated disruption scenario by ID",
+    responses={404: {"description": "Scenario not found"}},
 )
 def run_chaos_scenario(
     scenario_id: str,
@@ -444,6 +450,10 @@ def run_chaos_scenario(
     "/chaos/matrix/{scenario_id}",
     tags=[TAG_CHAOS],
     summary="[Phase 4] Get Markov pod migration transition matrix for a scenario",
+    responses={
+        400: {"description": "Snapshot data missing for scenario"},
+        404: {"description": "Scenario not found"},
+    },
 )
 def get_scenario_transition_matrix(
     scenario_id: str,
@@ -517,6 +527,7 @@ def list_snapshots() -> List[str]:
     "/snapshots/{scenario_id}/{phase_tag}",
     tags=[TAG_SNAPSHOTS],
     summary="[Phase 4] Retrieve an immutable cluster snapshot with SHA-256 verification",
+    responses={404: {"description": "Snapshot not found in repository"}},
 )
 def get_snapshot_detail(
     scenario_id: str,
@@ -612,6 +623,7 @@ def get_json_benchmark_report(
     "/benchmarks/latex/{scenario_id}",
     tags=[TAG_BENCHMARKS],
     summary="[Academic Defense] Export publication-ready LaTeX transition matrix table",
+    responses={404: {"description": "Scenario not found or snapshot missing"}},
 )
 def get_latex_transition_table(
     scenario_id: str,

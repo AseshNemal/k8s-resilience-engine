@@ -144,7 +144,7 @@ class BaseScenario(ABC):
                 from_node=src,
                 to_node=dst,
                 pod_count=len(svcs),
-                services_affected=sorted(list(set(svcs))),
+                services_affected=sorted(set(svcs)),
             )
             for (src, dst), svcs in sorted(transitions_map.items())
         ]

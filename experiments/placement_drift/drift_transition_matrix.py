@@ -9,6 +9,8 @@ from experiments.placement_drift.scenario_models import (
     NodeTransitionRecord,
 )
 
+LATEX_HLINE = r"\hline"
+
 
 class DriftTransitionMatrix:
     """
@@ -96,9 +98,9 @@ class DriftTransitionMatrix:
             r"\centering",
             r"\caption{Pod Placement Migration Transition Matrix ($T_0 \to T_1$)}",
             rf"\begin{{tabular}}{{{col_spec}}}",
-            r"\hline",
+            LATEX_HLINE,
             rf"From / To & {headers} \\",
-            r"\hline",
+            LATEX_HLINE,
         ]
 
         for src in sorted_nodes:
@@ -106,7 +108,7 @@ class DriftTransitionMatrix:
             lines.append(rf"{src} & {row_vals} \\")
 
         lines.extend([
-            r"\hline",
+            LATEX_HLINE,
             r"\end{tabular}",
             r"\end{table}",
         ])
