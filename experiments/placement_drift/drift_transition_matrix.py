@@ -44,7 +44,7 @@ class DriftTransitionMatrix:
 
         sorted_nodes = cls._collect_all_nodes(t0_snapshot, t1_snapshot)
         matrix: Dict[str, Dict[str, int]] = {
-            src: {dst: 0 for dst in sorted_nodes} for src in sorted_nodes
+            src: dict.fromkeys(sorted_nodes, 0) for src in sorted_nodes
         }
 
         transitions_map: Dict[Tuple[str, str], List[str]] = {}
