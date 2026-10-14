@@ -39,7 +39,7 @@ class DriftTransitionMatrix:
         for p in t1_snapshot.pods:
             all_nodes.add(p.node_name)
 
-        sorted_nodes = sorted(list(all_nodes))
+        sorted_nodes = sorted(all_nodes)
         matrix: Dict[str, Dict[str, int]] = {
             src: {dst: 0 for dst in sorted_nodes} for src in sorted_nodes
         }
@@ -64,7 +64,7 @@ class DriftTransitionMatrix:
                 from_node=src,
                 to_node=dst,
                 pod_count=len(svcs),
-                services_affected=sorted(list(set(svcs))),
+                services_affected=sorted(set(svcs)),
             )
             for (src, dst), svcs in sorted(transitions_map.items())
         ]

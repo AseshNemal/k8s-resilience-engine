@@ -46,7 +46,7 @@ class PlacementDriftCalculator:
             return 0.0
 
         exposed_count = 0
-        for svc, nodes in svc_map.items():
+        for nodes in svc_map.values():
             if len(nodes) == 1:
                 exposed_count += 1
 

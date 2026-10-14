@@ -306,7 +306,7 @@ def get_cluster_zones(namespace: str = "default") -> list[dict[str, Any]]:
             "nodes": v["nodes"],
             "node_count": len(v["nodes"]),
             "total_pods": v["total_pods"],
-            "hosted_services": sorted(list(v["services"])),
+            "hosted_services": sorted(v["services"]),
         }
         for v in zone_map.values()
     ]
@@ -339,7 +339,7 @@ def get_node_detail(node_name: str, namespace: str = "default") -> dict[str, Any
         "memory_available": match_node.memory_available,
         "total_pods": len(hosted_pods),
         "total_services": len(hosted_services),
-        "services": sorted(list(hosted_services)),
+        "services": sorted(hosted_services),
         "pods": hosted_pods,
     }
 
@@ -444,7 +444,7 @@ def get_node_risk_rankings(namespace: str = "default") -> list[dict[str, Any]]:
             "service_count": len(n["services"]),
             "cluster_workload_share": pod_share,
             "risk_level": "CRITICAL" if pod_share >= 0.5 else ("ELEVATED" if pod_share >= 0.3 else "BALANCED"),
-            "hosted_services": sorted(list(n["services"])),
+            "hosted_services": sorted(n["services"]),
         })
 
     rankings.sort(key=lambda x: x["cluster_workload_share"], reverse=True)
@@ -496,7 +496,6 @@ def clear_cluster_snapshots() -> dict[str, Any]:
 
 def get_chaos_safety_status() -> dict[str, Any]:
     """Returns cluster pre-flight safety status for chaos experiment injection."""
-    guard = SafetyGuard(allow_default_namespace=True)
     graph = get_live_deployment_graph()
     nodes_count = len(graph.nodes)
     is_safe = nodes_count >= 2
