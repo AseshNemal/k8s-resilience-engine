@@ -437,13 +437,20 @@ def get_node_risk_rankings(namespace: str = "default") -> list[dict[str, Any]]:
     rankings = []
     for n in node_stats.values():
         pod_share = round(n["pod_count"] / total_cluster_pods, 3)
+        if pod_share >= 0.5:
+            risk_level = "CRITICAL"
+        elif pod_share >= 0.3:
+            risk_level = "ELEVATED"
+        else:
+            risk_level = "BALANCED"
+
         rankings.append({
             "node_name": n["name"],
             "zone": n["zone"],
             "pod_count": n["pod_count"],
             "service_count": len(n["services"]),
             "cluster_workload_share": pod_share,
-            "risk_level": "CRITICAL" if pod_share >= 0.5 else ("ELEVATED" if pod_share >= 0.3 else "BALANCED"),
+            "risk_level": risk_level,
             "hosted_services": sorted(n["services"]),
         })
 

@@ -19,6 +19,19 @@ class DriftTransitionMatrix:
     """
 
     @classmethod
+    def _collect_all_nodes(
+        cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot
+    ) -> List[str]:
+        """Collects unique sorted node names across both snapshots."""
+        all_nodes: Set[str] = set()
+        for snap in (t0_snapshot, t1_snapshot):
+            for node in snap.nodes:
+                all_nodes.add(node.get("name", "unknown"))
+            for p in snap.pods:
+                all_nodes.add(p.node_name)
+        return sorted(all_nodes)
+
+    @classmethod
     def build_matrix(
         cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot
     ) -> Tuple[List[str], Dict[str, Dict[str, int]], List[NodeTransitionRecord]]:
@@ -29,17 +42,7 @@ class DriftTransitionMatrix:
         t0_pods = {p.pod_name: p for p in t0_snapshot.pods}
         t1_pods = {p.pod_name: p for p in t1_snapshot.pods}
 
-        all_nodes: Set[str] = set()
-        for node in t0_snapshot.nodes:
-            all_nodes.add(node.get("name", "unknown"))
-        for node in t1_snapshot.nodes:
-            all_nodes.add(node.get("name", "unknown"))
-        for p in t0_snapshot.pods:
-            all_nodes.add(p.node_name)
-        for p in t1_snapshot.pods:
-            all_nodes.add(p.node_name)
-
-        sorted_nodes = sorted(all_nodes)
+        sorted_nodes = cls._collect_all_nodes(t0_snapshot, t1_snapshot)
         matrix: Dict[str, Dict[str, int]] = {
             src: {dst: 0 for dst in sorted_nodes} for src in sorted_nodes
         }
@@ -47,17 +50,16 @@ class DriftTransitionMatrix:
         transitions_map: Dict[Tuple[str, str], List[str]] = {}
 
         for pod_name, p0 in t0_pods.items():
-            if pod_name in t1_pods:
-                p1 = t1_pods[pod_name]
-                src, dst = p0.node_name, p1.node_name
-                if src in matrix and dst in matrix[src]:
-                    matrix[src][dst] += 1
+            p1 = t1_pods.get(pod_name)
+            if p1 is None:
+                continue
 
-                if src != dst:
-                    pair = (src, dst)
-                    if pair not in transitions_map:
-                        transitions_map[pair] = []
-                    transitions_map[pair].append(p0.service_name)
+            src, dst = p0.node_name, p1.node_name
+            if src in matrix and dst in matrix[src]:
+                matrix[src][dst] += 1
+
+            if src != dst:
+                transitions_map.setdefault((src, dst), []).append(p0.service_name)
 
         records = [
             NodeTransitionRecord(

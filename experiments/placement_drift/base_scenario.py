@@ -197,15 +197,15 @@ class BaseScenario(ABC):
         except ChaosSafetyError as exc:
             self.status = ScenarioStatus.ABORTED_BY_SAFETY
             error_msg = str(exc)
-            logger.error("[%s] Safety Guard Abort: %s", self.scenario_id, exc)
+            logger.exception("[%s] Safety Guard Abort: %s", self.scenario_id, exc)
         except Exception as exc:
             self.status = ScenarioStatus.FAILED
             error_msg = str(exc)
-            logger.error("[%s] Scenario Execution Failed: %s", self.scenario_id, exc)
+            logger.exception("[%s] Scenario Execution Failed: %s", self.scenario_id, exc)
             try:
                 rollback_done = self.rollback()
             except Exception as rb_exc:
-                logger.critical("[%s] Rollback Failed: %s", self.scenario_id, rb_exc)
+                logger.exception("[%s] Rollback Failed: %s", self.scenario_id, rb_exc)
 
         elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
         return ScenarioResult(

@@ -51,6 +51,9 @@ TAG_CHAOS = "4. Chaos Engineering (Disruption Scenarios)"
 TAG_SNAPSHOTS = "5. Cluster Snapshots & Cryptographic Provenance"
 TAG_BENCHMARKS = "6. Academic Benchmarks & Publications"
 
+DESC_K8S_NAMESPACE = "Target Kubernetes namespace"
+DESC_TARGET_NAMESPACE = "Target namespace"
+
 
 # =====================================================================
 # Topic 1: Topology & Live Cluster State
@@ -74,7 +77,7 @@ def read_sample_deployment() -> DeploymentGraph:
     summary="[Phase 1] Extract live Kubernetes cluster deployment topology",
 )
 def read_live_deployment(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> DeploymentGraph:
     """Queries live Kubernetes API (Docker Desktop / KinD) and compiles topology graph."""
     return get_live_deployment_graph(namespace=namespace)
@@ -86,7 +89,7 @@ def read_live_deployment(
     summary="[Phase 1] List all cluster worker nodes with failure-domain zones & capacity",
 )
 def list_topology_nodes(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
     """Lists resolved cluster worker nodes, their availability zones, and allocatable capacity."""
     graph = get_live_deployment_graph(namespace=namespace)
@@ -109,7 +112,7 @@ def list_topology_nodes(
 )
 def get_node_topology_detail(
     node_name: str,
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Retrieves hosted microservices, pod list, and capacity for a specific worker node."""
     detail = get_node_detail(node_name=node_name, namespace=namespace)
@@ -124,7 +127,7 @@ def get_node_topology_detail(
     summary="[Phase 1] Summarize failure-domain zones and cross-zone pod distribution",
 )
 def list_topology_zones(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
     """Returns cluster availability zones, member node counts, and hosted pod distribution."""
     return get_cluster_zones(namespace=namespace)
@@ -136,7 +139,7 @@ def list_topology_zones(
     summary="[Phase 1] List active microservices with replica counts & concentration index",
 )
 def list_topology_services(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
     """Returns active microservices, their replica distribution, and concentration scores."""
     graph = get_live_deployment_graph(namespace=namespace)
@@ -161,7 +164,7 @@ def list_topology_services(
 )
 def get_service_topology_detail(
     service_name: str,
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Returns detailed pod-to-node placement mapping for a designated microservice."""
     graph = get_live_deployment_graph(namespace=namespace)
@@ -238,7 +241,7 @@ def get_manifest_service_detail_endpoint(
     summary="[Phase 2] Calculate overall constraint compliance rate",
 )
 def get_manifest_compliance_rate(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Calculates percentage of live workloads strictly meeting their declared intent constraints."""
     report, _ = analyze_resilience_drift(namespace=namespace)
@@ -260,7 +263,7 @@ def get_manifest_compliance_rate(
     summary="[Phase 3] Compute cluster resilience drift & failure-domain exposure report",
 )
 def get_resilience_drift(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Evaluates live placement against declared intent; returns exposure levels and drift violations."""
     report, _ = analyze_resilience_drift(namespace=namespace)
@@ -273,7 +276,7 @@ def get_resilience_drift(
     summary="[Phase 3] List all active resilience drift violations across all 5 detectors",
 )
 def list_drift_violations(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
     """Extracts all active violations from scale, resource, affinity, contention, and spread detectors."""
     report, _ = analyze_resilience_drift(namespace=namespace)
@@ -292,7 +295,7 @@ def list_drift_violations(
     summary="[Phase 3] Categorical breakdown of violations across all 5 detectors",
 )
 def get_drift_categories(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Groups active violations into scale, resource limit, node affinity, contention, and spread."""
     return get_drift_categories_summary(namespace=namespace)
@@ -304,7 +307,7 @@ def get_drift_categories(
     summary="[Phase 3] Identify Single Points of Failure (SPOF) with 100% replica colocation",
 )
 def list_drift_spofs(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
     """Lists services where all replicas are colocated on a single node or zone."""
     return get_drift_spofs(namespace=namespace)
@@ -316,7 +319,7 @@ def list_drift_spofs(
     summary="[Phase 3] Rank microservices by Herfindahl-Hirschman Concentration Index (HHI)",
 )
 def list_concentration_rankings(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
     """Sorts all microservices descending by replica concentration index (0.0=perfect spread, 1.0=colocated)."""
     return get_concentration_rankings(namespace=namespace)
@@ -328,7 +331,7 @@ def list_concentration_rankings(
     summary="[Phase 3] Rank cluster worker nodes by failure blast radius and workload density",
 )
 def list_node_risk_rankings(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
     """Ranks worker nodes by proportion of cluster workloads hosted and failure risk tier."""
     return get_node_risk_rankings(namespace=namespace)
@@ -342,7 +345,7 @@ def list_node_risk_rankings(
 )
 def get_service_exposure_detail(
     service_name: str,
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Calculates single-service availability score SA(s, {n}) under failure scenarios."""
     report, _ = analyze_resilience_drift(namespace=namespace)
@@ -358,7 +361,7 @@ def get_service_exposure_detail(
     summary="[Phase 3] Retrieve Baseline B2 deployment-only vulnerability ranking",
 )
 def get_baseline_b2(
-    namespace: str = Query("default", description="Target Kubernetes namespace"),
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Calculates Baseline B2 deployment-only failure exposure scores for control comparison."""
     _, baseline_b2 = analyze_resilience_drift(namespace=namespace)
@@ -437,7 +440,7 @@ def get_chaos_scenario_detail(
 )
 def run_chaos_scenario(
     scenario_id: str,
-    namespace: str = Query("default", description="Target namespace"),
+    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
 ) -> Dict[str, Any]:
     """Injects a specific disruption fault (e.g. node drain, pod crash) and calculates placement drift."""
     result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace)
@@ -502,7 +505,7 @@ def get_safety_status() -> Dict[str, Any]:
     summary="[Phase 4] Validate proposed chaos fault against safety guardrails",
 )
 def validate_proposed_chaos_action(
-    namespace: str = Query("default", description="Target namespace"),
+    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
     service_name: Optional[str] = Query(None, description="Target service"),
 ) -> Dict[str, Any]:
     """Validates that a proposed disruption fault does not violate system namespace or safety rules."""
@@ -550,7 +553,7 @@ def get_snapshot_detail(
 )
 def freeze_live_snapshot(
     snapshot_id: str = Query("manual_snapshot", description="Identifier for this snapshot"),
-    namespace: str = Query("default", description="Target namespace"),
+    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
 ) -> Dict[str, Any]:
     """Captures live pod placement and computes a deterministic SHA-256 fingerprint."""
     return freeze_cluster_state(snapshot_id=snapshot_id, namespace=namespace)
@@ -576,7 +579,7 @@ def clear_snapshots_cache() -> Dict[str, Any]:
     summary="[Academic Defense] Run all 8 disruption scenarios and compile benchmark metrics",
 )
 def get_chaos_benchmarks(
-    namespace: str = Query("default", description="Target namespace for chaos simulation"),
+    namespace: str = Query("default", description=f"{DESC_TARGET_NAMESPACE} for chaos simulation"),
 ) -> Dict[str, Any]:
     """Executes all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions."""
     return run_chaos_benchmark_pipeline(namespace=namespace)
@@ -613,7 +616,7 @@ def get_markdown_benchmark_report() -> Response:
     summary="[Academic Defense] Export full publication-grade JSON benchmark dataset",
 )
 def get_json_benchmark_report(
-    namespace: str = Query("default", description="Target namespace"),
+    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
 ) -> Dict[str, Any]:
     """Returns serialized JSON benchmark dataset with aggregate metrics and per-scenario telemetry."""
     return run_chaos_benchmark_pipeline(namespace=namespace)
