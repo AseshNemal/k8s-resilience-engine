@@ -412,40 +412,126 @@
         });
     }
 
-    function initEnsembleInteractions(root, ensemble) {
-        const filterBtns = root.querySelectorAll("[data-role='ensemble-category-filters'] .filter-btn");
+    function initEnsembleInteractions(root, ensemble, benchmarks) {
+        const viewTabs = root.querySelectorAll("[data-role='ensemble-view-tabs'] .tab-btn");
+        const catBtns = root.querySelectorAll("[data-role='ensemble-category-filters'] .filter-btn");
+        const svcBtns = root.querySelectorAll("[data-role='ensemble-service-filters'] .filter-btn");
+        const sevBtns = root.querySelectorAll("[data-role='ensemble-severity-filters'] .filter-btn");
         const searchInput = root.querySelector("[data-role='ensemble-search']");
         const tbody = root.querySelector("[data-role='ensemble-table-body']");
+        const svcRow = root.querySelector("[data-role='service-filter-row']");
 
+        let currentView = "ensemble";
         let activeCat = "ALL";
+        let activeSvc = "ALL";
+        let activeSev = "ALL";
         let searchQuery = "";
 
+        // Normalize benchmark scenarios to trial records
+        const benchmarkTrials = (benchmarks && benchmarks.scenario_results)
+            ? benchmarks.scenario_results.map((s) => ({
+                trial_id: s.scenario_id,
+                scenario_category: s.disruption_type,
+                target_service: s.target_service || (s.drifted_services && s.drifted_services.length ? s.drifted_services.join(", ") : "multi_workload"),
+                parameter_spec: `Core Chaos Benchmark (${s.disruption_type})`,
+                d_rate: s.d_rate || 0,
+                delta_e_rate: s.delta_e_rate || 0,
+                migrated_pods: (s.transitions && s.transitions.length) ? s.transitions.reduce((sum, t) => sum + (t.migrated_pods || 1), 0) : 0,
+                status: s.status || "COMPLETED",
+            }))
+            : [];
+
         function filterAndRender() {
-            let filtered = ensemble.trials || [];
+            let list = currentView === "ensemble" ? (ensemble ? ensemble.trials || [] : []) : benchmarkTrials;
+
+            // 1. Category Filter
             if (activeCat !== "ALL") {
-                filtered = filtered.filter((t) => t.scenario_category === activeCat);
+                list = list.filter((t) => t.scenario_category === activeCat);
             }
+
+            // 2. Service Filter
+            if (activeSvc !== "ALL") {
+                list = list.filter((t) => t.target_service.includes(activeSvc));
+            }
+
+            // 3. Severity Filter
+            if (activeSev === "CRITICAL") {
+                list = list.filter((t) => t.d_rate >= 0.5);
+            } else if (activeSev === "MODERATE") {
+                list = list.filter((t) => t.d_rate >= 0.2 && t.d_rate < 0.5);
+            } else if (activeSev === "STABLE") {
+                list = list.filter((t) => t.d_rate < 0.2);
+            }
+
+            // 4. Search Query
             if (searchQuery.trim()) {
                 const q = searchQuery.toLowerCase();
-                filtered = filtered.filter((t) =>
+                list = list.filter((t) =>
                     t.trial_id.toLowerCase().includes(q) ||
                     t.target_service.toLowerCase().includes(q) ||
                     t.parameter_spec.toLowerCase().includes(q) ||
                     t.scenario_category.toLowerCase().includes(q)
                 );
             }
-            renderEnsembleTable(tbody, filtered);
+
+            renderEnsembleTable(tbody, list);
         }
 
-        filterBtns.forEach((btn) => {
+        // View Tabs
+        viewTabs.forEach((tab) => {
+            tab.addEventListener("click", () => {
+                viewTabs.forEach((t) => t.classList.remove("tab-btn--active"));
+                tab.classList.add("tab-btn--active");
+                currentView = tab.getAttribute("data-view");
+
+                // Toggle visibility of service filter row if needed
+                if (svcRow) {
+                    svcRow.style.display = currentView === "ensemble" ? "flex" : "none";
+                }
+
+                // Reset sub-filters on view change
+                activeCat = "ALL";
+                activeSvc = "ALL";
+                activeSev = "ALL";
+                catBtns.forEach((b) => b.classList.toggle("filter-btn--active", b.getAttribute("data-cat") === "ALL"));
+                svcBtns.forEach((b) => b.classList.toggle("filter-btn--active", b.getAttribute("data-svc") === "ALL"));
+                sevBtns.forEach((b) => b.classList.toggle("filter-btn--active", b.getAttribute("data-sev") === "ALL"));
+
+                filterAndRender();
+            });
+        });
+
+        // Category Buttons
+        catBtns.forEach((btn) => {
             btn.addEventListener("click", () => {
-                filterBtns.forEach((b) => b.classList.remove("filter-btn--active"));
+                catBtns.forEach((b) => b.classList.remove("filter-btn--active"));
                 btn.classList.add("filter-btn--active");
                 activeCat = btn.getAttribute("data-cat");
                 filterAndRender();
             });
         });
 
+        // Service Buttons
+        svcBtns.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                svcBtns.forEach((b) => b.classList.remove("filter-btn--active"));
+                btn.classList.add("filter-btn--active");
+                activeSvc = btn.getAttribute("data-svc");
+                filterAndRender();
+            });
+        });
+
+        // Severity Buttons
+        sevBtns.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                sevBtns.forEach((b) => b.classList.remove("filter-btn--active"));
+                btn.classList.add("filter-btn--active");
+                activeSev = btn.getAttribute("data-sev");
+                filterAndRender();
+            });
+        });
+
+        // Search Input
         if (searchInput) {
             searchInput.addEventListener("input", (e) => {
                 searchQuery = e.target.value;
@@ -460,10 +546,14 @@
         if (reloadButton) reloadButton.disabled = true;
 
         try {
-            const [deployment, ensemble] = await Promise.all([
+            const [deployment, ensemble, benchmarks] = await Promise.all([
                 fetchJson(ENDPOINT),
                 fetchJson("/api/deployments/benchmarks/ensemble").catch((err) => {
                     console.warn("Ensemble endpoint optional fetch error:", err);
+                    return null;
+                }),
+                fetchJson("/api/deployments/chaos/benchmarks").catch((err) => {
+                    console.warn("Chaos benchmarks optional fetch error:", err);
                     return null;
                 }),
             ]);
@@ -521,12 +611,14 @@
                 highestConcentrationService
             );
 
-            if (ensemble) {
-                renderEnsembleSummary(
-                    region.querySelector('[data-role="ensemble-summary-grid"]'),
-                    ensemble
-                );
-                initEnsembleInteractions(region, ensemble);
+            if (ensemble || benchmarks) {
+                if (ensemble) {
+                    renderEnsembleSummary(
+                        region.querySelector('[data-role="ensemble-summary-grid"]'),
+                        ensemble
+                    );
+                }
+                initEnsembleInteractions(region, ensemble, benchmarks);
             }
 
             initJsonPanel(region.querySelector("#deployment-raw-json"), deployment);
