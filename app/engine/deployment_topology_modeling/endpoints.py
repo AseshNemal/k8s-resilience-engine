@@ -6,13 +6,16 @@ Provides component-internal HTTP endpoints for Phase 3 Resilience Drift Engine:
 - GET /baseline-b2: Experimental control baseline B2 service rankings
 - POST /diff: State diffing and placement drift rate (D_rate) calculation
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 
 from app.engine.deployment_topology_modeling.service import (
     analyze_resilience_drift,
     diff_cluster_snapshots,
+    run_chaos_benchmark_pipeline,
+    run_single_chaos_scenario,
 )
+
 from app.engine.deployment_topology_modeling.drift_analysis.drift_models import (
     ClusterExposureReport,
     BaselineB2Result,
@@ -64,3 +67,31 @@ def diff_snapshots_endpoint(
     baseline = payload.get("baseline", {})
     target = payload.get("target", {})
     return diff_cluster_snapshots(baseline, target)
+
+
+@router.get(
+    "/chaos/benchmarks",
+    summary="Execute all 8 Section 10 chaos scenarios and return benchmark metrics",
+)
+def get_chaos_benchmarks(
+    namespace: str = "default",
+) -> Dict[str, Any]:
+    """Runs all 8 controlled disruption scenarios and calculates aggregate D_rate benchmarks."""
+    return run_chaos_benchmark_pipeline(namespace=namespace)
+
+
+@router.post(
+    "/chaos/run/{scenario_id}",
+    summary="Execute an isolated Section 10 disruption scenario by ID",
+    responses={404: {"description": "Scenario not found"}},
+)
+def run_chaos_scenario_endpoint(
+    scenario_id: str,
+    namespace: str = "default",
+) -> Dict[str, Any]:
+    """Runs a single designated disruption fault scenario and returns transition results."""
+    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
+    return result.model_dump()
+

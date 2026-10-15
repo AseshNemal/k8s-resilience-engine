@@ -1,0 +1,181 @@
+{
+  "aggregate_metrics": {
+    "total_scenarios": 8.0,
+    "completed_count": 8.0,
+    "mean_d_rate": 0.2708,
+    "max_d_rate": 0.6667,
+    "total_runtime_ms": 4.88
+  },
+  "scenario_results": [
+    {
+      "scenario_id": "01_initial_deployment",
+      "scenario_name": "Baseline Initial Steady-State Deployment",
+      "disruption_type": "INITIAL_DEPLOYMENT",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "01_initial_deployment_T0",
+      "target_snapshot_id": "01_initial_deployment_T1",
+      "baseline_hash": "7be70545f81580e95b36c1cee62687af4c698228b850dabf8b762a3b3f3b5d96",
+      "target_hash": "7be70545f81580e95b36c1cee62687af4c698228b850dabf8b762a3b3f3b5d96",
+      "d_rate": 0.0,
+      "delta_e_rate": 0.0,
+      "drifted_services": [],
+      "transitions": [],
+      "runtime_ms": 0.72,
+      "error_message": null,
+      "rollback_successful": true
+    },
+    {
+      "scenario_id": "02_scale_up_stress",
+      "scenario_name": "HPA Scale-Up Bin-Packing Stress",
+      "disruption_type": "SCALE_UP_STRESS",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "02_scale_up_stress_T0",
+      "target_snapshot_id": "02_scale_up_stress_T1",
+      "baseline_hash": "0be2b8204d7f2f305a7a087c5f4344d85fde2dccd11407b3948a37dfab6e72eb",
+      "target_hash": "815d15dfed1ba44513c8cacc3206bb600e26199d4a70b713b48900f7375d4808",
+      "d_rate": 0.0,
+      "delta_e_rate": 0.0,
+      "drifted_services": [],
+      "transitions": [],
+      "runtime_ms": 0.6,
+      "error_message": null,
+      "rollback_successful": true
+    },
+    {
+      "scenario_id": "03_scale_down_loss",
+      "scenario_name": "Scale-Down Redundancy Loss",
+      "disruption_type": "SCALE_DOWN_LOSS",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "03_scale_down_loss_T0",
+      "target_snapshot_id": "03_scale_down_loss_T1",
+      "baseline_hash": "e00adbc6d487db919ae6e570e487b08e951488ffbcb52501b947e53acb02ef68",
+      "target_hash": "8301ecad08648d91df8c4a94a41bd9a82ba0bd104527ba8ea53d331d082c46a3",
+      "d_rate": 0.5,
+      "delta_e_rate": 0.5,
+      "drifted_services": [
+        "cartservice"
+      ],
+      "transitions": [],
+      "runtime_ms": 0.64,
+      "error_message": null,
+      "rollback_successful": true
+    },
+    {
+      "scenario_id": "04_rolling_update",
+      "scenario_name": "Rolling Update Churn & Transient Skew",
+      "disruption_type": "ROLLING_UPDATE_CHURN",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "04_rolling_update_T0",
+      "target_snapshot_id": "04_rolling_update_T1",
+      "baseline_hash": "770dc6bba431152dcb8a1cc8fbb96e2d03564eb19a961994e618b14dd67d4b23",
+      "target_hash": "1fd3dd4f1b5f4f74693923b7a60151f1ba1e9b337ec59403afa8e676ffb2ffa2",
+      "d_rate": 0.5,
+      "delta_e_rate": 0.5,
+      "drifted_services": [
+        "paymentservice"
+      ],
+      "transitions": [],
+      "runtime_ms": 0.67,
+      "error_message": null,
+      "rollback_successful": true
+    },
+    {
+      "scenario_id": "05_pod_deletion_chaos",
+      "scenario_name": "Involuntary Pod Deletion & Reschedule Drift",
+      "disruption_type": "POD_DELETION_CHAOS",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "05_pod_deletion_chaos_T0",
+      "target_snapshot_id": "05_pod_deletion_chaos_T1",
+      "baseline_hash": "23c46f09d9e8b7bfc4a7edc920b6322217a6e96c4e7b8d981fde5349ae7f63cf",
+      "target_hash": "38fc63a868226da18ae169e565742620c01de906866f6e4a5858953dfecb62e7",
+      "d_rate": 0.5,
+      "delta_e_rate": 0.5,
+      "drifted_services": [
+        "paymentservice"
+      ],
+      "transitions": [],
+      "runtime_ms": 0.71,
+      "error_message": null,
+      "rollback_successful": true
+    },
+    {
+      "scenario_id": "06_node_cordon",
+      "scenario_name": "Node Cordon Unschedulable Diversion",
+      "disruption_type": "NODE_CORDON",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "06_node_cordon_T0",
+      "target_snapshot_id": "06_node_cordon_T1",
+      "baseline_hash": "0be2b8204d7f2f305a7a087c5f4344d85fde2dccd11407b3948a37dfab6e72eb",
+      "target_hash": "f71f592c58e9cc9410dd228c110bffa1cc54c5490ce1770bf1760f3c19a6950d",
+      "d_rate": 0.0,
+      "delta_e_rate": 0.0,
+      "drifted_services": [],
+      "transitions": [],
+      "runtime_ms": 0.62,
+      "error_message": null,
+      "rollback_successful": true
+    },
+    {
+      "scenario_id": "07_node_drain_eviction",
+      "scenario_name": "Node Drain & Mass Pod Evacuation",
+      "disruption_type": "NODE_DRAIN_EVICTION",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "07_node_drain_eviction_T0",
+      "target_snapshot_id": "07_node_drain_eviction_T1",
+      "baseline_hash": "21a6455b862b0f0a703ef91673ab516fff9fc61676095877d5819c25803f7047",
+      "target_hash": "b67f7390d6529714c644829e1de3b2f4687bdb5f75b5fa3b25f1ce7966900b74",
+      "d_rate": 0.6667,
+      "delta_e_rate": 0.3333,
+      "drifted_services": [
+        "cartservice",
+        "paymentservice"
+      ],
+      "transitions": [
+        {
+          "from_node": "worker-1",
+          "to_node": "worker-2",
+          "pod_count": 1,
+          "services_affected": [
+            "paymentservice"
+          ]
+        },
+        {
+          "from_node": "worker-1",
+          "to_node": "worker-3",
+          "pod_count": 1,
+          "services_affected": [
+            "cartservice"
+          ]
+        }
+      ],
+      "runtime_ms": 0.64,
+      "error_message": null,
+      "rollback_successful": true
+    },
+    {
+      "scenario_id": "08_resource_contention",
+      "scenario_name": "Constrained Capacity Bin-Packing",
+      "disruption_type": "RESOURCE_CONTENTION",
+      "status": "COMPLETED",
+      "execution_mode": "DRY_RUN_SIMULATION",
+      "baseline_snapshot_id": "08_resource_contention_T0",
+      "target_snapshot_id": "08_resource_contention_T1",
+      "baseline_hash": "0be2b8204d7f2f305a7a087c5f4344d85fde2dccd11407b3948a37dfab6e72eb",
+      "target_hash": "ec6e66ab22113fd9a53b6420b6727a9ea4b45a75c45b6e095ea274a9ca0e3a13",
+      "d_rate": 0.0,
+      "delta_e_rate": 0.0,
+      "drifted_services": [],
+      "transitions": [],
+      "runtime_ms": 0.28,
+      "error_message": null,
+      "rollback_successful": true
+    }
+  ]
+}
