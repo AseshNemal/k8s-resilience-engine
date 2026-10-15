@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
     configure_analysis_session_repository,
     discover_analysis_workflows,
+    list_analysis_services,
     get_workflow_analysis,
     list_workflow_analyses,
     start_workflow_analysis,
@@ -253,6 +254,21 @@ def get_live_workflow(
     )
 
 
+def get_experiment_progress(campaign_id: str) -> dict[str, Any]:
+    from .campaign_assessment_service import get_experiment_progress as progress
+    return progress(campaign_id)
+
+
+def get_boutique_demo_execution_template() -> dict[str, Any]:
+    """Opt-in benchmark template; never inferred for arbitrary applications."""
+    from datetime import datetime, timezone
+    from .online_boutique_workload import online_boutique_checkout_probe, DEFAULT_PRODUCT_ID
+
+    return online_boutique_checkout_probe(
+        DEFAULT_PRODUCT_ID, datetime.now(timezone.utc).year + 2
+    ).to_mapping()
+
+
 def get_live_evidence(
     service_name: str,
     operation: str,
@@ -416,6 +432,7 @@ __all__ = [
     "preview_workflow_probe",
     "discover_live_workflows",
     "discover_analysis_workflows",
+    "list_analysis_services",
     "evaluate_workflow_by_id",
     "freeze_workflow_graph",
     "get_evidence_source",

@@ -24,10 +24,10 @@ def test_guided_flow_gates_collection_and_exports_research_artifacts() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
 
     assert "loadManifestGate(campaign, manifestGate, runButton, runStatus)" in script
-    assert "Freeze experiment manifest" in script
+    assert "Freeze experiment record" in script
     assert "runButton.disabled = true" in script
     assert "manifest.integrityVerified" in script
-    assert "Download manifest JSON" in script
+    assert "Download experiment record JSON" in script
     assert "Download validated graph JSON" in script
     assert 'guidedText("h4", "", campaign.workflowName)' in script
     assert 'name="traceSourceType"' in TEMPLATE.read_text(encoding="utf-8")

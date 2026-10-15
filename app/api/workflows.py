@@ -18,6 +18,7 @@ from app.engine.workflow_dependency_modeling.service import (
     record_intervention_event,
     start_workflow_analysis,
     create_scenario,
+    list_analysis_services,
     create_dependency_assessment,
     create_dependency_classification_evaluation,
     create_dependency_classification_reference,
@@ -31,6 +32,8 @@ from app.engine.workflow_dependency_modeling.service import (
     get_live_workflow,
     get_workflow_analysis,
     get_live_evidence,
+    get_boutique_demo_execution_template,
+    get_experiment_progress,
     get_execution,
     get_experiment_campaign,
     get_experiment_manifest,
@@ -626,6 +629,30 @@ def read_workflow_analysis_sessions() -> list[dict[str, Any]]:
     return [analysis.to_mapping() for analysis in list_workflow_analyses()]
 
 
+@router.get("/execution-templates/online-boutique-checkout")
+def read_boutique_demo_execution_template() -> dict[str, Any]:
+    return get_boutique_demo_execution_template()
+
+
+@router.post(
+    "/analysis-sessions/services",
+    responses={
+        422: {"description": "Trace connection input is invalid"},
+        503: {"description": "Trace-query service is unavailable"},
+    },
+)
+def list_workflow_analysis_services(
+    payload: dict[str, Any] = Body(...),
+) -> list[str]:
+    """List recorded services without requiring a manually entered identity."""
+    try:
+        return list_analysis_services(payload)
+    except ConnectionError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
 @router.post(
     "/analysis-sessions/discover",
     responses={
@@ -762,6 +789,14 @@ def read_workflow_experiment_manifest(manifest_id: str) -> dict[str, Any]:
     try:
         return _manifest_payload(get_experiment_manifest(manifest_id))
     except ExperimentManifestNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get("/experiment-campaigns/{campaign_id}/progress")
+def read_experiment_progress(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_experiment_progress(campaign_id)
+    except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
