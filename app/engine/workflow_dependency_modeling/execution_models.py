@@ -149,6 +149,8 @@ class ExecutionRegistration:
     finished_at: datetime | None = None
     expected_trace_id: str | None = None
     registered_by: str = "system"
+    experiment_record_id: str | None = None
+    experiment_record_digest: str | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExecutionRegistration":
@@ -172,6 +174,17 @@ class ExecutionRegistration:
         finished_at = _timestamp(data.get("finishedAt"), "finishedAt", required=False)
         if finished_at is not None and finished_at < started_at:
             raise ComponentDataError("finishedAt cannot precede startedAt")
+        record_id = data.get("experimentRecordId")
+        record_digest = data.get("experimentRecordDigest")
+        if (record_id is None) != (record_digest is None):
+            raise ComponentDataError("Experiment record ID and digest must be supplied together")
+        if record_id is not None and (
+            not isinstance(record_id, str) or not record_id.strip()
+            or not isinstance(record_digest, str) or not record_digest.startswith("sha256:")
+            or len(record_digest) != 71
+            or any(c not in "0123456789abcdef" for c in record_digest[7:])
+        ):
+            raise ComponentDataError("Invalid experiment record identity or digest")
         return cls(
             execution_id=_identifier(data, "executionId"),
             batch_id=_identifier(data, "batchId"),
@@ -192,6 +205,8 @@ class ExecutionRegistration:
             finished_at=finished_at,
             expected_trace_id=expected_trace_id.strip() if expected_trace_id else None,
             registered_by=_required_text(data, "registeredBy"),
+            experiment_record_id=record_id,
+            experiment_record_digest=record_digest,
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -212,6 +227,9 @@ class ExecutionRegistration:
             result["finishedAt"] = _iso(self.finished_at)
         if self.expected_trace_id is not None:
             result["expectedTraceId"] = self.expected_trace_id
+        if self.experiment_record_id is not None:
+            result["experimentRecordId"] = self.experiment_record_id
+            result["experimentRecordDigest"] = self.experiment_record_digest
         return result
 
 

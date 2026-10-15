@@ -1,6 +1,14 @@
 """Controlled baseline execution and readiness tests."""
 
 from datetime import datetime, timedelta, timezone
+import pytest
+from app.engine.workflow_dependency_modeling import experiment_manifest_service as records
+from app.engine.workflow_dependency_modeling.experiment_manifest_repository import InMemoryExperimentManifestRepository
+
+
+@pytest.fixture(autouse=True)
+def isolated_experiment_records(monkeypatch):
+    monkeypatch.setattr(records, '_default_repository', InMemoryExperimentManifestRepository())
 
 from fastapi.testclient import TestClient
 
@@ -94,6 +102,8 @@ def _campaigns(analyses, required_trials=3):
         analysis_repository=analyses,
         now=NOW,
     )
+    records.create_experiment_manifest(campaign.campaign_id, {}, actor='test',
+        campaign_repository=repository, analysis_repository=analyses, now=NOW)
     return repository, campaign
 
 
@@ -113,6 +123,74 @@ def _run(success=True, trace_id=TRACE_ID) -> OnlineBoutiqueRunResult:
             else "Checkout response did not contain the reviewed order confirmation marker"
         ),
     )
+
+
+@pytest.mark.parametrize('problem', ['missing', 'tampered'])
+def test_record_gate_blocks_before_workload_io(problem):
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    if problem == 'missing':
+        records.configure_experiment_manifest_repository(InMemoryExperimentManifestRepository())
+    else:
+        records.list_experiment_manifests()[0].campaign_snapshot['workflowName'] = 'tampered'
+    calls = []
+    with pytest.raises(ValueError, match='record'):
+        run_campaign_baseline_trial(campaign.campaign_id, 'http://localhost:8080',
+            actor='test', campaign_repository=campaigns, analysis_repository=analyses,
+            repository=InMemoryExecutionRepository(), workload_runner=lambda *a, **kw: calls.append(1))
+    assert calls == []
+
+
+def test_record_gate_rejects_configuration_drift():
+    from dataclasses import replace
+    analyses = _analysis_repository()
+    _, campaign = _campaigns(analyses)
+    with pytest.raises(ValueError, match='differs'):
+        records.require_experiment_record(replace(campaign, workflow_name='changed'), analyses.get(campaign.analysis_session_id))
+
+
+def test_recovery_is_recordable_before_any_intervention_trials():
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    events = InMemoryInterventionEventRepository()
+    _ready_baseline(analyses, campaigns, campaign, executions)
+    for index, event_type in enumerate(['activated', 'restored']):
+        record_intervention_event(campaign.campaign_id, {
+            'targetService': 'paymentservice', 'eventType': event_type,
+            'operatorConfirmed': True, 'evidence': 'test operator observation',
+            'occurredAt': (NOW + timedelta(seconds=index)).isoformat(),
+        }, actor='test', campaign_repository=campaigns, repository=events,
+           execution_repository_override=executions, now=NOW + timedelta(seconds=index))
+    state = intervention_status(campaign.campaign_id, campaign_repository=campaigns,
+        repository=events, execution_repository_override=executions)
+    payment = next(s for s in state['services'] if s['targetService'] == 'paymentservice')
+    assert payment['state'] == 'restored'
+    assert payment['evidenceReady'] is False
+
+
+def test_live_progress_uses_evidence_not_initial_plan(monkeypatch):
+    from app.engine.workflow_dependency_modeling import campaign_assessment_service as assessment
+    analyses = _analysis_repository()
+    _, campaign = _campaigns(analyses)
+    monkeypatch.setattr(assessment, 'get_experiment_campaign', lambda _: campaign)
+    monkeypatch.setattr(assessment, 'baseline_readiness', lambda _: {'ready':True, 'blockers':[]})
+    monkeypatch.setattr(assessment, 'intervention_status', lambda _: {'services':[{'targetService':'paymentservice','evidenceReady':False}]})
+    assert assessment.get_experiment_progress(campaign.campaign_id)['stage'] == 'interventions_required'
+
+
+def test_baseline_api_cannot_bypass_missing_record(monkeypatch):
+    from app.engine.workflow_dependency_modeling import campaign_execution_service as execution
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    records.configure_experiment_manifest_repository(InMemoryExperimentManifestRepository())
+    monkeypatch.setattr(execution, 'get_experiment_campaign', lambda *a: campaign)
+    monkeypatch.setattr(execution, 'get_workflow_analysis', lambda *a: analyses.get(campaign.analysis_session_id))
+    monkeypatch.setattr(execution, 'execution_repository', lambda *a: InMemoryExecutionRepository())
+    response = TestClient(app).post(f'/api/workflows/experiment-campaigns/{campaign.campaign_id}/baseline-runs',
+        headers={'X-Actor':'test'}, json={'applicationUrl':'http://localhost:8080'})
+    assert response.status_code == 422
+    assert 'record' in response.json()['detail']
 
 
 def _trace(status=200, trace_id=TRACE_ID):
@@ -254,6 +332,38 @@ def test_baseline_polls_until_incremental_trace_contains_terminal_span() -> None
     assert delays == [0.25]
 
 
+def test_partial_trace_with_terminal_span_cannot_count_as_baseline() -> None:
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    partial = _trace()
+    partial["spans"].append(
+        {
+            **partial["spans"][0],
+            "spanID": "disconnected-span",
+            "operationName": "unrelated operation",
+        }
+    )
+
+    outcome = run_campaign_baseline_trial(
+        campaign.campaign_id,
+        "http://localhost:8080",
+        actor="runner",
+        campaign_repository=campaigns,
+        analysis_repository=analyses,
+        repository=executions,
+        workload_runner=lambda *args, **kwargs: _run(),
+        trace_fetcher=lambda analysis, trace_id: [partial],
+        sleeper=lambda seconds: None,
+        now=NOW,
+    )
+
+    assert outcome.status is ExecutionOutcomeStatus.INDETERMINATE
+    assert outcome.evidence_snapshot is not None
+    assert "PARTIAL" in outcome.reasons[0]
+    assert baseline_readiness(campaign, executions)["eligibleTrials"] == 0
+
+
 def test_missing_trace_is_indeterminate_and_blocks_readiness() -> None:
     analyses = _analysis_repository()
     campaigns, campaign = _campaigns(analyses)
@@ -295,6 +405,8 @@ def test_confirmation_marker_can_fail_matched_http_trace() -> None:
     )
     assert outcome.correlation_status is CorrelationStatus.MATCHED
     assert outcome.status is ExecutionOutcomeStatus.FAILED
+    assert outcome.assertions[-1].name == "business_probe_success"
+    assert outcome.assertions[-1].passed is False
     assert "confirmation marker" in outcome.reasons[-1]
 
 
@@ -330,6 +442,9 @@ def test_campaign_baseline_api_runs_and_reports_readiness(monkeypatch) -> None:
     )
     assert created.status_code == 201
     assert created.json()["status"] == "succeeded"
+    frozen = records.list_experiment_manifests()[0]
+    assert created.json()['experimentRecordId'] == frozen.manifest_id
+    assert created.json()['experimentRecordDigest'] == frozen.content_digest
     readiness = client.get(
         f"/api/workflows/experiment-campaigns/{campaign.campaign_id}/baseline-readiness"
     )
@@ -394,6 +509,25 @@ def _ready_baseline(analyses, campaigns, campaign, executions) -> None:
         )
 
 
+def test_baseline_rejects_externally_claimed_campaign_evidence() -> None:
+    from dataclasses import replace
+
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    _ready_baseline(analyses, campaigns, campaign, executions)
+    outcome = executions.list(batch_id=campaign.baseline.batch_id)[0]
+    executions._records[outcome.registration.execution_id] = replace(
+        outcome,
+        registration=replace(outcome.registration, source="external_registration"),
+    )
+
+    readiness = baseline_readiness(campaign, executions)
+    assert readiness["ready"] is False
+    assert readiness["eligibleTrials"] == 2
+    assert readiness["excludedTrials"] == 1
+
+
 def test_intervention_events_require_ready_baseline_and_safe_order() -> None:
     analyses = _analysis_repository()
     campaigns, campaign = _campaigns(analyses)
@@ -441,6 +575,66 @@ def test_intervention_events_require_ready_baseline_and_safe_order() -> None:
     assert status["baselineReady"] is True
     assert payment["state"] == "restored"
     assert len(payment["events"]) == 2
+
+
+def test_second_service_cannot_be_intervened_while_first_is_active() -> None:
+    from dataclasses import replace
+
+    from app.engine.workflow_dependency_modeling.experiment_campaign_models import InterventionPlan
+
+    analyses = _analysis_repository()
+    original_campaigns, original = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    _ready_baseline(analyses, original_campaigns, original, executions)
+    cart_plan = InterventionPlan.from_mapping(
+        {
+            "targetService": "cartservice",
+            "interventionType": "service_unavailable",
+            "batchId": "batch:cart",
+            "status": "planned",
+            "operatorApprovalRequired": True,
+            "confirmationRequirements": ["Confirm cartservice outage"],
+        }
+    )
+    campaign = replace(
+        original,
+        candidate_services=("cartservice", "paymentservice"),
+        interventions=(cart_plan, *original.interventions),
+    )
+    campaigns = InMemoryExperimentCampaignRepository()
+    campaigns.create(campaign)
+    events = InMemoryInterventionEventRepository()
+    record_intervention_event(
+        campaign.campaign_id,
+        {
+            "targetService": "cartservice",
+            "eventType": "activated",
+            "operatorConfirmed": True,
+            "evidence": "cartservice unavailable",
+            "occurredAt": NOW.isoformat(),
+        },
+        actor="operator",
+        campaign_repository=campaigns,
+        repository=events,
+        execution_repository_override=executions,
+        now=NOW,
+    )
+    with pytest.raises(ValueError, match="Restore the active intervention"):
+        record_intervention_event(
+            campaign.campaign_id,
+            {
+                "targetService": "paymentservice",
+                "eventType": "activated",
+                "operatorConfirmed": True,
+                "evidence": "paymentservice unavailable",
+                "occurredAt": NOW.isoformat(),
+            },
+            actor="operator",
+            campaign_repository=campaigns,
+            repository=events,
+            execution_repository_override=executions,
+            now=NOW,
+        )
 
 
 def test_intervention_event_api_records_operator_confirmation(monkeypatch) -> None:

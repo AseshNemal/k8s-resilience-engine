@@ -15,10 +15,12 @@ from app.engine.workflow_dependency_modeling.analysis_session_service import (
     get_workflow_analysis,
 )
 from app.engine.workflow_dependency_modeling.execution_models import (
+    AssertionResult,
     CorrelationStatus,
     ExecutionOutcome,
     ExecutionOutcomeStatus,
     ExecutionRegistration,
+    TraceEvidenceSnapshot,
 )
 from app.engine.workflow_dependency_modeling.execution_repository import (
     ExecutionRepository,
@@ -48,6 +50,7 @@ from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
     run_http_workflow_probe,
 )
 from app.engine.workflow_dependency_modeling.trace_source import create_trace_source
+from app.engine.workflow_dependency_modeling.trace_validator import validate_trace_quality
 from app.engine.workflow_dependency_modeling.intervention_event_models import (
     InterventionEvent,
     InterventionEventType,
@@ -129,6 +132,13 @@ def _record_campaign_trial(
     now: datetime | None,
 ) -> ExecutionOutcome:
     timestamp = _utc(now)
+    from .experiment_manifest_service import require_experiment_record
+    from .experiment_campaign_models import ExperimentCampaign
+    from .analysis_session_models import WorkflowAnalysisSession
+    record = require_experiment_record(campaign, analysis)
+    # Execute the verified snapshots, not independently mutable live inputs.
+    campaign = ExperimentCampaign.from_mapping(record.campaign_snapshot)
+    analysis = WorkflowAnalysisSession.from_mapping(record.analysis_snapshot)
     definition: WorkflowProbeDefinition | None = campaign.execution_definition
     if definition is None:
         raise ValueError(
@@ -146,9 +156,10 @@ def _record_campaign_trial(
             (trace for trace in traces if trace.get("traceID") == run.trace_id),
             None,
         )
-        if matching_trace is not None and trace_has_terminal_evidence(
-            matching_trace,
-            scenario.success_condition,
+        if (
+            matching_trace is not None
+            and validate_trace_quality([matching_trace]).valid_count == 1
+            and trace_has_terminal_evidence(matching_trace, scenario.success_condition)
         ):
             break
         if attempt < len(TRACE_POLL_DELAYS_SECONDS):
@@ -172,15 +183,43 @@ def _record_campaign_trial(
             "startedAt": run.started_at.isoformat(),
             "finishedAt": run.finished_at.isoformat(),
             "registeredBy": actor,
+            "experimentRecordId": record.manifest_id,
+            "experimentRecordDigest": record.content_digest,
         }
     )
     recorded_at = max(_utc(now), run.finished_at)
-    outcome = evaluate_execution(
-        registration,
-        scenario,
-        traces,
-        now=recorded_at,
-    )
+    matching_traces = [
+        trace for trace in traces if trace.get("traceID") == run.trace_id
+    ]
+    if len(matching_traces) == 1:
+        quality = validate_trace_quality(matching_traces)
+        if not quality.results[0].eligible:
+            snapshot = TraceEvidenceSnapshot.from_trace(
+                matching_traces[0],
+                trace_id=run.trace_id,
+                source_locator=registration.evidence_locator,
+                captured_at=recorded_at,
+            )
+            outcome = ExecutionOutcome(
+                registration=registration,
+                status=ExecutionOutcomeStatus.INDETERMINATE,
+                correlation_status=CorrelationStatus.MATCHED,
+                recorded_at=recorded_at,
+                matched_trace_id=run.trace_id,
+                evidence_id=f"trace:{run.trace_id}",
+                evidence_snapshot=snapshot,
+                reasons=(
+                    "Trace quality is " + quality.results[0].quality.value
+                    + "; incomplete telemetry cannot establish a workflow outcome",
+                    *quality.results[0].reasons,
+                ),
+            )
+        else:
+            outcome = evaluate_execution(
+                registration, scenario, traces, now=recorded_at
+            )
+    else:
+        outcome = evaluate_execution(registration, scenario, traces, now=recorded_at)
     if (
         not run.business_success
         and outcome.correlation_status is CorrelationStatus.MATCHED
@@ -194,7 +233,15 @@ def _record_campaign_trial(
             matched_trace_id=outcome.matched_trace_id,
             evidence_id=outcome.evidence_id,
             evidence_snapshot=outcome.evidence_snapshot,
-            assertions=outcome.assertions,
+            assertions=(
+                *outcome.assertions,
+                AssertionResult(
+                    name="business_probe_success",
+                    passed=False,
+                    expected=True,
+                    observed=False,
+                ),
+            ),
             reasons=(*outcome.reasons, run.reason),
         )
     return execution_repository(repository).create(outcome)
@@ -205,12 +252,7 @@ def baseline_readiness(
     repository: ExecutionRepository | None = None,
 ) -> dict[str, Any]:
     records = execution_repository(repository).list(batch_id=campaign.baseline.batch_id)
-    eligible = [
-        item
-        for item in records
-        if item.correlation_status is CorrelationStatus.MATCHED
-        and item.status in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
-    ]
+    eligible = [item for item in records if _eligible_campaign_outcome(item)]
     successes = sum(item.status is ExecutionOutcomeStatus.SUCCEEDED for item in eligible)
     failures = sum(item.status is ExecutionOutcomeStatus.FAILED for item in eligible)
     excluded = len(records) - len(eligible)
@@ -375,6 +417,16 @@ def record_intervention_event(
             raise ValueError("This service already has an active intervention")
         if not baseline_readiness(campaign, execution_repository_override)["ready"]:
             raise ValueError("Baseline readiness must pass before an intervention is activated")
+        for other_plan in campaign.interventions:
+            if other_plan.target_service == plan.target_service:
+                continue
+            other_events = event_repository.list(campaign_id, other_plan.target_service)
+            if other_events and other_events[-1].event_type is InterventionEventType.ACTIVATED:
+                raise ValueError(
+                    "Restore the active intervention for "
+                    + other_plan.target_service
+                    + " before activating another service"
+                )
     elif not active:
         raise ValueError("A restoration requires an active intervention")
 
@@ -397,6 +449,46 @@ def record_intervention_event(
     if existing and event.occurred_at < existing[-1].occurred_at:
         raise ValueError("Intervention events must be recorded in chronological order")
     return event_repository.create(event)
+
+
+def _trial_within_intervention(
+    outcome: ExecutionOutcome, events: list[InterventionEvent]
+) -> bool:
+    """Count a trial only if its full execution fits an attested outage window."""
+    finished_at = outcome.registration.finished_at
+    if finished_at is None:
+        return False
+    activated_at: datetime | None = None
+    for event in events:
+        if event.event_type is InterventionEventType.ACTIVATED:
+            activated_at = event.occurred_at
+        elif activated_at is not None:
+            if activated_at <= outcome.registration.started_at and finished_at <= event.occurred_at:
+                return True
+            activated_at = None
+    return (
+        activated_at is not None
+        and activated_at <= outcome.registration.started_at
+    )
+
+
+def _eligible_campaign_outcome(outcome: ExecutionOutcome) -> bool:
+    """Accept only trace-backed outcomes produced by the controlled runner."""
+    registration = outcome.registration
+    snapshot = outcome.evidence_snapshot
+    return (
+        registration.source == "controlled_workflow_experiment"
+        and registration.experiment_record_id is not None
+        and registration.experiment_record_digest is not None
+        and outcome.correlation_status is CorrelationStatus.MATCHED
+        and outcome.status in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
+        and outcome.matched_trace_id is not None
+        and outcome.matched_trace_id == registration.expected_trace_id
+        and snapshot is not None
+        and snapshot.trace_id == outcome.matched_trace_id
+        and snapshot.source_locator == registration.evidence_locator
+        and validate_trace_quality([snapshot.to_mapping()["rawTrace"]]).valid_count == 1
+    )
 
 
 def intervention_status(
@@ -423,17 +515,24 @@ def intervention_status(
         )
         trial_count = len(records)
         eligible = [
-            item
-            for item in records
-            if item.correlation_status is CorrelationStatus.MATCHED
-            and item.status
-            in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
+            item for item in records
+            if _eligible_campaign_outcome(item)
+            and _trial_within_intervention(item, events)
         ]
         trace_ids = [item.matched_trace_id for item in eligible]
         duplicate_trace_ids = sorted(
             {trace_id for trace_id in trace_ids if trace_id and trace_ids.count(trace_id) > 1}
         )
         excluded = len(records) - len(eligible)
+        blockers: list[str] = []
+        if state != "restored":
+            blockers.append("Intervention must be restored after the trials")
+        if len(eligible) < campaign.baseline.required_trials:
+            blockers.append("Collect more correlated trials within the confirmed intervention window")
+        if excluded:
+            blockers.append("Trial evidence is uncorrelated or outside the intervention window")
+        if duplicate_trace_ids:
+            blockers.append("Intervention trials reuse a trace ID")
         services.append(
             {
                 "targetService": plan.target_service,
@@ -444,12 +543,8 @@ def intervention_status(
                 "requiredTrials": campaign.baseline.required_trials,
                 "excludedTrials": excluded,
                 "duplicateTraceIds": duplicate_trace_ids,
-                "evidenceReady": (
-                    state == "restored"
-                    and len(eligible) >= campaign.baseline.required_trials
-                    and excluded == 0
-                    and not duplicate_trace_ids
-                ),
+                "evidenceReady": not blockers,
+                "blockers": blockers,
                 "events": [event.to_mapping() for event in events],
             }
         )
