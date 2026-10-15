@@ -4,7 +4,7 @@
     "completed_count": 8.0,
     "mean_d_rate": 0.2708,
     "max_d_rate": 0.6667,
-    "total_runtime_ms": 2.94
+    "total_runtime_ms": 3.43
   },
   "scenario_results": [
     {
@@ -21,7 +21,7 @@
       "delta_e_rate": 0.0,
       "drifted_services": [],
       "transitions": [],
-      "runtime_ms": 0.58,
+      "runtime_ms": 0.47,
       "error_message": null,
       "rollback_successful": true
     },
@@ -39,7 +39,7 @@
       "delta_e_rate": 0.0,
       "drifted_services": [],
       "transitions": [],
-      "runtime_ms": 0.48,
+      "runtime_ms": 0.36,
       "error_message": null,
       "rollback_successful": true
     },
@@ -59,7 +59,7 @@
         "cartservice"
       ],
       "transitions": [],
-      "runtime_ms": 0.31,
+      "runtime_ms": 0.29,
       "error_message": null,
       "rollback_successful": true
     },
@@ -79,7 +79,7 @@
         "paymentservice"
       ],
       "transitions": [],
-      "runtime_ms": 0.24,
+      "runtime_ms": 0.34,
       "error_message": null,
       "rollback_successful": true
     },
@@ -99,7 +99,7 @@
         "paymentservice"
       ],
       "transitions": [],
-      "runtime_ms": 0.25,
+      "runtime_ms": 0.42,
       "error_message": null,
       "rollback_successful": true
     },
@@ -117,7 +117,7 @@
       "delta_e_rate": 0.0,
       "drifted_services": [],
       "transitions": [],
-      "runtime_ms": 0.25,
+      "runtime_ms": 0.3,
       "error_message": null,
       "rollback_successful": true
     },
@@ -155,7 +155,7 @@
           ]
         }
       ],
-      "runtime_ms": 0.43,
+      "runtime_ms": 0.7,
       "error_message": null,
       "rollback_successful": true
     },
@@ -173,7 +173,7 @@
       "delta_e_rate": 0.0,
       "drifted_services": [],
       "transitions": [],
-      "runtime_ms": 0.4,
+      "runtime_ms": 0.55,
       "error_message": null,
       "rollback_successful": true
     }

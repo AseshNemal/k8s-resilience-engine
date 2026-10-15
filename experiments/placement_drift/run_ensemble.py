@@ -89,14 +89,18 @@ def render_cli_dashboard(metrics) -> None:
     print(f"  {DIM}{'Microservice':<24} {'Trials':<8} {'Mean Drift':<12} {'Visual Distribution':<16} {'Resilience Tier'}{RESET}")
     print(f"  {DIM}{'─' * 24} {'─' * 8} {'─' * 12} {'─' * 16} {'─' * 24}{RESET}")
 
+    TIER_CRITICAL_DRIFT = "CRITICAL DRIFT"
+    TIER_MODERATE_DRIFT = "MODERATE DRIFT"
+    TIER_MINIMAL_DRIFT = "MINIMAL DRIFT"
+
     tier_map = {
-        "multi_workload": ("CRITICAL DRIFT", RED),
-        "productcatalogservice": ("MODERATE DRIFT", YELLOW),
+        "multi_workload": (TIER_CRITICAL_DRIFT, RED),
+        "productcatalogservice": (TIER_MODERATE_DRIFT, YELLOW),
         "paymentservice": ("MODERATE DRIFT (SPOF)", RED),
-        "cartservice": ("MODERATE DRIFT", YELLOW),
-        "checkoutservice": ("MINIMAL DRIFT", GREEN),
-        "shippingservice": ("MINIMAL DRIFT", GREEN),
-        "frontend": ("MINIMAL DRIFT", GREEN),
+        "cartservice": (TIER_MODERATE_DRIFT, YELLOW),
+        "checkoutservice": (TIER_MINIMAL_DRIFT, GREEN),
+        "shippingservice": (TIER_MINIMAL_DRIFT, GREEN),
+        "frontend": (TIER_MINIMAL_DRIFT, GREEN),
         "all_services": ("CONTROL BASELINE", BLUE),
     }
 

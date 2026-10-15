@@ -403,7 +403,12 @@ class ParametricEnsembleEvaluator:
         ]
 
         for svc, rate in sorted(metrics.per_service_drift.items(), key=lambda x: x[1], reverse=True):
-            tier = "CRITICAL DRIFT" if rate >= 0.50 else ("MODERATE DRIFT" if rate >= 0.25 else "MINIMAL DRIFT")
+            if rate >= 0.50:
+                tier = "CRITICAL DRIFT"
+            elif rate >= 0.25:
+                tier = "MODERATE DRIFT"
+            else:
+                tier = "MINIMAL DRIFT"
             lines.append(f"| `{svc}` | {len([t for t in metrics.trials if t.target_service == svc])} | {rate * 100:.2f}% | {tier} |")
 
         lines.extend([
@@ -414,7 +419,12 @@ class ParametricEnsembleEvaluator:
         ])
 
         for cat, rate in sorted(metrics.per_disruption_drift.items(), key=lambda x: x[1], reverse=True):
-            impact = "HIGH DISPLACEMENT" if rate >= 0.50 else ("BALANCED RE-PLACEMENT" if rate >= 0.25 else "STABLE")
+            if rate >= 0.50:
+                impact = "HIGH DISPLACEMENT"
+            elif rate >= 0.25:
+                impact = "BALANCED RE-PLACEMENT"
+            else:
+                impact = "STABLE"
             lines.append(f"| **{cat}** | {len([t for t in metrics.trials if t.scenario_category == cat])} | {rate * 100:.2f}% | {impact} |")
 
         lines.extend([
