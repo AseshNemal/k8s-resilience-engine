@@ -23,6 +23,7 @@ from app.engine.workflow_dependency_modeling.execution_models import (
 
 def _statistics(
     records: Iterable[ExecutionOutcome],
+    allowed_execution_ids: set[str] | None = None,
 ) -> tuple[CohortStatistics, tuple[str, ...]]:
     outcomes = list(records)
     execution_counts = Counter(item.registration.execution_id for item in outcomes)
@@ -37,6 +38,7 @@ def _statistics(
         and trace_counts[item.matched_trace_id] == 1
         and item.status
         in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
+        and (allowed_execution_ids is None or item.registration.execution_id in allowed_execution_ids)
     ]
     excluded = tuple(
         item.registration.execution_id for item in outcomes if item not in eligible
@@ -95,10 +97,13 @@ def assess_service_dependency(
     intervention: InterventionCohort | None,
     intervention_records: list[ExecutionOutcome],
     policy: AssessmentPolicy,
+    *,
+    baseline_allowed_execution_ids: set[str] | None = None,
+    intervention_allowed_execution_ids: set[str] | None = None,
 ) -> ServiceDependencyAssessment:
     """Classify one candidate without hiding weak or contradictory evidence."""
-    baseline, baseline_excluded = _statistics(baseline_records)
-    intervention_stats, intervention_excluded = _statistics(intervention_records)
+    baseline, baseline_excluded = _statistics(baseline_records, baseline_allowed_execution_ids)
+    intervention_stats, intervention_excluded = _statistics(intervention_records, intervention_allowed_execution_ids)
     excluded = baseline_excluded + intervention_excluded
     reasons: list[str] = []
     if _cohorts_overlap(baseline, intervention_stats):

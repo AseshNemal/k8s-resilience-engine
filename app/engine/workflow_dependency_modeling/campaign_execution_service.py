@@ -256,8 +256,12 @@ def baseline_readiness(
     successes = sum(item.status is ExecutionOutcomeStatus.SUCCEEDED for item in eligible)
     failures = sum(item.status is ExecutionOutcomeStatus.FAILED for item in eligible)
     excluded = len(records) - len(eligible)
+    excluded_reasons = sorted({
+        _campaign_exclusion_reason(item)
+        for item in records if not _eligible_campaign_outcome(item)
+    })
     success_rate = successes / len(eligible) if eligible else None
-    trace_ids = [item.matched_trace_id for item in eligible]
+    trace_ids = [item.matched_trace_id for item in records if item.matched_trace_id]
     duplicate_trace_ids = sorted(
         {trace_id for trace_id in trace_ids if trace_id and trace_ids.count(trace_id) > 1}
     )
@@ -266,8 +270,6 @@ def baseline_readiness(
         blockers.append(
             f"Collect {campaign.baseline.required_trials - len(eligible)} more eligible baseline trial(s)."
         )
-    if excluded:
-        blockers.append("Resolve or restart the campaign after uncorrelated baseline trials.")
     if duplicate_trace_ids:
         blockers.append("Baseline contains a trace reused by multiple trial records.")
     if success_rate is not None and 1 - success_rate > campaign.baseline.maximum_failure_rate:
@@ -281,6 +283,7 @@ def baseline_readiness(
         "successfulTrials": successes,
         "failedTrials": failures,
         "excludedTrials": excluded,
+        "excludedReasons": excluded_reasons,
         "duplicateTraceIds": duplicate_trace_ids,
         "successRate": round(success_rate, 4) if success_rate is not None else None,
         "ready": not blockers,
@@ -491,6 +494,21 @@ def _eligible_campaign_outcome(outcome: ExecutionOutcome) -> bool:
     )
 
 
+def _campaign_exclusion_reason(outcome: ExecutionOutcome) -> str:
+    registration = outcome.registration
+    if registration.experiment_record_id is None or registration.experiment_record_digest is None:
+        return "Trial predates the frozen experiment record and cannot be used for validation"
+    if outcome.correlation_status is not CorrelationStatus.MATCHED:
+        return "No unique matching trace was captured"
+    if outcome.status not in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}:
+        return "The workflow outcome is indeterminate"
+    if outcome.evidence_snapshot is None:
+        return "The matched trace has no immutable evidence snapshot"
+    if validate_trace_quality([outcome.evidence_snapshot.to_mapping()["rawTrace"]]).valid_count != 1:
+        return "The matched trace is incomplete or invalid"
+    return "Trial provenance does not satisfy the controlled evidence contract"
+
+
 def intervention_status(
     campaign_id: str,
     *,
@@ -519,7 +537,7 @@ def intervention_status(
             if _eligible_campaign_outcome(item)
             and _trial_within_intervention(item, events)
         ]
-        trace_ids = [item.matched_trace_id for item in eligible]
+        trace_ids = [item.matched_trace_id for item in records if item.matched_trace_id]
         duplicate_trace_ids = sorted(
             {trace_id for trace_id in trace_ids if trace_id and trace_ids.count(trace_id) > 1}
         )
@@ -529,8 +547,12 @@ def intervention_status(
             blockers.append("Intervention must be restored after the trials")
         if len(eligible) < campaign.baseline.required_trials:
             blockers.append("Collect more correlated trials within the confirmed intervention window")
-        if excluded:
-            blockers.append("Trial evidence is uncorrelated or outside the intervention window")
+        excluded_reasons = sorted({
+            _campaign_exclusion_reason(item)
+            if not _eligible_campaign_outcome(item)
+            else "Trial execution falls outside the confirmed intervention window"
+            for item in records if item not in eligible
+        })
         if duplicate_trace_ids:
             blockers.append("Intervention trials reuse a trace ID")
         services.append(
@@ -542,6 +564,7 @@ def intervention_status(
                 "eligibleTrials": len(eligible),
                 "requiredTrials": campaign.baseline.required_trials,
                 "excludedTrials": excluded,
+                "excludedReasons": excluded_reasons,
                 "duplicateTraceIds": duplicate_trace_ids,
                 "evidenceReady": not blockers,
                 "blockers": blockers,

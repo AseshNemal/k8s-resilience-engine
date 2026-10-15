@@ -12,6 +12,9 @@ from app.engine.workflow_dependency_modeling.analysis_session_service import (
     get_workflow_analysis,
 )
 from app.engine.workflow_dependency_modeling.campaign_execution_service import (
+    _eligible_campaign_outcome,
+    _intervention_repository,
+    _trial_within_intervention,
     baseline_readiness,
     intervention_status,
 )
@@ -87,6 +90,7 @@ def get_experiment_progress(campaign_id: str) -> dict[str, Any]:
 def _validate_records(
     records: list[ExecutionOutcome], workflow_id: str, environment_id: str,
     manifest_id: str, manifest_digest: str,
+    allowed_execution_ids: set[str],
 ) -> None:
     if not records:
         raise ValueError("Campaign evidence cohort is empty")
@@ -100,7 +104,7 @@ def _validate_records(
             raise ValueError("Campaign evidence contains an unsupported scenario version")
         if registration.condition_id != "default":
             raise ValueError("Guided campaigns support the default condition only; use condition-aware assessments for separate business conditions")
-        if (
+        if registration.execution_id in allowed_execution_ids and (
             registration.experiment_record_id != manifest_id
             or registration.experiment_record_digest != manifest_digest
         ):
@@ -163,9 +167,13 @@ def assess_experiment_campaign(
 
     execution_repo = execution_repository(execution_repository_override)
     baseline_records = execution_repo.list(batch_id=campaign.baseline.batch_id)
+    baseline_allowed = {
+        item.registration.execution_id for item in baseline_records
+        if _eligible_campaign_outcome(item)
+    }
     _validate_records(
         baseline_records, campaign.workflow_id, campaign.environment_id,
-        record.manifest_id, record.content_digest,
+        record.manifest_id, record.content_digest, baseline_allowed,
     )
     policy = AssessmentPolicy(min_samples_per_cohort=campaign.baseline.required_trials)
     service_results = []
@@ -176,9 +184,17 @@ def assess_experiment_campaign(
     for plan in campaign.interventions:
         state = status_by_service[plan.target_service]
         records = execution_repo.list(batch_id=plan.batch_id)
+        events = _intervention_repository(event_repository).list(
+            campaign.campaign_id, plan.target_service
+        )
+        intervention_allowed = {
+            item.registration.execution_id for item in records
+            if _eligible_campaign_outcome(item)
+            and _trial_within_intervention(item, events)
+        }
         _validate_records(
             records, campaign.workflow_id, campaign.environment_id,
-            record.manifest_id, record.content_digest,
+            record.manifest_id, record.content_digest, intervention_allowed,
         )
         evidence = "; ".join(
             f"{event['eventType']}={event['eventId']} ({event['evidence']})"
@@ -201,6 +217,8 @@ def assess_experiment_campaign(
                 cohort,
                 records,
                 policy,
+                baseline_allowed_execution_ids=baseline_allowed,
+                intervention_allowed_execution_ids=intervention_allowed,
             )
         )
 

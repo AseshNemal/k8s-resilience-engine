@@ -122,10 +122,17 @@ def _evidence_outcomes(
 
 def _trace_provenance(
     outcomes: list[ExecutionOutcome],
+    eligible_execution_ids: set[str],
 ) -> tuple[tuple[str, ...], int]:
+    eligible_outcomes = [
+        outcome for outcome in outcomes
+        if outcome.registration.execution_id in eligible_execution_ids
+    ]
+    if {item.registration.execution_id for item in eligible_outcomes} != eligible_execution_ids:
+        raise ValueError("Assessment references eligible executions missing from the evidence batches")
     matched_trace_ids = [
         outcome.matched_trace_id
-        for outcome in outcomes
+        for outcome in eligible_outcomes
         if outcome.correlation_status is CorrelationStatus.MATCHED
         and outcome.matched_trace_id
     ]
@@ -136,19 +143,31 @@ def _trace_provenance(
         )
     eligible_trace_ids = [
         outcome.matched_trace_id
-        for outcome in outcomes
+        for outcome in eligible_outcomes
         if outcome.correlation_status is CorrelationStatus.MATCHED
         and outcome.status
         in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
         and outcome.matched_trace_id
     ]
     valid_trace_ids = tuple(sorted(eligible_trace_ids))
+    if len(valid_trace_ids) != len(eligible_execution_ids):
+        raise ValueError("Assessment eligibility no longer matches correlated execution evidence")
     if not valid_trace_ids:
         raise ValueError(
             "An approved graph cannot be frozen without eligible correlated trace evidence"
         )
     excluded_count = len(outcomes) - len(valid_trace_ids)
     return valid_trace_ids, excluded_count
+
+
+def _assessment_eligible_execution_ids(assessment: DependencyAssessment) -> set[str]:
+    results = (*assessment.services, *assessment.edges)
+    return {
+        execution_id
+        for result in results
+        for cohort in (result.baseline, result.intervention)
+        for execution_id in cohort.eligible_execution_ids
+    }
 
 
 def freeze_workflow_graph(
@@ -168,7 +187,8 @@ def freeze_workflow_graph(
         workflow_id, assessment_id, assessment_repo
     )
     valid_trace_ids, excluded_count = _trace_provenance(
-        _evidence_outcomes(_assessment_batch_ids(assessment), execution_repository)
+        _evidence_outcomes(_assessment_batch_ids(assessment), execution_repository),
+        _assessment_eligible_execution_ids(assessment),
     )
     frozen_at = now or datetime.now(timezone.utc)
     if frozen_at.tzinfo is None:
