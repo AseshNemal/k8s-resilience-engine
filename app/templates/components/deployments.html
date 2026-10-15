@@ -87,6 +87,52 @@
     <div class="card ensemble-card">
         <div class="ensemble-summary-grid" data-role="ensemble-summary-grid"></div>
 
+        <div class="ensemble-breakdown-grid">
+            <div class="ensemble-breakdown-card">
+                <div class="ensemble-breakdown-card__header">
+                    <div>
+                        <h4 class="ensemble-breakdown-card__title">Microservice Sensitivity Breakdown</h4>
+                        <span class="ensemble-breakdown-card__sub">Workload resilience ranking across 28 chaos trials</span>
+                    </div>
+                </div>
+                <div class="table-scroll">
+                    <table class="data-table data-table--compact">
+                        <thead>
+                            <tr>
+                                <th scope="col">Microservice</th>
+                                <th scope="col">Trials</th>
+                                <th scope="col">Mean Drift</th>
+                                <th scope="col">Resilience Tier</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="ensemble-service-sensitivity-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="ensemble-breakdown-card">
+                <div class="ensemble-breakdown-card__header">
+                    <div>
+                        <h4 class="ensemble-breakdown-card__title">Disruption Category Sensitivity Breakdown</h4>
+                        <span class="ensemble-breakdown-card__sub">Failure domain perturbation impact ranking</span>
+                    </div>
+                </div>
+                <div class="table-scroll">
+                    <table class="data-table data-table--compact">
+                        <thead>
+                            <tr>
+                                <th scope="col">Disruption Category</th>
+                                <th scope="col">Trials</th>
+                                <th scope="col">Mean Drift</th>
+                                <th scope="col">Scheduling Impact</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="ensemble-category-sensitivity-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div class="ensemble-filter-bar">
             <div class="filter-group" data-role="ensemble-category-filters">
                 <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All (28)</button>

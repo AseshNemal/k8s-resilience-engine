@@ -320,6 +320,133 @@
         });
     }
 
+    function renderSensitivityBreakdowns(root, ensemble) {
+        if (!root || !ensemble) return;
+
+        const svcTbody = root.querySelector("[data-role='ensemble-service-sensitivity-body']");
+        const catTbody = root.querySelector("[data-role='ensemble-category-sensitivity-body']");
+
+        if (svcTbody && ensemble.per_service_drift) {
+            svcTbody.innerHTML = "";
+            const tierMap = {
+                "multi_workload": { label: "CRITICAL DRIFT", variant: "danger" },
+                "productcatalogservice": { label: "MODERATE DRIFT", variant: "warning" },
+                "paymentservice": { label: "MODERATE DRIFT (SPOF)", variant: "danger" },
+                "cartservice": { label: "MODERATE DRIFT", variant: "warning" },
+                "checkoutservice": { label: "MINIMAL DRIFT", variant: "success" },
+                "shippingservice": { label: "MINIMAL DRIFT", variant: "success" },
+                "frontend": { label: "MINIMAL DRIFT", variant: "success" },
+                "all_services": { label: "CONTROL BASELINE", variant: "muted" },
+            };
+
+            const sortedServices = Object.entries(ensemble.per_service_drift).sort((a, b) => b[1] - a[1]);
+
+            sortedServices.forEach(([svc, rate]) => {
+                const tr = document.createElement("tr");
+
+                const svcCell = document.createElement("td");
+                const code = document.createElement("code");
+                code.style.fontWeight = "600";
+                code.textContent = svc;
+                svcCell.appendChild(code);
+
+                const countCell = document.createElement("td");
+                const count = ensemble.trials ? ensemble.trials.filter((t) => t.target_service === svc).length : 0;
+                countCell.textContent = `${count}`;
+
+                const driftCell = document.createElement("td");
+                const dWrapper = document.createElement("div");
+                dWrapper.className = "drift-cell-wrapper";
+
+                let fillClass = "green";
+                if (rate >= 0.5) fillClass = "red";
+                else if (rate >= 0.2) fillClass = "yellow";
+
+                const bar = document.createElement("div");
+                bar.className = "drift-progress-bar";
+                const fill = document.createElement("div");
+                fill.className = `drift-progress-fill drift-progress-fill--${fillClass}`;
+                fill.style.width = `${Math.min(100, rate * 100)}%`;
+                bar.appendChild(fill);
+
+                const dText = document.createElement("span");
+                dText.style.fontWeight = "600";
+                dText.textContent = `${(rate * 100).toFixed(2)}%`;
+
+                dWrapper.append(bar, dText);
+                driftCell.appendChild(dWrapper);
+
+                const tierCell = document.createElement("td");
+                const tierInfo = tierMap[svc] || { label: "STABLE", variant: "success" };
+                const badge = document.createElement("span");
+                badge.className = `status-badge status-badge--${tierInfo.variant}`;
+                badge.textContent = tierInfo.label;
+                tierCell.appendChild(badge);
+
+                tr.append(svcCell, countCell, driftCell, tierCell);
+                svcTbody.appendChild(tr);
+            });
+        }
+
+        if (catTbody && ensemble.per_disruption_drift) {
+            catTbody.innerHTML = "";
+            const catMap = {
+                "NODE_DRAIN": { label: "HIGH DISPLACEMENT", variant: "danger" },
+                "SCALE_DOWN_LOSS": { label: "BALANCED RE-PLACEMENT", variant: "warning" },
+                "POD_DELETION": { label: "BALANCED RE-PLACEMENT", variant: "warning" },
+                "ROLLING_UPDATE": { label: "BALANCED RE-PLACEMENT", variant: "warning" },
+                "SCALE_UP_STRESS": { label: "STABLE", variant: "success" },
+                "BASELINE": { label: "STABLE", variant: "muted" },
+            };
+
+            const sortedCategories = Object.entries(ensemble.per_disruption_drift).sort((a, b) => b[1] - a[1]);
+
+            sortedCategories.forEach(([cat, rate]) => {
+                const tr = document.createElement("tr");
+
+                const catCell = document.createElement("td");
+                catCell.style.fontWeight = "600";
+                catCell.textContent = cat.replace(/_/g, " ");
+
+                const countCell = document.createElement("td");
+                const count = ensemble.trials ? ensemble.trials.filter((t) => t.scenario_category === cat).length : 0;
+                countCell.textContent = `${count}`;
+
+                const driftCell = document.createElement("td");
+                const dWrapper = document.createElement("div");
+                dWrapper.className = "drift-cell-wrapper";
+
+                let fillClass = "green";
+                if (rate >= 0.5) fillClass = "red";
+                else if (rate >= 0.2) fillClass = "yellow";
+
+                const bar = document.createElement("div");
+                bar.className = "drift-progress-bar";
+                const fill = document.createElement("div");
+                fill.className = `drift-progress-fill drift-progress-fill--${fillClass}`;
+                fill.style.width = `${Math.min(100, rate * 100)}%`;
+                bar.appendChild(fill);
+
+                const dText = document.createElement("span");
+                dText.style.fontWeight = "600";
+                dText.textContent = `${(rate * 100).toFixed(2)}%`;
+
+                dWrapper.append(bar, dText);
+                driftCell.appendChild(dWrapper);
+
+                const impactCell = document.createElement("td");
+                const catInfo = catMap[cat] || { label: "STABLE", variant: "success" };
+                const badge = document.createElement("span");
+                badge.className = `status-badge status-badge--${catInfo.variant}`;
+                badge.textContent = catInfo.label;
+                impactCell.appendChild(badge);
+
+                tr.append(catCell, countCell, driftCell, impactCell);
+                catTbody.appendChild(tr);
+            });
+        }
+    }
+
     function renderEnsembleTable(tbody, trials) {
         if (!tbody) return;
         tbody.innerHTML = "";
@@ -569,6 +696,7 @@
                         region.querySelector('[data-role="ensemble-summary-grid"]'),
                         ensemble
                     );
+                    renderSensitivityBreakdowns(region, ensemble);
                 }
                 initEnsembleInteractions(region, ensemble, benchmarks);
             }
