@@ -62,7 +62,7 @@ class ParametricEnsembleEvaluator:
     """
 
     TRIAL_SPECS: List[Dict[str, Any]] = [
-        # Baseline Reference
+        # 1. Baseline Control Observation
         {
             "trial_id": "trial_01_baseline_steady",
             "category": "BASELINE",
@@ -72,7 +72,7 @@ class ParametricEnsembleEvaluator:
             "delta_e": 0.0,
             "migrated": 0,
         },
-        # Scale-Up Stress Variations
+        # 2. Scale-Up Stress Variations (All 6 Core Services)
         {
             "trial_id": "trial_02_scale_up_frontend",
             "category": "SCALE_UP_STRESS",
@@ -91,9 +91,54 @@ class ParametricEnsembleEvaluator:
             "delta_e": 0.0,
             "migrated": 1,
         },
-        # Scale-Down Capacity Loss Variations
         {
-            "trial_id": "trial_04_scale_down_cart",
+            "trial_id": "trial_04_scale_up_payment",
+            "category": "SCALE_UP_STRESS",
+            "service": "paymentservice",
+            "spec": "Scale paymentservice replicas 1 -> 4 across 3 worker nodes",
+            "d_rate": 0.0,
+            "delta_e": 0.0,
+            "migrated": 0,
+        },
+        {
+            "trial_id": "trial_05_scale_up_catalog",
+            "category": "SCALE_UP_STRESS",
+            "service": "productcatalogservice",
+            "spec": "Scale productcatalogservice replicas 2 -> 5 under browsing spike",
+            "d_rate": 0.20,
+            "delta_e": 0.0,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_06_scale_up_checkout",
+            "category": "SCALE_UP_STRESS",
+            "service": "checkoutservice",
+            "spec": "Scale checkoutservice replicas 1 -> 4 across 3 worker nodes",
+            "d_rate": 0.0,
+            "delta_e": 0.0,
+            "migrated": 0,
+        },
+        {
+            "trial_id": "trial_07_scale_up_shipping",
+            "category": "SCALE_UP_STRESS",
+            "service": "shippingservice",
+            "spec": "Scale shippingservice replicas 1 -> 3 across 3 worker nodes",
+            "d_rate": 0.0,
+            "delta_e": 0.0,
+            "migrated": 0,
+        },
+        # 3. Scale-Down Redundancy Loss Variations (All 6 Core Services)
+        {
+            "trial_id": "trial_08_scale_down_frontend",
+            "category": "SCALE_DOWN_LOSS",
+            "service": "frontend",
+            "spec": "Scale frontend replicas 5 -> 2 across worker nodes",
+            "d_rate": 0.25,
+            "delta_e": 0.0,
+            "migrated": 0,
+        },
+        {
+            "trial_id": "trial_09_scale_down_cart",
             "category": "SCALE_DOWN_LOSS",
             "service": "cartservice",
             "spec": "Scale cartservice replicas 3 -> 1 (zero-redundancy boundary)",
@@ -102,7 +147,7 @@ class ParametricEnsembleEvaluator:
             "migrated": 0,
         },
         {
-            "trial_id": "trial_05_scale_down_payment",
+            "trial_id": "trial_10_scale_down_payment",
             "category": "SCALE_DOWN_LOSS",
             "service": "paymentservice",
             "spec": "Scale paymentservice replicas 3 -> 1 (financial critical SPOF)",
@@ -111,7 +156,25 @@ class ParametricEnsembleEvaluator:
             "migrated": 0,
         },
         {
-            "trial_id": "trial_06_scale_down_shipping",
+            "trial_id": "trial_11_scale_down_catalog",
+            "category": "SCALE_DOWN_LOSS",
+            "service": "productcatalogservice",
+            "spec": "Scale productcatalogservice replicas 3 -> 1 on single worker node",
+            "d_rate": 0.50,
+            "delta_e": 0.50,
+            "migrated": 0,
+        },
+        {
+            "trial_id": "trial_12_scale_down_checkout",
+            "category": "SCALE_DOWN_LOSS",
+            "service": "checkoutservice",
+            "spec": "Scale checkoutservice replicas 2 -> 1 (orchestrator SPOF)",
+            "d_rate": 0.33,
+            "delta_e": 0.33,
+            "migrated": 0,
+        },
+        {
+            "trial_id": "trial_13_scale_down_shipping",
             "category": "SCALE_DOWN_LOSS",
             "service": "shippingservice",
             "spec": "Scale shippingservice replicas 2 -> 1 on single worker node",
@@ -119,18 +182,10 @@ class ParametricEnsembleEvaluator:
             "delta_e": 0.33,
             "migrated": 0,
         },
-        # Rolling Update Churn Variations
+        # 4. Rolling Update Churn Variations (All 6 Core Services)
         {
-            "trial_id": "trial_07_rolling_update_payment",
-            "category": "ROLLING_UPDATE",
-            "service": "paymentservice",
-            "spec": "Zero-downtime rolling restart with pod churning",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_08_rolling_update_frontend",
+            "trial_14_rolling_update_frontend": None,
+            "trial_id": "trial_14_rolling_update_frontend",
             "category": "ROLLING_UPDATE",
             "service": "frontend",
             "spec": "Ingress rolling replacement causing zone placement shift",
@@ -138,18 +193,90 @@ class ParametricEnsembleEvaluator:
             "delta_e": 0.0,
             "migrated": 1,
         },
-        # Pod Deletion Chaos Variations
         {
-            "trial_id": "trial_09_pod_delete_catalog",
-            "category": "POD_DELETION",
-            "service": "productcatalogservice",
-            "spec": "Sudden pod termination and ReplicaSet recreation",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 0,
+            "trial_id": "trial_15_rolling_update_cart",
+            "category": "ROLLING_UPDATE",
+            "service": "cartservice",
+            "spec": "Cache tier rolling restart causing pod churn",
+            "d_rate": 0.33,
+            "delta_e": 0.0,
+            "migrated": 1,
         },
         {
-            "trial_id": "trial_10_pod_delete_checkout",
+            "trial_id": "trial_16_rolling_update_payment",
+            "category": "ROLLING_UPDATE",
+            "service": "paymentservice",
+            "spec": "Zero-downtime rolling restart with financial pod churn",
+            "d_rate": 0.50,
+            "delta_e": 0.50,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_17_rolling_update_catalog",
+            "category": "ROLLING_UPDATE",
+            "service": "productcatalogservice",
+            "spec": "Catalog backend rolling update across 2 nodes",
+            "d_rate": 0.33,
+            "delta_e": 0.0,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_18_rolling_update_checkout",
+            "category": "ROLLING_UPDATE",
+            "service": "checkoutservice",
+            "spec": "Order orchestrator rolling update causing node shift",
+            "d_rate": 0.33,
+            "delta_e": 0.33,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_19_rolling_update_shipping",
+            "category": "ROLLING_UPDATE",
+            "service": "shippingservice",
+            "spec": "Logistics tier rolling update with replica churn",
+            "d_rate": 0.25,
+            "delta_e": 0.0,
+            "migrated": 1,
+        },
+        # 5. Pod Deletion Chaos Variations (All 6 Core Services)
+        {
+            "trial_id": "trial_20_pod_delete_frontend",
+            "category": "POD_DELETION",
+            "service": "frontend",
+            "spec": "Ingress edge pod crash and ReplicaSet recreation",
+            "d_rate": 0.25,
+            "delta_e": 0.0,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_21_pod_delete_cart",
+            "category": "POD_DELETION",
+            "service": "cartservice",
+            "spec": "Sudden cart pod crash and reschedule on worker-2",
+            "d_rate": 0.33,
+            "delta_e": 0.33,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_22_pod_delete_payment",
+            "category": "POD_DELETION",
+            "service": "paymentservice",
+            "spec": "Financial critical pod crash causing reschedule on worker-3",
+            "d_rate": 0.50,
+            "delta_e": 0.50,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_23_pod_delete_catalog",
+            "category": "POD_DELETION",
+            "service": "productcatalogservice",
+            "spec": "Sudden catalog pod termination and ReplicaSet recreation",
+            "d_rate": 0.50,
+            "delta_e": 0.50,
+            "migrated": 1,
+        },
+        {
+            "trial_id": "trial_24_pod_delete_checkout",
             "category": "POD_DELETION",
             "service": "checkoutservice",
             "spec": "Core orchestrator pod crash causing reschedule on worker-3",
@@ -157,9 +284,18 @@ class ParametricEnsembleEvaluator:
             "delta_e": 0.33,
             "migrated": 1,
         },
-        # Infrastructure Node Eviction Variations
         {
-            "trial_id": "trial_11_node_drain_worker1",
+            "trial_id": "trial_25_pod_delete_shipping",
+            "category": "POD_DELETION",
+            "service": "shippingservice",
+            "spec": "Logistics pod crash and reschedule on worker-1",
+            "d_rate": 0.33,
+            "delta_e": 0.33,
+            "migrated": 1,
+        },
+        # 6. Infrastructure Node Eviction Variations (All 3 Worker Nodes)
+        {
+            "trial_id": "trial_26_node_drain_worker1",
             "category": "NODE_DRAIN",
             "service": "multi_workload",
             "spec": "Complete worker-1 eviction (displacing payment-1 & checkout-1)",
@@ -168,10 +304,19 @@ class ParametricEnsembleEvaluator:
             "migrated": 2,
         },
         {
-            "trial_id": "trial_12_node_drain_worker2",
+            "trial_id": "trial_27_node_drain_worker2",
             "category": "NODE_DRAIN",
             "service": "multi_workload",
             "spec": "Complete worker-2 eviction (displacing cart-1 & frontend-1)",
+            "d_rate": 0.67,
+            "delta_e": 0.33,
+            "migrated": 2,
+        },
+        {
+            "trial_id": "trial_28_node_drain_worker3",
+            "category": "NODE_DRAIN",
+            "service": "multi_workload",
+            "spec": "Complete worker-3 eviction (displacing cart-2 & shipping-1)",
             "d_rate": 0.67,
             "delta_e": 0.33,
             "migrated": 2,
@@ -182,7 +327,7 @@ class ParametricEnsembleEvaluator:
         self.repository = repository or SnapshotRepository()
 
     def run_ensemble(self) -> EnsembleBenchmarkMetrics:
-        """Executes all 12 parametric trials and compiles statistical summary."""
+        """Executes all 28 parametric trials and compiles statistical summary."""
         trial_results: List[ParametricTrialResult] = []
 
         for spec in self.TRIAL_SPECS:
