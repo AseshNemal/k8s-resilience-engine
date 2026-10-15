@@ -94,10 +94,10 @@ def test_workflow_page_defaults_to_guided_analysis_not_internal_artifacts() -> N
     assert 'data-role="guided-discover-button"' in response.text
     assert 'data-role="guided-inspect-button"' in response.text
     assert "Which services does this workflow actually need?" in response.text
-    assert "Researcher-defined success contract" in response.text
-    assert "Choose a business workflow" in response.text
-    assert "Connect your application’s trace source" in response.text
-    assert "Discover workflows" in response.text
+    assert "Your confirmed outcome rule" in response.text
+    assert "Which recorded operation represents your workflow?" in response.text
+    assert "Where are your traces stored?" in response.text
+    assert "Connect trace source" in response.text
     assert "Trace query address" in response.text
     assert "Interventions require approval" in response.text
     assert "Synthetic Fixture Dataset" in response.text
@@ -121,10 +121,10 @@ def test_workflow_client_exposes_operator_gated_campaign_lifecycle() -> None:
     assert 'benchmarkProfile: "online_boutique_checkout_v0_10_1"' not in script
     assert "Business success contract" in script
     assert "Request options (JSON object)" in script
-    assert "ready for dependency experiment" in script
+    assert "confirm success next" in script
     assert "supportsGuidedExperiment" in script
     assert "updateGuidedSelectionAction" in script
-    assert "Configure workflow experiment" in script
+    assert "Define success" in script
     assert "No workflow executions run automatically" in script
     assert "conditionEvidenceDetails" in script
     assert "guidedResult.replaceChildren()" in script
