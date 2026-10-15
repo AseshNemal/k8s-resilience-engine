@@ -163,6 +163,21 @@ def verify_experiment_manifest(manifest: ExperimentManifest) -> bool:
     )
 
 
+def require_experiment_record(campaign, analysis, repository=None) -> ExperimentManifest:
+    """Fail closed before external I/O if the frozen experiment is absent or changed."""
+    records = [item for item in _repository(repository).list()
+               if item.campaign_id == campaign.campaign_id]
+    if len(records) != 1:
+        raise ValueError("Exactly one frozen experiment record is required before execution")
+    record = records[0]
+    if not verify_experiment_manifest(record):
+        raise ValueError("Experiment record integrity verification failed")
+    if (record.campaign_snapshot != campaign.to_mapping()
+            or record.analysis_snapshot != analysis.to_mapping()):
+        raise ValueError("Experiment configuration differs from the frozen record; create a new campaign")
+    return record
+
+
 def get_experiment_manifest(
     manifest_id: str,
     repository: ExperimentManifestRepository | None = None,

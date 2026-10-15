@@ -16,6 +16,7 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
     SqlAlchemyExecutionRepository,
 )
 from app.engine.workflow_dependency_modeling.execution_service import (
+    _registration,
     run_benchmark_batch,
 )
 from app.engine.workflow_dependency_modeling.models import WorkflowScenario
@@ -25,6 +26,21 @@ from app.shared.persistence.models import Base
 
 
 NOW = datetime(2026, 10, 3, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    "reserved_field",
+    [
+        {"source": "controlled_workflow_experiment"},
+        {"experimentRecordId": "manifest:forged"},
+    ],
+)
+def test_external_execution_cannot_claim_controlled_campaign_provenance(reserved_field) -> None:
+    payload = registration().to_mapping()
+    payload.pop("registeredBy")
+    payload.update(reserved_field)
+    with pytest.raises(ValueError, match="reserved for server-run trials"):
+        _registration(payload, "external-operator")
 
 
 def scenario(

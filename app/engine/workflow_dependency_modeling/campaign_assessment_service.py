@@ -47,6 +47,9 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
 from app.engine.workflow_dependency_modeling.intervention_event_repository import (
     InterventionEventRepository,
 )
+from app.engine.workflow_dependency_modeling.experiment_manifest_service import (
+    require_experiment_record,
+)
 
 
 def _utc(value: datetime | None) -> datetime:
@@ -56,8 +59,34 @@ def _utc(value: datetime | None) -> datetime:
     return result.astimezone(timezone.utc)
 
 
+def get_experiment_progress(campaign_id: str) -> dict[str, Any]:
+    """Live progress derived from evidence, separate from the immutable plan."""
+    from .dependency_assessment_repository import DependencyAssessmentNotFoundError
+    campaign = get_experiment_campaign(campaign_id)
+    baseline = baseline_readiness(campaign)
+    interventions = intervention_status(campaign_id)
+    stage = "baseline_required"
+    blockers = list(baseline["blockers"])
+    if baseline["ready"]:
+        incomplete = [s["targetService"] for s in interventions["services"] if not s["evidenceReady"]]
+        stage = "interventions_required" if incomplete else "ready_for_assessment"
+        blockers = ["Complete and restore intervention cohort: " + s for s in incomplete]
+        if not incomplete:
+            try:
+                get_experiment_campaign_assessment(campaign_id)
+                stage = "reviewed"
+                get_experiment_campaign_approval(campaign_id)
+                stage = "approved"
+            except DependencyAssessmentNotFoundError:
+                pass
+    return {"campaignId": campaign_id, "stage": stage, "baseline": baseline,
+            "interventions": interventions, "blockers": blockers,
+            "interventionVerification": "operator_attested"}
+
+
 def _validate_records(
-    records: list[ExecutionOutcome], workflow_id: str, environment_id: str
+    records: list[ExecutionOutcome], workflow_id: str, environment_id: str,
+    manifest_id: str, manifest_digest: str,
 ) -> None:
     if not records:
         raise ValueError("Campaign evidence cohort is empty")
@@ -71,6 +100,11 @@ def _validate_records(
             raise ValueError("Campaign evidence contains an unsupported scenario version")
         if registration.condition_id != "default":
             raise ValueError("Guided campaigns support the default condition only; use condition-aware assessments for separate business conditions")
+        if (
+            registration.experiment_record_id != manifest_id
+            or registration.experiment_record_digest != manifest_digest
+        ):
+            raise ValueError("Campaign evidence does not match the frozen experiment record")
 
 
 def _candidate_edges(
@@ -106,6 +140,7 @@ def assess_experiment_campaign(
     """Classify every downstream candidate after all campaign gates pass."""
     campaign = get_experiment_campaign(campaign_id, campaign_repository)
     analysis = get_workflow_analysis(campaign.analysis_session_id, analysis_repository)
+    record = require_experiment_record(campaign, analysis)
     baseline_state = baseline_readiness(campaign, execution_repository_override)
     if not baseline_state["ready"]:
         raise ValueError("Baseline evidence is not ready for assessment")
@@ -128,7 +163,10 @@ def assess_experiment_campaign(
 
     execution_repo = execution_repository(execution_repository_override)
     baseline_records = execution_repo.list(batch_id=campaign.baseline.batch_id)
-    _validate_records(baseline_records, campaign.workflow_id, campaign.environment_id)
+    _validate_records(
+        baseline_records, campaign.workflow_id, campaign.environment_id,
+        record.manifest_id, record.content_digest,
+    )
     policy = AssessmentPolicy(min_samples_per_cohort=campaign.baseline.required_trials)
     service_results = []
     cohorts = []
@@ -138,7 +176,10 @@ def assess_experiment_campaign(
     for plan in campaign.interventions:
         state = status_by_service[plan.target_service]
         records = execution_repo.list(batch_id=plan.batch_id)
-        _validate_records(records, campaign.workflow_id, campaign.environment_id)
+        _validate_records(
+            records, campaign.workflow_id, campaign.environment_id,
+            record.manifest_id, record.content_digest,
+        )
         evidence = "; ".join(
             f"{event['eventType']}={event['eventId']} ({event['evidence']})"
             for event in state["events"]
