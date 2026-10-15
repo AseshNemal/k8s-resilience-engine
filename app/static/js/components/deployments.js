@@ -266,11 +266,207 @@
         container.appendChild(card);
     }
 
+    function renderEnsembleSummary(container, ensemble) {
+        if (!container || !ensemble) return;
+        container.innerHTML = "";
+
+        const meanPct = (ensemble.mean_d_rate * 100).toFixed(1);
+        const stdDevPct = (ensemble.std_dev_d_rate * 100).toFixed(1);
+        const ciLow = (ensemble.confidence_interval_95[0] * 100).toFixed(1);
+        const ciHigh = (ensemble.confidence_interval_95[1] * 100).toFixed(1);
+        const deltaEPct = (ensemble.mean_delta_e_rate * 100).toFixed(1);
+
+        const items = [
+            {
+                label: "Total Trials",
+                value: `${ensemble.total_trials}`,
+                sub: "Empirical perturbations completed",
+            },
+            {
+                label: "Mean Drift Rate (μ)",
+                value: `${meanPct}%`,
+                sub: `Standard deviation σ = ${stdDevPct}%`,
+            },
+            {
+                label: "95% Confidence Interval",
+                value: `[${ciLow}%, ${ciHigh}%]`,
+                sub: "True population drift estimate",
+            },
+            {
+                label: "Failure Exposure (ΔE)",
+                value: `+${deltaEPct}%`,
+                sub: "Net increase in SPOF risk",
+            },
+        ];
+
+        items.forEach((item) => {
+            const box = document.createElement("div");
+            box.className = "ensemble-metric-box";
+
+            const label = document.createElement("span");
+            label.className = "ensemble-metric-box__label";
+            label.textContent = item.label;
+
+            const val = document.createElement("span");
+            val.className = "ensemble-metric-box__value";
+            val.textContent = item.value;
+
+            const sub = document.createElement("span");
+            sub.className = "ensemble-metric-box__sub";
+            sub.textContent = item.sub;
+
+            box.append(label, val, sub);
+            container.appendChild(box);
+        });
+    }
+
+    function renderEnsembleTable(tbody, trials) {
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        if (!trials || trials.length === 0) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = '<td colspan="8" style="text-align:center; padding: 20px; color: var(--color-text-muted);">No matching trials found.</td>';
+            tbody.appendChild(tr);
+            return;
+        }
+
+        trials.forEach((trial) => {
+            const row = document.createElement("tr");
+
+            // Trial ID
+            const idCell = document.createElement("td");
+            const code = document.createElement("code");
+            code.style.fontSize = "12px";
+            code.textContent = trial.trial_id;
+            idCell.appendChild(code);
+
+            // Category badge
+            const catCell = document.createElement("td");
+            const catBadge = document.createElement("span");
+            catBadge.className = "status-badge status-badge--muted";
+            catBadge.textContent = trial.scenario_category.replace(/_/g, " ");
+            catCell.appendChild(catBadge);
+
+            // Workload
+            const workCell = document.createElement("td");
+            workCell.style.fontWeight = "600";
+            workCell.textContent = trial.target_service;
+
+            // Spec
+            const specCell = document.createElement("td");
+            specCell.style.fontSize = "13px";
+            specCell.style.color = "var(--color-text-muted)";
+            specCell.textContent = trial.parameter_spec;
+
+            // Drift Rate with Progress Bar
+            const driftCell = document.createElement("td");
+            const dWrapper = document.createElement("div");
+            dWrapper.className = "drift-cell-wrapper";
+
+            const dPct = (trial.d_rate * 100).toFixed(1);
+            let fillClass = "green";
+            if (trial.d_rate >= 0.5) fillClass = "red";
+            else if (trial.d_rate >= 0.2) fillClass = "yellow";
+
+            const bar = document.createElement("div");
+            bar.className = "drift-progress-bar";
+            const fill = document.createElement("div");
+            fill.className = `drift-progress-fill drift-progress-fill--${fillClass}`;
+            fill.style.width = `${Math.min(100, trial.d_rate * 100)}%`;
+            bar.appendChild(fill);
+
+            const dText = document.createElement("span");
+            dText.style.fontWeight = "600";
+            dText.textContent = `${dPct}%`;
+
+            dWrapper.append(bar, dText);
+            driftCell.appendChild(dWrapper);
+
+            // Exposure Delta
+            const expCell = document.createElement("td");
+            const ePct = (trial.delta_e_rate * 100).toFixed(1);
+            const expBadge = document.createElement("span");
+            if (trial.delta_e_rate > 0) {
+                expBadge.className = "status-badge status-badge--danger";
+                expBadge.textContent = `+${ePct}%`;
+            } else {
+                expBadge.className = "status-badge status-badge--muted";
+                expBadge.textContent = "0.0%";
+            }
+            expCell.appendChild(expBadge);
+
+            // Displaced Pods
+            const dispCell = document.createElement("td");
+            dispCell.textContent = `${trial.migrated_pods || 0}`;
+
+            // Status
+            const statusCell = document.createElement("td");
+            const statusBadge = document.createElement("span");
+            statusBadge.className = "status-badge status-badge--success";
+            statusBadge.textContent = "COMPLETED";
+            statusCell.appendChild(statusBadge);
+
+            row.append(idCell, catCell, workCell, specCell, driftCell, expCell, dispCell, statusCell);
+            tbody.appendChild(row);
+        });
+    }
+
+    function initEnsembleInteractions(root, ensemble) {
+        const filterBtns = root.querySelectorAll("[data-role='ensemble-category-filters'] .filter-btn");
+        const searchInput = root.querySelector("[data-role='ensemble-search']");
+        const tbody = root.querySelector("[data-role='ensemble-table-body']");
+
+        let activeCat = "ALL";
+        let searchQuery = "";
+
+        function filterAndRender() {
+            let filtered = ensemble.trials || [];
+            if (activeCat !== "ALL") {
+                filtered = filtered.filter((t) => t.scenario_category === activeCat);
+            }
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase();
+                filtered = filtered.filter((t) =>
+                    t.trial_id.toLowerCase().includes(q) ||
+                    t.target_service.toLowerCase().includes(q) ||
+                    t.parameter_spec.toLowerCase().includes(q) ||
+                    t.scenario_category.toLowerCase().includes(q)
+                );
+            }
+            renderEnsembleTable(tbody, filtered);
+        }
+
+        filterBtns.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                filterBtns.forEach((b) => b.classList.remove("filter-btn--active"));
+                btn.classList.add("filter-btn--active");
+                activeCat = btn.getAttribute("data-cat");
+                filterAndRender();
+            });
+        });
+
+        if (searchInput) {
+            searchInput.addEventListener("input", (e) => {
+                searchQuery = e.target.value;
+                filterAndRender();
+            });
+        }
+
+        filterAndRender();
+    }
+
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
 
         try {
-            const deployment = await fetchJson(ENDPOINT);
+            const [deployment, ensemble] = await Promise.all([
+                fetchJson(ENDPOINT),
+                fetchJson("/api/deployments/benchmarks/ensemble").catch((err) => {
+                    console.warn("Ensemble endpoint optional fetch error:", err);
+                    return null;
+                }),
+            ]);
 
             region.innerHTML = "";
             region.appendChild(template.content.cloneNode(true));
@@ -286,8 +482,8 @@
                     !highest ||
                     (service.replicaConcentration || 0) >
                         (highest.replicaConcentration || 0)
-                        ? service
-                        : highest,
+                    ? service
+                    : highest,
                 null
             );
 
@@ -324,6 +520,14 @@
                 region.querySelector('[data-role="deployment-warning-region"]'),
                 highestConcentrationService
             );
+
+            if (ensemble) {
+                renderEnsembleSummary(
+                    region.querySelector('[data-role="ensemble-summary-grid"]'),
+                    ensemble
+                );
+                initEnsembleInteractions(region, ensemble);
+            }
 
             initJsonPanel(region.querySelector("#deployment-raw-json"), deployment);
 

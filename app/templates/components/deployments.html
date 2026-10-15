@@ -78,6 +78,46 @@
 
     <div data-role="deployment-warning-region"></div>
 
+    <div class="section-header" style="margin-top: var(--space-xl);">
+        <h3 class="section-header__title">Multi-Service Chaos Resilience Ensemble (28 Symmetrical Trials)</h3>
+        <span class="section-header__note">
+            Empirical placement drift benchmarks across 6 core microservices and 3 cluster nodes under chaos perturbations.
+        </span>
+    </div>
+    <div class="card ensemble-card">
+        <div class="ensemble-summary-grid" data-role="ensemble-summary-grid"></div>
+
+        <div class="ensemble-filter-bar">
+            <div class="filter-group" data-role="ensemble-category-filters">
+                <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All (28)</button>
+                <button type="button" class="filter-btn" data-cat="NODE_DRAIN">Node Drain (3)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_DOWN_LOSS">Scale Down (6)</button>
+                <button type="button" class="filter-btn" data-cat="POD_DELETION">Pod Deletion (6)</button>
+                <button type="button" class="filter-btn" data-cat="ROLLING_UPDATE">Rolling Update (6)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_UP_STRESS">Scale Up (6)</button>
+            </div>
+            <input type="text" class="ensemble-search-input" data-role="ensemble-search" placeholder="Search service, category, or trial..." aria-label="Search trials" />
+        </div>
+
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Trial ID</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Workload</th>
+                        <th scope="col">Chaos Specification</th>
+                        <th scope="col">Placement Drift (D_rate)</th>
+                        <th scope="col">Failure Exposure (ΔE)</th>
+                        <th scope="col">Displaced</th>
+                        <th scope="col">Status</th>
+                    </tr>
+                </thead>
+                <tbody data-role="ensemble-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="section-header">
         <h3 class="section-header__title">Raw Data</h3>
     </div>
