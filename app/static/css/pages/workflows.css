@@ -1077,6 +1077,28 @@
     min-width: 0;
 }
 
+.guided-field[hidden] {
+    display: none;
+}
+
+.guided-connection-options {
+    grid-column: 1 / -1;
+}
+
+.guided-connection-options > summary,
+.telemetry-onboarding > summary {
+    cursor: pointer;
+    padding: 10px 0;
+    color: var(--color-text);
+    font-weight: 600;
+}
+
+.guided-connection-options > summary:focus-visible,
+.telemetry-onboarding > summary:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 3px;
+}
+
 .guided-field--wide {
     grid-column: span 2;
 }
@@ -1367,6 +1389,30 @@
     font-size: 15px;
 }
 
+.guided-contract > label:not(.guided-contract__confirmation),
+.guided-contract .workflow-request-details > label {
+    display: grid;
+    gap: 5px;
+}
+
+.guided-contract label[hidden],
+.guided-contract details[hidden] {
+    display: none;
+}
+
+.guided-contract input:not([type="checkbox"]),
+.guided-contract select,
+.guided-contract textarea {
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 11px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    color: var(--color-text);
+    background: var(--color-surface, #fff);
+    font: inherit;
+}
+
 .guided-contract p,
 .guided-contract__confirmation,
 .guided-contract__status {
@@ -1606,6 +1652,8 @@
 }
 
 .baseline-readiness__gate {
+    display: grid;
+    gap: 6px;
     padding: 11px 13px;
     border-left: 4px solid #d97706;
     background: #fffbeb;
@@ -1754,6 +1802,23 @@
     border-radius: var(--radius-medium);
     background: #eff6ff;
 }
+
+.manifest-gate .classification-result,
+.manifest-gate .classification-result > *,
+.guided-contract__effective,
+.experiment-profile strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.intervention-service pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: 12px;
+    background: var(--color-bg-secondary, #f3f4f6);
+}
+
+.guided-result select { max-width: 100%; }
 
 .manifest-gate--verified {
     border-color: #86efac;

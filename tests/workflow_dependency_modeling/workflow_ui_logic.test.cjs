@@ -10,7 +10,7 @@ const context = {
     document: {querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {}},
 };
 vm.createContext(context);
-vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.buildSetup = buildObservedWorkflowSetup; })();'), context);
+vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; })();'), context);
 const build = (...args) => JSON.parse(JSON.stringify(context.buildSetup(...args)));
 
 test('keeps response markers as a list and preserves generic request data', () => {
@@ -36,4 +36,16 @@ test('rejects non-object options and string responseContains', () => {
 
 test('does not invent success markers or request data', () => {
     assert.deepEqual(build('204', '', ''), {mode: 'observed_entry', expectedStatusCodes: [204], request: {}});
+});
+
+test('workflow selection preserves distinct services with the same operation name', () => {
+    const workflows = [
+        {rootService: 'gateway-a', operationName: 'POST /payment'},
+        {rootService: 'gateway-b', operationName: 'POST /payment'},
+    ];
+    assert.equal(context.selectWorkflow(workflows, '0'), workflows[0]);
+    assert.equal(context.selectWorkflow(workflows, '1'), workflows[1]);
+    for (const selection of ['', 'POST /payment', '-1', '99']) {
+        assert.equal(context.selectWorkflow(workflows, selection), undefined);
+    }
 });
