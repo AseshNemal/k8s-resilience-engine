@@ -11,7 +11,7 @@
  */
 
 (function () {
-    const ENDPOINT = "/api/deployments/sample";
+    let currentEndpoint = "/api/deployments/sample";
     const { fetchJson } = window.ResilienceApi;
     const { setError, formatRatioAsPercentage, initJsonPanel, updateLastRefreshed } =
         window.ResilienceUi;
@@ -19,6 +19,8 @@
     const region = document.querySelector('[data-role="page-region"]');
     const template = document.querySelector('[data-role="page-template"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
+    const toggleSourceButton = document.querySelector('[data-role="toggle-source-button"]');
+    const sourceBadge = document.querySelector('[data-role="source-badge"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
 
     function setMetric(root, name, value) {
@@ -623,10 +625,11 @@
 
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
+        if (toggleSourceButton) toggleSourceButton.disabled = true;
 
         try {
             const [deployment, ensemble, benchmarks] = await Promise.all([
-                fetchJson(ENDPOINT),
+                fetchJson(currentEndpoint),
                 fetchJson("/api/deployments/benchmarks/ensemble").catch((err) => {
                     console.warn("Ensemble endpoint optional fetch error:", err);
                     return null;
@@ -706,14 +709,36 @@
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
             setError(region, {
-                endpoint: ENDPOINT,
+                endpoint: currentEndpoint,
                 message: error.message,
                 onRetry: loadPage,
             });
-            console.error("Failed to load deployment sample data:", error);
+            console.error("Failed to load deployment data:", error);
         } finally {
             if (reloadButton) reloadButton.disabled = false;
+            if (toggleSourceButton) toggleSourceButton.disabled = false;
         }
+    }
+
+    if (toggleSourceButton) {
+        toggleSourceButton.addEventListener("click", () => {
+            if (currentEndpoint === "/api/deployments/sample") {
+                currentEndpoint = "/api/deployments/live";
+                if (sourceBadge) {
+                    sourceBadge.textContent = "Live Cluster (KinD)";
+                    sourceBadge.className = "status-badge status-badge--success status-badge--no-dot";
+                }
+                toggleSourceButton.textContent = "Switch to Sample Data";
+            } else {
+                currentEndpoint = "/api/deployments/sample";
+                if (sourceBadge) {
+                    sourceBadge.textContent = "Sample Data";
+                    sourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
+                }
+                toggleSourceButton.textContent = "Switch to Live Cluster (KinD)";
+            }
+            loadPage();
+        });
     }
 
     if (reloadButton) {
