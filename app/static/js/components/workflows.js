@@ -741,6 +741,8 @@
             target.replaceChildren();
             const counts = document.createElement("div");
             counts.className = "baseline-readiness__counts";
+            target.setAttribute("role", "status");
+            target.setAttribute("aria-live", "polite");
             counts.append(
                 resultCard("Eligible", `${readiness.eligibleTrials}/${readiness.requiredTrials}`, "Exactly correlated"),
                 resultCard("Succeeded", String(readiness.successfulTrials), "Met the success contract"),
@@ -858,8 +860,12 @@
             "",
             `${service.eligibleTrials}/${service.requiredTrials} eligible workflow trials · ${service.excludedTrials} excluded`
         );
+        const excludedDetails = document.createElement("details");
         if (service.excludedReasons?.length) {
-            progress.title = service.excludedReasons.join("; ");
+            excludedDetails.appendChild(guidedText("summary", "", "Why trials were excluded"));
+            const excludedList = document.createElement("ul");
+            service.excludedReasons.forEach((reason) => excludedList.appendChild(guidedText("li", "", reason)));
+            excludedDetails.appendChild(excludedList);
         }
         const controls = document.createElement("div");
         controls.className = "intervention-service__controls";
@@ -938,7 +944,9 @@
                 guidedText('pre', '', `docker inspect ${name} --format '{{.Config.Image}} {{.State.Status}}'\n# After approval, stop and verify:\ndocker stop ${name}\ndocker inspect ${name} --format '{{.State.Status}}'\n# Restore, including if the trial fails:\ndocker start ${name}\ndocker inspect ${name} --format '{{.State.Status}}'\ndocker logs --tail 20 ${name}`),
                 guidedText('p', '', 'A running container alone does not prove recovery. Check its logs and a normal application request before confirming restoration. Retain the output as evidence.'));
         }
-        card.append(title, progress, instructions, controls, message);
+        card.append(title, progress);
+        if (service.excludedReasons?.length) card.appendChild(excludedDetails);
+        card.append(instructions, controls, message);
         return card;
     }
 
