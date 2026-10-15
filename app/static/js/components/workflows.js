@@ -745,7 +745,7 @@
                 resultCard("Eligible", `${readiness.eligibleTrials}/${readiness.requiredTrials}`, "Exactly correlated"),
                 resultCard("Succeeded", String(readiness.successfulTrials), "Met the success contract"),
                 resultCard("Failed", String(readiness.failedTrials), "Business outcome failed"),
-                resultCard("Excluded", String(readiness.excludedTrials), "Missing or ambiguous evidence")
+                resultCard("Excluded", String(readiness.excludedTrials), "Not counted toward validation")
             );
             const gate = document.createElement("div");
             gate.className = readiness.ready
@@ -762,6 +762,11 @@
                 gate.appendChild(list);
             } else {
                 gate.appendChild(guidedText("span", "", "Intervention cohorts may now be collected one service at a time."));
+            }
+            if (readiness.excludedReasons?.length) {
+                const excluded = document.createElement("ul");
+                readiness.excludedReasons.forEach((reason) => excluded.appendChild(guidedText("li", "", `Excluded: ${reason}`)));
+                gate.appendChild(excluded);
             }
             target.append(counts, gate);
             runButton.disabled = readiness.ready || runButton.dataset.manifestVerified !== 'true';
@@ -853,6 +858,9 @@
             "",
             `${service.eligibleTrials}/${service.requiredTrials} eligible workflow trials · ${service.excludedTrials} excluded`
         );
+        if (service.excludedReasons?.length) {
+            progress.title = service.excludedReasons.join("; ");
+        }
         const controls = document.createElement("div");
         controls.className = "intervention-service__controls";
         const evidence = document.createElement("input");

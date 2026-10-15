@@ -385,7 +385,7 @@ def test_missing_trace_is_indeterminate_and_blocks_readiness() -> None:
     assert outcome.correlation_status is CorrelationStatus.MISSING
     assert readiness["ready"] is False
     assert readiness["excludedTrials"] == 1
-    assert any("uncorrelated" in blocker for blocker in readiness["blockers"])
+    assert "No unique matching trace was captured" in readiness["excludedReasons"]
 
 
 def test_confirmation_marker_can_fail_matched_http_trace() -> None:
@@ -526,6 +526,42 @@ def test_baseline_rejects_externally_claimed_campaign_evidence() -> None:
     assert readiness["ready"] is False
     assert readiness["eligibleTrials"] == 2
     assert readiness["excludedTrials"] == 1
+
+
+def test_legacy_matched_trial_is_excluded_without_permanently_poisoning_baseline() -> None:
+    from dataclasses import replace
+
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    for index in range(4):
+        trace_id = f"{index + 1:032x}"
+        outcome = run_campaign_baseline_trial(
+            campaign.campaign_id,
+            "http://localhost:8080",
+            actor="runner",
+            campaign_repository=campaigns,
+            analysis_repository=analyses,
+            repository=executions,
+            workload_runner=lambda *args, _id=trace_id, **kwargs: _run(trace_id=_id),
+            trace_fetcher=lambda analysis, expected, _id=trace_id: [_trace(trace_id=_id)],
+            sleeper=lambda seconds: None,
+            now=NOW,
+        )
+        if index == 0:
+            executions._records[outcome.registration.execution_id] = replace(
+                outcome,
+                registration=replace(
+                    outcome.registration,
+                    experiment_record_id=None,
+                    experiment_record_digest=None,
+                ),
+            )
+    readiness = baseline_readiness(campaign, executions)
+    assert readiness["ready"] is True
+    assert readiness["eligibleTrials"] == 3
+    assert readiness["excludedTrials"] == 1
+    assert "predates the frozen experiment record" in readiness["excludedReasons"][0]
 
 
 def test_intervention_events_require_ready_baseline_and_safe_order() -> None:

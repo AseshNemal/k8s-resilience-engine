@@ -276,6 +276,61 @@ def test_incomplete_intervention_cannot_be_assessed() -> None:
         )
 
 
+def test_legacy_trial_remains_excluded_through_assessment_and_freeze() -> None:
+    from dataclasses import replace
+    from app.engine.workflow_dependency_modeling.graph_freeze_service import freeze_workflow_graph
+    from app.engine.workflow_dependency_modeling.graph_freeze_repository import InMemoryGraphFreezeRepository
+
+    analyses, campaigns, executions, events = _repositories()
+    manifest = manifests.list_experiment_manifests()[0]
+    legacy = _outcome("base:legacy", "batch:baseline", True, manifest)
+    legacy = replace(
+        legacy,
+        registration=replace(
+            legacy.registration,
+            experiment_record_id=None,
+            experiment_record_digest=None,
+        ),
+    )
+    executions.create(legacy)
+    assessments = InMemoryDependencyAssessmentRepository()
+    result = assess_experiment_campaign(
+        "campaign:checkout1",
+        actor="reviewer",
+        campaign_repository=campaigns,
+        analysis_repository=analyses,
+        execution_repository_override=executions,
+        event_repository=events,
+        repository=assessments,
+        now=NOW,
+    )
+    assert result.services[0].classification is ValidatedDependencyType.MANDATORY
+    assert result.services[0].baseline.total_records == 4
+    assert result.services[0].baseline.eligible_records == 3
+    assert "base:legacy" in result.services[0].excluded_execution_ids
+    approve_experiment_campaign(
+        "campaign:checkout1",
+        actor="reviewer",
+        rationale="Reviewed the eligible evidence and the excluded legacy trial",
+        approval_confirmed=True,
+        campaign_repository=campaigns,
+        repository=assessments,
+        now=NOW,
+    )
+    frozen = freeze_workflow_graph(
+        "checkout",
+        {"freezeId": "freeze:checkout:legacy", "assessmentId": result.assessment_id},
+        actor="reviewer",
+        repository=InMemoryGraphFreezeRepository(),
+        dependency_repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    assert frozen.valid_trace_count == 6
+    assert frozen.excluded_trace_count == 1
+    assert legacy.matched_trace_id not in frozen.trace_ids
+
+
 def test_trials_outside_confirmed_intervention_window_cannot_be_assessed() -> None:
     from dataclasses import replace
 
