@@ -87,49 +87,19 @@
     <div class="card ensemble-card">
         <div class="ensemble-summary-grid" data-role="ensemble-summary-grid"></div>
 
-        <div class="ensemble-view-tabs" data-role="ensemble-view-tabs">
-            <button type="button" class="tab-btn tab-btn--active" data-view="ensemble">Parametric Ensemble (28 Symmetrical Trials)</button>
-            <button type="button" class="tab-btn" data-view="benchmarks">Core Chaos Scenarios (8 Section 10 Experiments)</button>
-        </div>
-
-        <div class="ensemble-filter-section">
-            <div class="ensemble-filter-row">
-                <span class="filter-label">Disruption:</span>
-                <div class="filter-group" data-role="ensemble-category-filters">
-                    <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All Categories (28)</button>
-                    <button type="button" class="filter-btn" data-cat="BASELINE">Baseline (1)</button>
-                    <button type="button" class="filter-btn" data-cat="SCALE_UP_STRESS">Scale Up (6)</button>
-                    <button type="button" class="filter-btn" data-cat="SCALE_DOWN_LOSS">Scale Down (6)</button>
-                    <button type="button" class="filter-btn" data-cat="ROLLING_UPDATE">Rolling Update (6)</button>
-                    <button type="button" class="filter-btn" data-cat="POD_DELETION">Pod Deletion (6)</button>
-                    <button type="button" class="filter-btn" data-cat="NODE_DRAIN">Node Drain (3)</button>
-                </div>
+        <div class="ensemble-filter-bar">
+            <div class="filter-group" data-role="ensemble-category-filters">
+                <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All (28)</button>
+                <button type="button" class="filter-btn" data-cat="BASELINE">Baseline (1)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_UP_STRESS">Scale Up (6)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_DOWN_LOSS">Scale Down (6)</button>
+                <button type="button" class="filter-btn" data-cat="ROLLING_UPDATE">Rolling Update (6)</button>
+                <button type="button" class="filter-btn" data-cat="POD_DELETION">Pod Deletion (6)</button>
+                <button type="button" class="filter-btn" data-cat="NODE_CORDON">Node Cordon (1)</button>
+                <button type="button" class="filter-btn" data-cat="NODE_DRAIN">Node Drain (3)</button>
+                <button type="button" class="filter-btn" data-cat="RESOURCE_CONTENTION">Resource Contention (1)</button>
             </div>
-
-            <div class="ensemble-filter-row" data-role="service-filter-row">
-                <span class="filter-label">Workload:</span>
-                <div class="filter-group" data-role="ensemble-service-filters">
-                    <button type="button" class="filter-btn filter-btn--active" data-svc="ALL">All Services</button>
-                    <button type="button" class="filter-btn" data-svc="frontend">frontend (4)</button>
-                    <button type="button" class="filter-btn" data-svc="cartservice">cartservice (4)</button>
-                    <button type="button" class="filter-btn" data-svc="paymentservice">paymentservice (4)</button>
-                    <button type="button" class="filter-btn" data-svc="productcatalogservice">productcatalogservice (4)</button>
-                    <button type="button" class="filter-btn" data-svc="checkoutservice">checkoutservice (4)</button>
-                    <button type="button" class="filter-btn" data-svc="shippingservice">shippingservice (4)</button>
-                    <button type="button" class="filter-btn" data-svc="multi_workload">multi_workload (3)</button>
-                </div>
-            </div>
-
-            <div class="ensemble-filter-row" style="justify-content: space-between;">
-                <div class="filter-group" data-role="ensemble-severity-filters">
-                    <span class="filter-label">Drift Impact:</span>
-                    <button type="button" class="filter-btn filter-btn--active" data-sev="ALL">All Levels</button>
-                    <button type="button" class="filter-btn" data-sev="CRITICAL">Critical (≥50%)</button>
-                    <button type="button" class="filter-btn" data-sev="MODERATE">Moderate (20–49%)</button>
-                    <button type="button" class="filter-btn" data-sev="STABLE">Stable (&lt;20%)</button>
-                </div>
-                <input type="text" class="ensemble-search-input" data-role="ensemble-search" placeholder="Search trial ID, service, node, or spec..." aria-label="Search trials" />
-            </div>
+            <input type="text" class="ensemble-search-input" data-role="ensemble-search" placeholder="Search service, category, or trial..." aria-label="Search trials" />
         </div>
 
         <div class="table-scroll">
