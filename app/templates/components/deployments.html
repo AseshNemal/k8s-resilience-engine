@@ -136,6 +136,49 @@
             </div>
         </div>
 
+        <!-- Phase 4 Formal Markov Transition Matrix Visualizer -->
+        <div class="markov-matrix-card" data-role="markov-matrix-panel">
+            <div class="markov-matrix-header">
+                <div>
+                    <div class="markov-matrix-title-row">
+                        <span class="status-badge status-badge--primary">Phase 4 Mathematical Model</span>
+                        <h4 class="markov-matrix-title">Markov Pod Migration Transition Matrix ($T[i, j]$)</h4>
+                    </div>
+                    <p class="markov-matrix-desc">
+                        Quantifies stochastic pod migrations across physical nodes: \( T[i,j] \) represents pod replicas relocated from source node \( n_i \) to destination node \( n_j \) upon disruption.
+                    </p>
+                </div>
+                <div class="markov-matrix-actions">
+                    <label for="markov-scenario-select" class="markov-label">Disruption Scenario:</label>
+                    <select id="markov-scenario-select" class="markov-select" data-role="markov-scenario-select">
+                        <option value="07_node_drain_eviction" selected>Scenario 07: Node Drain & Eviction (High Displacement)</option>
+                        <option value="05_pod_deletion_chaos">Scenario 05: Involuntary Pod Deletion (Reschedule Drift)</option>
+                        <option value="04_rolling_update">Scenario 04: Rolling Update (Surge Churn)</option>
+                        <option value="02_scale_up_stress">Scenario 02: Scale Up Stress (Bin-packing)</option>
+                        <option value="03_scale_down_loss">Scenario 03: Scale Down Loss (Redundancy)</option>
+                        <option value="06_node_cordon">Scenario 06: Node Cordon (Unschedulable)</option>
+                        <option value="08_resource_contention">Scenario 08: Resource Contention (Constrained)</option>
+                        <option value="01_initial_deployment">Scenario 01: Initial Baseline (Control)</option>
+                    </select>
+                    <button type="button" class="secondary-button" data-role="markov-toggle-latex-btn">
+                        View LaTeX Table
+                    </button>
+                </div>
+            </div>
+
+            <div class="markov-matrix-content" data-role="markov-matrix-content">
+                <div class="loading-state">Loading Markov Transition Matrix…</div>
+            </div>
+
+            <div class="markov-latex-preview" data-role="markov-latex-preview" style="display: none;">
+                <div class="markov-latex-header">
+                    <span>LaTeX Table Code (Overleaf / Dissertation Ready):</span>
+                    <button type="button" class="secondary-button" data-role="markov-copy-latex-btn">Copy LaTeX</button>
+                </div>
+                <pre class="markov-latex-code" data-role="markov-latex-code"></pre>
+            </div>
+        </div>
+
         <div class="ensemble-filter-bar">
             <div class="filter-group" data-role="ensemble-category-filters">
                 <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All (28)</button>

@@ -293,6 +293,10 @@
                 label: "95% Confidence Interval",
                 value: `[${ciLow}%, ${ciHigh}%]`,
                 sub: "True population drift estimate",
+                isCi: true,
+                ciLow: parseFloat(ciLow),
+                ciHigh: parseFloat(ciHigh),
+                mean: parseFloat(meanPct),
             },
             {
                 label: "Failure Exposure (ΔE)",
@@ -318,6 +322,33 @@
             sub.textContent = item.sub;
 
             box.append(label, val, sub);
+
+            if (item.isCi) {
+                const ciBarContainer = document.createElement("div");
+                ciBarContainer.className = "ci-visual-container";
+
+                const ciTrack = document.createElement("div");
+                ciTrack.className = "ci-visual-track";
+
+                const ciBand = document.createElement("div");
+                ciBand.className = "ci-visual-band";
+                ciBand.style.left = `${Math.max(0, item.ciLow)}%`;
+                ciBand.style.width = `${Math.max(4, Math.min(100, item.ciHigh - item.ciLow))}%`;
+
+                const ciMeanMarker = document.createElement("div");
+                ciMeanMarker.className = "ci-visual-mean";
+                ciMeanMarker.style.left = `${item.mean}%`;
+
+                ciTrack.append(ciBand, ciMeanMarker);
+
+                const ciLabels = document.createElement("div");
+                ciLabels.className = "ci-visual-labels";
+                ciLabels.innerHTML = `<span>0%</span><span class="ci-badge">${item.ciLow}% — ${item.ciHigh}% (μ=${item.mean}%)</span><span>100%</span>`;
+
+                ciBarContainer.append(ciTrack, ciLabels);
+                box.appendChild(ciBarContainer);
+            }
+
             container.appendChild(box);
         });
     }
@@ -623,6 +654,187 @@
         filterAndRender();
     }
 
+    async function loadMarkovMatrix(root, scenarioId) {
+        if (!root) return;
+        const content = root.querySelector("[data-role='markov-matrix-content']");
+        const latexCodeEl = root.querySelector("[data-role='markov-latex-code']");
+        if (!content) return;
+
+        content.innerHTML = '<div class="loading-state">Loading Markov Transition Matrix…</div>';
+
+        try {
+            const data = await fetchJson(`/api/deployments/chaos/matrix/${scenarioId}`);
+            content.innerHTML = "";
+
+            if (!data || !data.nodes || !data.transition_matrix) {
+                content.innerHTML = '<p class="text-muted" style="padding:15px;">No transition data available for this scenario.</p>';
+                return;
+            }
+
+            const wrapper = document.createElement("div");
+            wrapper.className = "markov-grid-wrapper";
+
+            const tableScroll = document.createElement("div");
+            tableScroll.className = "table-scroll";
+
+            const table = document.createElement("table");
+            table.className = "markov-grid-table";
+
+            // Header Row
+            const thead = document.createElement("thead");
+            const headerRow = document.createElement("tr");
+
+            const cornerTh = document.createElement("th");
+            cornerTh.className = "markov-header-corner";
+            cornerTh.textContent = "From (T0) \\ To (T1)";
+            headerRow.appendChild(cornerTh);
+
+            data.nodes.forEach((nodeName) => {
+                const th = document.createElement("th");
+                th.textContent = nodeName;
+                headerRow.appendChild(th);
+            });
+
+            const outTh = document.createElement("th");
+            outTh.textContent = "Migrations Out";
+            headerRow.appendChild(outTh);
+
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // Table Body
+            const tbody = document.createElement("tbody");
+            data.nodes.forEach((srcNode) => {
+                const tr = document.createElement("tr");
+
+                const rowNodeTd = document.createElement("td");
+                rowNodeTd.className = "markov-row-node";
+                rowNodeTd.textContent = srcNode;
+                tr.appendChild(rowNodeTd);
+
+                let totalOut = 0;
+
+                data.nodes.forEach((dstNode) => {
+                    const td = document.createElement("td");
+                    const count = data.transition_matrix[srcNode]?.[dstNode] || 0;
+
+                    if (srcNode === dstNode) {
+                        td.className = "markov-cell--stayed";
+                        td.innerHTML = `<span>${count}</span> <small style="display:block;font-size:10px;opacity:0.8;">remained</small>`;
+                    } else if (count > 0) {
+                        td.className = "markov-cell--migration";
+                        td.innerHTML = `<span>→ ${count}</span> <small style="display:block;font-size:10px;">displaced</small>`;
+                        totalOut += count;
+                    } else {
+                        td.className = "markov-cell--empty";
+                        td.textContent = "—";
+                    }
+
+                    tr.appendChild(td);
+                });
+
+                const outTd = document.createElement("td");
+                outTd.style.fontWeight = "700";
+                outTd.textContent = totalOut > 0 ? `→ ${totalOut}` : "0";
+                if (totalOut > 0) outTd.style.color = "var(--color-danger)";
+                tr.appendChild(outTd);
+
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            tableScroll.appendChild(table);
+            wrapper.appendChild(tableScroll);
+
+            // Metrics Row
+            const metricsRow = document.createElement("div");
+            metricsRow.className = "markov-metrics-row";
+
+            const dRatePct = (data.d_rate * 100).toFixed(1);
+            const deltaEPct = (data.delta_e_rate * 100).toFixed(1);
+
+            metricsRow.innerHTML = `
+                <div class="markov-metric-pill">
+                    <span class="markov-metric-pill__label">Placement Drift Rate (D_rate):</span>
+                    <span class="status-badge ${data.d_rate > 0.3 ? 'status-badge--danger' : data.d_rate > 0 ? 'status-badge--warning' : 'status-badge--success'}">${dRatePct}%</span>
+                </div>
+                <div class="markov-metric-pill">
+                    <span class="markov-metric-pill__label">Exposure Shift (ΔE):</span>
+                    <span class="status-badge ${data.delta_e_rate > 0 ? 'status-badge--danger' : 'status-badge--muted'}">${data.delta_e_rate > 0 ? '+' : ''}${deltaEPct}%</span>
+                </div>
+                <div class="markov-metric-pill">
+                    <span class="markov-metric-pill__label">Evaluated Nodes:</span>
+                    <span class="markov-metric-pill__val">${data.nodes.length}</span>
+                </div>
+            `;
+            wrapper.appendChild(metricsRow);
+
+            // Migration Records
+            if (data.migration_records && data.migration_records.length > 0) {
+                const migList = document.createElement("div");
+                migList.className = "markov-migrations-list";
+
+                data.migration_records.forEach((rec) => {
+                    const item = document.createElement("div");
+                    item.className = "markov-migration-item";
+                    item.innerHTML = `
+                        <strong>${rec.from_node} → ${rec.to_node}:</strong>
+                        <span>${rec.pod_count} pod(s) displaced</span>
+                        <code style="font-size:11px; margin-left: auto;">${(rec.services_affected || []).join(", ")}</code>
+                    `;
+                    migList.appendChild(item);
+                });
+                wrapper.appendChild(migList);
+            }
+
+            content.appendChild(wrapper);
+
+            if (latexCodeEl) {
+                latexCodeEl.textContent = data.latex_table || "% No LaTeX code generated";
+            }
+        } catch (err) {
+            content.innerHTML = `<p class="text-danger" style="padding:10px;">Failed to load transition matrix: ${err.message}</p>`;
+        }
+    }
+
+    function initMarkovControls(root) {
+        if (!root) return;
+        const select = root.querySelector("[data-role='markov-scenario-select']");
+        const toggleLatexBtn = root.querySelector("[data-role='markov-toggle-latex-btn']");
+        const copyLatexBtn = root.querySelector("[data-role='markov-copy-latex-btn']");
+        const latexPreview = root.querySelector("[data-role='markov-latex-preview']");
+        const latexCodeEl = root.querySelector("[data-role='markov-latex-code']");
+
+        if (select) {
+            select.addEventListener("change", () => {
+                loadMarkovMatrix(root, select.value);
+            });
+        }
+
+        if (toggleLatexBtn && latexPreview) {
+            toggleLatexBtn.addEventListener("click", () => {
+                const isHidden = latexPreview.style.display === "none";
+                latexPreview.style.display = isHidden ? "block" : "none";
+                toggleLatexBtn.textContent = isHidden ? "Hide LaTeX Table" : "View LaTeX Table";
+            });
+        }
+
+        if (copyLatexBtn && latexCodeEl) {
+            copyLatexBtn.addEventListener("click", () => {
+                navigator.clipboard.writeText(latexCodeEl.textContent).then(() => {
+                    const original = copyLatexBtn.textContent;
+                    copyLatexBtn.textContent = "Copied to Clipboard!";
+                    setTimeout(() => {
+                        copyLatexBtn.textContent = original;
+                    }, 2000);
+                });
+            });
+        }
+
+        const initialScenario = select ? select.value : "07_node_drain_eviction";
+        loadMarkovMatrix(root, initialScenario);
+    }
+
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
         if (toggleSourceButton) toggleSourceButton.disabled = true;
@@ -702,6 +914,7 @@
                     renderSensitivityBreakdowns(region, ensemble);
                 }
                 initEnsembleInteractions(region, ensemble, benchmarks);
+                initMarkovControls(region);
             }
 
             initJsonPanel(region.querySelector("#deployment-raw-json"), deployment);
