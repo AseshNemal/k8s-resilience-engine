@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections import Counter
 from enum import Enum
+from ipaddress import ip_address
 from typing import Any, Mapping, Sequence
 
 
@@ -130,6 +131,19 @@ def _span_metrics(
         for process in processes.values()
         if isinstance(process, Mapping)
     }
+    # An address is not a service name. For IP peers, use an actual linked
+    # server span as identity evidence; otherwise retain the unresolved address.
+    resolved_client_ids = {
+        _parent_id(span)
+        for span in spans
+        if any(
+            isinstance(tag, Mapping)
+            and tag.get("key") == "span.kind"
+            and str(tag.get("value", "")).lower() == "server"
+            for tag in (span.get("tags") if isinstance(span.get("tags"), list) else [])
+        )
+        and str(processes.get(str(span.get("processID", "")), {}).get("serviceName", "")).strip()
+    }
     missing_service_identities: set[str] = set()
     for span in spans:
         tags = {
@@ -141,6 +155,19 @@ def _span_metrics(
             continue
         raw_target = tags.get("server.address") or tags.get("net.peer.name")
         if not isinstance(raw_target, str):
+            continue
+        address = raw_target.strip().lower()
+        if address.startswith("[") and "]" in address:
+            address = address[1:address.index("]")]
+        elif address.count(":") == 1:
+            address = address.split(":", 1)[0]
+        try:
+            ip_address(address)
+        except ValueError:
+            pass
+        else:
+            if str(span.get("spanID", "")).strip() not in resolved_client_ids:
+                missing_service_identities.add(address)
             continue
         target = raw_target.strip().lower().split(".", 1)[0].split(":", 1)[0]
         if target and target not in observed_services and target != "localhost":

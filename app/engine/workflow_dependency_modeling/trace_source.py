@@ -97,6 +97,8 @@ class TraceSourceConfiguration:
 class TraceSource(Protocol):
     """Evidence backend boundary consumed by Component 1 orchestration."""
 
+    def get_services(self) -> list[str]: ...
+
     def fetch_workflow_traces(
         self,
         *,
@@ -134,6 +136,14 @@ class OfflineJaegerTraceSource:
     """Read an immutable in-memory Jaeger export through the generic port."""
 
     traces: tuple[dict[str, Any], ...]
+
+    def get_services(self) -> list[str]:
+        return sorted({
+            process["serviceName"]
+            for trace in self.traces
+            for process in trace.get("processes", {}).values()
+            if isinstance(process.get("serviceName"), str) and process["serviceName"].strip()
+        })
 
     @classmethod
     def from_payload(cls, payload: Any) -> "OfflineJaegerTraceSource":

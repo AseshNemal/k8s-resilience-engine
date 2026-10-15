@@ -213,6 +213,14 @@ def start_workflow_analysis(
     return _repository(repository).create(analysis)
 
 
+def list_analysis_services(data: Mapping[str, Any]) -> list[str]:
+    """Read available service identities from an approved trace connection."""
+    configuration = _trace_source(data)
+    source = create_trace_source(configuration)
+    services = source.get_services()
+    return sorted({name.strip() for name in services if isinstance(name, str) and name.strip()})
+
+
 def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Discover operations through the same allowlisted connection policy."""
     trace_source = _trace_source(data)
