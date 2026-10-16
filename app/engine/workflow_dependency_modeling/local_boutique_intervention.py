@@ -28,6 +28,9 @@ _DEMO_SERVICES = frozenset({
     "recommendationservice", "shippingservice",
 })
 _COMPOSE_FILE = (Path(__file__).resolve().parents[3] / "deploy" / "docker-compose.boutique.yml").resolve()
+_INSTRUMENTED_OVERRIDE = (
+    Path(__file__).resolve().parents[3] / "deploy" / "docker-compose.boutique-instrumented.yml"
+).resolve()
 _COHORT_LOCK = Lock()
 
 
@@ -54,10 +57,18 @@ class DockerDemoController:
             raise RuntimeError("Docker returned invalid container inspection data") from err
         labels = data.get("Config", {}).get("Labels") or {}
         compose_path = labels.get("com.docker.compose.project.config_files", "")
+        listed_files = [
+            str(Path(item.strip()).resolve()).casefold()
+            for item in compose_path.split(",") if item.strip()
+        ]
+        allowed_files = {
+            str(_COMPOSE_FILE).casefold(), str(_INSTRUMENTED_OVERRIDE).casefold()
+        }
         if (
             data.get("Name") != f"/{container}"
             or labels.get("com.docker.compose.service") != service
-            or str(Path(compose_path).resolve()).casefold() != str(_COMPOSE_FILE).casefold()
+            or str(_COMPOSE_FILE).casefold() not in listed_files
+            or not set(listed_files) <= allowed_files
         ):
             raise ValueError("Container does not belong to this repository's Online Boutique demo")
         return data

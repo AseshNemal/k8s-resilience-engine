@@ -1,5 +1,6 @@
 """The demo control never touches an unverified container or skips recovery."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,25 @@ class FakeDocker:
     def start(self, service):
         self.actions.append(("start", service))
         self.state = "running"
+
+
+def test_docker_identity_accepts_only_repository_compose_files(monkeypatch):
+    controller = demo.DockerDemoController()
+    labels = {
+        "com.docker.compose.service": "cartservice",
+        "com.docker.compose.project.config_files": (
+            f"{demo._COMPOSE_FILE},{demo._INSTRUMENTED_OVERRIDE}"
+        ),
+    }
+    container = {
+        "Name": "/boutique-cartservice", "Config": {"Labels": labels},
+        "State": {"Status": "running"},
+    }
+    monkeypatch.setattr(controller, "_command", lambda *args: json.dumps(container))
+    assert controller.inspect("cartservice")["Name"] == "/boutique-cartservice"
+    labels["com.docker.compose.project.config_files"] += ",C:/elsewhere/rogue.yml"
+    with pytest.raises(ValueError, match="does not belong"):
+        controller.inspect("cartservice")
 
 
 def _setup(monkeypatch, *, fail_trial=False):

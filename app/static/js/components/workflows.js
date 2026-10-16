@@ -1163,10 +1163,10 @@
         const summary = document.createElement("div");
         summary.className = "approved-graph";
         summary.append(
-            resultCard("Mandatory", graph.mandatoryServices.join(", ") || "None", "Workflow cannot succeed without these"),
+            resultCard("Mandatory", graph.mandatoryServices.join(", ") || "None", "Repeatedly prevented this tested checkout outcome"),
             resultCard("Supportive", (approval.supportingServices || approval.excludedSupportingServices || []).join(", ") || "None", "Recorded separately; excluded from Component 3 failure gating"),
             resultCard("Optional", graph.optionalServices.join(", ") || "None", "No material outcome effect observed"),
-            resultCard("Retained edges", String(graph.edges.length), "Only between approved services")
+            resultCard("Observed call edges", String(graph.edges.length), "Trace-observed links between approved services; not individually outage-validated")
         );
         const exportButton = guidedText("button", "experiment-button", "Download validated graph JSON");
         exportButton.type = "button";

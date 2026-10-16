@@ -20,6 +20,11 @@ test('local Docker action is offered only to the reviewed local boutique profile
     assert.equal(context.isLocalBoutiqueDemo({workloadProfile: 'reviewed_generic'}, 'http://localhost:8080'), false);
 });
 
+test('approved output distinguishes trace-observed edges from outage-validated services', () => {
+    assert.match(source, /Observed call edges/);
+    assert.match(source, /not individually outage-validated/);
+});
+
 test('keeps response markers as a list and preserves generic request data', () => {
     const setup = build('200, 201, 200', '{"pathVariables":{"id":"42"},"jsonBody":{"quantity":2},"responseContains":["order"]}', ' confirmed ');
     assert.deepEqual(setup.expectedStatusCodes, [200, 201]);
