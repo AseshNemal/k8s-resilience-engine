@@ -50,7 +50,8 @@ from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
     run_http_workflow_probe,
 )
 from app.engine.workflow_dependency_modeling.trace_source import create_trace_source
-from app.engine.workflow_dependency_modeling.trace_validator import validate_trace_quality
+from app.engine.workflow_dependency_modeling.trace_validator import TraceQuality, validate_trace_quality
+from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
 from app.engine.workflow_dependency_modeling.intervention_event_models import (
     InterventionEvent,
     InterventionEventType,
@@ -63,6 +64,7 @@ WorkloadRunner = Callable[..., WorkflowRunResult]
 TraceFetcher = Callable[[Any, str], list[dict[str, Any]]]
 Sleeper = Callable[[float], None]
 TRACE_POLL_DELAYS_SECONDS = (0.25, 0.5, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0)
+_VERIFIED_OUTAGE_ASSERTION = "verified_unavailable_service:"
 _default_intervention_repository: InterventionEventRepository | None = None
 
 
@@ -119,6 +121,37 @@ def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]
     return create_trace_source(analysis.trace_source).fetch_trace(trace_id)
 
 
+def _expected_outage_trace_quality(trace: dict[str, Any], target: str | None) -> bool:
+    """Tolerate only the missing server span caused by one verified outage."""
+    if not target:
+        return False
+    summary = validate_trace_quality([trace])
+    result = summary.results[0]
+    if (
+        result.quality is not TraceQuality.PARTIAL
+        or result.missing_service_identities != (target,)
+        or result.reasons != (f"Client spans have no server-side service identity for: {target}",)
+    ):
+        return False
+    return any(
+        span.error and span.tags.get("net.peer.name") == target
+        for span in parse_spans([trace])
+    )
+
+
+def _verified_outage_target(outcome: ExecutionOutcome) -> str | None:
+    for assertion in outcome.assertions:
+        if assertion.name.startswith(_VERIFIED_OUTAGE_ASSERTION) and assertion.passed:
+            target = assertion.name.removeprefix(_VERIFIED_OUTAGE_ASSERTION)
+            if (
+                assertion.expected == target
+                and assertion.observed == target
+                and outcome.registration.batch_id.endswith(f":intervention:{target}")
+            ):
+                return target
+    return None
+
+
 def _record_campaign_trial(
     campaign: ExperimentCampaign,
     analysis: Any,
@@ -130,6 +163,7 @@ def _record_campaign_trial(
     trace_fetcher: TraceFetcher | None,
     sleeper: Sleeper | None,
     now: datetime | None,
+    verified_unavailable_service: str | None = None,
 ) -> ExecutionOutcome:
     timestamp = _utc(now)
     from .experiment_manifest_service import require_experiment_record
@@ -158,7 +192,10 @@ def _record_campaign_trial(
         )
         if (
             matching_trace is not None
-            and validate_trace_quality([matching_trace]).valid_count == 1
+            and (
+                validate_trace_quality([matching_trace]).valid_count == 1
+                or _expected_outage_trace_quality(matching_trace, verified_unavailable_service)
+            )
             and (
                 not run.business_success
                 or trace_has_terminal_evidence(matching_trace, scenario.success_condition)
@@ -196,7 +233,10 @@ def _record_campaign_trial(
     ]
     if len(matching_traces) == 1:
         quality = validate_trace_quality(matching_traces)
-        if not quality.results[0].eligible:
+        expected_outage = _expected_outage_trace_quality(
+            matching_traces[0], verified_unavailable_service
+        )
+        if not quality.results[0].eligible and not expected_outage:
             snapshot = TraceEvidenceSnapshot.from_trace(
                 matching_traces[0],
                 trace_id=run.trace_id,
@@ -221,15 +261,41 @@ def _record_campaign_trial(
             outcome = evaluate_execution(
                 registration, scenario, traces, now=recorded_at
             )
+            if expected_outage:
+                outcome = ExecutionOutcome(
+                    registration=outcome.registration,
+                    status=outcome.status,
+                    correlation_status=outcome.correlation_status,
+                    recorded_at=outcome.recorded_at,
+                    matched_trace_id=outcome.matched_trace_id,
+                    evidence_id=outcome.evidence_id,
+                    evidence_snapshot=outcome.evidence_snapshot,
+                    assertions=(
+                        *outcome.assertions,
+                        AssertionResult(
+                            name=_VERIFIED_OUTAGE_ASSERTION + verified_unavailable_service,
+                            passed=True,
+                            expected=verified_unavailable_service,
+                            observed=verified_unavailable_service,
+                        ),
+                    ),
+                    reasons=outcome.reasons,
+                )
     else:
         outcome = evaluate_execution(registration, scenario, traces, now=recorded_at)
     if (
         not run.business_success
         and outcome.correlation_status is CorrelationStatus.MATCHED
         and outcome.evidence_snapshot is not None
-        and validate_trace_quality(
-            [outcome.evidence_snapshot.to_mapping()["rawTrace"]]
-        ).valid_count == 1
+        and (
+            validate_trace_quality(
+                [outcome.evidence_snapshot.to_mapping()["rawTrace"]]
+            ).valid_count == 1
+            or _expected_outage_trace_quality(
+                outcome.evidence_snapshot.to_mapping()["rawTrace"],
+                verified_unavailable_service,
+            )
+        )
         and outcome.status in {
             ExecutionOutcomeStatus.SUCCEEDED,
             ExecutionOutcomeStatus.INDETERMINATE,
@@ -361,6 +427,7 @@ def run_campaign_intervention_trial(
     trace_fetcher: TraceFetcher | None = None,
     sleeper: Sleeper | None = None,
     now: datetime | None = None,
+    verified_unavailable_service: str | None = None,
 ) -> ExecutionOutcome:
     """Run one workflow only while the selected intervention is confirmed active."""
     campaign = get_experiment_campaign(campaign_id, campaign_repository)
@@ -372,6 +439,8 @@ def run_campaign_intervention_trial(
     )
     if plan is None:
         raise ValueError("targetService is not a candidate in this campaign")
+    if verified_unavailable_service is not None and verified_unavailable_service != target_service:
+        raise ValueError("Verified outage target must match the intervention service")
     events = _intervention_repository(event_repository).list(
         campaign.campaign_id, target_service
     )
@@ -392,6 +461,7 @@ def run_campaign_intervention_trial(
         trace_fetcher,
         sleeper,
         now,
+        verified_unavailable_service,
     )
 
 
@@ -510,7 +580,12 @@ def _eligible_campaign_outcome(outcome: ExecutionOutcome) -> bool:
         and snapshot is not None
         and snapshot.trace_id == outcome.matched_trace_id
         and snapshot.source_locator == registration.evidence_locator
-        and validate_trace_quality([snapshot.to_mapping()["rawTrace"]]).valid_count == 1
+        and (
+            validate_trace_quality([snapshot.to_mapping()["rawTrace"]]).valid_count == 1
+            or _expected_outage_trace_quality(
+                snapshot.to_mapping()["rawTrace"], _verified_outage_target(outcome)
+            )
+        )
     )
 
 
@@ -524,7 +599,13 @@ def _campaign_exclusion_reason(outcome: ExecutionOutcome) -> str:
         return "The workflow outcome is indeterminate"
     if outcome.evidence_snapshot is None:
         return "The matched trace has no immutable evidence snapshot"
-    if validate_trace_quality([outcome.evidence_snapshot.to_mapping()["rawTrace"]]).valid_count != 1:
+    if (
+        validate_trace_quality([outcome.evidence_snapshot.to_mapping()["rawTrace"]]).valid_count != 1
+        and not _expected_outage_trace_quality(
+            outcome.evidence_snapshot.to_mapping()["rawTrace"],
+            _verified_outage_target(outcome),
+        )
+    ):
         return "The matched trace is incomplete or invalid"
     return "Trial provenance does not satisfy the controlled evidence contract"
 

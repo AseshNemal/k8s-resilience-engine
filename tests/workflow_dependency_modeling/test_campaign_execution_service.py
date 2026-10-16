@@ -19,6 +19,8 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     InMemoryAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.campaign_execution_service import (
+    _expected_outage_trace_quality,
+    _eligible_campaign_outcome,
     baseline_readiness,
     intervention_status,
     record_intervention_event,
@@ -211,6 +213,71 @@ def _trace(status=200, trace_id=TRACE_ID):
             }
         ],
     }
+
+
+def _payment_outage_trace(trace_id=TRACE_ID):
+    trace = _trace(status=500, trace_id=trace_id)
+    trace["spans"].append({
+        "traceID": trace_id,
+        "spanID": "span-2",
+        "operationName": "hipstershop.PaymentService/Charge",
+        "processID": "p1",
+        "references": [{"refType": "CHILD_OF", "traceID": trace_id, "spanID": "span-1"}],
+        "startTime": 1_000_001,
+        "duration": 50_000,
+        "tags": [
+            {"key": "span.kind", "type": "string", "value": "client"},
+            {"key": "net.peer.name", "type": "string", "value": "paymentservice"},
+            {"key": "error", "type": "bool", "value": True},
+        ],
+    })
+    return trace
+
+
+def test_expected_outage_quality_requires_exact_missing_error_target():
+    trace = _payment_outage_trace()
+    assert _expected_outage_trace_quality(trace, "paymentservice") is True
+    assert _expected_outage_trace_quality(trace, "shippingservice") is False
+    trace["spans"][1]["tags"][-1]["value"] = False
+    assert _expected_outage_trace_quality(trace, "paymentservice") is False
+
+
+def test_verified_outage_trial_is_eligible_but_manual_partial_trace_is_not():
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    events = InMemoryInterventionEventRepository()
+    _ready_baseline(analyses, campaigns, campaign, executions)
+    record_intervention_event(campaign.campaign_id, {
+        "targetService": "paymentservice", "eventType": "activated",
+        "operatorConfirmed": True, "evidence": "Docker inspect state=exited",
+        "occurredAt": NOW.isoformat(),
+    }, actor="operator", campaign_repository=campaigns,
+       repository=events, execution_repository_override=executions, now=NOW)
+
+    verified = run_campaign_intervention_trial(
+        campaign.campaign_id, "paymentservice", "http://localhost:8080",
+        actor="operator", campaign_repository=campaigns, analysis_repository=analyses,
+        event_repository=events, repository=executions,
+        workload_runner=lambda *args, **kwargs: _run(success=False),
+        trace_fetcher=lambda analysis, trace_id: [_payment_outage_trace(trace_id)],
+        sleeper=lambda seconds: None, now=NOW,
+        verified_unavailable_service="paymentservice",
+    )
+    assert verified.status is ExecutionOutcomeStatus.FAILED
+    assert _eligible_campaign_outcome(verified) is True
+    assert any(item.name == "verified_unavailable_service:paymentservice" for item in verified.assertions)
+
+    manual = run_campaign_intervention_trial(
+        campaign.campaign_id, "paymentservice", "http://localhost:8080",
+        actor="operator", campaign_repository=campaigns, analysis_repository=analyses,
+        event_repository=events, repository=executions,
+        workload_runner=lambda *args, **kwargs: _run(success=False, trace_id="f" * 32),
+        trace_fetcher=lambda analysis, trace_id: [_payment_outage_trace(trace_id)],
+        sleeper=lambda seconds: None, now=NOW,
+    )
+    assert manual.status is ExecutionOutcomeStatus.INDETERMINATE
+    assert _eligible_campaign_outcome(manual) is False
 
 
 def test_baseline_trial_executes_correlates_and_persists() -> None:

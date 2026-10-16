@@ -132,8 +132,12 @@ def run_local_boutique_intervention_cohort(
                 "occurredAt": datetime.now(timezone.utc).isoformat(),
             }, actor=actor)
             for _ in range(remaining):
+                # A missing server span is expected only while Docker itself
+                # still verifies this exact demo container is stopped.
+                _state_evidence(docker.inspect(target_service), "exited")
                 outcome = run_campaign_intervention_trial(
-                    campaign_id, target_service, application_url, actor=actor
+                    campaign_id, target_service, application_url, actor=actor,
+                    verified_unavailable_service=target_service,
                 )
                 outcomes.append(outcome.to_mapping())
         finally:

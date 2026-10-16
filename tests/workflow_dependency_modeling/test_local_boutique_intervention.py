@@ -59,7 +59,7 @@ def _setup(monkeypatch, *, fail_trial=False):
     def trial(*args, **kwargs):
         if fail_trial:
             raise RuntimeError("Jaeger unavailable")
-        trials.append(1)
+        trials.append(kwargs)
         return SimpleNamespace(to_mapping=lambda: {"status": "failed"})
 
     monkeypatch.setattr(demo, "intervention_status", status)
@@ -77,6 +77,10 @@ def test_local_cohort_stops_one_service_runs_trials_and_restores(monkeypatch):
     )
     assert events == ["activated", "restored"]
     assert len(trials) == 3
+    assert all(
+        trial["verified_unavailable_service"] == "paymentservice"
+        for trial in trials
+    )
     assert len(result["outcomes"]) == 3
     assert docker.state == "running"
     assert ("stop", "paymentservice") in docker.actions
