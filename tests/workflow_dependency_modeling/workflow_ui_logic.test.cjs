@@ -25,6 +25,7 @@ test('approved output distinguishes trace-observed edges from outage-validated s
     assert.match(source, /not individually outage-validated/);
     assert.match(source, /badge\.textContent = 'Step 5: graph approved'/);
     assert.match(source, /Download the approved graph JSON or inspect it through the workflow API/);
+    assert.match(source, /progress\.stage === "approved"/);
 });
 
 test('keeps response markers as a list and preserves generic request data', () => {

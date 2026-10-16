@@ -59,7 +59,7 @@ def test_progress_does_not_call_docker_verified_trials_operator_attested(monkeyp
     from app.engine.workflow_dependency_modeling import campaign_assessment_service as service
 
     records = [SimpleNamespace(marker="paymentservice")]
-    monkeypatch.setattr(service, "execution_repository", lambda: SimpleNamespace(
+    monkeypatch.setattr(service, "execution_repository", lambda repository: SimpleNamespace(
         list=lambda *, batch_id: records
     ))
     monkeypatch.setattr(service, "_eligible_campaign_outcome", lambda outcome: True)

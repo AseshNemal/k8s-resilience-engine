@@ -68,7 +68,7 @@ def _intervention_verification(services: list[dict[str, Any]]) -> str:
     verified = 0
     eligible = 0
     for service in services:
-        records = execution_repository().list(batch_id=service["batchId"])
+        records = execution_repository(None).list(batch_id=service["batchId"])
         for outcome in records:
             if not _eligible_campaign_outcome(outcome):
                 continue

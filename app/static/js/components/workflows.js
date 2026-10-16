@@ -763,7 +763,12 @@
             if (remaining) remaining.replaceChildren(
                 ...(
                     readiness.ready
-                        ? ["Choose a service below to test, then record its result."]
+                        ? [{
+                            interventions_required: "Choose a service below to test, then record its result.",
+                            ready_for_assessment: "Classify the completed dependency tests.",
+                            reviewed: "Review every classification, then approve the graph.",
+                            approved: "Download the approved graph JSON or inspect it through the workflow API.",
+                        }[progress.stage] || "Check the current campaign status."]
                         : progress.blockers
                 ).map(text => guidedText('li', '', text))
             );
@@ -803,7 +808,9 @@
             runButton.disabled = readiness.ready || runButton.dataset.manifestVerified !== 'true';
             if (readiness.ready) {
                 runButton.textContent = "Baseline complete";
-                runStatus.textContent = "The clean workflow baseline is stable and fully correlated.";
+                runStatus.textContent = progress.stage === "approved"
+                    ? "Graph approved. The normal workflow baseline passed with exact trace correlation."
+                    : "The clean workflow baseline is stable and fully correlated.";
                 updateExperimentPath(2);
                 if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · BASELINE READY";
                 interventionConsole.hidden = false;
