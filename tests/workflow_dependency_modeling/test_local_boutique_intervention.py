@@ -3,7 +3,9 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException, Request
 
+from app.api import workflows as workflow_api
 from app.engine.workflow_dependency_modeling import local_boutique_intervention as demo
 
 
@@ -102,3 +104,29 @@ def test_local_cohort_rejects_non_local_application_before_docker(monkeypatch):
             actor="operator", controller=docker,
         )
     assert docker.actions == []
+
+
+def test_local_demo_api_requires_explicit_header_and_loopback(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        workflow_api, "run_local_boutique_intervention_cohort",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or {"ok": True},
+    )
+    payload = {"applicationUrl": "http://localhost:8080"}
+    def request(host):
+        return Request({"type": "http", "method": "POST", "path": "/",
+                        "headers": [], "client": (host, 12345)})
+
+    action = workflow_api.execute_local_boutique_intervention_cohort
+    with pytest.raises(HTTPException) as remote:
+        action("campaign:demo", "paymentservice", request("198.51.100.10"),
+               payload, "operator", "stop-and-restore-one-demo-service")
+    assert remote.value.status_code == 403
+    with pytest.raises(HTTPException) as bad:
+        action("campaign:demo", "paymentservice", request("127.0.0.1"),
+               payload, "operator", "no")
+    assert bad.value.status_code == 403
+    accepted = action("campaign:demo", "paymentservice", request("127.0.0.1"),
+                      payload, "operator", "stop-and-restore-one-demo-service")
+    assert accepted == {"ok": True}
+    assert len(calls) == 1

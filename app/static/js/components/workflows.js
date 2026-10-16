@@ -835,6 +835,11 @@
         return button;
     }
 
+    function isLocalBoutiqueDemo(campaign, applicationUrl) {
+        return campaign.workloadProfile === "online_boutique_checkout_v0_10_1"
+            && ["http://localhost:8080", "http://127.0.0.1:8080"].includes(applicationUrl.trim());
+    }
+
     async function loadInterventionConsole(campaign, target, frontendUrl) {
         const applicationUrlLabel = frontendUrl.closest("label");
         target.replaceChildren();
@@ -850,7 +855,9 @@
             guidedText(
                 "p",
                 "intervention-console__notice",
-                "Change one service only after approval. This page records the result; it does not stop or restart services."
+                isLocalBoutiqueDemo(campaign, frontendUrl.value)
+                    ? "Use a local demo test below to stop one verified container, collect three trials, and restore it. Check the result before continuing."
+                    : "For other environments, change one service only after approval; this page records operator evidence but cannot control the service."
             )
         );
         try {
@@ -965,6 +972,37 @@
             restore.disabled = false;
             controls.append(run, evidenceLabel, restore);
         } else {
+            if (isLocalBoutiqueDemo(campaign, frontendUrl.value)) {
+                const demoRun = interventionActionButton("Run local demo test · stop, test, restore", async () => {
+                    if (!frontendUrl.reportValidity()) return;
+                    if (!window.confirm(`Temporarily stop boutique-${service.targetService}, run its workflow trials, then restore it? Only use this on the local demo.`)) return;
+                    demoRun.disabled = true;
+                    message.textContent = `Testing ${service.targetService}; restoration will be attempted even if a trial fails…`;
+                    message.classList.remove("is-error");
+                    try {
+                        await requestScenario(
+                            `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/local-demo/${encodeURIComponent(service.targetService)}/run-cohort`,
+                            {
+                                method: "POST",
+                                headers: {
+                                    "Content-Type": "application/json",
+                                    "X-Actor": "guided-local-researcher",
+                                    "X-Local-Demo-Confirm": "stop-and-restore-one-demo-service",
+                                },
+                                body: JSON.stringify({applicationUrl: frontendUrl.value.trim()}),
+                            }
+                        );
+                        await refresh();
+                    } catch (error) {
+                        message.textContent = `${error.message} Check that boutique-${service.targetService} is running before retrying.`;
+                        message.classList.add("is-error");
+                        demoRun.disabled = false;
+                    }
+                });
+                demoRun.classList.add("intervention-service__demo-action");
+                controls.classList.add("intervention-service__controls--demo");
+                controls.appendChild(demoRun);
+            }
             const activate = interventionActionButton(
                 service.state === "restored" ? "Record service unavailable again" : "Record service unavailable",
                 () => recordEvent("activated")

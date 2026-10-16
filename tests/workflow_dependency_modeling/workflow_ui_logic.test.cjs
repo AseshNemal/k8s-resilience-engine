@@ -10,8 +10,15 @@ const context = {
     document: {querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {}},
 };
 vm.createContext(context);
-vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; globalThis.observedGraphModel = observedGraphModel; })();'), context);
+vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; globalThis.observedGraphModel = observedGraphModel; globalThis.isLocalBoutiqueDemo = isLocalBoutiqueDemo; })();'), context);
 const build = (...args) => JSON.parse(JSON.stringify(context.buildSetup(...args)));
+
+test('local Docker action is offered only to the reviewed local boutique profile', () => {
+    const campaign = {workloadProfile: 'online_boutique_checkout_v0_10_1'};
+    assert.equal(context.isLocalBoutiqueDemo(campaign, 'http://localhost:8080'), true);
+    assert.equal(context.isLocalBoutiqueDemo(campaign, 'https://production.example'), false);
+    assert.equal(context.isLocalBoutiqueDemo({workloadProfile: 'reviewed_generic'}, 'http://localhost:8080'), false);
+});
 
 test('keeps response markers as a list and preserves generic request data', () => {
     const setup = build('200, 201, 200', '{"pathVariables":{"id":"42"},"jsonBody":{"quantity":2},"responseContains":["order"]}', ' confirmed ');

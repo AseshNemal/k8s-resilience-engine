@@ -1659,6 +1659,15 @@
     align-items: center;
 }
 
+.intervention-service__controls--demo {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.intervention-service__demo-action {
+    grid-column: 1 / -1;
+    justify-self: start;
+}
+
 .intervention-service__evidence-label {
     display: grid;
     gap: 5px;
