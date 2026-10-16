@@ -15,6 +15,7 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     InMemoryAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.campaign_assessment_service import (
+    _intervention_evidence,
     _intervention_verification,
     approve_experiment_campaign,
     assess_experiment_campaign,
@@ -68,6 +69,9 @@ def test_progress_does_not_call_docker_verified_trials_operator_attested(monkeyp
     assert _intervention_verification(services) == "docker_verified_local_demo"
     records.append(SimpleNamespace(marker=None))
     assert _intervention_verification(services) == "mixed"
+    assert _intervention_evidence(services) == {
+        "verification": "mixed", "verifiedTrials": 1, "eligibleTrials": 2,
+    }
     records[0].marker = None
     assert _intervention_verification(services) == "operator_attested"
 

@@ -71,6 +71,7 @@
 
     let discoveredWorkflows = [];
     let guidedWorkflows = [];
+    let latestInterventionEvidence = null;
     let guidedConnectionVersion = 0;
     let liveMode = false;
     let renderVersion = 0;
@@ -751,6 +752,7 @@
             const progress = await requestScenario(
                 `/api/workflows/experiment-campaigns/${encodeURIComponent(campaign.campaignId)}/progress`
             );
+            latestInterventionEvidence = progress.interventionEvidence || null;
             const readiness = progress.baseline;
             const root = target.closest('.guided-result') || guidedResult;
             const badge = root.querySelector('.guided-result__heading .guided-maturity');
@@ -1181,6 +1183,10 @@
             resultCard("Optional", graph.optionalServices.join(", ") || "None", "No material outcome effect observed"),
             resultCard("Observed call edges", String(graph.edges.length), "Trace-observed links between approved services; not individually outage-validated")
         );
+        const evidence = latestInterventionEvidence;
+        const evidenceNote = evidence
+            ? `Backend-verified outage trials: ${evidence.verifiedTrials}/${evidence.eligibleTrials} eligible. ${evidence.verification === 'mixed' ? 'The remaining eligible trials have no backend-verified outage marker; the saved reviewer claim of full Docker verification is not supported by the ledger.' : evidence.verification === 'operator_attested' ? 'These trials rely on operator attestation, not backend-verified Docker state.' : 'Every eligible trial has a backend-verified outage marker.'}`
+            : 'Intervention verification counts are unavailable; inspect the campaign progress API before relying on the approval claim.';
         const exportButton = guidedText("button", "experiment-button", "Download validated graph JSON");
         exportButton.type = "button";
         exportButton.addEventListener("click", () => {
@@ -1188,7 +1194,8 @@
         });
         target.append(
             summary,
-            guidedText("p", "assessment-console__entry", `Approved by ${approval.approvedBy}. ${approval.rationale}`),
+            guidedText("p", "assessment-console__entry", evidenceNote),
+            guidedText("p", "assessment-console__entry", `Reviewer-entered approval rationale (not independently verified): Approved by ${approval.approvedBy}. ${approval.rationale}`),
             exportButton
         );
         updateExperimentPath(5);

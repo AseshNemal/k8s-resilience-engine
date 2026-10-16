@@ -63,8 +63,8 @@ def _utc(value: datetime | None) -> datetime:
     return result.astimezone(timezone.utc)
 
 
-def _intervention_verification(services: list[dict[str, Any]]) -> str:
-    """Report verified Docker evidence only for eligible trials carrying its marker."""
+def _intervention_evidence(services: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count eligible trials with a backend-verified outage marker."""
     verified = 0
     eligible = 0
     for service in services:
@@ -76,10 +76,16 @@ def _intervention_verification(services: list[dict[str, Any]]) -> str:
             if _verified_outage_target(outcome) == service["targetService"]:
                 verified += 1
     if eligible and verified == eligible and all(item["evidenceReady"] for item in services):
-        return "docker_verified_local_demo"
-    if verified:
-        return "mixed"
-    return "operator_attested"
+        verification = "docker_verified_local_demo"
+    elif verified:
+        verification = "mixed"
+    else:
+        verification = "operator_attested"
+    return {"verification": verification, "verifiedTrials": verified, "eligibleTrials": eligible}
+
+
+def _intervention_verification(services: list[dict[str, Any]]) -> str:
+    return _intervention_evidence(services)["verification"]
 
 
 def get_experiment_progress(campaign_id: str) -> dict[str, Any]:
@@ -102,9 +108,11 @@ def get_experiment_progress(campaign_id: str) -> dict[str, Any]:
                 stage = "approved"
             except DependencyAssessmentNotFoundError:
                 pass
+    evidence = _intervention_evidence(interventions["services"])
     return {"campaignId": campaign_id, "stage": stage, "baseline": baseline,
             "interventions": interventions, "blockers": blockers,
-            "interventionVerification": _intervention_verification(interventions["services"])}
+            "interventionVerification": evidence["verification"],
+            "interventionEvidence": evidence}
 
 
 def _validate_records(

@@ -26,6 +26,8 @@ test('approved output distinguishes trace-observed edges from outage-validated s
     assert.match(source, /badge\.textContent = 'Step 5: graph approved'/);
     assert.match(source, /Download the approved graph JSON or inspect it through the workflow API/);
     assert.match(source, /progress\.stage === "approved"/);
+    assert.match(source, /Backend-verified outage trials:/);
+    assert.match(source, /saved reviewer claim of full Docker verification is not supported by the ledger/);
 });
 
 test('keeps response markers as a list and preserves generic request data', () => {
