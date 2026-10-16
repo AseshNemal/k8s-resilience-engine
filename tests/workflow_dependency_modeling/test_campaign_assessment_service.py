@@ -283,6 +283,31 @@ def test_completed_campaign_creates_explainable_assessment() -> None:
     ) == approval
 
 
+def test_instrumented_local_demo_cannot_approve_unverified_eligible_trials(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import campaign_assessment_service as service
+
+    analyses, campaigns, executions, events = _repositories()
+    assessments = InMemoryDependencyAssessmentRepository()
+    assess_experiment_campaign(
+        "campaign:checkout1", actor="reviewer", campaign_repository=campaigns,
+        analysis_repository=analyses, execution_repository_override=executions,
+        event_repository=events, repository=assessments, now=NOW,
+    )
+    local_campaign = SimpleNamespace(
+        workload_profile="online_boutique_checkout_v0_10_1",
+        environment_id="online-boutique-local-instrumented-v0.10.1",
+        baseline=SimpleNamespace(required_trials=3),
+        interventions=(SimpleNamespace(batch_id="batch:payment", target_service="paymentservice"),),
+    )
+    monkeypatch.setattr(service, "get_experiment_campaign", lambda *args, **kwargs: local_campaign)
+    with pytest.raises(ValueError, match="backend-verified Docker outage proof"):
+        approve_experiment_campaign(
+            "campaign:checkout1", actor="reviewer", rationale="Reviewed evidence",
+            approval_confirmed=True, campaign_repository=campaigns,
+            repository=assessments, execution_repository_override=executions, now=NOW,
+        )
+
+
 def test_incomplete_intervention_cannot_be_assessed() -> None:
     analyses, campaigns, executions, _ = _repositories()
     events = InMemoryInterventionEventRepository()

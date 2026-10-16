@@ -268,6 +268,19 @@ def test_verified_outage_trial_is_eligible_but_manual_partial_trace_is_not():
     assert _eligible_campaign_outcome(verified) is True
     assert any(item.name == "verified_unavailable_service:paymentservice" for item in verified.assertions)
 
+    # Docker proof must also survive when Jaeger returns a fully valid trace.
+    valid_trace = run_campaign_intervention_trial(
+        campaign.campaign_id, "paymentservice", "http://localhost:8080",
+        actor="operator", campaign_repository=campaigns, analysis_repository=analyses,
+        event_repository=events, repository=executions,
+        workload_runner=lambda *args, **kwargs: _run(success=False, trace_id="e" * 32),
+        trace_fetcher=lambda analysis, trace_id: [_trace(status=500, trace_id=trace_id)],
+        sleeper=lambda seconds: None, now=NOW,
+        verified_unavailable_service="paymentservice",
+    )
+    assert _eligible_campaign_outcome(valid_trace) is True
+    assert any(item.name == "verified_unavailable_service:paymentservice" for item in valid_trace.assertions)
+
     manual = run_campaign_intervention_trial(
         campaign.campaign_id, "paymentservice", "http://localhost:8080",
         actor="operator", campaign_repository=campaigns, analysis_repository=analyses,

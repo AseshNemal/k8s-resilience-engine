@@ -261,7 +261,9 @@ def _record_campaign_trial(
             outcome = evaluate_execution(
                 registration, scenario, traces, now=recorded_at
             )
-            if expected_outage:
+            if verified_unavailable_service is not None and (
+                quality.results[0].eligible or expected_outage
+            ):
                 outcome = ExecutionOutcome(
                     registration=outcome.registration,
                     status=outcome.status,

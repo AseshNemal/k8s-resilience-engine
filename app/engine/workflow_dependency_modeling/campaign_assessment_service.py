@@ -46,6 +46,7 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_repository impo
     ExperimentCampaignRepository,
 )
 from app.engine.workflow_dependency_modeling.experiment_campaign_service import (
+    ONLINE_BOUTIQUE_CHECKOUT_PROFILE,
     get_experiment_campaign,
 )
 from app.engine.workflow_dependency_modeling.intervention_event_repository import (
@@ -63,7 +64,9 @@ def _utc(value: datetime | None) -> datetime:
     return result.astimezone(timezone.utc)
 
 
-def _intervention_evidence(services: list[dict[str, Any]]) -> dict[str, Any]:
+def _intervention_evidence(
+    services: list[dict[str, Any]], repository: ExecutionRepository | None = None,
+) -> dict[str, Any]:
     """Count eligible trials with a backend-verified outage marker."""
     verified = 0
     eligible = 0
@@ -71,7 +74,7 @@ def _intervention_evidence(services: list[dict[str, Any]]) -> dict[str, Any]:
     for service in services:
         service_verified = 0
         service_eligible = 0
-        records = execution_repository(None).list(batch_id=service["batchId"])
+        records = execution_repository(repository).list(batch_id=service["batchId"])
         for outcome in records:
             if not _eligible_campaign_outcome(outcome):
                 continue
@@ -310,6 +313,7 @@ def approve_experiment_campaign(
     approval_confirmed: bool,
     campaign_repository: ExperimentCampaignRepository | None = None,
     repository: DependencyAssessmentRepository | None = None,
+    execution_repository_override: ExecutionRepository | None = None,
     now: datetime | None = None,
 ) -> AssessmentApproval:
     """Approve only the assessment deterministically owned by this campaign."""
@@ -325,6 +329,25 @@ def approve_experiment_campaign(
         "controlled_online_boutique_campaign",
     }:
         raise ValueError("Campaign approval requires controlled campaign evidence")
+    campaign = get_experiment_campaign(campaign_id, campaign_repository)
+    if (
+        campaign.workload_profile == ONLINE_BOUTIQUE_CHECKOUT_PROFILE
+        and campaign.environment_id == "online-boutique-local-instrumented-v0.10.1"
+    ):
+        evidence = _intervention_evidence([
+            {"batchId": item.batch_id, "targetService": item.target_service,
+             "evidenceReady": True}
+            for item in campaign.interventions
+        ], execution_repository_override)
+        if any(
+            item["verifiedTrials"] < campaign.baseline.required_trials
+            or item["verifiedTrials"] != item["eligibleTrials"]
+            for item in evidence["services"]
+        ):
+            raise ValueError(
+                "Local demo approval requires every eligible intervention trial "
+                "to carry backend-verified Docker outage proof"
+            )
     return approve_dependency_assessment(
         assessment.assessment_id,
         actor=actor,
