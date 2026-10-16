@@ -71,6 +71,7 @@ def test_progress_does_not_call_docker_verified_trials_operator_attested(monkeyp
     assert _intervention_verification(services) == "mixed"
     assert _intervention_evidence(services) == {
         "verification": "mixed", "verifiedTrials": 1, "eligibleTrials": 2,
+        "services": [{"targetService": "paymentservice", "verifiedTrials": 1, "eligibleTrials": 2}],
     }
     records[0].marker = None
     assert _intervention_verification(services) == "operator_attested"

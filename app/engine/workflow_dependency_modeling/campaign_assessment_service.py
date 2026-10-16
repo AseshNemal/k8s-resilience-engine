@@ -67,21 +67,30 @@ def _intervention_evidence(services: list[dict[str, Any]]) -> dict[str, Any]:
     """Count eligible trials with a backend-verified outage marker."""
     verified = 0
     eligible = 0
+    service_evidence = []
     for service in services:
+        service_verified = 0
+        service_eligible = 0
         records = execution_repository(None).list(batch_id=service["batchId"])
         for outcome in records:
             if not _eligible_campaign_outcome(outcome):
                 continue
             eligible += 1
+            service_eligible += 1
             if _verified_outage_target(outcome) == service["targetService"]:
                 verified += 1
+                service_verified += 1
+        service_evidence.append({"targetService": service["targetService"],
+                                 "verifiedTrials": service_verified,
+                                 "eligibleTrials": service_eligible})
     if eligible and verified == eligible and all(item["evidenceReady"] for item in services):
         verification = "docker_verified_local_demo"
     elif verified:
         verification = "mixed"
     else:
         verification = "operator_attested"
-    return {"verification": verification, "verifiedTrials": verified, "eligibleTrials": eligible}
+    return {"verification": verification, "verifiedTrials": verified,
+            "eligibleTrials": eligible, "services": service_evidence}
 
 
 def _intervention_verification(services: list[dict[str, Any]]) -> str:

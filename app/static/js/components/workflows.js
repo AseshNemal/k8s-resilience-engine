@@ -1184,8 +1184,11 @@
             resultCard("Observed call edges", String(graph.edges.length), "Trace-observed links between approved services; not individually outage-validated")
         );
         const evidence = latestInterventionEvidence;
+        const unverifiedServices = (evidence?.services || [])
+            .filter(service => service.verifiedTrials < service.eligibleTrials)
+            .map(service => `${service.targetService} (${service.verifiedTrials}/${service.eligibleTrials})`);
         const evidenceNote = evidence
-            ? `Backend-verified outage trials: ${evidence.verifiedTrials}/${evidence.eligibleTrials} eligible. ${evidence.verification === 'mixed' ? 'The remaining eligible trials have no backend-verified outage marker; the saved reviewer claim of full Docker verification is not supported by the ledger.' : evidence.verification === 'operator_attested' ? 'These trials rely on operator attestation, not backend-verified Docker state.' : 'Every eligible trial has a backend-verified outage marker.'}`
+            ? `Backend-verified outage trials: ${evidence.verifiedTrials}/${evidence.eligibleTrials} eligible. ${evidence.verification === 'mixed' ? `Missing markers: ${unverifiedServices.join(', ')}. The saved reviewer claim of full Docker verification is not supported by the ledger.` : evidence.verification === 'operator_attested' ? 'These trials rely on operator attestation, not backend-verified Docker state.' : 'Every eligible trial has a backend-verified outage marker.'}`
             : 'Intervention verification counts are unavailable; inspect the campaign progress API before relying on the approval claim.';
         const exportButton = guidedText("button", "experiment-button", "Download validated graph JSON");
         exportButton.type = "button";
