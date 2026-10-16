@@ -1,6 +1,6 @@
 from typing import Any
 import httpx
-from fastapi import APIRouter, Body, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, Response, status
 
 from app.engine.workflow_dependency_modeling.evaluator import (
     GraphEvaluationResult,
@@ -64,6 +64,7 @@ from app.engine.workflow_dependency_modeling.service import (
     run_benchmark_batch,
     run_campaign_baseline_trial,
     run_campaign_intervention_trial,
+    run_local_boutique_intervention_cohort,
     scenario_etag,
     transition_scenario_lifecycle,
     telemetry_source_capabilities,
@@ -879,6 +880,42 @@ def read_workflow_campaign_intervention_status(campaign_id: str) -> dict[str, An
         return intervention_status(campaign_id)
     except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/local-demo/{target_service}/run-cohort",
+    responses={
+        403: {"description": "Local demo control is not allowed for this request"},
+        422: {"description": "Local demo target or evidence is not ready"},
+        503: {"description": "Docker, the demo app, or Jaeger is unavailable"},
+    },
+)
+def execute_local_boutique_intervention_cohort(
+    campaign_id: str,
+    target_service: str,
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    confirmation: str = Header(..., alias="X-Local-Demo-Confirm"),
+) -> dict[str, Any]:
+    """Explicit browser action, confined to the local Compose Online Boutique demo."""
+    if (
+        request.client is None
+        or request.client.host not in {"127.0.0.1", "::1"}
+        or confirmation != "stop-and-restore-one-demo-service"
+    ):
+        raise HTTPException(status_code=403, detail="Local demo control requires explicit loopback confirmation")
+    try:
+        return run_local_boutique_intervention_cohort(
+            campaign_id,
+            target_service,
+            _campaign_application_url(payload),
+            actor=actor,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+    except (RuntimeError, ConnectionError, httpx.HTTPError) as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
 
 
 @router.post(

@@ -43,6 +43,9 @@ from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     run_campaign_baseline_trial,
     run_campaign_intervention_trial,
 )
+from app.engine.workflow_dependency_modeling.local_boutique_intervention import (
+    run_local_boutique_intervention_cohort,
+)
 from app.engine.workflow_dependency_modeling.campaign_assessment_service import (
     approve_experiment_campaign,
     assess_experiment_campaign,
@@ -473,6 +476,7 @@ __all__ = [
     "run_benchmark_batch",
     "run_campaign_baseline_trial",
     "run_campaign_intervention_trial",
+    "run_local_boutique_intervention_cohort",
     "scenario_etag",
     "start_workflow_analysis",
     "transition_scenario_lifecycle",
