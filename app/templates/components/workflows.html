@@ -10,157 +10,27 @@
 
 {% block content %}
 <div class="page-header">
-    <p class="workflow-kicker">Component 1 · Business workflow intelligence</p>
-    <h2 class="page-header__title">Which services does this workflow actually need?</h2>
-    <p class="page-header__subtitle">
-        Turn distributed traces and controlled execution outcomes into an evidence-backed
-        dependency graph for failure-impact analysis.
-    </p>
-    <div class="page-header__meta">
-        <span class="component-owner">Owner: <strong>Member 1</strong></span>
-        <span class="contract-chip">In: Telemetry Evidence</span>
-        <span class="contract-chip contract-chip--out">Out: WorkflowGraph</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="data-source-badge">NO ACTIVE CAMPAIGN</span>
-    </div>
+    <p class="workflow-kicker">Component 1 · Workflow dependencies</p>
+    <h2 class="page-header__title">Build a workflow from real traces</h2>
+    <p class="page-header__subtitle">Connect tracing, pick a recorded operation, and inspect its service calls.</p>
 </div>
-
-<section class="component-brief" aria-labelledby="component-brief-title">
-    <div class="component-brief__statement">
-        <span class="component-brief__number">01</span>
-        <div>
-            <p class="component-brief__label">Component responsibility</p>
-            <h3 id="component-brief-title">Model a business workflow—not the Kubernetes deployment.</h3>
-            <p>
-                Component 1 identifies which application services participate in a business
-                outcome and validates whether each dependency is mandatory, supporting, or optional.
-            </p>
-        </div>
-    </div>
-    <div class="component-contract" aria-label="Component 1 contract">
-        <div><span>Input</span><strong>Scenarios + assessed telemetry evidence</strong></div>
-        <span class="component-contract__arrow" aria-hidden="true">→</span>
-        <div><span>Decision</span><strong>Evidence-backed dependency class</strong></div>
-        <span class="component-contract__arrow" aria-hidden="true">→</span>
-        <div><span>Output to Component 3</span><strong>Approved WorkflowGraph</strong></div>
-    </div>
-</section>
-
-<section class="dependency-legend" aria-label="How to read dependency classifications">
-    <article><span class="dependency-legend__index">M</span><h3>Mandatory</h3><p>Confirmed intervention repeatedly prevents the defined business outcome.</p></article>
-    <article><span class="dependency-legend__index">S</span><h3>Supporting</h3><p>Measured degradation, without consistently blocking success. Preserved in the assessment.</p></article>
-    <article><span class="dependency-legend__index">O</span><h3>Optional</h3><p>No material success effect under tested conditions. This does not mean universally unnecessary.</p></article>
-    <article><span class="dependency-legend__index">?</span><h3>Unresolved / conditional</h3><p>Missing evidence or different results by condition. Blocks a single global dependency claim.</p></article>
-</section>
 
 <section class="guided-analysis" aria-labelledby="guided-analysis-title">
     <div class="guided-analysis__header">
         <div>
-            <p class="workflow-kicker">Start with existing traces</p>
-            <h3 id="guided-analysis-title">Connect tracing, choose a workflow, define success</h3>
-            <p>We discover service calls from your recorded traces. You confirm the outcome that matters. No reference graph or manually entered dependency list is needed.</p>
-        </div>
-        <span class="status-badge status-badge--muted status-badge--no-dot">Interventions require approval</span>
-    </div>
-    <div class="operator-preflight" aria-label="Requirements before starting">
-        <div class="operator-preflight__intro">
-            <span>Before you start</span>
-            <strong>Three facts make the result defensible</strong>
-        </div>
-        <div class="operator-preflight__item">
-            <span class="operator-preflight__number" aria-hidden="true">01</span>
-            <div><strong>Workflow is callable</strong><small>The application entry point can be exercised safely.</small></div>
-        </div>
-        <div class="operator-preflight__item">
-            <span class="operator-preflight__number" aria-hidden="true">02</span>
-            <div><strong>Telemetry is complete or explicitly limited</strong><small>A supported trace source—or a clearly limited alternative—is assessed before graph construction.</small></div>
-        </div>
-        <div class="operator-preflight__item">
-            <span class="operator-preflight__number" aria-hidden="true">03</span>
-            <div><strong>Success is measurable</strong><small>An operator can state when the business outcome succeeded.</small></div>
+            <p class="workflow-kicker">Start here</p>
+            <h3 id="guided-analysis-title">Connect your trace source</h3>
+            <p>Choose a service and operation from recorded traces. No graph or service list to enter.</p>
         </div>
     </div>
-    <details class="telemetry-onboarding">
-        <summary>Other evidence sources and telemetry diagnostics</summary>
-        <div class="guided-analysis__header">
-            <div>
-                <p class="workflow-kicker">Project onboarding</p>
-                <h4 id="telemetry-onboarding-title">What telemetry does this project have?</h4>
-                <p>Component 1 reports the strongest defensible evidence level. It never upgrades logs, network flows, or source models into causal traces.</p>
-            </div>
-        </div>
-        <form class="guided-analysis__form" data-role="telemetry-readiness-form">
-            <div class="guided-field">
-                <label for="telemetry-source-type">Evidence source</label>
-                <select id="telemetry-source-type" name="sourceType" data-role="telemetry-source-type">
-                    <option value="jaeger" selected>Jaeger / OpenTelemetry</option>
-                    <option value="offline_jaeger">Offline Jaeger JSON</option>
-                    <option value="zipkin">Zipkin</option>
-                    <option value="tempo">Grafana Tempo</option>
-                    <option value="vendor_tracing">Other tracing backend</option>
-                    <option value="correlated_logs">Structured correlated logs</option>
-                    <option value="network_observations">Service mesh / network observations</option>
-                    <option value="source_model">Source or configuration model only</option>
-                    <option value="none">No telemetry</option>
-                </select>
-            </div>
-            <div class="guided-field guided-field--wide">
-                <label for="telemetry-endpoint">Query endpoint</label>
-                <input id="telemetry-endpoint" name="endpoint" type="url" value="http://localhost:16686"
-                       data-role="telemetry-endpoint" placeholder="https://tracing.example.internal">
-                <small>Required for live Jaeger, Zipkin, or Tempo. Do not embed credentials in the URL.</small>
-            </div>
-            <div class="guided-field">
-                <label for="telemetry-entry-service">Entry service</label>
-                <input id="telemetry-entry-service" name="entryService"
-                       placeholder="api-gateway">
-            </div>
-            <div class="guided-field">
-                <label for="telemetry-authentication">Query authentication</label>
-                <select id="telemetry-authentication" name="authentication">
-                    <option value="none" selected>No authentication</option>
-                    <option value="bearer_env">Bearer token from server environment</option>
-                </select>
-            </div>
-            <div class="guided-field">
-                <label for="telemetry-secret-env">Token environment variable</label>
-                <input id="telemetry-secret-env" name="secretEnv" placeholder="TRACE_QUERY_TOKEN"
-                       pattern="[A-Z][A-Z0-9_]{0,127}">
-            </div>
-            <div class="guided-field guided-field--wide">
-                <label for="telemetry-offline-json">Evidence JSON</label>
-                <textarea id="telemetry-offline-json" name="offlineJson" rows="3"
-                          placeholder='Optional: paste a Jaeger/Zipkin/OTLP export, correlated-log entries, network observations, or source-model edges'></textarea>
-            </div>
-            <fieldset class="telemetry-capabilities">
-                <legend>Evidence fields available</legend>
-                <label><input type="checkbox" name="hasServiceIdentities" checked> Service identities</label>
-                <label><input type="checkbox" name="hasTimestamps" checked> Timestamps</label>
-                <label><input type="checkbox" name="hasCorrelationIds" checked> Correlation IDs</label>
-                <label><input type="checkbox" name="hasParentRelationships" checked> Parent relationships</label>
-                <label><input type="checkbox" name="hasOutcomeStatus" checked> Outcome status</label>
-            </fieldset>
-            <div class="guided-analysis__action">
-                <button type="submit" class="experiment-button">Assess telemetry readiness</button>
-            </div>
-        </form>
-        <output class="guided-selection-status" data-role="telemetry-readiness-result" aria-live="polite">
-            Select the project's current evidence source.
-        </output>
-    </details>
-    <ol class="experiment-path" aria-label="Workflow dependency experiment stages">
-        <li class="is-current"><span>01</span><strong>Observe</strong><small>Find workflow traces</small></li>
-        <li><span>02</span><strong>Freeze &amp; baseline</strong><small>Lock inputs, prove success</small></li>
-        <li><span>03</span><strong>Validate</strong><small>Test one dependency</small></li>
-        <li><span>04</span><strong>Review</strong><small>Inspect evidence</small></li>
-        <li><span>05</span><strong>Export</strong><small>Release graph</small></li>
+    <ol class="experiment-path" aria-label="Workflow dependency steps" hidden>
+        <li class="is-current"><span>01</span><strong>Inspect</strong><small>View recorded calls</small></li>
+        <li><span>02</span><strong>Run normally</strong><small>Check successful runs</small></li>
+        <li><span>03</span><strong>Test services</strong><small>One at a time</small></li>
+        <li><span>04</span><strong>Review</strong><small>Check results</small></li>
+        <li><span>05</span><strong>Download</strong><small>Get approved graph</small></li>
     </ol>
-    <div class="experiment-profile">
-        <div><span>Workflow under test</span><strong>Selected observed operation</strong></div>
-        <div><span>Business success</span><strong>Your confirmed outcome rule</strong></div>
-        <div><span>Evidence source</span><strong>Recorded service activity + controlled outcomes</strong></div>
-    </div>
-    <details class="guided-advanced" open>
-        <summary>1. Where are your traces stored?</summary>
+    <div class="guided-advanced">
         <form class="guided-analysis__form" data-role="guided-analysis-form">
             <div class="guided-field guided-field--wide">
                 <label for="guided-trace-source">Trace backend</label>
@@ -169,13 +39,12 @@
                     <option value="zipkin">Zipkin v2</option>
                     <option value="tempo">Grafana Tempo</option>
                 </select>
-                <small>We query the selected backend directly. Jaeger is not required for Zipkin or Tempo.</small>
             </div>
             <div class="guided-field guided-field--wide">
                 <label for="guided-trace-endpoint">Trace query address</label>
                 <input id="guided-trace-endpoint" name="traceEndpoint" type="url"
                        value="http://localhost:16686" aria-describedby="guided-trace-service-help" required>
-                <small id="guided-trace-service-help">This is the backend query API—not the OTLP ingestion port. Local defaults: Jaeger 16686, Zipkin 9411, Tempo 3200.</small>
+                <small id="guided-trace-service-help">Use the trace query URL, such as Jaeger :16686.</small>
             </div>
             <details class="guided-connection-options">
                 <summary>Authentication, environment and time window</summary>
@@ -212,36 +81,121 @@
             <input name="evidenceTier" value="experimental" type="hidden">
             <div class="guided-analysis__action">
                 <button type="submit" class="experiment-button" data-role="guided-discover-button">Connect trace source</button>
-                <button type="button" class="secondary-button" data-role="resume-experiment">Resume saved experiment</button>
+                <button type="button" class="secondary-button" data-role="resume-experiment">Open saved run</button>
             </div>
             <div class="guided-field guided-field--wide" data-role="guided-service-field" hidden>
-                <label for="guided-entry-service">2. Which service receives this workflow?</label>
+                <label for="guided-entry-service">Entry service</label>
                 <select id="guided-entry-service" name="entryService" disabled aria-describedby="guided-service-help">
                     <option value="">Connect to load recorded services</option>
                 </select>
                 <small id="guided-service-help">Select from your tracing backend. We will find the operations recorded for it.</small>
             </div>
         </form>
-    </details>
+    </div>
     <div class="guided-discovery" data-role="guided-discovery" hidden>
         <div>
-            <label for="guided-operation">Which recorded operation represents your workflow?</label>
+            <label for="guided-operation">Recorded operation</label>
             <select id="guided-operation" data-role="guided-operation" aria-describedby="guided-workflow-help">
                 <option value="">Choose a recorded service first</option>
             </select>
             <small id="guided-workflow-help">Service calls and workflow ID are derived automatically. A multi-step business workflow may span several operations.</small>
         </div>
-        <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>Inspect workflow</button>
+        <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>Show workflow calls</button>
     </div>
     <output class="guided-selection-status" data-role="guided-analysis-status" aria-live="polite">Connect a trace source or resume a saved experiment.</output>
-    <div class="guided-result" data-role="guided-result" hidden aria-live="polite"></div>
+    <div class="guided-result" data-role="guided-result" hidden></div>
 </section>
+
+<details class="workflow-method">
+<summary>How dependency labels are decided</summary>
+<section class="dependency-legend" aria-label="How to read dependency classifications">
+    <article><span class="dependency-legend__index">M</span><h3>Mandatory</h3><p>Confirmed intervention repeatedly prevents the defined business outcome.</p></article>
+    <article><span class="dependency-legend__index">S</span><h3>Supporting</h3><p>Measured degradation, without consistently blocking success. Preserved in the assessment.</p></article>
+    <article><span class="dependency-legend__index">O</span><h3>Optional</h3><p>No material success effect under tested conditions. This does not mean universally unnecessary.</p></article>
+    <article><span class="dependency-legend__index">?</span><h3>Unresolved / conditional</h3><p>Missing evidence or different results by condition. Blocks a single global dependency claim.</p></article>
+</section>
+</details>
 
 <details class="research-audit">
 <summary>
     <span><strong>Research audit controls</strong><small>Scenarios, execution ledgers, intervention cohorts, references, and metrics</small></span>
 </summary>
 <div class="research-audit__body">
+<details class="operator-preflight-disclosure">
+    <summary>Requirements before testing dependencies</summary>
+    <div class="operator-preflight" aria-label="Requirements before starting">
+        <div class="operator-preflight__intro"><span>Before you start</span><strong>Check the inputs</strong></div>
+        <div class="operator-preflight__item"><span class="operator-preflight__number" aria-hidden="true">01</span><div><strong>Workflow is callable</strong><small>The application entry point can be exercised safely.</small></div></div>
+        <div class="operator-preflight__item"><span class="operator-preflight__number" aria-hidden="true">02</span><div><strong>Telemetry is complete or explicitly limited</strong><small>The trace source and its gaps are recorded.</small></div></div>
+        <div class="operator-preflight__item"><span class="operator-preflight__number" aria-hidden="true">03</span><div><strong>Success is measurable</strong><small>The expected result has a check the runner can perform.</small></div></div>
+    </div>
+</details>
+<details class="telemetry-onboarding">
+    <summary>Other evidence sources and telemetry diagnostics</summary>
+    <div class="guided-analysis__header">
+        <div>
+            <p class="workflow-kicker">Project onboarding</p>
+            <h4 id="telemetry-onboarding-title">What telemetry does this project have?</h4>
+            <p>Alternative sources have different evidence limits; they are not treated as causal traces.</p>
+        </div>
+    </div>
+    <form class="guided-analysis__form" data-role="telemetry-readiness-form">
+        <div class="guided-field">
+            <label for="telemetry-source-type">Evidence source</label>
+            <select id="telemetry-source-type" name="sourceType" data-role="telemetry-source-type">
+                <option value="jaeger" selected>Jaeger / OpenTelemetry</option>
+                <option value="offline_jaeger">Offline Jaeger JSON</option>
+                <option value="zipkin">Zipkin</option>
+                <option value="tempo">Grafana Tempo</option>
+                <option value="vendor_tracing">Other tracing backend</option>
+                <option value="correlated_logs">Structured correlated logs</option>
+                <option value="network_observations">Service mesh / network observations</option>
+                <option value="source_model">Source or configuration model only</option>
+                <option value="none">No telemetry</option>
+            </select>
+        </div>
+        <div class="guided-field guided-field--wide">
+            <label for="telemetry-endpoint">Query endpoint</label>
+            <input id="telemetry-endpoint" name="endpoint" type="url" value="http://localhost:16686"
+                   data-role="telemetry-endpoint" placeholder="https://tracing.example.internal">
+            <small>Required for live Jaeger, Zipkin, or Tempo. Do not embed credentials in the URL.</small>
+        </div>
+        <div class="guided-field">
+            <label for="telemetry-entry-service">Entry service</label>
+            <input id="telemetry-entry-service" name="entryService" placeholder="api-gateway">
+        </div>
+        <div class="guided-field">
+            <label for="telemetry-authentication">Query authentication</label>
+            <select id="telemetry-authentication" name="authentication">
+                <option value="none" selected>No authentication</option>
+                <option value="bearer_env">Bearer token from server environment</option>
+            </select>
+        </div>
+        <div class="guided-field">
+            <label for="telemetry-secret-env">Token environment variable</label>
+            <input id="telemetry-secret-env" name="secretEnv" placeholder="TRACE_QUERY_TOKEN" pattern="[A-Z][A-Z0-9_]{0,127}">
+        </div>
+        <div class="guided-field guided-field--wide">
+            <label for="telemetry-offline-json">Evidence JSON</label>
+            <textarea id="telemetry-offline-json" name="offlineJson" rows="3"
+                      placeholder='Optional: paste a Jaeger/Zipkin/OTLP export, correlated-log entries, network observations, or source-model edges'></textarea>
+        </div>
+        <fieldset class="telemetry-capabilities">
+            <legend>Evidence fields available</legend>
+            <label><input type="checkbox" name="hasServiceIdentities" checked> Service identities</label>
+            <label><input type="checkbox" name="hasTimestamps" checked> Timestamps</label>
+            <label><input type="checkbox" name="hasCorrelationIds" checked> Correlation IDs</label>
+            <label><input type="checkbox" name="hasParentRelationships" checked> Parent relationships</label>
+            <label><input type="checkbox" name="hasOutcomeStatus" checked> Outcome status</label>
+        </fieldset>
+        <div class="guided-analysis__action">
+            <button type="submit" class="experiment-button">Assess telemetry readiness</button>
+        </div>
+    </form>
+    <output class="guided-selection-status" data-role="telemetry-readiness-result" aria-live="polite">
+        Select the project's current evidence source.
+    </output>
+</details>
 <nav class="workflow-steps" aria-label="Workflow modeling stages">
     <button type="button" class="workflow-step is-active" data-workflow-stage-button="define" aria-pressed="true">
         <span>1</span><strong>Define</strong><small>Business outcome</small>

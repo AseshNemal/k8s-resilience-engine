@@ -308,8 +308,8 @@
         guidedInspectButton.textContent = !selected
             ? "No workflow available"
             : supportsGuidedExperiment(selected)
-                ? "Define success"
-                : "View observed services";
+                ? "View calls and set success"
+                : "View service calls";
     }
 
     function selectedGuidedWorkflow(workflows, selection) {
@@ -454,16 +454,12 @@
     }
 
     function updateExperimentPath(activeIndex) {
+        const path = document.querySelector(".experiment-path");
+        if (path) path.hidden = false;
         document.querySelectorAll(".experiment-path li").forEach((item, index) => {
             item.classList.toggle("is-current", index === activeIndex);
             item.classList.toggle("is-complete", index < activeIndex);
         });
-    }
-
-    function updateWorkflowProfile(name, outcome) {
-        const fields = document.querySelectorAll('.experiment-profile strong');
-        if (fields[0]) fields[0].textContent = name;
-        if (fields[1]) fields[1].textContent = outcome;
     }
 
     function observedGraphModel(session) {
@@ -498,11 +494,20 @@
         return section;
     }
 
+    function renderObservedGraphDisclosure(session) {
+        const details = document.createElement("details");
+        details.className = "guided-observed-graph-disclosure";
+        details.append(
+            guidedText("summary", "", `View recorded calls · ${session.observedServices.length} services · ${session.edges.length} arrows`),
+            renderObservedGraph(session)
+        );
+        return details;
+    }
+
     function renderCampaign(campaign) {
         if (!guidedResult) return;
         guidedResult.hidden = false;
         guidedResult.replaceChildren();
-        updateWorkflowProfile(campaign.workflowName, campaign.successContract.outcome);
         updateExperimentPath(campaign.status === "baseline_required" ? 1 : 2);
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
         if (sourcePill) sourcePill.textContent = "Campaign active";
@@ -511,42 +516,35 @@
         heading.className = "guided-result__heading";
         const identity = document.createElement("div");
         identity.append(
-            guidedText("span", "guided-result__label", "Controlled dependency experiment"),
+            guidedText("span", "guided-result__label", "Workflow test"),
             guidedText("h4", "", campaign.workflowName),
             guidedText(
                 "p",
                 "",
-                `${campaign.environmentId} · First prove the workflow succeeds consistently, then test one candidate dependency at a time.`
+                `${campaign.environmentId} · Run the workflow normally, then test one service at a time.`
             )
         );
-        const statusLabels = {
-            baseline_required: "Step 2: baseline needed",
-            interventions_required: "Step 3: dependency tests needed",
-            ready_for_assessment: "Step 4: ready to review",
-            reviewed: "Step 5: approval needed",
-            approved: "Step 5: graph exported",
-        };
         heading.append(
             identity,
             guidedText(
                 "span",
                 "guided-maturity",
-                statusLabels[campaign.status] || campaign.status.replaceAll("_", " ")
+                "Checking run status…"
             )
         );
 
         const metrics = document.createElement("div");
         metrics.className = "guided-result__metrics";
         metrics.append(
-            resultCard("Baseline target", `${campaign.baseline.requiredTrials} runs`, "Checking current evidence…"),
-            resultCard("Candidates", String(campaign.candidateServices.length), "Validated one at a time"),
-            resultCard("Observed evidence", `${campaign.observedTraceCount} traces`, "Participation, not necessity")
+            resultCard("Normal runs", `${campaign.baseline.requiredTrials} needed`, "Confirm the workflow succeeds"),
+            resultCard("Services to test", String(campaign.candidateServices.length), "One at a time"),
+            resultCard("Recorded traces", `${campaign.observedTraceCount}`, "Calls found before testing")
         );
 
         const contract = document.createElement("section");
         contract.className = "guided-contract guided-contract--confirmed";
         contract.append(
-            guidedText("span", "guided-result__label", "How success is measured"),
+            guidedText("span", "guided-result__label", "Success check"),
             guidedText("h5", "", campaign.successContract.outcome),
             guidedText(
                 "p",
@@ -619,30 +617,13 @@
             }
         });
 
-        const runbook = document.createElement("section");
-        runbook.className = "campaign-runbook";
-        runbook.appendChild(guidedText("h5", "", "Candidate dependencies to validate after the baseline"));
-        const list = document.createElement("div");
-        list.className = "campaign-runbook__list";
-        campaign.interventions.forEach((intervention, index) => {
-            const item = document.createElement("article");
-            item.className = "campaign-runbook__item";
-            item.append(
-                guidedText("span", "campaign-runbook__number", String(index + 1).padStart(2, "0")),
-                guidedText("strong", "", intervention.targetService),
-                guidedText("small", "", "Temporarily unavailable · run workflow · restore")
-            );
-            list.appendChild(item);
-        });
-        runbook.appendChild(list);
-
         const interventionConsole = document.createElement("section");
         interventionConsole.className = "intervention-console";
         interventionConsole.hidden = true;
 
         const next = document.createElement("div");
         next.className = "guided-next";
-        next.appendChild(guidedText("h5", "", "What remains before the dependency result is available"));
+        next.appendChild(guidedText("h5", "", "Next action"));
         const blockers = document.createElement("ol");
         blockers.appendChild(guidedText("li", "", "Checking current evidence…"));
         next.appendChild(blockers);
@@ -650,10 +631,10 @@
         const observedGraph = document.createElement("section");
         observedGraph.className = "guided-observed-graph-loading";
         observedGraph.textContent = "Loading the recorded call graph…";
-        guidedResult.append(heading, metrics, observedGraph, contract, manifestGate, baseline, runbook, interventionConsole, next);
+        guidedResult.append(heading, metrics, observedGraph, contract, manifestGate, baseline, interventionConsole, next);
         requestScenario(`/api/workflows/analysis-sessions/${encodeURIComponent(campaign.analysisSessionId)}`)
             .then((session) => {
-                if (observedGraph.isConnected) observedGraph.replaceWith(renderObservedGraph(session));
+                if (observedGraph.isConnected) observedGraph.replaceWith(renderObservedGraphDisclosure(session));
             })
             .catch((error) => {
                 if (observedGraph.isConnected) observedGraph.textContent = `Recorded call graph unavailable: ${error.message}`;
@@ -678,8 +659,8 @@
         const identity = document.createElement("div");
         identity.append(
             guidedText("span", "guided-result__label", "Reproducibility record"),
-            guidedText("h5", "", "Inputs frozen and integrity verified"),
-            guidedText("p", "", "Inputs saved. You can now collect baseline evidence.")
+            guidedText("h5", "", "Test settings saved"),
+            guidedText("p", "", "You can now run the workflow normally.")
         );
         const badge = guidedText("span", "manifest-gate__badge", "VERIFIED");
         const details = document.createElement("div");
@@ -721,7 +702,7 @@
             }
             const actions = document.createElement("div");
             actions.className = "manifest-gate__actions";
-            const freezeButton = guidedText("button", "experiment-button", "Freeze experiment record");
+            const freezeButton = guidedText("button", "experiment-button", "Save test settings");
             freezeButton.type = "button";
             const help = guidedText("small", "", "Uses a recorded seed and five telemetry-completeness levels. Advanced values remain available in the downloaded JSON.");
             actions.append(freezeButton, help);
@@ -779,7 +760,13 @@
             const baselineTitle = root.querySelector('.baseline-console__heading strong');
             if (baselineTitle) baselineTitle.textContent = readiness.ready ? 'Normal behavior confirmed' : `Collect ${readiness.requiredTrials} eligible normal executions`;
             const remaining = root.querySelector('.guided-next ol');
-            if (remaining) remaining.replaceChildren(...progress.blockers.map(text => guidedText('li', '', text)));
+            if (remaining) remaining.replaceChildren(
+                ...(
+                    readiness.ready
+                        ? ["Choose a service below to test, then record its result."]
+                        : progress.blockers
+                ).map(text => guidedText('li', '', text))
+            );
             target.replaceChildren();
             const counts = document.createElement("div");
             counts.className = "baseline-readiness__counts";
@@ -821,6 +808,8 @@
                 if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · BASELINE READY";
                 interventionConsole.hidden = false;
                 await loadInterventionConsole(campaign, interventionConsole, frontendUrl);
+                const baselineControls = runButton.closest(".baseline-console__controls");
+                if (baselineControls) baselineControls.hidden = true;
             }
         } catch (error) {
             target.replaceChildren(guidedText("p", "baseline-console__status is-error", error.message));
@@ -847,6 +836,7 @@
     }
 
     async function loadInterventionConsole(campaign, target, frontendUrl) {
+        const applicationUrlLabel = frontendUrl.closest("label");
         target.replaceChildren();
         const heading = document.createElement("div");
         heading.className = "baseline-console__heading";
@@ -856,10 +846,11 @@
         );
         target.append(
             heading,
+            applicationUrlLabel,
             guidedText(
                 "p",
                 "intervention-console__notice",
-                "This component never changes the cluster. Use your approved Docker or Kubernetes procedure, record what you changed, then confirm the state here."
+                "Change one service only after approval. This page records the result; it does not stop or restart services."
             )
         );
         try {
@@ -889,8 +880,11 @@
     }
 
     function renderInterventionService(campaign, service, target, frontendUrl) {
-        const card = document.createElement("article");
+        const card = document.createElement("details");
         card.className = `intervention-service intervention-service--${service.state}`;
+        card.open = service.state === "active";
+        const summary = document.createElement("summary");
+        summary.className = "intervention-service__summary";
         const title = document.createElement("div");
         title.className = "intervention-service__title";
         title.append(
@@ -916,7 +910,8 @@
         evidence.placeholder = service.state === "active"
             ? "Restoration evidence (ticket, command result, observation)"
             : "Activation evidence (ticket, command result, observation)";
-        evidence.setAttribute("aria-label", `${service.targetService} operator evidence`);
+        const evidenceLabel = guidedText("label", "intervention-service__evidence-label", "Proof of service state");
+        evidenceLabel.appendChild(evidence);
         const message = guidedText("span", "baseline-console__status", "");
 
         const refresh = () => loadInterventionConsole(campaign, target, frontendUrl);
@@ -965,16 +960,16 @@
                     run.disabled = false;
                 }
             });
-            const restore = interventionActionButton("Confirm restored", () => recordEvent("restored"));
+            const restore = interventionActionButton("Record service restored", () => recordEvent("restored"));
             // Recovery must never depend on trial eligibility or completion.
             restore.disabled = false;
-            controls.append(run, evidence, restore);
+            controls.append(run, evidenceLabel, restore);
         } else {
             const activate = interventionActionButton(
-                service.state === "restored" ? "Confirm intervention active again" : "Confirm intervention active",
+                service.state === "restored" ? "Record service unavailable again" : "Record service unavailable",
                 () => recordEvent("activated")
             );
-            controls.append(evidence, activate);
+            controls.append(evidenceLabel, activate);
         }
         const instructions = document.createElement('details');
         instructions.append(guidedText('summary', '', 'Manual intervention and recovery instructions'),
@@ -986,7 +981,8 @@
                 guidedText('pre', '', `docker inspect ${name} --format '{{.Config.Image}} {{.State.Status}}'\n# After approval, stop and verify:\ndocker stop ${name}\ndocker inspect ${name} --format '{{.State.Status}}'\n# Restore, including if the trial fails:\ndocker start ${name}\ndocker inspect ${name} --format '{{.State.Status}}'\ndocker logs --tail 20 ${name}`),
                 guidedText('p', '', 'A running container alone does not prove recovery. Check its logs and a normal application request before confirming restoration. Retain the output as evidence.'));
         }
-        card.append(title, progress);
+        summary.append(title, progress);
+        card.appendChild(summary);
         if (service.excludedReasons?.length) card.appendChild(excludedDetails);
         card.append(instructions, controls, message);
         return card;
@@ -1194,13 +1190,12 @@
         if (!guidedResult) return;
         guidedResult.hidden = false;
         guidedResult.replaceChildren();
-        updateWorkflowProfile(session.operationName, 'Define the measurable outcome below');
 
         const heading = document.createElement("div");
         heading.className = "guided-result__heading";
         const identity = document.createElement("div");
         identity.append(
-            guidedText("span", "guided-result__label", "Observed workflow"),
+            guidedText("span", "guided-result__label", "Recorded workflow"),
             guidedText("h4", "", session.operationName),
             guidedText(
                 "p",
@@ -1222,18 +1217,17 @@
         const warning = document.createElement("div");
         warning.className = "guided-result__warning";
         warning.append(
-            guidedText("strong", "", "What this result means"),
+            guidedText("strong", "", "Calls found"),
             guidedText(
                 "span",
                 "",
-                `${session.observedServices.length} services appeared while this workflow ran. ` +
-                "They participated, but this does not yet prove the workflow needs every one of them."
+                "These services were called during the workflow. Testing is still needed to know which are required."
             )
         );
 
-        const evidence = document.createElement("div");
+        const evidence = document.createElement("details");
         evidence.className = "guided-evidence";
-        evidence.appendChild(guidedText("h5", "", "Observed service participation"));
+        evidence.appendChild(guidedText("summary", "", "Service frequency in traces"));
         session.serviceEvidence.forEach((item) => {
             const row = document.createElement("div");
             row.className = "guided-evidence__row";
@@ -1256,18 +1250,18 @@
         contract.className = "guided-contract";
         const observedEntrySupported = supportsObservedEntryProbe(session);
         contract.append(
-            guidedText("span", "guided-result__label", "Business success contract"),
+            guidedText("span", "guided-result__label", "Success check"),
             guidedText(
                 "h5",
                 "",
-                "3. What does successful completion mean?"
+                "What counts as success?"
             ),
             guidedText(
                 "p",
                 "",
                 observedEntrySupported
-                    ? "We already know the operation and participating services. Describe the expected outcome, then confirm a measurable check. You do not need to enter a workflow ID or reference graph."
-                    : "This operation needs an imported, reviewed HTTP sequence that invokes the workflow and identifies its terminal trace outcome."
+                    ? "Name the result you expect and select the response to check. No workflow ID or graph is needed."
+                    : "Import the HTTP steps needed to run this workflow and check its result."
             )
         );
 
@@ -1277,7 +1271,7 @@
         workflowName.value = session.operationName;
         workflowNameLabel.appendChild(workflowName);
 
-        const outcomeLabel = guidedText("label", "", "Business outcome");
+        const outcomeLabel = guidedText("label", "", "Successful result");
         const outcome = document.createElement("input");
         outcome.required = true;
         outcome.placeholder = "The customer-visible or system outcome that must succeed";
@@ -1404,13 +1398,13 @@
         trials.value = "5";
         trials.required = true;
         trialsLabel.appendChild(trials);
-        const planButton = guidedText("button", "experiment-button", "Create controlled experiment");
+        const planButton = guidedText("button", "experiment-button", "Save workflow and continue");
         planButton.type = "submit";
         planButton.disabled = true;
         const planStatus = guidedText(
             "small",
             "guided-contract__status",
-            "This creates the experiment plan only. No service will be changed yet."
+            "Saves the check. No service will be changed."
         );
         planStatus.setAttribute("role", "status");
         planStatus.setAttribute("tabindex", "-1");
@@ -1519,10 +1513,7 @@
             guidedWorkflows.forEach((workflow, index) => {
                 const option = document.createElement("option");
                 option.value = String(index);
-                const readiness = supportsGuidedExperiment(workflow)
-                    ? "confirm success next"
-                    : "observation only";
-                option.textContent = `${workflow.rootService} · ${workflow.operationName} — ${readiness} · ${workflow.traceCount} traces`;
+                option.textContent = `${workflow.operationName} · ${workflow.traceCount} traces`;
                 guidedOperation.appendChild(option);
             });
             if (!guidedWorkflows.length) {
@@ -1535,7 +1526,7 @@
             updateGuidedSelectionAction();
             setGuidedStatus(
                 guidedWorkflows.length
-                    ? `Found ${guidedWorkflows.length} recorded workflow${guidedWorkflows.length === 1 ? "" : "s"}. Select one to inspect its evidence maturity.`
+                    ? `Found ${guidedWorkflows.length} recorded operation${guidedWorkflows.length === 1 ? "" : "s"}. Choose the one you want to inspect.`
                     : "The trace service is connected, but no workflow activity was recorded in this time window.",
                 guidedWorkflows.length === 0
             );
@@ -1599,16 +1590,21 @@
             const campaigns = await requestScenario("/api/workflows/experiment-campaigns");
             if (campaigns.length) {
                 guidedResult.hidden = false;
-                const label = guidedText('label', '', 'Saved experiment');
+                const label = guidedText('label', '', 'Saved workflow tests');
                 const select = document.createElement('select');
-                campaigns.forEach(c => select.appendChild(new Option(`${c.workflowName} · ${c.environmentId} · ${c.createdAt || ''} · ${c.campaignId}`, c.campaignId)));
+                campaigns.forEach((campaign) => {
+                    const date = campaign.createdAt
+                        ? new Date(campaign.createdAt).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'})
+                        : campaign.environmentId;
+                    select.appendChild(new Option(`${campaign.workflowName} · ${date}`, campaign.campaignId));
+                });
                 label.appendChild(select);
-                const open = guidedText('button', 'experiment-button', 'Open selected experiment');
+                const open = guidedText('button', 'experiment-button', 'Open run');
                 open.type = 'button';
-                const progress = guidedText('p', '', 'Choose an experiment. Its current evidence progress will load when opened.');
+                const progress = guidedText('p', '', 'Choose a saved run to see its latest status.');
                 open.addEventListener('click', () => {
                     renderCampaign(campaigns.find(c => c.campaignId === select.value));
-                    setGuidedStatus('Saved experiment loaded. No test was run automatically.');
+                    setGuidedStatus('Saved run loaded. No test was started.');
                 });
                 guidedResult.replaceChildren(label, open, progress);
                 return;

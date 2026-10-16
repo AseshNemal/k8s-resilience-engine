@@ -977,6 +977,10 @@
     border-bottom: 1px solid var(--color-border);
 }
 
+.experiment-path[hidden] {
+    display: none;
+}
+
 .experiment-path li {
     position: relative;
     display: grid;
@@ -1086,7 +1090,9 @@
 }
 
 .guided-connection-options > summary,
-.telemetry-onboarding > summary {
+.telemetry-onboarding > summary,
+.operator-preflight-disclosure > summary,
+.workflow-method > summary {
     cursor: pointer;
     padding: 10px 0;
     color: var(--color-text);
@@ -1094,9 +1100,22 @@
 }
 
 .guided-connection-options > summary:focus-visible,
-.telemetry-onboarding > summary:focus-visible {
+.telemetry-onboarding > summary:focus-visible,
+.operator-preflight-disclosure > summary:focus-visible,
+.workflow-method > summary:focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 3px;
+}
+
+.operator-preflight-disclosure,
+.telemetry-onboarding {
+    font-size: 12px;
+}
+
+.workflow-method {
+    margin: 0 0 var(--space-lg);
+    padding: 0 var(--space-sm);
+    font-size: 12px;
 }
 
 .guided-field--wide {
@@ -1314,9 +1333,47 @@
     margin-top: var(--space-lg);
 }
 
+.guided-evidence > summary,
+.campaign-runbook > summary {
+    min-height: 44px;
+    padding: 12px 0;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.guided-evidence > summary:focus-visible,
+.campaign-runbook > summary:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
 .guided-observed-graph,
 .guided-observed-graph-loading {
     margin-top: var(--space-lg);
+}
+
+.guided-observed-graph-disclosure {
+    margin-top: var(--space-md);
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.guided-observed-graph-disclosure > summary {
+    min-height: 44px;
+    padding: 12px 0;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.guided-observed-graph-disclosure > summary:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+.guided-observed-graph-disclosure .guided-observed-graph {
+    margin-top: 0;
 }
 
 .guided-observed-graph h5 {
@@ -1501,7 +1558,8 @@
 }
 
 .campaign-runbook {
-    margin-top: var(--space-lg);
+    margin-top: var(--space-md);
+    border-top: 1px solid var(--color-border);
 }
 
 .intervention-console,
@@ -1517,6 +1575,28 @@
 
 .intervention-console[hidden] {
     display: none;
+}
+
+.baseline-console__controls[hidden] {
+    display: none;
+}
+
+.intervention-console > label {
+    display: grid;
+    gap: 6px;
+    max-width: 460px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.intervention-console > label input {
+    min-height: 44px;
+    padding: 9px 11px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: #fff;
+    color: var(--color-text);
+    font: inherit;
 }
 
 .intervention-console__notice,
@@ -1545,6 +1625,21 @@
     background: #fff;
 }
 
+.intervention-service:not([open]) {
+    border-left-color: var(--color-border);
+}
+
+.intervention-service__summary {
+    min-height: 44px;
+    cursor: pointer;
+    list-style-position: inside;
+}
+
+.intervention-service__summary:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 3px;
+}
+
 .intervention-service--restored,
 .assessment-console__results article {
     border-left-color: #16a34a;
@@ -1562,6 +1657,14 @@
     grid-template-columns: auto minmax(220px, 1fr) auto;
     gap: 10px;
     align-items: center;
+}
+
+.intervention-service__evidence-label {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 700;
 }
 
 .intervention-service__controls input,
