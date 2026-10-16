@@ -23,6 +23,8 @@ test('local Docker action is offered only to the reviewed local boutique profile
 test('approved output distinguishes trace-observed edges from outage-validated services', () => {
     assert.match(source, /Observed call edges/);
     assert.match(source, /not individually outage-validated/);
+    assert.match(source, /badge\.textContent = 'Step 5: graph approved'/);
+    assert.match(source, /Download the approved graph JSON or inspect it through the workflow API/);
 });
 
 test('keeps response markers as a list and preserves generic request data', () => {

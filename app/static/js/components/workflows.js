@@ -1155,6 +1155,12 @@
     }
 
     function renderApprovedGraph(approval, target) {
+        const badge = guidedResult.querySelector('.guided-result__heading .guided-maturity');
+        if (badge) badge.textContent = 'Step 5: graph approved';
+        const remaining = guidedResult.querySelector('.guided-next ol');
+        if (remaining) remaining.replaceChildren(
+            guidedText('li', '', 'Download the approved graph JSON or inspect it through the workflow API.')
+        );
         target.replaceChildren(
             guidedText("div", "guided-result__label", "05  ·  APPROVED OUTPUT"),
             guidedText("h5", "", "WorkflowGraph released to Component 3")

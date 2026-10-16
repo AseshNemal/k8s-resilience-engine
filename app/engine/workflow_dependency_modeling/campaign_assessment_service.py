@@ -15,6 +15,7 @@ from app.engine.workflow_dependency_modeling.campaign_execution_service import (
     _eligible_campaign_outcome,
     _intervention_repository,
     _trial_within_intervention,
+    _verified_outage_target,
     baseline_readiness,
     intervention_status,
 )
@@ -62,6 +63,25 @@ def _utc(value: datetime | None) -> datetime:
     return result.astimezone(timezone.utc)
 
 
+def _intervention_verification(services: list[dict[str, Any]]) -> str:
+    """Report verified Docker evidence only for eligible trials carrying its marker."""
+    verified = 0
+    eligible = 0
+    for service in services:
+        records = execution_repository().list(batch_id=service["batchId"])
+        for outcome in records:
+            if not _eligible_campaign_outcome(outcome):
+                continue
+            eligible += 1
+            if _verified_outage_target(outcome) == service["targetService"]:
+                verified += 1
+    if eligible and verified == eligible and all(item["evidenceReady"] for item in services):
+        return "docker_verified_local_demo"
+    if verified:
+        return "mixed"
+    return "operator_attested"
+
+
 def get_experiment_progress(campaign_id: str) -> dict[str, Any]:
     """Live progress derived from evidence, separate from the immutable plan."""
     from .dependency_assessment_repository import DependencyAssessmentNotFoundError
@@ -84,7 +104,7 @@ def get_experiment_progress(campaign_id: str) -> dict[str, Any]:
                 pass
     return {"campaignId": campaign_id, "stage": stage, "baseline": baseline,
             "interventions": interventions, "blockers": blockers,
-            "interventionVerification": "operator_attested"}
+            "interventionVerification": _intervention_verification(interventions["services"])}
 
 
 def _validate_records(

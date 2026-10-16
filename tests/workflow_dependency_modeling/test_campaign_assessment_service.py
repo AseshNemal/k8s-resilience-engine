@@ -1,6 +1,7 @@
 """Campaign-to-assessment orchestration tests."""
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     InMemoryAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.campaign_assessment_service import (
+    _intervention_verification,
     approve_experiment_campaign,
     assess_experiment_campaign,
     get_experiment_campaign_assessment,
@@ -51,6 +53,23 @@ from app.main import app
 
 
 NOW = datetime(2026, 10, 5, tzinfo=timezone.utc)
+
+
+def test_progress_does_not_call_docker_verified_trials_operator_attested(monkeypatch):
+    from app.engine.workflow_dependency_modeling import campaign_assessment_service as service
+
+    records = [SimpleNamespace(marker="paymentservice")]
+    monkeypatch.setattr(service, "execution_repository", lambda: SimpleNamespace(
+        list=lambda *, batch_id: records
+    ))
+    monkeypatch.setattr(service, "_eligible_campaign_outcome", lambda outcome: True)
+    monkeypatch.setattr(service, "_verified_outage_target", lambda outcome: outcome.marker)
+    services = [{"batchId": "batch:payment", "targetService": "paymentservice", "evidenceReady": True}]
+    assert _intervention_verification(services) == "docker_verified_local_demo"
+    records.append(SimpleNamespace(marker=None))
+    assert _intervention_verification(services) == "mixed"
+    records[0].marker = None
+    assert _intervention_verification(services) == "operator_attested"
 
 
 @pytest.fixture(autouse=True)
