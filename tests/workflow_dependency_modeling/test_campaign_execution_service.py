@@ -410,6 +410,32 @@ def test_confirmation_marker_can_fail_matched_http_trace() -> None:
     assert "confirmation marker" in outcome.reasons[-1]
 
 
+def test_early_step_failure_counts_only_with_its_own_valid_trace() -> None:
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    early_trace = _trace(status=503)
+    early_trace["spans"][0]["operationName"] = "GET /product/item-42"
+
+    outcome = run_campaign_baseline_trial(
+        campaign.campaign_id,
+        "http://localhost:8080",
+        actor="runner",
+        campaign_repository=campaigns,
+        analysis_repository=analyses,
+        repository=executions,
+        workload_runner=lambda *args, **kwargs: _run(success=False),
+        trace_fetcher=lambda analysis, trace_id: [early_trace],
+        sleeper=lambda seconds: None,
+        now=NOW,
+    )
+
+    assert outcome.status is ExecutionOutcomeStatus.FAILED
+    assert outcome.correlation_status is CorrelationStatus.MATCHED
+    assert outcome.assertions[-1].name == "business_probe_success"
+    assert baseline_readiness(campaign, executions)["eligibleTrials"] == 1
+
+
 def test_campaign_baseline_api_runs_and_reports_readiness(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import (
         analysis_session_service,

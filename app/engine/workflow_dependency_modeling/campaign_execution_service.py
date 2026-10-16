@@ -159,7 +159,10 @@ def _record_campaign_trial(
         if (
             matching_trace is not None
             and validate_trace_quality([matching_trace]).valid_count == 1
-            and trace_has_terminal_evidence(matching_trace, scenario.success_condition)
+            and (
+                not run.business_success
+                or trace_has_terminal_evidence(matching_trace, scenario.success_condition)
+            )
         ):
             break
         if attempt < len(TRACE_POLL_DELAYS_SECONDS):
@@ -223,7 +226,21 @@ def _record_campaign_trial(
     if (
         not run.business_success
         and outcome.correlation_status is CorrelationStatus.MATCHED
-        and outcome.status is ExecutionOutcomeStatus.SUCCEEDED
+        and outcome.evidence_snapshot is not None
+        and validate_trace_quality(
+            [outcome.evidence_snapshot.to_mapping()["rawTrace"]]
+        ).valid_count == 1
+        and outcome.status in {
+            ExecutionOutcomeStatus.SUCCEEDED,
+            ExecutionOutcomeStatus.INDETERMINATE,
+        }
+        and (
+            outcome.status is ExecutionOutcomeStatus.SUCCEEDED
+            or not trace_has_terminal_evidence(
+                outcome.evidence_snapshot.to_mapping()["rawTrace"],
+                scenario.success_condition,
+            )
+        )
     ):
         outcome = ExecutionOutcome(
             registration=outcome.registration,
@@ -242,7 +259,10 @@ def _record_campaign_trial(
                     observed=False,
                 ),
             ),
-            reasons=(*outcome.reasons, run.reason),
+            reasons=(
+                "The reviewed workflow probe failed with a valid trace for its first failing step",
+                run.reason,
+            ),
         )
     return execution_repository(repository).create(outcome)
 
