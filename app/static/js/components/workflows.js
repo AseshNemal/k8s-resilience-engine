@@ -1198,7 +1198,7 @@
         target.append(
             summary,
             guidedText("p", "assessment-console__entry", evidenceNote),
-            guidedText("p", "assessment-console__entry", `Reviewer-entered approval rationale (not independently verified): Approved by ${approval.approvedBy}. ${approval.rationale}`),
+            guidedText("p", "assessment-console__entry", `Reviewer note from ${approval.approvedBy}: ${approval.rationale}`),
             exportButton
         );
         updateExperimentPath(5);

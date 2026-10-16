@@ -177,7 +177,8 @@ def test_live_progress_uses_evidence_not_initial_plan(monkeypatch):
     _, campaign = _campaigns(analyses)
     monkeypatch.setattr(assessment, 'get_experiment_campaign', lambda _: campaign)
     monkeypatch.setattr(assessment, 'baseline_readiness', lambda _: {'ready':True, 'blockers':[]})
-    monkeypatch.setattr(assessment, 'intervention_status', lambda _: {'services':[{'targetService':'paymentservice','evidenceReady':False}]})
+    monkeypatch.setattr(assessment, 'intervention_status', lambda _: {'services':[{'targetService':'paymentservice','batchId':'batch:payment','evidenceReady':False}]})
+    monkeypatch.setattr(assessment, 'execution_repository', lambda repository: InMemoryExecutionRepository())
     assert assessment.get_experiment_progress(campaign.campaign_id)['stage'] == 'interventions_required'
 
 
