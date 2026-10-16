@@ -45,3 +45,14 @@ def test_guided_flow_has_keyboard_mobile_and_reduced_motion_rules() -> None:
     assert "min-height: 44px" in styles
     assert "@media (max-width: 700px)" in styles
     assert "@media (prefers-reduced-motion: reduce)" in styles
+
+
+def test_recorded_graph_is_shown_before_dependency_validation() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+    styles = STYLES.read_text(encoding="utf-8")
+
+    assert 'guidedResult.append(heading, metrics, warning, renderObservedGraph(session), evidence, contract)' in script
+    assert 'renderObservedGraph(session)' in script
+    assert 'campaign.analysisSessionId' in script
+    assert 'They do not establish that a service is required for success.' in script
+    assert '.guided-observed-graph__edges' in styles

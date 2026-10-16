@@ -1314,6 +1314,44 @@
     margin-top: var(--space-lg);
 }
 
+.guided-observed-graph,
+.guided-observed-graph-loading {
+    margin-top: var(--space-lg);
+}
+
+.guided-observed-graph h5 {
+    margin: 0 0 4px;
+    font-size: 13px;
+}
+
+.guided-observed-graph p,
+.guided-observed-graph-loading {
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.guided-observed-graph .workflow-dag-container {
+    margin-top: var(--space-sm);
+}
+
+.guided-observed-graph__edges {
+    margin-top: var(--space-sm);
+    font-size: 12px;
+}
+
+.guided-observed-graph__edges summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.guided-observed-graph__edges ul {
+    display: grid;
+    gap: 4px;
+    margin: var(--space-sm) 0 0;
+    padding-left: 20px;
+    overflow-wrap: anywhere;
+}
+
 .guided-evidence h5,
 .guided-next h5 {
     margin: 0 0 var(--space-sm);

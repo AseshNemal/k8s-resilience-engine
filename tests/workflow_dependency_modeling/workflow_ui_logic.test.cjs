@@ -10,7 +10,7 @@ const context = {
     document: {querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {}},
 };
 vm.createContext(context);
-vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; })();'), context);
+vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; globalThis.observedGraphModel = observedGraphModel; })();'), context);
 const build = (...args) => JSON.parse(JSON.stringify(context.buildSetup(...args)));
 
 test('keeps response markers as a list and preserves generic request data', () => {
@@ -48,4 +48,17 @@ test('workflow selection preserves distinct services with the same operation nam
     for (const selection of ['', 'POST /payment', '-1', '99']) {
         assert.equal(context.selectWorkflow(workflows, selection), undefined);
     }
+});
+
+test('observed graph uses recorded edges without inventing mandatory dependencies', () => {
+    const graph = JSON.parse(JSON.stringify(context.observedGraphModel({
+        observedServices: ['frontend', 'checkoutservice', 'paymentservice'],
+        edges: [{source: 'frontend', target: 'checkoutservice'}, {source: 'checkoutservice', target: 'paymentservice'}],
+    })));
+    assert.deepEqual(graph, {
+        observedServices: ['frontend', 'checkoutservice', 'paymentservice'],
+        edges: [{source: 'frontend', target: 'checkoutservice'}, {source: 'checkoutservice', target: 'paymentservice'}],
+        mandatoryServices: [],
+        optionalServices: [],
+    });
 });

@@ -466,6 +466,38 @@
         if (fields[1]) fields[1].textContent = outcome;
     }
 
+    function observedGraphModel(session) {
+        return {
+            observedServices: [...session.observedServices],
+            edges: session.edges.map(({source, target}) => ({source, target})),
+            mandatoryServices: [],
+            optionalServices: [],
+        };
+    }
+
+    function renderObservedGraph(session) {
+        const section = document.createElement("section");
+        section.className = "guided-observed-graph";
+        section.setAttribute("aria-label", "Observed service call graph");
+        section.append(
+            guidedText("h5", "", "Observed service call graph"),
+            guidedText("p", "", "Arrows are calls found in matching traces. They do not establish that a service is required for success.")
+        );
+        const canvas = document.createElement("div");
+        renderGraph(canvas, observedGraphModel(session));
+        section.appendChild(canvas);
+        const edgeList = document.createElement("details");
+        edgeList.className = "guided-observed-graph__edges";
+        edgeList.appendChild(guidedText("summary", "", `${session.edges.length} observed call relationships`));
+        const list = document.createElement("ul");
+        session.edges.forEach(({source, target}) => {
+            list.appendChild(guidedText("li", "", `${source} → ${target}`));
+        });
+        edgeList.appendChild(list);
+        section.appendChild(edgeList);
+        return section;
+    }
+
     function renderCampaign(campaign) {
         if (!guidedResult) return;
         guidedResult.hidden = false;
@@ -615,7 +647,17 @@
         blockers.appendChild(guidedText("li", "", "Checking current evidence…"));
         next.appendChild(blockers);
 
-        guidedResult.append(heading, metrics, contract, manifestGate, baseline, runbook, interventionConsole, next);
+        const observedGraph = document.createElement("section");
+        observedGraph.className = "guided-observed-graph-loading";
+        observedGraph.textContent = "Loading the recorded call graph…";
+        guidedResult.append(heading, metrics, observedGraph, contract, manifestGate, baseline, runbook, interventionConsole, next);
+        requestScenario(`/api/workflows/analysis-sessions/${encodeURIComponent(campaign.analysisSessionId)}`)
+            .then((session) => {
+                if (observedGraph.isConnected) observedGraph.replaceWith(renderObservedGraph(session));
+            })
+            .catch((error) => {
+                if (observedGraph.isConnected) observedGraph.textContent = `Recorded call graph unavailable: ${error.message}`;
+            });
         loadManifestGate(campaign, manifestGate, runButton, runStatus).then(() => loadBaselineReadiness(
             campaign,
             readiness,
@@ -1430,7 +1472,7 @@
             }
         }, true);
 
-        guidedResult.append(heading, metrics, warning, evidence, contract);
+        guidedResult.append(heading, metrics, warning, renderObservedGraph(session), evidence, contract);
         updateExperimentPath(0);
         if (dataSourceBadge) {
             dataSourceBadge.textContent = `${session.evidenceTier.toUpperCase()} · OBSERVED`;
