@@ -34,6 +34,8 @@ from app.engine.deployment_topology_modeling.service import (
     get_chaos_safety_status,
     validate_chaos_action,
     get_scenario_latex_table,
+    run_parametric_ensemble_pipeline,
+    get_parametric_ensemble_markdown_report,
 )
 from app.shared.schemas.deployment import DeploymentGraph
 from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
@@ -636,3 +638,24 @@ def get_latex_transition_table(
     if res is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found or snapshot missing.")
     return res
+
+
+@router.get(
+    "/benchmarks/ensemble",
+    tags=[TAG_BENCHMARKS],
+    summary="[Academic Defense] Multi-Service Parametric Ensemble Evaluation (Mean, Std Dev, 95% CI)",
+)
+def get_parametric_ensemble_dataset() -> Dict[str, Any]:
+    """Executes a 12-trial multi-workload parametric sweep and returns statistical ensemble metrics."""
+    return run_parametric_ensemble_pipeline()
+
+
+@router.get(
+    "/benchmarks/ensemble/markdown",
+    tags=[TAG_BENCHMARKS],
+    summary="[Academic Defense] Export publication-grade Markdown report for Multi-Service Ensemble",
+)
+def get_parametric_ensemble_markdown() -> Response:
+    """Returns formatted Markdown report with statistical summary and sensitivity tables for publication."""
+    md_content = get_parametric_ensemble_markdown_report()
+    return Response(content=md_content, media_type="text/markdown")

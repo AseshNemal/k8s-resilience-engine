@@ -19,9 +19,12 @@
         <span class="contract-chip">In: Kubernetes Manifests</span>
         <span class="contract-chip">In: Live Cluster State</span>
         <span class="contract-chip contract-chip--out">Out: DeploymentGraph</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot">Sample Data</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Sample Data</span>
+        <button type="button" class="secondary-button" data-role="toggle-source-button">
+            Switch to Live Cluster (KinD)
+        </button>
         <button type="button" class="secondary-button" data-role="reload-button">
-            Reload Sample Data
+            Reload Data
         </button>
     </div>
 </div>
@@ -77,6 +80,138 @@
     </div>
 
     <div data-role="deployment-warning-region"></div>
+
+    <div class="section-header" style="margin-top: var(--space-xl);">
+        <h3 class="section-header__title">Multi-Service Chaos Resilience Ensemble (28 Symmetrical Trials)</h3>
+        <span class="section-header__note">
+            Empirical placement drift benchmarks across 6 core microservices and 3 cluster nodes under chaos perturbations.
+        </span>
+    </div>
+    <div class="card ensemble-card">
+        <div class="ensemble-summary-grid" data-role="ensemble-summary-grid"></div>
+
+        <div class="ensemble-breakdown-grid">
+            <div class="ensemble-breakdown-card">
+                <div class="ensemble-breakdown-card__header">
+                    <div>
+                        <h4 class="ensemble-breakdown-card__title">Microservice Sensitivity Breakdown</h4>
+                        <span class="ensemble-breakdown-card__sub">Workload resilience ranking across 28 chaos trials</span>
+                    </div>
+                </div>
+                <div class="table-scroll">
+                    <table class="data-table data-table--compact">
+                        <thead>
+                            <tr>
+                                <th scope="col">Microservice</th>
+                                <th scope="col">Trials</th>
+                                <th scope="col">Mean Drift</th>
+                                <th scope="col">Resilience Tier</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="ensemble-service-sensitivity-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="ensemble-breakdown-card">
+                <div class="ensemble-breakdown-card__header">
+                    <div>
+                        <h4 class="ensemble-breakdown-card__title">Disruption Category Sensitivity Breakdown</h4>
+                        <span class="ensemble-breakdown-card__sub">Failure domain perturbation impact ranking</span>
+                    </div>
+                </div>
+                <div class="table-scroll">
+                    <table class="data-table data-table--compact">
+                        <thead>
+                            <tr>
+                                <th scope="col">Disruption Category</th>
+                                <th scope="col">Trials</th>
+                                <th scope="col">Mean Drift</th>
+                                <th scope="col">Scheduling Impact</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="ensemble-category-sensitivity-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 4 Formal Markov Transition Matrix Visualizer -->
+        <div class="markov-matrix-card" data-role="markov-matrix-panel">
+            <div class="markov-matrix-header">
+                <div>
+                    <div class="markov-matrix-title-row">
+                        <span class="status-badge status-badge--primary">Phase 4 Mathematical Model</span>
+                        <h4 class="markov-matrix-title">Markov Pod Migration Transition Matrix ($T[i, j]$)</h4>
+                    </div>
+                    <p class="markov-matrix-desc">
+                        Quantifies stochastic pod migrations across physical nodes: \( T[i,j] \) represents pod replicas relocated from source node \( n_i \) to destination node \( n_j \) upon disruption.
+                    </p>
+                </div>
+                <div class="markov-matrix-actions">
+                    <label for="markov-scenario-select" class="markov-label">Disruption Scenario:</label>
+                    <select id="markov-scenario-select" class="markov-select" data-role="markov-scenario-select">
+                        <option value="07_node_drain_eviction" selected>Scenario 07: Node Drain & Eviction (High Displacement)</option>
+                        <option value="05_pod_deletion_chaos">Scenario 05: Involuntary Pod Deletion (Reschedule Drift)</option>
+                        <option value="04_rolling_update">Scenario 04: Rolling Update (Surge Churn)</option>
+                        <option value="02_scale_up_stress">Scenario 02: Scale Up Stress (Bin-packing)</option>
+                        <option value="03_scale_down_loss">Scenario 03: Scale Down Loss (Redundancy)</option>
+                        <option value="06_node_cordon">Scenario 06: Node Cordon (Unschedulable)</option>
+                        <option value="08_resource_contention">Scenario 08: Resource Contention (Constrained)</option>
+                        <option value="01_initial_deployment">Scenario 01: Initial Baseline (Control)</option>
+                    </select>
+                    <button type="button" class="secondary-button" data-role="markov-toggle-latex-btn">
+                        View LaTeX Table
+                    </button>
+                </div>
+            </div>
+
+            <div class="markov-matrix-content" data-role="markov-matrix-content">
+                <div class="loading-state">Loading Markov Transition Matrix…</div>
+            </div>
+
+            <div class="markov-latex-preview" data-role="markov-latex-preview" style="display: none;">
+                <div class="markov-latex-header">
+                    <span>LaTeX Table Code (Overleaf / Dissertation Ready):</span>
+                    <button type="button" class="secondary-button" data-role="markov-copy-latex-btn">Copy LaTeX</button>
+                </div>
+                <pre class="markov-latex-code" data-role="markov-latex-code"></pre>
+            </div>
+        </div>
+
+        <div class="ensemble-filter-bar">
+            <div class="filter-group" data-role="ensemble-category-filters">
+                <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All (28)</button>
+                <button type="button" class="filter-btn" data-cat="BASELINE">Baseline (1)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_UP_STRESS">Scale Up (6)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_DOWN_LOSS">Scale Down (6)</button>
+                <button type="button" class="filter-btn" data-cat="ROLLING_UPDATE">Rolling Update (6)</button>
+                <button type="button" class="filter-btn" data-cat="POD_DELETION">Pod Deletion (6)</button>
+                <button type="button" class="filter-btn" data-cat="NODE_CORDON">Node Cordon (1)</button>
+                <button type="button" class="filter-btn" data-cat="NODE_DRAIN">Node Drain (3)</button>
+                <button type="button" class="filter-btn" data-cat="RESOURCE_CONTENTION">Resource Contention (1)</button>
+            </div>
+            <input type="text" class="ensemble-search-input" data-role="ensemble-search" placeholder="Search service, category, or trial..." aria-label="Search trials" />
+        </div>
+
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Trial ID</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Workload</th>
+                        <th scope="col">Chaos Specification</th>
+                        <th scope="col">Placement Drift (D_rate)</th>
+                        <th scope="col">Failure Exposure (ΔE)</th>
+                        <th scope="col">Displaced</th>
+                        <th scope="col">Status</th>
+                    </tr>
+                </thead>
+                <tbody data-role="ensemble-table-body"></tbody>
+            </table>
+        </div>
+    </div>
 
     <div class="section-header">
         <h3 class="section-header__title">Raw Data</h3>

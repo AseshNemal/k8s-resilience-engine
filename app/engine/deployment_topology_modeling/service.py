@@ -279,6 +279,7 @@ from experiments.placement_drift.safety_guard import SafetyGuard
 from experiments.placement_drift.constants import ScenarioExecutionMode, PROTECTED_NAMESPACES
 from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix
 from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
+from experiments.placement_drift.parametric_ensemble_evaluator import ParametricEnsembleEvaluator
 
 _GLOBAL_SNAPSHOT_REPO = SnapshotRepository()
 
@@ -559,6 +560,21 @@ def get_scenario_latex_table(scenario_id: str) -> dict[str, Any] | None:
         "d_rate": result.d_rate,
         "delta_e_rate": result.delta_e_rate,
     }
+
+
+def run_parametric_ensemble_pipeline() -> dict[str, Any]:
+    """Executes the multi-service parametric sweep and returns statistical ensemble metrics."""
+    evaluator = ParametricEnsembleEvaluator(repository=_GLOBAL_SNAPSHOT_REPO)
+    metrics = evaluator.run_ensemble()
+    return metrics.model_dump()
+
+
+def get_parametric_ensemble_markdown_report() -> str:
+    """Generates an academic publication-grade Markdown report for the parametric ensemble sweep."""
+    evaluator = ParametricEnsembleEvaluator(repository=_GLOBAL_SNAPSHOT_REPO)
+    metrics = evaluator.run_ensemble()
+    return ParametricEnsembleEvaluator.generate_markdown_report(metrics)
+
 
 if __name__ == "__main__":
     print("--- LIVE DEPLOYMENT GRAPH MODEL (ENTERPRISE EDITION) ---")
