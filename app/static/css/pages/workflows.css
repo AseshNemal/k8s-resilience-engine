@@ -1727,8 +1727,120 @@
 
 .approved-graph {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
     gap: 8px;
+}
+
+.approved-graph .classification-result {
+    min-width: 0;
+}
+
+.approved-graph .classification-result span {
+    font-size: 16px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.validation-report {
+    display: grid;
+    gap: 14px;
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--color-border);
+    min-width: 0;
+}
+
+.validation-report h5,
+.validation-report p {
+    margin: 0;
+}
+
+.validation-report h5 {
+    font-size: 17px;
+    line-height: 1.35;
+}
+
+.validation-report__note,
+.validation-report__scope p {
+    color: var(--color-text-muted);
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.validation-report__services {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 265px), 1fr));
+    gap: 10px;
+    min-width: 0;
+}
+
+.validation-report__service {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    min-width: 0;
+    padding: 13px;
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: var(--color-surface, #fff);
+}
+
+.validation-report__service--mandatory { border-left-color: #b91c1c; }
+.validation-report__service--supporting { border-left-color: #b45309; }
+.validation-report__service--optional { border-left-color: #15803d; }
+
+.validation-report__service-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 10px;
+    min-width: 0;
+}
+
+.validation-report__service-heading strong {
+    overflow-wrap: anywhere;
+}
+
+.validation-report__label {
+    color: var(--color-text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: capitalize;
+}
+
+.validation-report__outcome {
+    color: var(--color-text);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.validation-report__reason {
+    color: var(--color-text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.validation-report__scope {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: #f8fafc;
+}
+
+.validation-report__error {
+    color: var(--color-danger, #b91c1c);
+    font-size: 13px;
+}
+
+.validation-report > .secondary-button {
+    justify-self: start;
+    min-height: 44px;
 }
 
 .baseline-console {

@@ -5,7 +5,7 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=workflow-validation-report">
 {% endblock %}
 
 {% block content %}
@@ -779,5 +779,5 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=workflow-verified-approval" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=workflow-validation-report-2" defer></script>
 {% endblock %}

@@ -1178,9 +1178,9 @@
         const summary = document.createElement("div");
         summary.className = "approved-graph";
         summary.append(
-            resultCard("Mandatory", graph.mandatoryServices.join(", ") || "None", "Repeatedly prevented this tested checkout outcome"),
+            resultCard("Mandatory", graph.mandatoryServices.join(", ") || "None", "Outage-tested blockers plus the structural entry point; see evidence below"),
             resultCard("Supportive", (approval.supportingServices || approval.excludedSupportingServices || []).join(", ") || "None", "Recorded separately; excluded from Component 3 failure gating"),
-            resultCard("Optional", graph.optionalServices.join(", ") || "None", "No material outcome effect observed"),
+            resultCard("Optional", graph.optionalServices.join(", ") || "None", "No material success change under the tested outage"),
             resultCard("Observed call edges", String(graph.edges.length), "Trace-observed links between approved services; not individually outage-validated")
         );
         const evidence = latestInterventionEvidence;
@@ -1201,8 +1201,90 @@
             guidedText("p", "assessment-console__entry", `Reviewer note from ${approval.approvedBy}: ${approval.rationale}`),
             exportButton
         );
+        const report = document.createElement("section");
+        report.className = "validation-report";
+        report.setAttribute("aria-label", "Workflow validation evidence");
+        report.append(
+            guidedText("h5", "", "Why these services have these labels"),
+            guidedText("p", "validation-report__note", "Loading the saved normal-run and service-outage results…")
+        );
+        target.appendChild(report);
+        loadApprovedEvidence(approval, target, report);
         updateExperimentPath(5);
         if (dataSourceBadge) dataSourceBadge.textContent = "EXPERIMENT · GRAPH APPROVED";
+    }
+
+    async function loadApprovedEvidence(approval, target, report) {
+        try {
+            const assessment = await requestScenario(
+                `/api/workflows/dependency-assessments/${encodeURIComponent(approval.assessmentId)}`
+            );
+            if (!report.isConnected || !target.contains(report)) return;
+            if (assessment.assessmentId !== approval.assessmentId || assessment.workflowId !== approval.workflowId) {
+                throw new Error("The saved assessment does not match this approved graph.");
+            }
+            renderValidationReport(assessment, approval, report);
+        } catch (error) {
+            if (!report.isConnected || !target.contains(report)) return;
+            report.replaceChildren(
+                guidedText("h5", "", "Validation evidence unavailable"),
+                guidedText("p", "validation-report__error", error.message)
+            );
+        }
+    }
+
+    function renderValidationReport(assessment, approval, report) {
+        const policy = assessment.policy;
+        const services = document.createElement("div");
+        services.className = "validation-report__services";
+        (assessment.services || []).forEach((service) => {
+            const item = document.createElement("article");
+            item.className = `validation-report__service validation-report__service--${service.classification}`;
+            const heading = document.createElement("div");
+            heading.className = "validation-report__service-heading";
+            heading.append(
+                guidedText("strong", "", service.serviceName),
+                guidedText("span", "validation-report__label", service.classification.replaceAll("_", " "))
+            );
+            const baseline = service.baseline;
+            const intervention = service.intervention;
+            const outcome = guidedText(
+                "p", "validation-report__outcome",
+                `Normal ${baseline.succeededRecords}/${baseline.eligibleRecords} successful → ${service.serviceName} unavailable ${intervention.succeededRecords}/${intervention.eligibleRecords} successful`
+            );
+            const effect = service.failureEffect == null
+                ? "Effect not measurable"
+                : `${Math.round(service.failureEffect * 100)} percentage-point success drop`;
+            item.append(
+                heading,
+                outcome,
+                guidedText("p", "validation-report__reason", `${effect}. ${(service.reasons || []).join(" ")}`)
+            );
+            services.appendChild(item);
+        });
+        const testedEdges = (assessment.edgeInterventions || []).length;
+        const observedEdges = approval.approvedGraph.edges.length;
+        const supporting = (assessment.supportingServices || []).length;
+        const scope = document.createElement("div");
+        scope.className = "validation-report__scope";
+        scope.append(
+            guidedText("strong", "", "What this validation covers"),
+            guidedText("p", "", `The registered ${assessment.workflowId} success condition was checked against ${assessment.services.length} separately controlled service outages. Mandatory means repeated workflow failure; supporting means partial degradation below the mandatory threshold; optional means no material success change under the tested outage. Supporting services in this run: ${supporting}.`),
+            guidedText("p", "", `${assessment.structuralEntryService} is the workflow entry point and was retained structurally, not tested as its own outage. ${observedEdges} arrows were observed in traces; ${testedEdges} edge-specific interventions were recorded, so the arrows are not individually validated as critical.`),
+            guidedText("p", "", `Decision rule: at least ${policy.minSamplesPerCohort} eligible executions per cohort; baseline success at least ${Math.round(policy.minBaselineSuccessRate * 100)}%; mandatory requires a drop of at least ${Math.round(policy.mandatoryEffectThreshold * 100)} percentage points and outage success at most ${Math.round(policy.maxMandatorySuccessRate * 100)}%. These results apply to this checkout condition and environment, not every deployment.`)
+        );
+        const download = guidedText("button", "secondary-button", "Download validation evidence JSON");
+        download.type = "button";
+        download.addEventListener("click", () => {
+            downloadJsonArtifact(`${assessment.workflowId}-validation-evidence.json`, assessment);
+        });
+        report.replaceChildren(
+            guidedText("h5", "", "Why these services have these labels"),
+            guidedText("p", "validation-report__note", "Saved assessment · normal runs compared with one confirmed service outage at a time"),
+            services,
+            scope,
+            download
+        );
     }
 
     async function createGuidedCampaign(session, requiredTrials, campaignSetup, button, status) {

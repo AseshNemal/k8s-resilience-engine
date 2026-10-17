@@ -72,3 +72,15 @@ def test_saved_run_keeps_service_controls_compact_and_shows_next_action() -> Non
     assert '"Proof of service state"' in script
     assert '"Next action"' in script
     assert 'data-role="guided-result" hidden></div>' in markup
+
+
+def test_approved_graph_also_loads_readable_validation_evidence() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+    styles = STYLES.read_text(encoding="utf-8")
+
+    assert "loadApprovedEvidence(approval, target, report)" in script
+    assert "/api/workflows/dependency-assessments/${encodeURIComponent(approval.assessmentId)}" in script
+    assert "Normal ${baseline.succeededRecords}/${baseline.eligibleRecords} successful" in script
+    assert "edge-specific interventions were recorded" in script
+    assert "Download validation evidence JSON" in script
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 265px), 1fr))" in styles
