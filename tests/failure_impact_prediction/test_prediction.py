@@ -1,6 +1,10 @@
 import pytest
 
+from app.engine.failure_impact_prediction import service as failure_service
 from app.engine.failure_impact_prediction.fixture_provider import get_demo_inputs
+from app.engine.failure_impact_prediction.runtime_provider import (
+    RuntimeComponentInputs,
+)
 from app.engine.failure_impact_prediction.service import predict_failure_impact
 
 
@@ -98,3 +102,41 @@ def test_unknown_failed_node_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="Unknown failed node"):
         predict_failure_impact(workflow, deployment, "node-99")
+
+
+def test_runtime_prediction_uses_validated_component_inputs(monkeypatch) -> None:
+    workflow, deployment = get_demo_inputs()
+    calls: dict[str, str] = {}
+
+    def runtime_inputs(
+        workflow_id: str,
+        namespace: str,
+    ) -> RuntimeComponentInputs:
+        calls["workflow_id"] = workflow_id
+        calls["namespace"] = namespace
+        return RuntimeComponentInputs(
+            workflow=workflow,
+            deployment=deployment,
+            workflow_freeze_id="freeze-checkout-v1",
+            workflow_assessment_id="assessment-checkout-v1",
+            namespace=namespace,
+        )
+
+    monkeypatch.setattr(
+        failure_service,
+        "get_runtime_component_inputs",
+        runtime_inputs,
+    )
+
+    report = failure_service.predict_runtime_failure_impact(
+        "checkout",
+        "node-1",
+        "research",
+    )
+
+    assert calls == {
+        "workflow_id": "checkout",
+        "namespace": "research",
+    }
+    assert report.failed_node == "node-1"
+    assert report.failed_workflows == ["checkout"]

@@ -20,23 +20,61 @@
         <span class="contract-chip">In: DeploymentGraph</span>
         <span class="contract-chip">In: Failed Node</span>
         <span class="contract-chip contract-chip--out">Out: FailureImpactReport</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot">Contract Fixtures</span>
+        <span
+            class="status-badge status-badge--muted status-badge--no-dot"
+            data-role="input-source-badge"
+        >Contract Fixtures</span>
     </div>
 </div>
 
 <div class="card" style="margin-bottom: var(--space-lg);">
     <div class="scenario-panel">
-        <div>
+        <div class="scenario-panel__controls">
             <div class="section-header__title" style="margin-bottom: 4px;">Failure Scenario</div>
-            <label class="scenario-panel__detail" for="failure-node-selector">
-                Selected worker node:
+            <label class="scenario-panel__field" for="failure-input-mode">
+                <span>Input source</span>
+                <select
+                    class="scenario-panel__select"
+                    id="failure-input-mode"
+                    data-role="input-mode"
+                >
+                    <option value="demo">Contract fixtures</option>
+                    <option value="runtime">Validated runtime</option>
+                </select>
+            </label>
+            <div class="scenario-panel__runtime-fields" data-role="runtime-fields" hidden>
+                <label class="scenario-panel__field" for="failure-workflow-id">
+                    <span>Workflow ID</span>
+                    <input
+                        class="scenario-panel__input"
+                        id="failure-workflow-id"
+                        data-role="workflow-id"
+                        type="text"
+                        value="checkout"
+                        autocomplete="off"
+                    >
+                </label>
+                <label class="scenario-panel__field" for="failure-namespace">
+                    <span>Namespace</span>
+                    <input
+                        class="scenario-panel__input"
+                        id="failure-namespace"
+                        data-role="namespace"
+                        type="text"
+                        value="default"
+                        autocomplete="off"
+                    >
+                </label>
+            </div>
+            <label class="scenario-panel__field" for="failure-node-selector">
+                <span>Selected worker node</span>
                 <select
                     class="scenario-panel__select"
                     id="failure-node-selector"
                     data-role="node-selector"
                 ></select>
             </label>
-            <p class="ui-note" style="margin-top: 4px;">
+            <p class="ui-note scenario-panel__note" data-role="input-mode-note">
                 Contract-fixture mode — this runs a virtual prediction and never changes a cluster.
             </p>
         </div>
@@ -135,7 +173,6 @@
         <ul class="future-work-list">
             <li>Interactive cross-layer graph view</li>
             <li>Multi-workflow portfolio blast-radius calculation</li>
-            <li>Validated Component 1 and Component 2 runtime inputs</li>
             <li>Chaos-injection result comparison</li>
             <li>Prediction accuracy tracking against observed outcomes</li>
         </ul>
