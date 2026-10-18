@@ -942,6 +942,9 @@ There is no deployment pipeline yet — `deploy/kubernetes/` is currently an emp
 folder. The app can run either with the local development server above
 (`uvicorn app.main:app --reload`) or in Docker Desktop (a single FastAPI container with
 SQLite on a named volume, plus a local multi-node kind cluster) — see [`docs/DOCKER.md`](docs/DOCKER.md).
+It can also be installed as a Docker Desktop extension with no published port (socket-only backend,
+read-only cluster access) — install, update, remove and troubleshooting are in
+[`docs/EXTENSION.md`](docs/EXTENSION.md).
 
 Writing real Kubernetes manifests for `deploy/kubernetes/` is future work — see
 [Development Phases](#development-phases) and the per-member "First" checklists earlier in
