@@ -37,6 +37,39 @@ def build_cross_layer_graph(
 ) -> CrossLayerGraph:
     """Join Component 1 and Component 2 outputs without mutating either input."""
 
+    duplicate_mandatory_services = _duplicates(workflow.mandatory_services)
+    if duplicate_mandatory_services:
+        raise CrossLayerGraphError(
+            "Duplicate mandatory workflow services: "
+            + ", ".join(duplicate_mandatory_services)
+        )
+
+    duplicate_optional_services = _duplicates(workflow.optional_services)
+    if duplicate_optional_services:
+        raise CrossLayerGraphError(
+            "Duplicate optional workflow services: "
+            + ", ".join(duplicate_optional_services)
+        )
+
+    conflicting_services = sorted(
+        set(workflow.mandatory_services) & set(workflow.optional_services)
+    )
+    if conflicting_services:
+        raise CrossLayerGraphError(
+            "Workflow services cannot be both mandatory and optional: "
+            + ", ".join(conflicting_services)
+        )
+
+    workflow_edge_names = [
+        f"{edge.source} -> {edge.target}" for edge in workflow.edges
+    ]
+    duplicate_workflow_edges = _duplicates(workflow_edge_names)
+    if duplicate_workflow_edges:
+        raise CrossLayerGraphError(
+            "Duplicate workflow edges: "
+            + ", ".join(duplicate_workflow_edges)
+        )
+
     node_names = [node.name for node in deployment.nodes]
     duplicate_nodes = _duplicates(node_names)
     if duplicate_nodes:
