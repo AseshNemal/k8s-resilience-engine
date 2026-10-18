@@ -299,6 +299,23 @@ def test_ingest_status_reports_without_a_credential(tmp_path, monkeypatch):
     assert code == 0 and result == {"ok": True, "connected": False}
 
 
+def test_ingest_disconnect_removes_the_credential_and_the_managed_record(tmp_path, monkeypatch):
+    request = {"kubeconfig": kubeconfig(server=HELPER_SERVER, user={"token": fresh_token(8)}), "managed": MANAGED}
+    ingest(json.dumps(request), tmp_path, monkeypatch)
+    assert (tmp_path / "kube" / "config").is_file() and (tmp_path / "kube" / "managed.json").is_file()
+
+    code, result = ingest("", tmp_path, monkeypatch, argv=["--disconnect"])
+
+    assert code == 0 and result == {"ok": True, "connected": False}
+    assert not (tmp_path / "kube" / "config").exists() and not (tmp_path / "kube" / "managed.json").exists()
+
+
+def test_ingest_disconnect_is_a_no_op_when_nothing_is_connected(tmp_path, monkeypatch):
+    code, result = ingest("", tmp_path, monkeypatch, argv=["--disconnect"])
+
+    assert code == 0 and result == {"ok": True, "connected": False}
+
+
 def test_ingest_rejects_unknown_arguments(tmp_path, monkeypatch):
     code, result = ingest("", tmp_path, monkeypatch, argv=["--password", "x"])
 

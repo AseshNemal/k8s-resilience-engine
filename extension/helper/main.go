@@ -1,179 +1,113 @@
-// Proof of concept for the cross-platform host helper. READ-ONLY: it never creates, updates or
-// deletes anything in a cluster, never requests a token, and never writes to the extension backend.
-// Output is JSON and never contains a credential.
+// resilience-helper is the host-side companion of the K8s Resilience Engine Docker Desktop extension.
 //
-//	discover        list kubeconfig contexts, classify them, and probe only supported ones
-//	transport-check test the candidate host-to-backend transports (status reads only)
-//	approve-demo    show the native approval dialog (creates nothing) and report the answer
-//	version
+// The extension UI launches it through Docker Desktop (ddClient.extension.host.cli.exec) to find
+// local clusters, to set up read-only access once (after a native approval dialog), and to renew the
+// short-lived credential. It keeps the user's administrator kubeconfig on the host: it hands the
+// extension backend only a read-only token, and prints nothing but a JSON status. No token, no
+// kubeconfig content and no error text from the cluster is ever printed or logged.
+//
+//	resilience-helper discover
+//	resilience-helper status
+//	resilience-helper authorize <context>
+//	resilience-helper renew <context>
+//	resilience-helper revoke <context>
+//	resilience-helper version
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/url"
+	"io"
 	"os"
+	"os/exec"
 	"runtime"
-	"sort"
-	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
+	"resilience-engine/helper/internal/approve"
+	"resilience-engine/helper/internal/clusters"
+	"resilience-engine/helper/internal/execx"
+	"resilience-engine/helper/internal/flow"
+	"resilience-engine/helper/internal/transport"
 )
 
-const (
-	rbacName     = "resilience-engine-reader"
-	managedLabel = "app.kubernetes.io/managed-by"
-	probeTimeout = 4 * time.Second
-)
+const version = "0.1.0"
 
-type contextInfo struct {
-	Name          string `json:"name"`
-	Server        string `json:"server"`
-	Supported     bool   `json:"supported"`
-	Reason        string `json:"reason,omitempty"`
-	Probed        bool   `json:"probed"`
-	Reachable     *bool  `json:"reachable,omitempty"`
-	ServerVersion string `json:"serverVersion,omitempty"`
-	Authorization string `json:"authorization,omitempty"` // approved | absent | unknown
-	ProbeError    string `json:"probeError,omitempty"`
+func realDeps() flow.Deps {
+	home, _ := os.UserHomeDir()
+	docker := transport.DockerExec{
+		Runner: execx.Real{},
+		FindDocker: func() (string, error) {
+			return transport.FindDocker(exec.LookPath, os.Stat, runtime.GOOS, home)
+		},
+	}
+	return flow.Deps{
+		Clusters: clusters.New(),
+		Prompter: approve.Default(),
+		Backends: func() []transport.Backend { return transport.Defaults(runtime.GOOS, home, docker) },
+	}
 }
 
-func emit(v any) {
-	body, _ := json.MarshalIndent(v, "", "  ")
-	body = append(body, '\n')
-	logEvent("emitted", map[string]any{"sha256": sha(body), "bytes": len(body)})
-	_, _ = os.Stdout.Write(body)
-}
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, realDeps)) }
 
-func fail(msg string) {
-	emit(map[string]any{"ok": false, "error": msg})
-	os.Exit(1)
-}
-
-// classify decides whether a context is a local cluster this helper may talk to. Supported means
-// a kind cluster whose API server is https on a loopback address. Nothing else is ever contacted.
-func classify(name, server string) (bool, string) {
-	u, err := url.Parse(server)
-	if err != nil || u.Hostname() == "" {
-		return false, "unparseable API server address"
-	}
-	if u.Scheme != "https" {
-		return false, "API server is not https"
-	}
-	switch u.Hostname() {
-	case "127.0.0.1", "localhost", "::1":
-	default:
-		return false, "API server is not a loopback address (remote clusters are out of scope)"
-	}
-	if !strings.HasPrefix(name, "kind-") {
-		return false, "not a kind context (only kind-* is supported initially)"
-	}
-	return true, ""
-}
-
-func discover() {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	raw, err := rules.Load()
-	if err != nil {
-		fail("could not read kubeconfig: " + err.Error())
-	}
-	names := make([]string, 0, len(raw.Contexts))
-	for n := range raw.Contexts {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
-	out := make([]contextInfo, 0, len(names))
-	for _, n := range names {
-		c := raw.Contexts[n]
-		cluster := raw.Clusters[c.Cluster]
-		info := contextInfo{Name: n}
-		if cluster == nil {
-			info.Reason = "context references a missing cluster"
-			out = append(out, info)
-			continue
+// run is main without the process: it returns the exit code and writes only JSON to stdout.
+func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code int) {
+	defer func() {
+		if recover() != nil {
+			// A panic message could contain a value from the run, so print nothing from it.
+			emit(stdout, flow.Result{Command: "internal", State: flow.StateError, Message: "internal error"})
+			code = 1
 		}
-		if u, err := url.Parse(cluster.Server); err == nil {
-			info.Server = u.Host // host:port only, no path or credentials
-		}
-		info.Supported, info.Reason = classify(n, cluster.Server)
-		if info.Supported {
-			probe(&info, n, rules)
-		}
-		out = append(out, info)
-	}
-	emit(map[string]any{
-		"ok":          true,
-		"platform":    runtime.GOOS + "/" + runtime.GOARCH,
-		"current":     raw.CurrentContext,
-		"contexts":    out,
-		"noKubectl":   true,
-		"noTokenSeen": true,
-	})
-}
+	}()
 
-// probe makes two read-only calls against a supported cluster: GET /version and GET one
-// ClusterRoleBinding. Authorization state lives in the cluster, so the helper keeps none.
-func probe(info *contextInfo, name string, rules *clientcmd.ClientConfigLoadingRules) {
-	info.Probed = true
-	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{CurrentContext: name}).ClientConfig()
-	if err != nil {
-		info.ProbeError = "could not build client config"
-		return
+	if len(args) == 0 {
+		return usage(stderr)
 	}
-	cfg.Timeout = probeTimeout
-	cs, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		info.ProbeError = "could not build client"
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancel()
-	yes, no := true, false
-	ver, err := cs.Discovery().ServerVersion()
-	if err != nil {
-		info.Reachable = &no
-		info.ProbeError = "API server unreachable"
-		info.Authorization = "unknown"
-		return
-	}
-	info.Reachable = &yes
-	info.ServerVersion = ver.GitVersion
-	crb, err := cs.RbacV1().ClusterRoleBindings().Get(ctx, rbacName, metav1.GetOptions{})
+	command, rest := args[0], args[1:]
+	needsContext := command == "authorize" || command == "renew" || command == "revoke"
 	switch {
-	case err == nil && crb.Labels[managedLabel] != "":
-		info.Authorization = "approved"
-	case err == nil:
-		info.Authorization = "present-unlabelled"
-	default:
-		info.Authorization = "absent"
+	case needsContext && len(rest) != 1:
+		return usage(stderr)
+	case !needsContext && len(rest) != 0:
+		return usage(stderr)
 	}
+
+	var (
+		timeout time.Duration
+		do      func(context.Context, flow.Deps) flow.Result
+	)
+	switch command {
+	case "discover":
+		timeout, do = 60*time.Second, flow.Discover
+	case "status":
+		timeout, do = 30*time.Second, flow.Status
+	case "authorize":
+		timeout, do = 5*time.Minute, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Authorize(ctx, d, rest[0]) }
+	case "renew":
+		timeout, do = 90*time.Second, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Renew(ctx, d, rest[0]) }
+	case "revoke":
+		timeout, do = 5*time.Minute, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Revoke(ctx, d, rest[0]) }
+	case "version":
+		emit(stdout, map[string]any{"ok": true, "version": version, "platform": runtime.GOOS + "/" + runtime.GOARCH})
+		return 0
+	default:
+		return usage(stderr)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	result := do(ctx, deps())
+	emit(stdout, result)
+	if result.OK {
+		return 0
+	}
+	return 1
 }
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: resilience-helper discover|transport-check|approve-demo|version")
-		os.Exit(2)
-	}
-	logInvocation()
-	switch os.Args[1] {
-	case "record":
-		recordReceived()
-	case "note":
-		recordNote()
-	case "discover":
-		discover()
-	case "transport-check":
-		transportCheck()
-	case "approve-demo":
-		approveDemo()
-	case "version":
-		emit(map[string]any{"ok": true, "platform": runtime.GOOS + "/" + runtime.GOARCH, "go": runtime.Version()})
-	default:
-		fail("unknown command")
-	}
+func emit(w io.Writer, v any) {
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func usage(stderr io.Writer) int {
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | revoke <context> | version\n")
+	return 2
 }
