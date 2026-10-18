@@ -387,7 +387,10 @@
         if (reloadButton) reloadButton.disabled = true;
 
         try {
-            const data = await fetchAll(ENDPOINTS);
+            // approvalBase is a URL prefix for the approval calls below, not an endpoint to fetch:
+            // fetching it requested GET /api/recommendations (404) and failed the whole page.
+            const { approvalBase, ...dataEndpoints } = ENDPOINTS;
+            const data = await fetchAll(dataEndpoints);
             const { recommendation, validation, deployment, failureImpact } = data;
 
             region.innerHTML = "";
