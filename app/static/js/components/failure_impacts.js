@@ -2,18 +2,15 @@
  * Failure Impact Prediction page script.
  * Owned by: Member 3 (K.V.D.Y.R. Karawita).
  *
- * Fetches /api/failure-impacts/sample (and /api/deployments/sample only to
- * compose the failure-chain visualization by matching pod.node against
- * failedNode) and formats the results for display. The "Run Sample
- * Simulation" button reloads the same sample endpoint — it does not run a
- * live simulation. No survival/blast-radius calculation happens in this
- * file; risk labels (Low/High/Critical) are explicitly-marked UI
- * classifications over the API's own blastRadius values.
+ * Runs Component 3's deterministic fixture-backed simulation for a selected
+ * worker node. All survival and blast-radius calculations happen in the
+ * Python engine; this file only renders the returned report. No live cluster
+ * is changed.
  */
 
 (function () {
-    const IMPACT_ENDPOINT = "/api/failure-impacts/sample";
-    const DEPLOYMENT_ENDPOINT = "/api/deployments/sample";
+    const IMPACT_ENDPOINT = "/api/failure-impacts/simulate";
+    const DEPLOYMENT_ENDPOINT = "/api/failure-impacts/demo-deployment";
     const { fetchJson } = window.ResilienceApi;
     const {
         setError,
@@ -26,7 +23,9 @@
     const region = document.querySelector('[data-role="page-region"]');
     const template = document.querySelector('[data-role="page-template"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
+    const nodeSelector = document.querySelector('[data-role="node-selector"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
+    let cachedDeployment = null;
 
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
@@ -44,6 +43,19 @@
         chip.className = "contract-chip";
         chip.textContent = text;
         return chip;
+    }
+
+    function populateNodeSelector(deployment) {
+        if (!nodeSelector || nodeSelector.options.length) return;
+
+        deployment.nodes.forEach((node) => {
+            const option = document.createElement("option");
+            option.value = node.name;
+            option.textContent = node.zone
+                ? `${node.name} (${node.zone})`
+                : node.name;
+            nodeSelector.appendChild(option);
+        });
     }
 
     function renderChipList(container, values) {
@@ -176,19 +188,27 @@
 
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
+        if (nodeSelector) nodeSelector.disabled = true;
 
         try {
-            const [impact, deployment] = await Promise.all([
-                fetchJson(IMPACT_ENDPOINT),
-                fetchJson(DEPLOYMENT_ENDPOINT),
-            ]);
+            const deployment =
+                cachedDeployment || (await fetchJson(DEPLOYMENT_ENDPOINT));
+            cachedDeployment = deployment;
+            populateNodeSelector(deployment);
+
+            const failedNode = nodeSelector?.value || deployment.nodes[0]?.name;
+            if (!failedNode) {
+                throw new Error("The demo topology contains no worker nodes.");
+            }
+            const impact = await fetchJson(
+                `${IMPACT_ENDPOINT}?failed_node=${encodeURIComponent(failedNode)}`
+            );
 
             region.innerHTML = "";
             region.appendChild(template.content.cloneNode(true));
 
             const risk = riskLabel(impact.blastRadius);
 
-            setMetric(region, "scenario-node", impact.failedNode);
             setMetric(region, "impact-failed-node", impact.failedNode);
             setMetric(region, "impact-blast-radius", formatPercentage(impact.blastRadius));
             setMetric(
@@ -260,6 +280,7 @@
             console.error("Failed to load failure-impact sample data:", error);
         } finally {
             if (reloadButton) reloadButton.disabled = false;
+            if (nodeSelector) nodeSelector.disabled = false;
         }
     }
 
