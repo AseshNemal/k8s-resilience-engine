@@ -51,7 +51,8 @@ docker extension install k8s-resilience-engine:0.1.4
 docker extension ls                                                    # VM should say Running(1)
 ```
 
-Open **Resilience Engine** in Docker Desktop's left sidebar. The tag must be a semantic version
+Docker asks you to confirm the install; answer `y` (or add `-f` to skip the question). Open
+**Resilience Engine** in Docker Desktop's left sidebar. The tag must be a semantic version
 (`0.1.4`, not `latest`); it is also the version Docker Desktop shows. The first start takes a few
 seconds while the database is created and migrated; the pages retry on their own meanwhile.
 
@@ -81,14 +82,15 @@ docker extension ls                                                    # shows t
 
 ```bash
 docker extension ls                                       # version, UI tab, VM Running(1)
-docker ps -a --filter name=k8s-resilience-engine-desktop-extension-service   # status should end in (healthy)
+docker ps -a --filter label=com.docker.compose.project=k8s-resilience-engine-desktop-extension   # status should end in (healthy)
 docker logs --tail 50 k8s-resilience-engine-desktop-extension-service         # migrations + "Uvicorn running on unix socket"
 docker inspect -f '{{.HostConfig.PortBindings}}' k8s-resilience-engine-desktop-extension-service   # expect map[]
 ```
 
-`docker ps` without a filter did not list the backend in testing (extension containers are hidden by
-default; Docker Desktop has a setting under **Extensions** to show them), but the filtered commands
-above find it. A healthy install has no published ports (`map[]`).
+Docker Desktop hides extension containers from `docker ps`, including a `--filter name=…` search
+(both returned nothing in testing, although the container was running). Only the compose-project label
+filter above lists it. `docker logs` and `docker inspect` work by container name. A healthy install has
+no published ports (`map[]`).
 
 ### Remove
 
