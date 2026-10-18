@@ -11,9 +11,10 @@ SOCKET_DIR=/run/guest-services
 SOCKET="$SOCKET_DIR/k8s-resilience-engine.sock"
 
 prepare() {  # prepare DIR: make DIR private to the app user (chmod first, then chown)
-    if [ "$(stat -c %u "$1")" != 10001 ]; then
-        chmod 0700 "$1"
-        chown 10001:10001 "$1"
+    local dir="$1"
+    if [ "$(stat -c %u "$dir")" != 10001 ]; then
+        chmod 0700 "$dir"
+        chown 10001:10001 "$dir"
     fi
 }
 
