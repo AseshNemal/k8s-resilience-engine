@@ -25,7 +25,7 @@ OUT_FILE="$KUBE_DIR/extension-readonly.kubeconfig"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --duration) DURATION="${2:?--duration needs a value such as 24h}"; shift 2 ;;
     --revoke) MODE="revoke"; shift ;;
@@ -36,7 +36,7 @@ while [ $# -gt 0 ]; do
 done
 
 command -v kubectl >/dev/null 2>&1 || die "'kubectl' is not installed or not on PATH."
-[ -f "$RBAC_MANIFEST" ] || die "Missing $RBAC_MANIFEST"
+[[ -f "$RBAC_MANIFEST" ]] || die "Missing $RBAC_MANIFEST"
 
 # Always target the kind research cluster explicitly, never whatever context happens to be current.
 K=(kubectl --context "$CONTEXT")
@@ -44,13 +44,13 @@ K=(kubectl --context "$CONTEXT")
   || die "Cannot reach cluster context '$CONTEXT'. Run ./scripts/cluster-up.sh first."
 
 confirm() {
-  [ "$ASSUME_YES" = "yes" ] && return 0
+  [[ "$ASSUME_YES" = "yes" ]] && return 0
   printf 'Proceed? [y/N] '
   read -r answer
   case "$answer" in y|Y|yes|YES) return 0 ;; *) echo "Aborted; nothing was changed."; exit 1 ;; esac
 }
 
-if [ "$MODE" = "revoke" ]; then
+if [[ "$MODE" = "revoke" ]]; then
   cat <<EOF
 This will DELETE from cluster '$CONTEXT':
   namespace/resilience-engine (and its service account), clusterrole/resilience-engine-reader,
@@ -84,11 +84,11 @@ case "$server" in
   https://127.0.0.1:*|https://localhost:*) api_port="${server##*:}" ;;
   *) die "Unexpected API server address '$server' for context '$CONTEXT'." ;;
 esac
-[ -n "$ca_data" ] || die "No embedded certificate authority found for context '$CONTEXT'."
+[[ -n "$ca_data" ]] || die "No embedded certificate authority found for context '$CONTEXT'."
 
 # The token is held in a shell variable only; it is never printed or passed on a command line.
 token="$("${K[@]}" -n resilience-engine create token resilience-engine-reader --duration "$DURATION")"
-[ -n "$token" ] || die "Token creation failed."
+[[ -n "$token" ]] || die "Token creation failed."
 
 umask 077
 mkdir -p "$KUBE_DIR"

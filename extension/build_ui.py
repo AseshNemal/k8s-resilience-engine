@@ -10,9 +10,11 @@ script or style under app/ is edited.
 Usage: build_ui.py OUTPUT_DIR
 """
 
+import os
 import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -20,7 +22,7 @@ from fastapi.testclient import TestClient
 from app.main import BASE_DIR, app
 
 # url_for() renders absolute URLs against the test client's origin; it is stripped below.
-BUILD_ORIGIN = "http://extension-build.invalid"
+BUILD_ORIGIN = "https://extension-build.invalid"
 
 # route -> (file, page key used by the CSS, header title in Docker's sentence case)
 PAGES = {
@@ -130,8 +132,8 @@ def _static_paths(html: str, key: str, title: str) -> str:
         raise SystemExit(f"{key}: could not find the header title.")
 
     html, count = re.subn(
-        r'(\s*)(<button\s+type="button"\s+class="sidebar__collapse-btn")',
-        lambda m: m.group(1) + CONNECT_LINK + m.group(2),
+        r'<button\s+type="button"\s+class="sidebar__collapse-btn"',
+        lambda m: CONNECT_LINK + m.group(0),
         html,
         count=1,
     )
@@ -150,9 +152,20 @@ def _static_paths(html: str, key: str, title: str) -> str:
     return html
 
 
+def _drop_tags(html: str, tag_pattern: str, needle: str) -> str:
+    """Remove every tag matching tag_pattern that contains needle, plus the whitespace before it."""
+    parts, pos = [], 0
+    for match in re.finditer(tag_pattern, html):
+        if needle in match.group(0):
+            parts.append(html[pos:match.start()].rstrip())
+            pos = match.end()
+    parts.append(html[pos:])
+    return "".join(parts)
+
+
 def _connect_page(index_html: str) -> str:
-    html = re.sub(r"\s*<link[^>]*dashboard\.css[^>]*>", "", index_html)
-    html = re.sub(r"\s*<script[^>]*dashboard\.js[^>]*></script>", "", html)
+    html = _drop_tags(index_html, r"<link[^>]*>", "dashboard.css")
+    html = _drop_tags(html, r"<script[^>]*></script>", "dashboard.js")
     html = re.sub(r"sidebar__link\s+is-active", "sidebar__link ", html)
     html = html.replace('class="sidebar__link" data-role="connect-link"', 'class="sidebar__link is-active" data-role="connect-link"')
     html = html.replace('<body data-page="overview">', '<body data-page="connect">', 1)
@@ -171,7 +184,23 @@ def _check_relative(name: str, html: str) -> None:
         raise SystemExit(f"{name}: absolute paths would break inside the extension: {leftovers[:5]}")
 
 
-def main(output: Path) -> None:
+def _checked_output_dir(requested: Path) -> Path:
+    """Resolve the output folder and refuse anything but a build folder, since it is emptied first.
+
+    Allowed: the image build's /out, or a folder inside the working directory or the temp directory.
+    An existing folder must be empty or an earlier build of this script (it has an index.html).
+    """
+    output = Path(os.path.realpath(requested))
+    inside = [Path(os.path.realpath(base)) for base in (Path.cwd(), tempfile.gettempdir())]
+    if output != Path("/out") and not any(base in output.parents for base in inside):
+        raise SystemExit(f"Refusing to build into {output}: use /out or a folder inside the working or temp directory.")
+    if output.exists() and (not output.is_dir() or (any(output.iterdir()) and not (output / "index.html").is_file())):
+        raise SystemExit(f"Refusing to replace {output}: it is not empty and is not an earlier build of this script.")
+    return output
+
+
+def main(requested: Path) -> None:
+    output = _checked_output_dir(requested)
     client = TestClient(app, base_url=BUILD_ORIGIN)
     if output.exists():
         shutil.rmtree(output)

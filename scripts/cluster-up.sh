@@ -20,7 +20,7 @@ APP_KUBECONFIG="$KUBE_DIR/kind-app.config"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 TMP_FILES=()
-cleanup() { [ ${#TMP_FILES[@]} -eq 0 ] || rm -f "${TMP_FILES[@]}"; }
+cleanup() { [[ ${#TMP_FILES[@]} -eq 0 ]] || rm -f "${TMP_FILES[@]}"; }
 trap cleanup EXIT
 
 # --- Prerequisites -----------------------------------------------------------
@@ -28,15 +28,15 @@ for tool in docker kind kubectl; do
   command -v "$tool" >/dev/null 2>&1 || die "'$tool' is not installed or not on PATH (see docs/DOCKER.md)."
 done
 docker info >/dev/null 2>&1 || die "Cannot reach the Docker daemon. Start Docker Desktop and wait until it is running."
-[ -f "$KIND_CONFIG" ] || die "Missing kind config: $KIND_CONFIG"
+[[ -f "$KIND_CONFIG" ]] || die "Missing kind config: $KIND_CONFIG"
 
 # --- Create the cluster, or reuse the existing one ---------------------------
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER_NAME"; then
   echo "Kind cluster '$CLUSTER_NAME' already exists; preserving it."
   # Node containers stop when Docker Desktop restarts. Start them again (data is kept).
   while read -r node; do
-    [ -n "$node" ] || continue
-    if [ "$(docker inspect -f '{{.State.Running}}' "$node")" != "true" ]; then
+    [[ -n "$node" ]] || continue
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$node")" != "true" ]]; then
       echo "Starting stopped node container: $node"
       docker start "$node" >/dev/null
     fi
@@ -53,7 +53,7 @@ echo "Waiting up to ${READY_TIMEOUT}s for the Kubernetes API server..."
 deadline=$((SECONDS + READY_TIMEOUT))
 until kind get kubeconfig --name "$CLUSTER_NAME" >"$HOST_KUBECONFIG" 2>/dev/null \
       && KUBECONFIG="$HOST_KUBECONFIG" kubectl get --raw=/readyz --request-timeout=5s >/dev/null 2>&1; do
-  if [ "$SECONDS" -ge "$deadline" ]; then
+  if [[ "$SECONDS" -ge "$deadline" ]]; then
     die "Cluster '$CLUSTER_NAME' exists but its API server is not reachable after ${READY_TIMEOUT}s.
   Check:  docker ps -a --filter name=$CLUSTER_NAME
   Logs:   docker logs ${CLUSTER_NAME}-control-plane
@@ -67,7 +67,7 @@ echo "API server is reachable:"
 KUBECONFIG="$HOST_KUBECONFIG" kubectl get nodes
 node_count="$(KUBECONFIG="$HOST_KUBECONFIG" kubectl get nodes --no-headers | wc -l | tr -d ' ')"
 ready_count="$(KUBECONFIG="$HOST_KUBECONFIG" kubectl get nodes --no-headers | awk '$2=="Ready"' | wc -l | tr -d ' ')"
-if [ "$node_count" != "4" ] || [ "$ready_count" != "$node_count" ]; then
+if [[ "$node_count" != "4" ]] || [[ "$ready_count" != "$node_count" ]]; then
   echo "WARNING: expected 4 Ready nodes (1 control-plane + 3 workers); found $node_count, $ready_count Ready." >&2
 fi
 

@@ -41,7 +41,8 @@ def test_docker_css_loads_after_every_other_stylesheet(built, name):
     sheets = re.findall(r'<link rel="stylesheet" href="([^"]+)"', page)
     assert sheets[-1] == "docker.css"
     assert sheets.count("docker.css") == 1
-    assert 'src="chrome.js"' in page and 'src="shim.js"' in page
+    assert 'src="chrome.js"' in page
+    assert 'src="shim.js"' in page
     assert page.index('src="shim.js"') < page.index("docker.css")      # the SDK adapter is first
 
 
@@ -96,7 +97,8 @@ def test_connect_page_has_every_control_the_script_expects(built):
     for role in ["connect-status", "connect-title", "connect-summary", "connect-details", "connect-server", "connect-credential",
                  "connect-expiry", "connect-message", "connect-disconnect", "connect-file", "connect-filename", "connect-submit"]:
         assert f'data-role="{role}"' in page, role
-    assert 'src="connect.js"' in page and 'data-role="cluster-panel"' not in page
+    assert 'src="connect.js"' in page
+    assert 'data-role="cluster-panel"' not in page
     assert 'role="alert"' in page
 
 
@@ -134,3 +136,19 @@ def test_navigation_labels_wrap_instead_of_truncating():
 
 def test_no_heavy_decoration():
     assert "box-shadow: none" in CSS and "gradient" not in CSS.split("Workflow dependencies")[0]
+
+
+def test_build_refuses_a_folder_that_is_not_an_earlier_build(tmp_path):
+    precious = tmp_path / "precious"
+    precious.mkdir()
+    (precious / "notes.txt").write_text("keep me")
+    with pytest.raises(SystemExit):
+        build_ui.main(precious)
+    assert (precious / "notes.txt").read_text() == "keep me"
+
+
+def test_build_refuses_paths_outside_the_working_and_temp_directories():
+    with pytest.raises(SystemExit):
+        build_ui.main(Path.home())
+    with pytest.raises(SystemExit):
+        build_ui.main(Path("/"))
