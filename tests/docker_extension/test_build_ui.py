@@ -30,9 +30,10 @@ def test_all_six_pages_are_rendered(built):
 
 def test_the_apps_own_static_files_are_copied_unchanged(built):
     comparison = filecmp.dircmp(Path(BASE_DIR) / "static", built / "static")
-    assert not comparison.diff_files and not comparison.left_only and not comparison.right_only
-    for sub in comparison.subdirs.values():
-        assert not sub.diff_files and not sub.left_only and not sub.right_only
+    for compared in [comparison, *comparison.subdirs.values()]:
+        assert not compared.diff_files
+        assert not compared.left_only
+        assert not compared.right_only
 
 
 @pytest.mark.parametrize("name", PAGE_FILES)
@@ -135,7 +136,8 @@ def test_navigation_labels_wrap_instead_of_truncating():
 
 
 def test_no_heavy_decoration():
-    assert "box-shadow: none" in CSS and "gradient" not in CSS.split("Workflow dependencies")[0]
+    assert "box-shadow: none" in CSS
+    assert "gradient" not in CSS.split("Workflow dependencies")[0]
 
 
 def test_build_refuses_a_folder_that_is_not_an_earlier_build(tmp_path):
@@ -147,8 +149,7 @@ def test_build_refuses_a_folder_that_is_not_an_earlier_build(tmp_path):
     assert (precious / "notes.txt").read_text() == "keep me"
 
 
-def test_build_refuses_paths_outside_the_working_and_temp_directories():
+@pytest.mark.parametrize("outside", [Path.home(), Path("/")])
+def test_build_refuses_paths_outside_the_working_and_temp_directories(outside):
     with pytest.raises(SystemExit):
-        build_ui.main(Path.home())
-    with pytest.raises(SystemExit):
-        build_ui.main(Path("/"))
+        build_ui.main(outside)
