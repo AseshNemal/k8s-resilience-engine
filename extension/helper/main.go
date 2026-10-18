@@ -43,9 +43,10 @@ type contextInfo struct {
 }
 
 func emit(v any) {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(v)
+	body, _ := json.MarshalIndent(v, "", "  ")
+	body = append(body, '\n')
+	logEvent("emitted", map[string]any{"sha256": sha(body), "bytes": len(body)})
+	_, _ = os.Stdout.Write(body)
 }
 
 func fail(msg string) {
@@ -158,7 +159,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: resilience-helper discover|transport-check|approve-demo|version")
 		os.Exit(2)
 	}
+	logInvocation()
 	switch os.Args[1] {
+	case "record":
+		recordReceived()
+	case "note":
+		recordNote()
 	case "discover":
 		discover()
 	case "transport-check":

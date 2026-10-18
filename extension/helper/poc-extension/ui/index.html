@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Helper PoC</title>
+<style>
+  body { font: 14px -apple-system, system-ui, sans-serif; margin: 24px; max-width: 880px; color: #0f172a; }
+  h1 { font-size: 18px; } p { color: #475569; }
+  button { font: inherit; padding: 8px 14px; margin: 0 8px 8px 0; border: 1px solid #94a3b8; border-radius: 6px; background: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  pre { background: #f1f5f9; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; min-height: 160px; }
+  .banner { padding: 8px 12px; border-radius: 6px; background: #fef3c7; color: #92400e; }
+</style>
+</head>
+<body>
+<h1>Resilience helper: proof of concept</h1>
+<p class="banner">Temporary test. Nothing here creates, changes or deletes anything in Kubernetes, and no credential is requested.</p>
+<p>The page launches the Go helper on your Mac through Docker Desktop. The dialog below is a demonstration: click <b>Approve</b> or <b>Cancel</b>; either way nothing is created.</p>
+<button id="discover">Discover clusters</button>
+<button id="dialog">Show approval dialog (demo)</button>
+<pre id="log">starting…</pre>
+<script src="poc.js"></script>
+</body>
+</html>

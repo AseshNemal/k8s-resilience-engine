@@ -1,0 +1,15 @@
+{
+  "icon": "icon.svg",
+  "ui": {
+    "dashboard-tab": {
+      "title": "Helper PoC",
+      "root": "/ui",
+      "src": "index.html"
+    }
+  },
+  "host": {
+    "binaries": [
+      { "darwin": [ { "path": "/darwin/resilience-helper" } ] }
+    ]
+  }
+}
