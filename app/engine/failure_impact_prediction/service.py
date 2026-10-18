@@ -16,6 +16,9 @@ from app.engine.failure_impact_prediction.models import CrossLayerGraph
 from app.engine.failure_impact_prediction.node_failure_simulator import (
     simulate_node_failure,
 )
+from app.engine.failure_impact_prediction.runtime_provider import (
+    get_runtime_component_inputs,
+)
 from app.engine.failure_impact_prediction.service_survival import (
     calculate_service_survival,
 )
@@ -114,6 +117,21 @@ def predict_demo_failure_impact(failed_node: str) -> FailureImpactReport:
     return predict_failure_impact(workflow, deployment, failed_node)
 
 
+def predict_runtime_failure_impact(
+    workflow_id: str,
+    failed_node: str,
+    namespace: str = "default",
+) -> FailureImpactReport:
+    """Predict from Component 1's frozen graph and Component 2's live topology."""
+
+    inputs = get_runtime_component_inputs(workflow_id, namespace)
+    return predict_failure_impact(
+        inputs.workflow,
+        inputs.deployment,
+        failed_node,
+    )
+
+
 def get_sample_failure_impact() -> FailureImpactReport:
     """Keep the original sample endpoint while returning a calculated report."""
 
@@ -126,4 +144,5 @@ __all__ = [
     "get_sample_failure_impact",
     "predict_demo_failure_impact",
     "predict_failure_impact",
+    "predict_runtime_failure_impact",
 ]

@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 
+from app.api import failure_impacts as failure_impact_routes
+from app.engine.failure_impact_prediction.service import get_sample_failure_impact
 from app.main import app
 
 
@@ -48,6 +50,83 @@ def test_component_three_routes_are_registered() -> None:
 
     assert "/api/failure-impacts/simulate" in paths
     assert "/api/failure-impacts/demo-deployment" in paths
+    assert "/api/failure-impacts/runtime" in paths
+
+
+def test_runtime_endpoint_forwards_validated_input_selection(monkeypatch) -> None:
+    calls: dict[str, str] = {}
+
+    def runtime_prediction(
+        workflow_id: str,
+        failed_node: str,
+        namespace: str,
+    ):
+        calls.update(
+            workflow_id=workflow_id,
+            failed_node=failed_node,
+            namespace=namespace,
+        )
+        return get_sample_failure_impact()
+
+    monkeypatch.setattr(
+        failure_impact_routes,
+        "predict_runtime_failure_impact",
+        runtime_prediction,
+    )
+
+    response = client.get(
+        "/api/failure-impacts/runtime",
+        params={
+            "workflow_id": "checkout",
+            "failed_node": "node-1",
+            "namespace": "research",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == {
+        "workflow_id": "checkout",
+        "failed_node": "node-1",
+        "namespace": "research",
+    }
+
+
+def test_runtime_endpoint_reports_missing_frozen_workflow(monkeypatch) -> None:
+    def missing_workflow(*args, **kwargs):
+        raise LookupError("No frozen workflow graph for checkout")
+
+    monkeypatch.setattr(
+        failure_impact_routes,
+        "predict_runtime_failure_impact",
+        missing_workflow,
+    )
+
+    response = client.get(
+        "/api/failure-impacts/runtime",
+        params={"workflow_id": "checkout", "failed_node": "node-1"},
+    )
+
+    assert response.status_code == 404
+    assert "No frozen workflow graph" in response.json()["detail"]
+
+
+def test_runtime_endpoint_reports_incompatible_topology(monkeypatch) -> None:
+    def incomplete_topology(*args, **kwargs):
+        raise ValueError("Mandatory workflow services have no deployment topology")
+
+    monkeypatch.setattr(
+        failure_impact_routes,
+        "predict_runtime_failure_impact",
+        incomplete_topology,
+    )
+
+    response = client.get(
+        "/api/failure-impacts/runtime",
+        params={"workflow_id": "checkout", "failed_node": "node-1"},
+    )
+
+    assert response.status_code == 422
+    assert "no deployment topology" in response.json()["detail"]
 
 
 def test_failure_impact_page_contains_node_simulation_controls() -> None:
