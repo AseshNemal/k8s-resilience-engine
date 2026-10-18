@@ -206,7 +206,9 @@ package.
   `approvalBase` URL prefix to `fetchAll()`, which requested `GET /api/recommendations` (404). The fix
   is four lines in `app/static/js/components/recommendations.js`; it belongs to Member 4's area and is
   isolated in its own commit so it can be reviewed or dropped independently.
-- Components 3 and 4 still serve sample data; there is no recommendation apply or validation step.
+- Component 3 (Failure impact) now runs its own deterministic prediction, but over disclosed contract
+  fixtures, not your cluster, and the page says so ("Contract Fixtures"). Component 4 still serves sample
+  data, and there is no recommendation apply or validation step.
   Nothing here applies Kubernetes changes, runs chaos experiments or deploys workloads.
 - The live topology of a fresh kind cluster shows its three worker nodes and no services.
 - kind workers are containers on one Docker host: logical failure domains, not independent machines.

@@ -138,7 +138,8 @@ Pointing the workflow probes at an Online Boutique frontend needs `WORKFLOW_TARG
 ## Current limitations
 
 - Only Component 2 (deployment topology, `/api/deployments/live`) reads the live cluster.
-  Components 3 and 4 still serve sample data, there is no recommendation apply or validation step,
+  Component 3 runs its prediction over contract fixtures (not your cluster) and Component 4 still serves
+  sample data, there is no recommendation apply or validation step,
   and Components 1 to 4 are not yet connected end to end.
 - The fresh kind cluster contains no application workloads, so live topology shows the three
   worker nodes and no services. Online Boutique is not deployed into kind by this setup.
