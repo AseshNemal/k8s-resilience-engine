@@ -122,6 +122,45 @@ SQLite (`/data/resilience.db`) and the stored credential live on the named volum
 | `docker extension update` | kept (new container and image, same volume; 0 migrations re-run) |
 | `docker extension uninstall` | **deleted** (volume removed); a reinstall starts empty and migrates itself |
 
+## Interface
+
+The pages are the app's own, restyled to sit inside Docker Desktop. All of it lives in the extension
+(`extension/ui-src/docker.css`, `chrome.js`, `connect.js` and `build_ui.py`); nothing under `app/` is
+edited, so the standalone web app looks exactly as before.
+
+- **Colors, type and weights are Docker's own**, read from the theme object Docker Desktop injects into
+  extension pages (`window.__ddMuiV5Themes`, Docker Desktop 4.95.0): primary `#1D63ED` / `#2986FF`,
+  paper `#FFFFFF` / `#10151B`, secondary text `#677285` / `#7794AB`, Roboto with the system fallback,
+  14px base, weights 400 and 500 only. One rule set uses CSS `light-dark()` and follows
+  `prefers-color-scheme`, which in the extension tab tracks Docker's appearance (checked: the tab's
+  background was exactly `#10151B` in dark). Docker sets no theme class or attribute on the frame, so
+  there is nothing else to listen to.
+- **Navigation** is a compact text list (sentence case, labels wrap instead of truncating) with the
+  current page highlighted; there is no brand block because the Docker tab already names the
+  extension. Below about 820px it becomes a tab strip.
+- **Header**: the page title, and one cluster chip (not connected, connected read-only, credential
+  expired) that links to Connect cluster. The decorative badges and refresh time are hidden; the health
+  badge appears only if the backend is unreachable.
+- **Sample vs live** is stated in the same place on every page: the data-source chip leads each page's
+  row, and the Overview opens with a connection panel that says plainly the overview shows sample data
+  and that only Deployment topology can show the live cluster. No metric is invented.
+- **Overview** shows connection status first, then the existing metrics as one continuous strip, the
+  analysis, and the components as a list with "Open component" links.
+- **Recommendations** keeps its comparison table and approval gate, adds a plain note ahead of the
+  gate (*Approving or rejecting only records your decision. Nothing is applied to your cluster.*), and
+  the approval dialog now behaves as a dialog (see below).
+- **Connect cluster** is one status card (state, server, credential, access, expiry, Disconnect) and
+  one step (choose the file, Connect or Replace credential). Errors show the backend's message plus the
+  next step.
+- **Workflow dependencies** keeps all of its content; the oversized intro is a quiet note and its
+  hardcoded light panels use the theme so they stay readable in dark.
+
+Two things the app never styled are defined here: the approval **dialog** (`.modal-backdrop`/`.modal`,
+which made it appear permanently on the page instead of only when asked) and the primary, danger and
+form-field controls. The dialog is hidden until requested, closes on Escape and Cancel, and opening or
+cancelling it changes nothing. These styles exist only in the extension; the standalone app still lacks
+them (`app/static/css/` is not touched).
+
 ## How Docker Desktop loads the UI (found by running it)
 
 These behaviours of Docker Desktop 4.95.0 shaped the design. Each one broke the first build.
@@ -149,9 +188,9 @@ These behaviours of Docker Desktop 4.95.0 shaped the design. Each one broke the 
 ## Development
 
 ```bash
-node --test extension/ui-src/shim.test.mjs      # fetch adapter logic (mocked SDK, no dependencies)
-docker run --rm --entrypoint sh -v "$PWD/tests:/app/tests:ro" -e DATABASE_URL=sqlite:////tmp/test.db \
-  k8s-resilience-engine:0.1.0 -c 'grep -iE "^(pytest|iniconfig|pluggy|pygments)==" requirements.txt | pip install -q -r /dev/stdin && python -m pytest -q -p no:cacheprovider'
+node --test extension/ui-src/shim.test.mjs extension/ui-src/chrome.test.mjs   # adapter and header wording (no dependencies)
+docker run --rm --entrypoint sh -v "$PWD/tests:/app/tests:ro" -v "$PWD/extension:/app/extension:ro" \
+  -e DATABASE_URL=sqlite:////tmp/test.db k8s-resilience-engine:0.1.3 -c 'grep -iE "^(pytest|iniconfig|pluggy|pygments)==" requirements.txt | pip install -q -r /dev/stdin && python -m pytest -q -p no:cacheprovider'
 docker extension dev debug k8s-resilience-engine:0.1.0     # opens the extension's developer tools
 ```
 
@@ -188,7 +227,21 @@ is not logged, so a temporary diagnostic script (never part of the repository or
 image) was layered onto the image. Inside the real tab it walked every page by clicking the sidebar
 links, read the rendered DOM, drove the interactive flows through the page's own controls, and
 reported over a loopback-only listener that was stopped afterwards. This verifies what is on the
-page, not how it looks: **layout and visual quality were not reviewed**.
+page and which styles apply, not how it looks in Docker's window.
+
+**Interface checks (after the redesign).** The interface itself was reviewed from real Chrome renders
+(the same Chromium engine as Docker Desktop's Electron) of the exact built UI files, with a mock of the
+SDK that reproduces its behaviour:
+
+| Check | Result |
+|---|---|
+| All six pages, light and dark, at a wide width (about 1100px) | Reviewed from renders |
+| Approval dialog open, in both themes; hidden by default; Escape and Cancel close it; approval stays pending | Verified (renders and DOM) |
+| Connect cluster: empty state, connected state (faked status), an error with its next step | Reviewed from renders |
+| No page-level horizontal overflow at 420px and 560px on all six pages | Measured |
+| In the real Docker Desktop tab: Docker's stylesheet applied, background exactly Docker's dark `#10151B`, forcing light and dark gives Docker's two paper/text pairs, no hidden element showing, no error states, real data on every page, dialog and Connect error flows, a 480px frame fits with the tab-strip navigation | Verified (DOM and computed styles) |
+| **Layout geometry in Docker Desktop's own window** (nav label truncation, title width, real viewport size, dialog placement) | **Not verified.** The extension view was never on screen during the automated runs (its viewport reported 0x0), so those numbers are void. |
+| **Screenshots of Docker Desktop's window**; Docker's real light appearance (only forced, not selected in Docker) | **Not available** (macOS denies screen capture to the tooling). Please check by eye. |
 
 | Check | Status |
 |---|---|
@@ -208,7 +261,7 @@ page, not how it looks: **layout and visual quality were not reviewed**.
 | Host socket: works for the same user, parents mode 700, absent inside kind nodes | Done |
 | Read-only RBAC (3 reads allowed, writes and secrets denied); admin credential refused | Done |
 | SQLite and credential persistence across restart and update; automatic migrations; uninstall deletes data | Done |
-| Python suite and fetch-adapter tests | Done (see the commit message for counts) |
+| Python suite and adapter/chrome tests | Done (see the commit messages for counts) |
 | Picking a **valid** kubeconfig through the OS file dialog in the UI | **Not run** (needs a human at the dialog). The same upload was verified against the backend, and an invalid file through the real file input. |
 | Clicking Approve/Reject, and `alert()` dialogs raised by the approval UI | **Not run** (deliberately: no approvals are decided) |
 | Linux and Windows hosts; amd64 image; Marketplace publishing | **Not run** |
