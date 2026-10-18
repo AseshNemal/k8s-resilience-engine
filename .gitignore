@@ -32,3 +32,6 @@ current_branch.txt
 
 # Ignore massive third-party YAML test payloads
 deploy/kubernetes/boutique.yaml
+
+# Generated kind kubeconfig for the Docker setup (cluster credentials)
+.kube/
