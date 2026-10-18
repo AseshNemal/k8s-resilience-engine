@@ -23,10 +23,11 @@ from app.main import BASE_DIR, app
 
 # url_for() renders absolute URLs against the test client's origin; it is stripped below.
 BUILD_ORIGIN = "https://extension-build.invalid"
+INDEX_PAGE = "index.html"
 
 # route -> (file, page key used by the CSS, header title in Docker's sentence case)
 PAGES = {
-    "/": ("index.html", "overview", "Overview"),
+    "/": (INDEX_PAGE, "overview", "Overview"),
     "/components/workflows": ("workflows.html", "workflows", "Workflow dependencies"),
     "/components/deployments": ("deployments.html", "deployments", "Deployment topology"),
     "/components/failure-impacts": ("failure-impacts.html", "failure-impacts", "Failure impact"),
@@ -194,7 +195,7 @@ def _checked_output_dir(requested: Path) -> Path:
     inside = [Path(os.path.realpath(base)) for base in (Path.cwd(), tempfile.gettempdir())]
     if output != Path("/out") and not any(base in output.parents for base in inside):
         raise SystemExit(f"Refusing to build into {output}: use /out or a folder inside the working or temp directory.")
-    if output.exists() and (not output.is_dir() or (any(output.iterdir()) and not (output / "index.html").is_file())):
+    if output.exists() and (not output.is_dir() or (any(output.iterdir()) and not (output / INDEX_PAGE).is_file())):
         raise SystemExit(f"Refusing to replace {output}: it is not empty and is not an earlier build of this script.")
     return output
 
@@ -213,7 +214,7 @@ def main(requested: Path) -> None:
             raise SystemExit(f"{route} returned HTTP {response.status_code}")
         rendered[name] = _static_paths(response.text, key, title)
 
-    rendered["connect.html"] = _connect_page(rendered["index.html"])
+    rendered["connect.html"] = _connect_page(rendered[INDEX_PAGE])
     for name, html in rendered.items():
         _check_relative(name, html)
         (output / name).write_text(html, encoding="utf-8")

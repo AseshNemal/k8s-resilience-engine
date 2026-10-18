@@ -16,11 +16,10 @@ WORKDIR /app
 COPY requirements.txt requirements-postgres.txt ./
 RUN grep -viE '^(pytest|iniconfig|pluggy|pygments)==' requirements.txt > /tmp/runtime.txt \
     && grep '^psycopg2-binary==' requirements-postgres.txt >> /tmp/runtime.txt \
-    && pip install -r /tmp/runtime.txt \
+    && pip install --only-binary :all: -r /tmp/runtime.txt \
     && pip check \
-    && rm /tmp/runtime.txt
-
-RUN useradd --uid 10001 --user-group --create-home --shell /usr/sbin/nologin app
+    && rm /tmp/runtime.txt \
+    && useradd --uid 10001 --user-group --create-home --shell /usr/sbin/nologin app
 
 # Code stays root-owned so the unprivileged runtime user cannot modify it.
 COPY alembic.ini ./
