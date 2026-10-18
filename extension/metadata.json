@@ -1,0 +1,15 @@
+{
+  "icon": "icon.svg",
+  "vm": {
+    "composefile": "compose.yaml",
+    "exposes": { "socket": "k8s-resilience-engine.sock" }
+  },
+  "ui": {
+    "dashboard-tab": {
+      "title": "Resilience Engine",
+      "root": "/ui",
+      "src": "index.html",
+      "backend": { "socket": "k8s-resilience-engine.sock" }
+    }
+  }
+}
