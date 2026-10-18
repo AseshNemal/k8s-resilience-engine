@@ -38,6 +38,31 @@ def test_optional_service_failure_does_not_fail_workflow() -> None:
     assert "emailservice" in report.failed_services
     assert report.failed_workflows == []
     assert report.blast_radius == pytest.approx(0.0)
+    assert len(report.root_causes) == 1
+    assert report.root_causes[0].service == "emailservice"
+    assert report.root_causes[0].type == "REPLICA_CONCENTRATION"
+    assert report.root_causes[0].concentration == pytest.approx(1.0)
+
+
+def test_preexisting_service_unavailability_is_explained() -> None:
+    workflow, deployment = get_demo_inputs()
+    cartservice = next(
+        service
+        for service in deployment.services
+        if service.name == "cartservice"
+    )
+    cartservice.ready_replicas = 0
+    for pod in cartservice.pods:
+        pod.ready = False
+
+    report = predict_failure_impact(workflow, deployment, "node-2")
+
+    assert report.failed_services == ["cartservice"]
+    assert report.failed_workflows == ["checkout"]
+    assert len(report.root_causes) == 1
+    assert report.root_causes[0].service == "cartservice"
+    assert report.root_causes[0].type == "PREEXISTING_UNAVAILABILITY"
+    assert report.root_causes[0].concentration is None
 
 
 def test_node_ranking_is_deterministic() -> None:

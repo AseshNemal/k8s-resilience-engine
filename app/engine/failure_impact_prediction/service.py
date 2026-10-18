@@ -52,12 +52,13 @@ def _predict_from_graph(
         (workflow_prediction,)
     )
 
-    prediction_by_service = {
-        prediction.service: prediction for prediction in service_predictions
-    }
+    failed_service_predictions = tuple(
+        prediction
+        for prediction in service_predictions
+        if not prediction.survives
+    )
     root_causes: list[RootCause] = []
-    for service_name in workflow_prediction.failed_due_to:
-        prediction = prediction_by_service[service_name]
+    for prediction in failed_service_predictions:
         initially_ready = len(prediction.initially_ready_pods)
         concentration = (
             len(prediction.lost_ready_pods) / initially_ready
@@ -71,7 +72,7 @@ def _predict_from_graph(
                     if prediction.caused_by_failed_node
                     else "PREEXISTING_UNAVAILABILITY"
                 ),
-                service=service_name,
+                service=prediction.service,
                 failure_domain=failed_node,
                 concentration=concentration,
             )
@@ -83,9 +84,7 @@ def _predict_from_graph(
         blast_radius=blast_radius,
         survivability=survivability,
         failed_services=[
-            prediction.service
-            for prediction in service_predictions
-            if not prediction.survives
+            prediction.service for prediction in failed_service_predictions
         ],
         failed_workflows=(
             [workflow_prediction.workflow_id]
