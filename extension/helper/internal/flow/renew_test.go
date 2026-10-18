@@ -93,10 +93,7 @@ func assertNoTokenNoWrite(t *testing.T, cs *fake.Clientset, b *fakeBackend, p *f
 
 func TestRevokedAccessIsReportedAndNeverSilentlyRecreated(t *testing.T) {
 	cs := approvedCluster(t)
-	if _, err := rbac.Revoke(bg, cs); err != nil { // someone removed the access from the cluster
-		t.Fatal(err)
-	}
-	cs.ClearActions()
+	removeAccess(t, cs) // someone removed the access from the cluster
 	p, b := neverPrompt(t), managedBackend()
 	r := Renew(bg, deps(newLoader(cs), p, b), ctxName)
 

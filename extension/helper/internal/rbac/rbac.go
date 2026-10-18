@@ -79,7 +79,13 @@ type ObjectState struct {
 	Name   string `json:"name"`
 	State  State  `json:"state"`
 	Detail string `json:"detail,omitempty"`
+	// Owner is the value of the managed-by label, if any. A different owner means the object is not
+	// ours, and Revoke will never delete it.
+	Owner string `json:"owner,omitempty"`
 }
+
+// foreign reports whether another tool, not this extension, has labelled the object as its own.
+func (o ObjectState) foreign() bool { return o.Owner != "" && o.Owner != ManagedByValue }
 
 type ExtraGrant struct {
 	Kind      string `json:"kind"` // ClusterRoleBinding or RoleBinding
@@ -160,19 +166,19 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 	var r Report
 
 	ns, err := cs.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{})
-	r.add(KindNamespace, Namespace, err, func() (State, string) { return labelState(ns.Labels) })
+	r.add(KindNamespace, Namespace, err, func() string { return ns.Labels[ManagedByKey] }, func() (State, string) { return labelState(ns.Labels) })
 	if err != nil && !apierrors.IsNotFound(err) {
 		return r, wrap(err)
 	}
 
 	sa, err := cs.CoreV1().ServiceAccounts(Namespace).Get(ctx, Name, metav1.GetOptions{})
-	r.add(KindServiceAccount, Name, err, func() (State, string) { return labelState(sa.Labels) })
+	r.add(KindServiceAccount, Name, err, func() string { return sa.Labels[ManagedByKey] }, func() (State, string) { return labelState(sa.Labels) })
 	if err != nil && !apierrors.IsNotFound(err) {
 		return r, wrap(err)
 	}
 
 	cr, err := cs.RbacV1().ClusterRoles().Get(ctx, Name, metav1.GetOptions{})
-	r.add(KindClusterRole, Name, err, func() (State, string) {
+	r.add(KindClusterRole, Name, err, func() string { return cr.Labels[ManagedByKey] }, func() (State, string) {
 		if cr.AggregationRule != nil {
 			return Drifted, "has an aggregation rule, so it can gain permissions from other roles"
 		}
@@ -186,7 +192,7 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 	}
 
 	crb, err := cs.RbacV1().ClusterRoleBindings().Get(ctx, Name, metav1.GetOptions{})
-	r.add(KindClusterRoleBinding, Name, err, func() (State, string) {
+	r.add(KindClusterRoleBinding, Name, err, func() string { return crb.Labels[ManagedByKey] }, func() (State, string) {
 		if crb.RoleRef != desiredRoleRef() {
 			return Drifted, "binds a different role"
 		}
@@ -207,7 +213,7 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 	return r, nil
 }
 
-func (r *Report) add(kind Kind, name string, err error, classify func() (State, string)) {
+func (r *Report) add(kind Kind, name string, err error, owner func() string, classify func() (State, string)) {
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Objects = append(r.Objects, ObjectState{Kind: kind, Name: name, State: Absent})
@@ -215,7 +221,7 @@ func (r *Report) add(kind Kind, name string, err error, classify func() (State, 
 		return
 	}
 	state, detail := classify()
-	r.Objects = append(r.Objects, ObjectState{Kind: kind, Name: name, State: state, Detail: detail})
+	r.Objects = append(r.Objects, ObjectState{Kind: kind, Name: name, State: state, Detail: detail, Owner: owner()})
 }
 
 // extraGrants finds bindings, other than the extension's own, that name its service account.
@@ -441,50 +447,182 @@ func mergeLabels(have map[string]string) map[string]string {
 	return out
 }
 
-// Deletion describes what Revoke would remove, for the dialog.
-func Deletions(r Report) []Change {
-	var out []Change
-	order := []Kind{KindClusterRoleBinding, KindClusterRole, KindServiceAccount, KindNamespace}
+// RevokePlan is exactly what Revoke will do: Delete is what is removed, Keep is what is deliberately
+// left alone and why. The approval dialog shows both, and Revoke executes only Delete.
+type RevokePlan struct {
+	Delete []Change
+	Keep   []string
+}
+
+// PlanRevoke decides, failing closed, what may be deleted:
+//   - the ClusterRoleBinding, ClusterRole and ServiceAccount, unless another tool has labelled them
+//     as its own;
+//   - the Namespace ONLY if it carries this extension's ownership label (so it is provably ours) and
+//     holds nothing else. A namespace created by the old setup script has no label and is kept. If the
+//     contents cannot be listed, the namespace is kept. Deleting a namespace deletes everything in it,
+//     so doubt always means keep.
+func PlanRevoke(ctx context.Context, cs kubernetes.Interface, r Report) RevokePlan {
+	var plan RevokePlan
 	have := map[Kind]ObjectState{}
 	for _, o := range r.Objects {
 		have[o.Kind] = o
 	}
-	for _, k := range order {
-		if o, ok := have[k]; ok && o.State != Absent {
-			out = append(out, Change{Action: "delete", Kind: k, Name: o.Name})
+	for _, k := range []Kind{KindClusterRoleBinding, KindClusterRole, KindServiceAccount} {
+		o, ok := have[k]
+		if !ok || o.State == Absent {
+			continue
+		}
+		if o.foreign() {
+			plan.Keep = append(plan.Keep, fmt.Sprintf("%s %s kept: it is managed by %q, not by this extension", k, o.Name, o.Owner))
+			continue
+		}
+		plan.Delete = append(plan.Delete, Change{Action: "delete", Kind: k, Name: o.Name})
+	}
+
+	ns, ok := have[KindNamespace]
+	if !ok || ns.State == Absent {
+		return plan
+	}
+	switch {
+	case ns.foreign():
+		plan.Keep = append(plan.Keep, fmt.Sprintf("Namespace %s kept: it is managed by %q, not by this extension", Namespace, ns.Owner))
+	case ns.Owner != ManagedByValue:
+		plan.Keep = append(plan.Keep, fmt.Sprintf("Namespace %s kept: it was not created by this extension (no ownership label); delete it yourself if you want it gone", Namespace))
+	default:
+		if reasons := namespaceHolds(ctx, cs); len(reasons) > 0 {
+			plan.Keep = append(plan.Keep, fmt.Sprintf("Namespace %s kept: %s", Namespace, strings.Join(reasons, "; ")))
+		} else {
+			plan.Delete = append(plan.Delete, Change{Action: "delete", Kind: KindNamespace, Name: Namespace})
 		}
 	}
-	return out
+	return plan
 }
 
-// Revoke deletes the extension's access objects. Every token already issued stops working because
-// its service account disappears. The namespace is kept if anything else lives in it.
-func Revoke(ctx context.Context, cs kubernetes.Interface) (kept []string, err error) {
+// namespaceHolds lists reasons the namespace must not be deleted. Anything that cannot be listed
+// counts as a reason, so a permission error never leads to a deletion.
+func namespaceHolds(ctx context.Context, cs kubernetes.Interface) []string {
+	var reasons []string
+	note := func(what string, n int, err error) {
+		switch {
+		case err != nil:
+			reasons = append(reasons, "could not verify it is empty ("+what+" could not be listed)")
+		case n > 0:
+			reasons = append(reasons, fmt.Sprintf("it contains %d %s", n, what))
+		}
+	}
+	opts := metav1.ListOptions{}
+	core, apps, batch, net, rb := cs.CoreV1(), cs.AppsV1(), cs.BatchV1(), cs.NetworkingV1(), cs.RbacV1()
+
+	sas, err := core.ServiceAccounts(Namespace).List(ctx, opts)
+	if err == nil {
+		n := 0
+		for _, sa := range sas.Items {
+			if sa.Name != "default" && sa.Name != Name {
+				n++
+			}
+		}
+		note("other service accounts", n, nil)
+	} else {
+		note("service accounts", 0, err)
+	}
+	if l, err := core.Pods(Namespace).List(ctx, opts); err != nil {
+		note("pods", 0, err)
+	} else {
+		note("pods", len(l.Items), nil)
+	}
+	if l, err := core.Services(Namespace).List(ctx, opts); err != nil {
+		note("services", 0, err)
+	} else {
+		note("services", len(l.Items), nil)
+	}
+	if l, err := core.Secrets(Namespace).List(ctx, opts); err != nil {
+		note("secrets", 0, err)
+	} else {
+		note("secrets", len(l.Items), nil)
+	}
+	if l, err := core.ConfigMaps(Namespace).List(ctx, opts); err != nil {
+		note("config maps", 0, err)
+	} else {
+		n := 0
+		for _, cm := range l.Items {
+			if cm.Name != "kube-root-ca.crt" { // Kubernetes puts this in every namespace itself
+				n++
+			}
+		}
+		note("config maps", n, nil)
+	}
+	if l, err := core.PersistentVolumeClaims(Namespace).List(ctx, opts); err != nil {
+		note("persistent volume claims", 0, err)
+	} else {
+		note("persistent volume claims", len(l.Items), nil)
+	}
+	if l, err := apps.Deployments(Namespace).List(ctx, opts); err != nil {
+		note("deployments", 0, err)
+	} else {
+		note("deployments", len(l.Items), nil)
+	}
+	if l, err := apps.StatefulSets(Namespace).List(ctx, opts); err != nil {
+		note("stateful sets", 0, err)
+	} else {
+		note("stateful sets", len(l.Items), nil)
+	}
+	if l, err := apps.DaemonSets(Namespace).List(ctx, opts); err != nil {
+		note("daemon sets", 0, err)
+	} else {
+		note("daemon sets", len(l.Items), nil)
+	}
+	if l, err := batch.Jobs(Namespace).List(ctx, opts); err != nil {
+		note("jobs", 0, err)
+	} else {
+		note("jobs", len(l.Items), nil)
+	}
+	if l, err := batch.CronJobs(Namespace).List(ctx, opts); err != nil {
+		note("cron jobs", 0, err)
+	} else {
+		note("cron jobs", len(l.Items), nil)
+	}
+	if l, err := net.Ingresses(Namespace).List(ctx, opts); err != nil {
+		note("ingresses", 0, err)
+	} else {
+		note("ingresses", len(l.Items), nil)
+	}
+	if l, err := rb.Roles(Namespace).List(ctx, opts); err != nil {
+		note("roles", 0, err)
+	} else {
+		note("roles", len(l.Items), nil)
+	}
+	if l, err := rb.RoleBindings(Namespace).List(ctx, opts); err != nil {
+		note("role bindings", 0, err)
+	} else {
+		note("role bindings", len(l.Items), nil)
+	}
+	return reasons
+}
+
+// Revoke deletes exactly the objects in plan.Delete. Every token already issued stops working once
+// its service account is gone. Objects already gone are fine, so it is safe to repeat.
+func Revoke(ctx context.Context, cs kubernetes.Interface, plan RevokePlan) error {
 	ignore := func(e error) error {
 		if e == nil || apierrors.IsNotFound(e) {
 			return nil
 		}
 		return wrap(e)
 	}
-	if e := ignore(cs.RbacV1().ClusterRoleBindings().Delete(ctx, Name, metav1.DeleteOptions{})); e != nil {
-		return nil, e
-	}
-	if e := ignore(cs.RbacV1().ClusterRoles().Delete(ctx, Name, metav1.DeleteOptions{})); e != nil {
-		return nil, e
-	}
-	if e := ignore(cs.CoreV1().ServiceAccounts(Namespace).Delete(ctx, Name, metav1.DeleteOptions{})); e != nil {
-		return nil, e
-	}
-	others, e := cs.CoreV1().ServiceAccounts(Namespace).List(ctx, metav1.ListOptions{})
-	if e == nil {
-		for _, sa := range others.Items {
-			if sa.Name != "default" && sa.Name != Name {
-				return []string{fmt.Sprintf("namespace %s kept: it also contains ServiceAccount %s", Namespace, sa.Name)}, nil
-			}
+	for _, c := range plan.Delete {
+		var err error
+		switch c.Kind {
+		case KindClusterRoleBinding:
+			err = cs.RbacV1().ClusterRoleBindings().Delete(ctx, c.Name, metav1.DeleteOptions{})
+		case KindClusterRole:
+			err = cs.RbacV1().ClusterRoles().Delete(ctx, c.Name, metav1.DeleteOptions{})
+		case KindServiceAccount:
+			err = cs.CoreV1().ServiceAccounts(Namespace).Delete(ctx, c.Name, metav1.DeleteOptions{})
+		case KindNamespace:
+			err = cs.CoreV1().Namespaces().Delete(ctx, c.Name, metav1.DeleteOptions{})
+		}
+		if e := ignore(err); e != nil {
+			return e
 		}
 	}
-	if e := ignore(cs.CoreV1().Namespaces().Delete(ctx, Namespace, metav1.DeleteOptions{})); e != nil {
-		return nil, e
-	}
-	return nil, nil
+	return nil
 }

@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -319,39 +322,185 @@ func TestInspectReportsForbiddenWhenTheUserCannotReadRBAC(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- revoke
+// ---------------------------------------------------------------- revoke (fails closed)
 
-func TestRevokeRemovesTheAccessObjectsAndIsIdempotent(t *testing.T) {
+func planFor(t *testing.T, cs *fake.Clientset) RevokePlan {
+	t.Helper()
+	return PlanRevoke(ctx, cs, inspect(t, cs))
+}
+
+func deleted(p RevokePlan) []string {
+	var out []string
+	for _, c := range p.Delete {
+		out = append(out, string(c.Kind))
+	}
+	return out
+}
+
+func TestRevokeRemovesAnEmptyLabelledNamespaceAndTheAccessObjectsAndIsIdempotent(t *testing.T) {
 	cs := fake.NewClientset(goodObjects(true)...)
-	if _, err := Revoke(ctx, cs); err != nil {
+	plan := planFor(t, cs)
+	if got := strings.Join(deleted(plan), ","); got != "ClusterRoleBinding,ClusterRole,ServiceAccount,Namespace" || len(plan.Keep) != 0 {
+		t.Fatalf("plan = %v keep %v", got, plan.Keep)
+	}
+	if err := Revoke(ctx, cs, plan); err != nil {
 		t.Fatal(err)
 	}
 	if r := inspect(t, cs); r.Overall() != OverallAbsent {
 		t.Fatalf("after revoke overall = %s", r.Overall())
 	}
-	if _, err := Revoke(ctx, cs); err != nil {
-		t.Fatalf("second revoke must be a no-op, got %v", err)
+	if err := Revoke(ctx, cs, plan); err != nil {
+		t.Fatalf("repeating a revoke must be a no-op, got %v", err)
 	}
 }
 
-func TestRevokeKeepsTheNamespaceWhenSomethingElseLivesInIt(t *testing.T) {
-	neighbour := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "someone-else", Namespace: Namespace}}
-	cs := fake.NewClientset(append(goodObjects(true), neighbour)...)
-	kept, err := Revoke(ctx, cs)
-	if err != nil || len(kept) != 1 {
-		t.Fatalf("kept = %v err = %v", kept, err)
+func TestRevokeKeepsTheNamespaceWhenAnythingElseLivesInIt(t *testing.T) {
+	in := func(name string) metav1.ObjectMeta { return metav1.ObjectMeta{Name: name, Namespace: Namespace} }
+	things := map[string]runtime.Object{
+		"another service account": &corev1.ServiceAccount{ObjectMeta: in("neighbour")},
+		"a pod":                   &corev1.Pod{ObjectMeta: in("p")},
+		"a service":               &corev1.Service{ObjectMeta: in("s")},
+		"a secret":                &corev1.Secret{ObjectMeta: in("db-password")},
+		"a config map":            &corev1.ConfigMap{ObjectMeta: in("settings")},
+		"a volume claim":          &corev1.PersistentVolumeClaim{ObjectMeta: in("data")},
+		"a deployment":            &appsv1.Deployment{ObjectMeta: in("d")},
+		"a stateful set":          &appsv1.StatefulSet{ObjectMeta: in("db")},
+		"a daemon set":            &appsv1.DaemonSet{ObjectMeta: in("agent")},
+		"a job":                   &batchv1.Job{ObjectMeta: in("j")},
+		"a cron job":              &batchv1.CronJob{ObjectMeta: in("c")},
+		"an ingress":              &networkingv1.Ingress{ObjectMeta: in("i")},
+		"a role":                  &rbacv1.Role{ObjectMeta: in("r")},
+		"a role binding":          &rbacv1.RoleBinding{ObjectMeta: in("rb")},
+	}
+	for name, obj := range things {
+		t.Run(name, func(t *testing.T) {
+			cs := fake.NewClientset(append(goodObjects(true), obj)...)
+			plan := planFor(t, cs)
+			if strings.Contains(strings.Join(deleted(plan), ","), "Namespace") {
+				t.Fatalf("the namespace must be kept when it holds %s: %v", name, deleted(plan))
+			}
+			if len(plan.Keep) != 1 || !strings.Contains(plan.Keep[0], "Namespace resilience-engine kept") {
+				t.Fatalf("the plan must say why: %v", plan.Keep)
+			}
+			if err := Revoke(ctx, cs, plan); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := cs.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{}); err != nil {
+				t.Fatalf("namespace was deleted although it holds %s", name)
+			}
+			if _, err := cs.RbacV1().ClusterRoles().Get(ctx, Name, metav1.GetOptions{}); err == nil {
+				t.Fatal("the access objects should still be removed")
+			}
+		})
+	}
+}
+
+func TestTheNamespaceThatKubernetesFillsInItselfDoesNotCountAsContents(t *testing.T) {
+	rootCA := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: Namespace}}
+	cs := fake.NewClientset(append(goodObjects(true), rootCA)...)
+	if got := strings.Join(deleted(planFor(t, cs)), ","); !strings.Contains(got, "Namespace") {
+		t.Fatalf("kube-root-ca.crt exists in every namespace and must not block deletion, plan = %s", got)
+	}
+}
+
+func TestANamespaceMadeByTheOldScriptHasNoLabelSoItIsNeverDeleted(t *testing.T) {
+	cs := fake.NewClientset(goodObjects(false)...) // as the old setup script left it
+	plan := planFor(t, cs)
+	if got := strings.Join(deleted(plan), ","); got != "ClusterRoleBinding,ClusterRole,ServiceAccount" {
+		t.Fatalf("only the access objects may go, plan = %s", got)
+	}
+	if len(plan.Keep) != 1 || !strings.Contains(plan.Keep[0], "not created by this extension") {
+		t.Fatalf("keep = %v", plan.Keep)
+	}
+	if err := Revoke(ctx, cs, plan); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := cs.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{}); err != nil {
-		t.Fatalf("namespace must be kept: %v", err)
+		t.Fatal("an unlabelled namespace must survive a revoke")
 	}
 }
 
-func TestDeletionsListExactlyWhatExists(t *testing.T) {
+func TestIfTheContentsCannotBeListedTheNamespaceIsKeptNotDeleted(t *testing.T) {
+	for _, resource := range []string{"pods", "secrets", "configmaps", "deployments", "persistentvolumeclaims", "serviceaccounts"} {
+		t.Run(resource, func(t *testing.T) {
+			cs := fake.NewClientset(goodObjects(true)...)
+			forbid(cs, "list", resource)
+			plan := PlanRevoke(ctx, cs, mustReport(t, cs))
+			if strings.Contains(strings.Join(deleted(plan), ","), "Namespace") {
+				t.Fatalf("doubt must mean keep: could not list %s but the namespace is in the plan", resource)
+			}
+			if len(plan.Keep) != 1 || !strings.Contains(plan.Keep[0], "could not verify") {
+				t.Fatalf("keep = %v", plan.Keep)
+			}
+		})
+	}
+}
+
+// mustReport inspects the cluster. The forbidden-list reactors in these tests only cover resources
+// Inspect never lists (it lists bindings only), so a report can still be produced.
+func mustReport(t *testing.T, cs *fake.Clientset) Report {
+	t.Helper()
+	r, err := Inspect(ctx, cs)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	return r
+}
+
+func TestObjectsAnotherToolHasLabelledAsItsOwnAreNeverDeleted(t *testing.T) {
 	objs := goodObjects(true)
-	cs := fake.NewClientset(objs[0], objs[1]) // only namespace + service account exist
-	d := Deletions(inspect(t, cs))
-	if len(d) != 2 || d[0].Kind != KindServiceAccount || d[1].Kind != KindNamespace {
-		t.Fatalf("deletions = %v", d)
+	objs[2].(*rbacv1.ClusterRole).Labels = map[string]string{ManagedByKey: "helm"}
+	objs[0].(*corev1.Namespace).Labels = map[string]string{ManagedByKey: "argocd"}
+	cs := fake.NewClientset(objs...)
+	plan := planFor(t, cs)
+
+	if got := strings.Join(deleted(plan), ","); got != "ClusterRoleBinding,ServiceAccount" {
+		t.Fatalf("only the extension's own objects may be deleted, plan = %s", got)
+	}
+	if len(plan.Keep) != 2 {
+		t.Fatalf("keep = %v", plan.Keep)
+	}
+	if err := Revoke(ctx, cs, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.RbacV1().ClusterRoles().Get(ctx, Name, metav1.GetOptions{}); err != nil {
+		t.Fatal("helm's ClusterRole was deleted")
+	}
+	if _, err := cs.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{}); err != nil {
+		t.Fatal("argocd's Namespace was deleted")
+	}
+}
+
+func TestRevokeExecutesExactlyThePlanAndNothingMore(t *testing.T) {
+	cs := fake.NewClientset(goodObjects(true)...)
+	only := RevokePlan{Delete: []Change{{Action: "delete", Kind: KindClusterRoleBinding, Name: Name}}}
+	if err := Revoke(ctx, cs, only); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.RbacV1().ClusterRoles().Get(ctx, Name, metav1.GetOptions{}); err != nil {
+		t.Fatal("the ClusterRole was not in the plan and must remain")
+	}
+	if _, err := cs.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{}); err != nil {
+		t.Fatal("the Namespace was not in the plan and must remain")
+	}
+	if err := Revoke(ctx, cs, RevokePlan{}); err != nil {
+		t.Fatalf("an empty plan must do nothing: %v", err)
+	}
+}
+
+func TestAnEmptyClusterHasNothingToRevoke(t *testing.T) {
+	plan := planFor(t, fake.NewClientset())
+	if len(plan.Delete) != 0 || len(plan.Keep) != 0 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
+func TestRevokeReportsForbiddenWhenTheUsersKubeconfigCannotDelete(t *testing.T) {
+	cs := fake.NewClientset(goodObjects(true)...)
+	plan := planFor(t, cs)
+	forbid(cs, "delete", "clusterrolebindings")
+	if err := Revoke(ctx, cs, plan); err == nil || !strings.Contains(err.Error(), ErrForbidden.Error()) {
+		t.Fatalf("err = %v", err)
 	}
 }
 

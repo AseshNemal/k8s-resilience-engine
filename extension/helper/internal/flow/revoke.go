@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/rbac"
@@ -28,10 +29,11 @@ func Revoke(ctx context.Context, d Deps, name string) Result {
 	if err != nil {
 		return clusterError(cmd, err)
 	}
-	dels := rbac.Deletions(report)
+	plan := rbac.PlanRevoke(ctx, cs, report)
+	dels := plan.Delete
 
 	if len(dels) > 0 {
-		decision, err := d.Prompter.Confirm(ctx, revokeDialog(c, dels))
+		decision, err := d.Prompter.Confirm(ctx, revokeDialog(c, plan))
 		switch {
 		case errors.Is(err, approve.ErrNoApprovalChannel), errors.Is(err, approve.ErrUnsupportedPlatform):
 			return fail(cmd, StateApprovalUnavailable, "no confirmation dialog is available on this system; remove the access with kubectl instead")
@@ -45,23 +47,27 @@ func Revoke(ctx context.Context, d Deps, name string) Result {
 		default:
 			return fail(cmd, StateDeclined, "you declined, so nothing was removed")
 		}
-		if _, err := rbac.Revoke(ctx, cs); err != nil {
+		if err := rbac.Revoke(ctx, cs, plan); err != nil {
 			return clusterError(cmd, err)
 		}
 	}
 
 	// Disconnect the backend whether or not the cluster side had anything left to remove.
 	r := Result{OK: true, Command: cmd, State: StateDisconnected, Context: c.Name, Changes: describe(dels)}
+	kept := ""
+	if len(plan.Keep) > 0 {
+		kept = " Kept: " + strings.Join(plan.Keep, "; ") + "."
+	}
 	backend, _, err := d.pickBackend(ctx)
 	if err != nil {
-		r.Message = "access was removed from the cluster, but the extension backend is not reachable; disconnect it from the extension"
+		r.Message = "access was removed from the cluster, but the extension backend is not reachable; disconnect it from the extension." + kept
 		return r
 	}
 	if err := backend.Disconnect(ctx); err != nil {
-		r.Message = "access was removed from the cluster, but the backend could not be disconnected; disconnect it from the extension"
+		r.Message = "access was removed from the cluster, but the backend could not be disconnected; disconnect it from the extension." + kept
 		return r
 	}
 	r.Transport = backend.Name()
-	r.Message = "access was removed from the cluster and the extension was disconnected"
+	r.Message = "access was removed from the cluster and the extension was disconnected." + kept
 	return r
 }

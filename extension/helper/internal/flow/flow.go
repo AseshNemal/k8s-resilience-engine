@@ -197,11 +197,19 @@ func authorizeDialog(c clusters.Context, version string, plan []rbac.Change) app
 	return approve.Request{Title: "Resilience Engine: approve read-only access?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
 }
 
-func revokeDialog(c clusters.Context, dels []rbac.Change) approve.Request {
+func revokeDialog(c clusters.Context, plan rbac.RevokePlan) approve.Request {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Cluster: %s\nAPI server: %s\n\nThis will DELETE from the cluster:\n",
 		approve.Sanitize(c.Name, 80), approve.Sanitize(clusters.HostPort(c.Server), 60))
-	b.WriteString(bullet(describe(dels)))
+	b.WriteString(bullet(describe(plan.Delete)))
+	if len(plan.Keep) > 0 {
+		b.WriteString("\nThis will NOT be deleted:\n")
+		kept := make([]string, len(plan.Keep))
+		for i, k := range plan.Keep {
+			kept[i] = approve.Sanitize(k, 220)
+		}
+		b.WriteString(bullet(kept))
+	}
 	b.WriteString("\nEvery token already issued for the extension stops working immediately, and the extension is disconnected.")
 	return approve.Request{Title: "Resilience Engine: remove read-only access?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
 }

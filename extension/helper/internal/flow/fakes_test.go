@@ -278,3 +278,16 @@ func forbiddenErr(resource string) error {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// removeAccess deletes the extension's access the way a cluster administrator would.
+func removeAccess(t *testing.T, cs *fake.Clientset) {
+	t.Helper()
+	r, err := rbac.Inspect(bg, cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rbac.Revoke(bg, cs, rbac.PlanRevoke(bg, cs, r)); err != nil {
+		t.Fatal(err)
+	}
+	cs.ClearActions()
+}
