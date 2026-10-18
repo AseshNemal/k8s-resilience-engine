@@ -29,24 +29,91 @@ Docker Desktop
   each page as static HTML and rewrites only asset and navigation paths. `shim.js` is loaded first
   and sends the pages' `fetch("/api/...")` calls through the Docker Desktop SDK to the backend.
 
-## Build and install
+## Install, update and remove
+
+The extension is built from this repository and installed from a **local image**. Nothing is
+published to Docker Hub or the Marketplace, and nothing needs a registry account.
+
+### Prerequisites
+
+- Docker Desktop with extensions enabled (tested on 4.95.0, macOS, Apple silicon).
+- **Settings → Extensions → untick "Allow only extensions distributed through the Docker
+  Marketplace".** Without this, a local image is refused. This is your security setting and, on
+  managed machines, may be locked by policy.
+- No Python, Node or `kubectl` is needed to run the extension itself. `kind` and `kubectl` are needed
+  only for the optional test cluster ([`DOCKER.md`](DOCKER.md)) and the cluster-access script below.
+
+### Install (first time)
 
 ```bash
-docker build -f extension/Dockerfile -t k8s-resilience-engine:0.1.0 .
-docker extension install k8s-resilience-engine:0.1.0
+docker build -f extension/Dockerfile -t k8s-resilience-engine:0.1.4 .   # run from the repository root
+docker extension install k8s-resilience-engine:0.1.4
+docker extension ls                                                    # VM should say Running(1)
 ```
 
-Docker Desktop must allow local extensions: **Settings → Extensions → untick "Allow only extensions
-distributed through the Docker Marketplace"**. This is your security setting and, on managed
-machines, may be locked by policy. Nothing is published to Docker Hub or the Marketplace.
+Open **Resilience Engine** in Docker Desktop's left sidebar. The tag must be a semantic version
+(`0.1.4`, not `latest`); it is also the version Docker Desktop shows. The first start takes a few
+seconds while the database is created and migrated; the pages retry on their own meanwhile.
 
-Update: build a new tag and run `docker extension update k8s-resilience-engine:<new tag>`. The
-container and image are replaced; **the data volume, and so your database and stored credential,
-are kept.**
+### Update (after changing code or pulling `main`)
 
-Remove: `docker extension uninstall k8s-resilience-engine`. **This deletes the data volume** (the
-SQLite database and the stored credential), the backend container, and the local extension image.
-Rebuild the image to install again. Cluster-side access is not touched: revoke it separately.
+Rebuild and update whenever anything the image contains changes: `app/`, `extension/`,
+`requirements.txt`, `sample_data/`, `alembic/`, or `experiments/`. `git pull` alone changes nothing
+inside an installed extension.
+
+```bash
+# 1. Optional but recommended: run the tests against the new image (see Development below).
+docker build -f extension/Dockerfile -t k8s-resilience-engine:0.1.5 .   # bump the version each time
+docker extension update k8s-resilience-engine:0.1.5
+docker extension ls                                                    # shows the new version, VM Running(1)
+```
+
+- Use a **new tag for every update**. That is what was tested; reusing a tag was not.
+- `update` removes and reinstalls the extension (container and image are replaced). **The data
+  volume is kept, so your database, approval records and stored credential survive**; new Alembic
+  migrations run automatically on the next start.
+- The open tab reloads itself. Wait about five seconds if a page briefly says it cannot reach the
+  backend; reads are retried automatically. Writes are not retried, so repeat a failed action by hand.
+- Old image tags stay on disk. After confirming the new version works, remove the ones you no longer
+  need yourself (`docker image rm k8s-resilience-engine:<old tag>`). Nothing deletes them for you.
+
+### Check that it is healthy
+
+```bash
+docker extension ls                                       # version, UI tab, VM Running(1)
+docker ps -a --filter name=k8s-resilience-engine-desktop-extension-service   # status should end in (healthy)
+docker logs --tail 50 k8s-resilience-engine-desktop-extension-service         # migrations + "Uvicorn running on unix socket"
+docker inspect -f '{{.HostConfig.PortBindings}}' k8s-resilience-engine-desktop-extension-service   # expect map[]
+```
+
+`docker ps` without a filter did not list the backend in testing (extension containers are hidden by
+default; Docker Desktop has a setting under **Extensions** to show them), but the filtered commands
+above find it. A healthy install has no published ports (`map[]`).
+
+### Remove
+
+```bash
+./scripts/extension-cluster-access.sh --revoke            # optional: invalidate the cluster token first
+docker extension uninstall k8s-resilience-engine
+```
+
+**Uninstalling deletes the data volume** (the SQLite database and the stored credential), the backend
+container, and the local extension image. Rebuild the image to install again. Cluster-side access is
+not touched by uninstalling: revoke it separately with `--revoke`.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Install says the extension is not from the Marketplace | Untick "Allow only extensions distributed through the Docker Marketplace" (Prerequisites). |
+| A page shows "Failed to fetch" right after install, update or Docker Desktop start | The backend is still starting. Wait about five seconds and reload the tab. Persisting longer: check `docker logs` and the health command above. |
+| Page keeps failing and `docker ps` shows the backend `unhealthy` or restarting | Read `docker logs`. A failed migration or an unreadable volume prints the reason. Do not delete the volume to "fix" it unless you accept losing the database and credential. |
+| Deployment Topology shows sample nodes, not your cluster | No cluster is connected. Run `./scripts/extension-cluster-access.sh`, then **Connect cluster** and pick `.kube/extension-readonly.kubeconfig`. |
+| "This credential can change the cluster (…)" | Working as intended: only the read-only file from the script is accepted. Do not upload your personal or the kind admin kubeconfig. |
+| "Could not reach the cluster API server" after Docker Desktop restarted | Re-run `./scripts/cluster-up.sh` (restarts the kind nodes; the published API port can change), then `./scripts/extension-cluster-access.sh` and pick the new file. |
+| "The cluster rejected the credential. It may have expired." or the page flags the credential as expired | The token reached its time limit or was revoked. Run `./scripts/extension-cluster-access.sh` again and pick the new file. |
+| Update did not change the interface | The image was not rebuilt, or the same tag was reused. Rebuild with a new tag and run `docker extension update`. |
+| Port 8000 is in use / `compose.yaml` and the extension both running | They are separate. The extension never uses port 8000; stop the `docker compose` stack if you want only the socket-only backend. |
 
 ## First use
 
@@ -191,7 +258,7 @@ These behaviours of Docker Desktop 4.95.0 shaped the design. Each one broke the 
 node --test extension/ui-src/shim.test.mjs extension/ui-src/chrome.test.mjs   # adapter and header wording (no dependencies)
 docker run --rm --entrypoint sh -v "$PWD/tests:/app/tests:ro" -v "$PWD/extension:/app/extension:ro" \
   -e DATABASE_URL=sqlite:////tmp/test.db k8s-resilience-engine:0.1.3 -c 'grep -iE "^(pytest|iniconfig|pluggy|pygments)==" requirements.txt | pip install -q -r /dev/stdin && python -m pytest -q -p no:cacheprovider'
-docker extension dev debug k8s-resilience-engine:0.1.0     # opens the extension's developer tools
+docker extension dev debug k8s-resilience-engine     # turns on debug mode for the extension; see: docker extension dev --help
 ```
 
 The UI uses the `window.ddClient` object Docker Desktop injects, as Docker's own `vm-service` sample
