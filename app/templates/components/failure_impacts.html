@@ -20,7 +20,7 @@
         <span class="contract-chip">In: DeploymentGraph</span>
         <span class="contract-chip">In: Failed Node</span>
         <span class="contract-chip contract-chip--out">Out: FailureImpactReport</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot">Sample Data</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot">Contract Fixtures</span>
     </div>
 </div>
 
@@ -28,15 +28,20 @@
     <div class="scenario-panel">
         <div>
             <div class="section-header__title" style="margin-bottom: 4px;">Failure Scenario</div>
-            <div class="scenario-panel__detail">
-                Selected worker node: <span class="scenario-panel__node" data-metric="scenario-node">node-1</span>
-            </div>
+            <label class="scenario-panel__detail" for="failure-node-selector">
+                Selected worker node:
+                <select
+                    class="scenario-panel__select"
+                    id="failure-node-selector"
+                    data-role="node-selector"
+                ></select>
+            </label>
             <p class="ui-note" style="margin-top: 4px;">
-                Sample mode — this reloads sample FailureImpactReport data, not a live cluster failure.
+                Contract-fixture mode — this runs a virtual prediction and never changes a cluster.
             </p>
         </div>
         <button type="button" class="action-button" data-role="reload-button">
-            Run Sample Simulation
+            Simulate Node Failure
         </button>
     </div>
 </div>
@@ -128,9 +133,9 @@
     </div>
     <div class="card">
         <ul class="future-work-list">
-            <li>Worker-node selector to choose which node to simulate</li>
             <li>Interactive cross-layer graph view</li>
-            <li>Compare blast radius across all nodes at once</li>
+            <li>Multi-workflow portfolio blast-radius calculation</li>
+            <li>Validated Component 1 and Component 2 runtime inputs</li>
             <li>Chaos-injection result comparison</li>
             <li>Prediction accuracy tracking against observed outcomes</li>
         </ul>
