@@ -940,8 +940,8 @@ command on macOS and Windows).
 
 There is no deployment pipeline yet — `deploy/kubernetes/` is currently an empty placeholder
 folder. The app can run either with the local development server above
-(`uvicorn app.main:app --reload`) or in Docker Desktop (FastAPI + PostgreSQL via Docker
-Compose, plus a local multi-node kind cluster) — see [`docs/DOCKER.md`](docs/DOCKER.md).
+(`uvicorn app.main:app --reload`) or in Docker Desktop (a single FastAPI container with
+SQLite on a named volume, plus a local multi-node kind cluster) — see [`docs/DOCKER.md`](docs/DOCKER.md).
 
 Writing real Kubernetes manifests for `deploy/kubernetes/` is future work — see
 [Development Phases](#development-phases) and the per-member "First" checklists earlier in

@@ -1,38 +1,27 @@
 name: resilience-engine
 
 services:
-  postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-resilience_engine}
-      POSTGRES_USER: ${POSTGRES_USER:-resilience}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env and set POSTGRES_PASSWORD}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
   app:
     build: .
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-resilience}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-resilience_engine}
+      # SQLite on the named volume below. To use an external PostgreSQL instead, replace this
+      # with a postgresql:// URL (the driver is installed in the image).
+      DATABASE_URL: sqlite:////data/resilience.db
       KUBECONFIG: /run/kube/config
       WORKFLOW_JAEGER_ALLOWED_HOSTS: ${WORKFLOW_JAEGER_ALLOWED_HOSTS:-localhost,127.0.0.1,::1,jaeger}
+    # The app is deliberately NOT attached to the kind Docker network, so cluster nodes and pods
+    # cannot resolve it by name. This does NOT isolate it: on Docker Desktop they can still reach
+    # it by IP or through the published port (see "Security notes" in docs/DOCKER.md). It reaches
+    # the Kubernetes API through the host-published port instead (see scripts/cluster-up.sh).
     ports:
       # Loopback only: the app has no authentication.
       - "127.0.0.1:8000:8000"
     volumes:
-      # Dedicated kind kubeconfig written by scripts/cluster-up.sh. The entrypoint copies
-      # it into the tmpfs below for the unprivileged app user. Never create it implicitly.
+      - appdata:/data
+      # Dedicated kubeconfig written by scripts/cluster-up.sh. The entrypoint copies it into the
+      # tmpfs below for the unprivileged app user. Never create it implicitly.
       - type: bind
-        source: ./.kube/kind-internal.config
+        source: ./.kube/kind-app.config
         target: /run/secrets/kubeconfig
         read_only: true
         bind:
@@ -42,9 +31,6 @@ services:
         tmpfs:
           size: 1048576
           mode: 0700
-    networks:
-      - default
-      - kind
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
       interval: 15s
@@ -53,10 +39,5 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-networks:
-  # Created by kind (scripts/cluster-up.sh); lets the app reach the cluster API server.
-  kind:
-    external: true
-
 volumes:
-  pgdata:
+  appdata:
