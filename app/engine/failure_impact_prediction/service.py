@@ -17,6 +17,7 @@ from app.engine.failure_impact_prediction.node_failure_simulator import (
     simulate_node_failure,
 )
 from app.engine.failure_impact_prediction.runtime_provider import (
+    RuntimeInputUnavailableError,
     get_runtime_component_inputs,
 )
 from app.engine.failure_impact_prediction.service_survival import (
@@ -145,4 +146,5 @@ __all__ = [
     "predict_demo_failure_impact",
     "predict_failure_impact",
     "predict_runtime_failure_impact",
+    "RuntimeInputUnavailableError",
 ]

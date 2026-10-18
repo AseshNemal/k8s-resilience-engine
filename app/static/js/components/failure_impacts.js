@@ -2,15 +2,17 @@
  * Failure Impact Prediction page script.
  * Owned by: Member 3 (K.V.D.Y.R. Karawita).
  *
- * Runs Component 3's deterministic fixture-backed simulation for a selected
- * worker node. All survival and blast-radius calculations happen in the
- * Python engine; this file only renders the returned report. No live cluster
+ * Runs Component 3's deterministic simulation over either disclosed contract
+ * fixtures or validated runtime inputs from Components 1 and 2. All survival
+ * and blast-radius calculations happen in the Python engine. No live cluster
  * is changed.
  */
 
 (function () {
-    const IMPACT_ENDPOINT = "/api/failure-impacts/simulate";
-    const DEPLOYMENT_ENDPOINT = "/api/failure-impacts/demo-deployment";
+    const DEMO_IMPACT_ENDPOINT = "/api/failure-impacts/simulate";
+    const DEMO_DEPLOYMENT_ENDPOINT = "/api/failure-impacts/demo-deployment";
+    const RUNTIME_IMPACT_ENDPOINT = "/api/failure-impacts/runtime";
+    const RUNTIME_DEPLOYMENT_ENDPOINT = "/api/deployments/live";
     const { fetchJson } = window.ResilienceApi;
     const {
         setError,
@@ -24,8 +26,17 @@
     const template = document.querySelector('[data-role="page-template"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
     const nodeSelector = document.querySelector('[data-role="node-selector"]');
+    const inputMode = document.querySelector('[data-role="input-mode"]');
+    const runtimeFields = document.querySelector('[data-role="runtime-fields"]');
+    const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
+    const namespaceInput = document.querySelector('[data-role="namespace"]');
+    const inputModeNote = document.querySelector('[data-role="input-mode-note"]');
+    const inputSourceBadge = document.querySelector(
+        '[data-role="input-source-badge"]'
+    );
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
     let cachedDeployment = null;
+    let cachedDeploymentKey = null;
 
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
@@ -46,7 +57,10 @@
     }
 
     function populateNodeSelector(deployment) {
-        if (!nodeSelector || nodeSelector.options.length) return;
+        if (!nodeSelector) return;
+
+        const previousSelection = nodeSelector.value;
+        nodeSelector.innerHTML = "";
 
         deployment.nodes.forEach((node) => {
             const option = document.createElement("option");
@@ -56,6 +70,79 @@
                 : node.name;
             nodeSelector.appendChild(option);
         });
+
+        if (
+            previousSelection &&
+            deployment.nodes.some((node) => node.name === previousSelection)
+        ) {
+            nodeSelector.value = previousSelection;
+        }
+    }
+
+    function selectedMode() {
+        return inputMode?.value === "runtime" ? "runtime" : "demo";
+    }
+
+    function runtimeSelection() {
+        const workflowId = workflowIdInput?.value.trim() || "";
+        const namespace = namespaceInput?.value.trim() || "";
+
+        if (!workflowId) {
+            throw new Error("Enter the frozen Component 1 workflow ID.");
+        }
+        if (!namespace) {
+            throw new Error("Enter the Kubernetes namespace.");
+        }
+        return { workflowId, namespace };
+    }
+
+    function requestContext() {
+        if (selectedMode() === "demo") {
+            return {
+                deploymentEndpoint: DEMO_DEPLOYMENT_ENDPOINT,
+                deploymentKey: "demo",
+                impactEndpoint(failedNode) {
+                    return `${DEMO_IMPACT_ENDPOINT}?failed_node=${encodeURIComponent(
+                        failedNode
+                    )}`;
+                },
+            };
+        }
+
+        const { workflowId, namespace } = runtimeSelection();
+        const namespaceQuery = encodeURIComponent(namespace);
+        return {
+            deploymentEndpoint: `${RUNTIME_DEPLOYMENT_ENDPOINT}?namespace=${namespaceQuery}`,
+            deploymentKey: `runtime:${namespace}`,
+            impactEndpoint(failedNode) {
+                const params = new URLSearchParams({
+                    workflow_id: workflowId,
+                    failed_node: failedNode,
+                    namespace,
+                });
+                return `${RUNTIME_IMPACT_ENDPOINT}?${params.toString()}`;
+            },
+        };
+    }
+
+    function updateInputModeUi() {
+        const runtime = selectedMode() === "runtime";
+        if (runtimeFields) runtimeFields.hidden = !runtime;
+        if (inputSourceBadge) {
+            inputSourceBadge.textContent = runtime
+                ? "Validated Runtime"
+                : "Contract Fixtures";
+        }
+        if (inputModeNote) {
+            inputModeNote.textContent = runtime
+                ? "Runtime mode — requires configured Component 1 persistence and a frozen workflow, then uses Component 2 topology; simulation remains virtual."
+                : "Contract-fixture mode — this runs a virtual prediction and never changes a cluster.";
+        }
+    }
+
+    function resetDeploymentCache() {
+        cachedDeployment = null;
+        cachedDeploymentKey = null;
     }
 
     function renderChipList(container, values) {
@@ -189,20 +276,31 @@
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
         if (nodeSelector) nodeSelector.disabled = true;
+        if (inputMode) inputMode.disabled = true;
+        if (workflowIdInput) workflowIdInput.disabled = true;
+        if (namespaceInput) namespaceInput.disabled = true;
+
+        let activeEndpoint = DEMO_IMPACT_ENDPOINT;
 
         try {
-            const deployment =
-                cachedDeployment || (await fetchJson(DEPLOYMENT_ENDPOINT));
-            cachedDeployment = deployment;
+            const context = requestContext();
+            activeEndpoint = context.impactEndpoint(nodeSelector?.value || "");
+            if (
+                !cachedDeployment ||
+                cachedDeploymentKey !== context.deploymentKey
+            ) {
+                cachedDeployment = await fetchJson(context.deploymentEndpoint);
+                cachedDeploymentKey = context.deploymentKey;
+            }
+            const deployment = cachedDeployment;
             populateNodeSelector(deployment);
 
             const failedNode = nodeSelector?.value || deployment.nodes[0]?.name;
             if (!failedNode) {
-                throw new Error("The demo topology contains no worker nodes.");
+                throw new Error("The selected topology contains no worker nodes.");
             }
-            const impact = await fetchJson(
-                `${IMPACT_ENDPOINT}?failed_node=${encodeURIComponent(failedNode)}`
-            );
+            activeEndpoint = context.impactEndpoint(failedNode);
+            const impact = await fetchJson(activeEndpoint);
 
             region.innerHTML = "";
             region.appendChild(template.content.cloneNode(true));
@@ -273,14 +371,17 @@
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
             setError(region, {
-                endpoint: IMPACT_ENDPOINT,
+                endpoint: activeEndpoint,
                 message: error.message,
                 onRetry: loadPage,
             });
-            console.error("Failed to load failure-impact sample data:", error);
+            console.error("Failed to load failure-impact data:", error);
         } finally {
             if (reloadButton) reloadButton.disabled = false;
             if (nodeSelector) nodeSelector.disabled = false;
+            if (inputMode) inputMode.disabled = false;
+            if (workflowIdInput) workflowIdInput.disabled = false;
+            if (namespaceInput) namespaceInput.disabled = false;
         }
     }
 
@@ -288,5 +389,20 @@
         reloadButton.addEventListener("click", loadPage);
     }
 
-    document.addEventListener("DOMContentLoaded", loadPage);
+    if (inputMode) {
+        inputMode.addEventListener("change", () => {
+            updateInputModeUi();
+            resetDeploymentCache();
+            loadPage();
+        });
+    }
+
+    if (namespaceInput) {
+        namespaceInput.addEventListener("input", resetDeploymentCache);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        updateInputModeUi();
+        loadPage();
+    });
 })();

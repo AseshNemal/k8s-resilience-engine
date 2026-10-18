@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.engine.failure_impact_prediction.service import (
+    RuntimeInputUnavailableError,
     get_demo_deployment,
     get_sample_failure_impact,
     predict_demo_failure_impact,
@@ -64,6 +65,7 @@ def simulate_demo_failure(
     responses={
         404: {"description": "A frozen workflow graph was not found"},
         422: {"description": "The runtime inputs or failed node are invalid"},
+        503: {"description": "An upstream component input is unavailable"},
     },
 )
 def simulate_runtime_failure(
@@ -93,5 +95,7 @@ def simulate_runtime_failure(
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except RuntimeInputUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

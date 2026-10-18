@@ -15,6 +15,35 @@
     font-size: 13px;
 }
 
+.scenario-panel__controls {
+    display: grid;
+    gap: var(--space-sm);
+    min-width: min(100%, 560px);
+}
+
+.scenario-panel__field,
+.scenario-panel__runtime-fields {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    font-size: 13px;
+}
+
+.scenario-panel__field > span {
+    min-width: 145px;
+    color: var(--color-text-muted);
+}
+
+.scenario-panel__runtime-fields {
+    display: grid;
+    gap: var(--space-sm);
+}
+
+.scenario-panel__runtime-fields[hidden] {
+    display: none;
+}
+
 .scenario-panel__node {
     font-family: var(--font-mono);
     font-weight: 700;
@@ -22,7 +51,6 @@
 
 .scenario-panel__select {
     min-width: 180px;
-    margin-left: var(--space-xs);
     padding: 7px 30px 7px 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-medium);
@@ -32,10 +60,26 @@
     font-weight: 700;
 }
 
-.scenario-panel__select:focus {
+.scenario-panel__input {
+    min-width: 180px;
+    padding: 7px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-family: var(--font-mono);
+    font-weight: 700;
+}
+
+.scenario-panel__select:focus,
+.scenario-panel__input:focus {
     border-color: var(--color-primary);
     outline: 2px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
     outline-offset: 1px;
+}
+
+.scenario-panel__note {
+    margin-top: 4px;
 }
 
 .impact-compare {

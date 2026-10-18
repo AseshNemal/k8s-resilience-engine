@@ -6,6 +6,10 @@ from app.shared.schemas.deployment import DeploymentGraph
 from app.shared.schemas.workflow import WorkflowGraph
 
 
+class RuntimeInputUnavailableError(RuntimeError):
+    """Raised when an owning component cannot provide its runtime contract."""
+
+
 @dataclass(frozen=True)
 class RuntimeComponentInputs:
     """Component-owned inputs and provenance used for one live prediction."""
@@ -43,8 +47,21 @@ def get_runtime_component_inputs(
         get_frozen_workflow_graph,
     )
 
-    frozen_workflow = get_frozen_workflow_graph(normalized_workflow_id)
-    deployment = get_live_deployment_graph(namespace=normalized_namespace)
+    try:
+        frozen_workflow = get_frozen_workflow_graph(normalized_workflow_id)
+    except LookupError:
+        raise
+    except Exception as error:
+        raise RuntimeInputUnavailableError(
+            "Component 1 frozen-workflow storage is unavailable"
+        ) from error
+
+    try:
+        deployment = get_live_deployment_graph(namespace=normalized_namespace)
+    except Exception as error:
+        raise RuntimeInputUnavailableError(
+            "Component 2 deployment topology is unavailable"
+        ) from error
 
     return RuntimeComponentInputs(
         workflow=frozen_workflow.graph.model_copy(deep=True),
@@ -55,4 +72,8 @@ def get_runtime_component_inputs(
     )
 
 
-__all__ = ["RuntimeComponentInputs", "get_runtime_component_inputs"]
+__all__ = [
+    "RuntimeComponentInputs",
+    "RuntimeInputUnavailableError",
+    "get_runtime_component_inputs",
+]
