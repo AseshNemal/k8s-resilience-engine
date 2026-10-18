@@ -88,8 +88,8 @@ func TestStdoutIsOneLineOfJSONAndStderrIsEmptyOnEveryOutcome(t *testing.T) {
 		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &v); err != nil || strings.Count(strings.TrimSpace(out), "\n") != 0 {
 			t.Errorf("%v: stdout must be exactly one JSON object: %q (%v)", args, out, err)
 		}
-		if (code == 0) != (v["ok"] == true) {
-			t.Errorf("%v: exit code %d disagrees with ok=%v", args, code, v["ok"])
+		if code != 0 {
+			t.Errorf("%v: a printed result must exit 0 (ok=%v state=%v), got %d", args, v["ok"], v["state"], code)
 		}
 	}
 }
@@ -111,10 +111,10 @@ func TestAnApprovedAuthorizeConnectsAndThePrintedOutputHasNoCredential(t *testin
 	}
 }
 
-func TestADeclinedAuthorizeExitsNonZeroAndSendsNothing(t *testing.T) {
+func TestADeclinedAuthorizeStillExitsZeroWithTheOutcomeInTheJSONAndSendsNothing(t *testing.T) {
 	b := &backend{}
 	code, out, _ := invoke(t, approve.Declined, b, "authorize", "kind-resilience-research")
-	if code != 1 || !strings.Contains(out, `"state":"declined"`) || len(b.got) != 0 {
+	if code != 0 || !strings.Contains(out, `"ok":false`) || !strings.Contains(out, `"state":"declined"`) || len(b.got) != 0 {
 		t.Fatalf("code %d out %s installs %d", code, out, len(b.got))
 	}
 }
@@ -144,7 +144,7 @@ func TestAPanicIsContainedAndPrintsNothingFromTheRun(t *testing.T) {
 func TestHostileContextArgumentsAreHandledAsDataNeverExecuted(t *testing.T) {
 	for _, name := range []string{`$(touch /tmp/pwned-by-cli)`, "kind-x; rm -rf /", "`id`", "--help", "-", "\x00"} {
 		code, out, _ := invoke(t, approve.Approved, &backend{}, "authorize", name)
-		if code != 1 || !strings.Contains(out, `"state":"unsupported-context"`) {
+		if code != 0 || !strings.Contains(out, `"state":"unsupported-context"`) {
 			t.Errorf("%q: code %d out %s", name, code, out)
 		}
 	}

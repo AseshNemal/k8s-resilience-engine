@@ -50,6 +50,7 @@ func realDeps() flow.Deps {
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, realDeps)) }
 
 // run is main without the process: it returns the exit code and writes only JSON to stdout.
+// Exit codes: 0 a result was printed (read ok/state in it), 1 internal error, 2 bad usage.
 func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code int) {
 	defer func() {
 		if recover() != nil {
@@ -95,12 +96,11 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	result := do(ctx, deps())
-	emit(stdout, result)
-	if result.OK {
-		return 0
-	}
-	return 1
+	// Exit 0 whenever a result was produced, success or not: the JSON carries ok and state. Docker
+	// Desktop's exec may discard the output of a process that exits non-zero, and "you declined" must
+	// stay distinguishable from "the helper crashed". Non-zero is reserved for misuse (2) and panics (1).
+	emit(stdout, do(ctx, deps()))
+	return 0
 }
 
 func emit(w io.Writer, v any) {
