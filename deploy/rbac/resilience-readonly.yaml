@@ -1,0 +1,38 @@
+# Read-only access for the Resilience Engine extension.
+# Applied only by `scripts/extension-cluster-access.sh`, after confirmation. It matches the
+# three reads the app makes: list nodes, list pods, list deployments. No write verbs, no secrets.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: resilience-engine
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: resilience-engine-reader
+  namespace: resilience-engine
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: resilience-engine-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: resilience-engine-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: resilience-engine-reader
+subjects:
+  - kind: ServiceAccount
+    name: resilience-engine-reader
+    namespace: resilience-engine
