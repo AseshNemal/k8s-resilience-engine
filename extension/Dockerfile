@@ -48,8 +48,7 @@ LABEL org.opencontainers.image.title="K8s Resilience Engine" \
 
 COPY extension/metadata.json extension/compose.yaml extension/icon.svg /
 COPY --from=render /out /ui
-COPY extension/ui-src/shim.js /ui/shim.js
-COPY extension/ui-src/connect.js /ui/connect.js
+COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/connect.js extension/ui-src/docker.css /ui/
 COPY --chmod=0755 extension/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
