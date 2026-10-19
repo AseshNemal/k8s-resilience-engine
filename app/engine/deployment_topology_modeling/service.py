@@ -1,406 +1,379 @@
+"""Public interface of Component 2 (Deployment Topology Modeling).
+
+Data sources are never mixed silently:
+- live:   the Kubernetes API (raises ClusterUnavailableError when no cluster can be reached)
+- sample: sample_data/deployment.json, only through the *_sample functions
+"""
 import json
 import time
-from typing import Any
-from dataclasses import asdict
+from dataclasses import dataclass
 from pathlib import Path
-from app.shared.schemas.deployment import DeploymentGraph
+from typing import Any
 
-# Core Domain Dependencies
+from kubernetes.config.config_exception import ConfigException
+from urllib3.exceptions import MaxRetryError, NewConnectionError
+
+from app.shared.schemas.deployment import DeploymentGraph
+from app.engine.deployment_topology_modeling import placement_metrics as pm
+from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterNode
 from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import get_cluster_nodes, get_cluster_pods
 from app.engine.deployment_topology_modeling.live_state.ownership_resolver import resolve_deployment_ownership
 from app.engine.deployment_topology_modeling.live_state.concentration_analyzer import analyze_replica_concentration
-
-# Internal JSON Mapping and Transformation Dependencies
 from app.engine.deployment_topology_modeling.graph_builder import DeploymentGraphBuilder
-
-
-# Phase 2 Manifest Intent Pipeline
 from app.engine.deployment_topology_modeling.manifest_parsing.pipeline import run_manifest_pipeline
-
-# Phase 3 Resilience Drift Analysis Dependencies
+from app.engine.deployment_topology_modeling.drift_analysis.constants import DriftType, INTENT_DRIFT_TYPES
 from app.engine.deployment_topology_modeling.drift_analysis.drift_analyzer import DriftAnalyzer
 from app.engine.deployment_topology_modeling.drift_analysis.drift_models import (
     ClusterExposureReport,
     BaselineB2Result,
+    ModelAccuracyCertificate,
     PlacementDriftDiffReport,
 )
 from app.engine.deployment_topology_modeling.drift_analysis.placement_drift_diff_engine import (
     PlacementDriftDiffEngine,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "deploy" / "kubernetes" / "boutique.yaml"
+FALLBACK_MANIFEST_DIR = PROJECT_ROOT / "deploy" / "test-workloads"
+SAMPLE_FILE = PROJECT_ROOT / "sample_data" / "deployment.json"
+HOSTNAME_LABEL = "kubernetes.io/hostname"
 
-from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterNode
+
+class ClusterUnavailableError(RuntimeError):
+    """No Kubernetes cluster could be reached. Callers must not substitute sample data silently."""
 
 
-def _get_nodes_and_workloads(
-    namespace: str = "default",
-) -> tuple[list[ClusterNode], list[dict[str, Any]]]:
-    """
-    Extracts live nodes and analyzed workloads.
-    
-    If the Kubernetes cluster control plane is not reachable (e.g. offline testing or local dev),
-    gracefully falls back to the canonical sample deployment topology.
-    """
+@dataclass
+class TopologyAnalysis:
+    graph: DeploymentGraph
+    report: ClusterExposureReport
+    baseline_b2: BaselineB2Result
+    data_source: str
+
+
+# ---------------------------------------------------------------------------------------------
+# Collection
+# ---------------------------------------------------------------------------------------------
+
+def collect_live_cluster(namespace: str = "default") -> tuple[list[ClusterNode], list[dict[str, Any]]]:
+    """Worker nodes and analysed services of one namespace from the live cluster."""
     try:
-        raw_nodes = get_cluster_nodes()
-        raw_pods = get_cluster_pods(namespace=namespace)
-        if raw_nodes:
-            workloads = resolve_deployment_ownership(pods=raw_pods, namespace=namespace)
-            analyzed_services = analyze_replica_concentration(workloads)
-            return raw_nodes, analyzed_services
-    except Exception:
-        pass
+        nodes = get_cluster_nodes()
+        pods = get_cluster_pods(namespace=namespace)
+        workloads = resolve_deployment_ownership(pods=pods, namespace=namespace)
+    except ConfigException as exc:
+        raise ClusterUnavailableError(f"No Kubernetes credentials available: {exc}") from exc
+    except (MaxRetryError, NewConnectionError, ConnectionError) as exc:
+        raise ClusterUnavailableError(f"Kubernetes API is unreachable: {exc}") from exc
+    return nodes, analyze_replica_concentration(workloads, {n.name: n.ready for n in nodes})
 
-    sample_graph = get_sample_deployment()
-    fallback_nodes = [
-        ClusterNode(
-            name=n.name,
-            zone=n.zone,
-            cpu_available=str(n.cpu_available),
-            memory_available=str(n.memory_available),
-        )
-        for n in sample_graph.nodes
-    ]
-    fallback_services = [
-        {
-            "name": s.name,
-            "declaredReplicas": s.declared_replicas,
-            "readyReplicas": s.ready_replicas,
-            "replicaConcentration": s.replica_concentration,
-            "pods": [
-                {
-                    "name": p.name,
-                    "node": p.node,
-                    "zone": p.zone,
-                    "ready": p.ready,
-                }
-                for p in s.pods
-            ],
+
+def _associate_manifest_intents(
+    parsed_manifests: list[Any], analyzed_services: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Associates Deployment manifests with Services through the Deployments that back each
+    Service (resolved from owner references), never by name similarity."""
+    by_deployment = {(m.namespace, m.service_name): m for m in parsed_manifests}
+    drift_manifests: dict[str, Any] = {}
+    service_intents: dict[str, dict[str, Any]] = {}
+    for service in analyzed_services:
+        service_name = service.get("name")
+        namespace = service.get("namespace", "default")
+        matching = [
+            by_deployment[(namespace, name)] for name in service.get("deploymentNames", [])
+            if (namespace, name) in by_deployment
+        ]
+        if not matching or not service_name:
+            continue
+        primary = matching[0]
+        expected_replicas = sum(item.expected_replicas for item in matching)
+        spread = [c for item in matching for c in item.spread_constraints]
+        requests = [r for item in matching for r in item.resource_requests]
+        limits = [lim for item in matching for lim in item.resource_limits_by_container]
+        drift_manifests[service_name] = primary.model_copy(update={
+            "service_name": service_name,
+            "expected_replicas": expected_replicas,
+            "spread_constraints": spread,
+            "has_node_affinity": any(item.has_node_affinity for item in matching),
+            "pod_anti_affinity_configured": any(item.pod_anti_affinity_configured for item in matching),
+            "pod_affinity_configured": any(item.pod_affinity_configured for item in matching),
+            "resource_requests": requests,
+            "resource_limits_by_container": limits,
+        })
+        service_intents[service_name] = {
+            "expected_replicas": expected_replicas,
+            "selector": primary.selector,
+            "readiness_probe_configured": all(item.readiness_probe_configured for item in matching),
+            "has_node_affinity": any(item.has_node_affinity for item in matching),
+            "pod_anti_affinity_configured": any(item.pod_anti_affinity_configured for item in matching),
+            "pod_affinity_configured": any(item.pod_affinity_configured for item in matching),
+            "node_selector": primary.node_selector,
+            "tolerations": primary.tolerations,
+            "selector_match_expressions": primary.selector_match_expressions,
+            "node_affinity_rules": primary.node_affinity_rules,
+            "pod_affinity_rules": primary.pod_affinity_rules,
+            "pod_anti_affinity_rules": primary.pod_anti_affinity_rules,
+            "spread_constraints": [c.model_dump() for c in spread],
+            "resource_requests": requests,
+            "resource_limits_by_container": limits,
         }
-        for s in sample_graph.services
-    ]
-    return fallback_nodes, fallback_services
+    return drift_manifests, service_intents
 
 
-def get_live_deployment_graph(
-    namespace: str = "default",
-    manifest_path: str | None = None,
-) -> DeploymentGraph:
-    """
-    Central Orchestrator for Deployment Topology Modeling.
-    
-    Acts as the primary API facade for Component 2, orchestrating live cluster state,
-    declared manifest parsing, and Phase 3 resilience drift analysis.
-    """
-    start_time = time.perf_counter()
-    
-    raw_nodes, analyzed_services = _get_nodes_and_workloads(namespace=namespace)
+def _load_manifest_intents(
+    manifest_path: str | None, analyzed_services: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    target = Path(manifest_path) if manifest_path else DEFAULT_MANIFEST_PATH
+    if not target.exists():
+        return {}, {}
+    try:
+        parsed = run_manifest_pipeline(str(target))
+    except Exception as exc:
+        raise ValueError(f"Unable to parse deployment manifest '{target}': {exc}") from exc
+    return _associate_manifest_intents(parsed, analyzed_services)
 
-    # Resolve declared manifest intent if available
-    project_root = Path(__file__).resolve().parents[3]
-    default_manifest = project_root / "deploy" / "kubernetes" / "boutique.yaml"
-    target_manifest = Path(manifest_path) if manifest_path else default_manifest
 
-    manifest_map = {}
-    if target_manifest.exists():
-        try:
-            parsed_manifests = run_manifest_pipeline(str(target_manifest))
-            manifest_map = {m.service_name: m for m in parsed_manifests}
-        except Exception:
-            manifest_map = {}
-
-    # Structure pods by service for the Phase 3 Drift Engine
-    pods_by_service = {
-        svc.get("name", ""): svc.get("pods", [])
-        for svc in analyzed_services
-        if svc.get("name")
-    }
-    nodes_dicts = [
-        {"name": n.name, "zone": n.zone, "labels": {"kubernetes.io/hostname": n.name}}
-        for n in raw_nodes
+def _detector_nodes(nodes: list[ClusterNode]) -> list[dict[str, Any]]:
+    """Nodes for the detectors. The hostname label is only filled in when the node lacks it."""
+    return [
+        {"name": n.name, "zone": n.zone, "labels": {HOSTNAME_LABEL: n.name, **(n.labels or {})}}
+        for n in nodes
     ]
 
-    # Run Phase 3 Resilience Drift Engine
-    analyzer = DriftAnalyzer()
-    cluster_report, _ = analyzer.analyze_cluster(
-        manifests_by_service=manifest_map,
-        runtime_pods_by_service=pods_by_service,
-        cluster_nodes=nodes_dicts,
+
+def _drift_reports(report: ClusterExposureReport) -> dict[str, dict[str, Any]]:
+    """drift_detected = declared intent differs from runtime (scale, affinity, spread).
+    Informational findings (missing resource limits) are excluded."""
+    reports = {}
+    for exp in report.services:
+        intent_violations = [v for v in exp.violations if v.drift_type in INTENT_DRIFT_TYPES]
+        reports[exp.service_name] = {
+            "drift_detected": bool(intent_violations),
+            "drift_reasons": [v.description for v in intent_violations],
+        }
+    return reports
+
+
+def _analyse(
+    nodes: list[ClusterNode],
+    analyzed_services: list[dict[str, Any]],
+    manifest_path: str | None,
+    data_source: str,
+    start_time: float,
+    load_manifests: bool = True,
+) -> TopologyAnalysis:
+    manifest_map, service_intents = (
+        _load_manifest_intents(manifest_path, analyzed_services) if load_manifests else ({}, {})
     )
-
-    # Map drift violations to service models
-    drift_reports = {}
-    for exp in cluster_report.services:
-        drift_reports[exp.service_name] = {
-            "drift_detected": len(exp.violations) > 0 or exp.severity_score > 0.5,
-            "drift_reasons": [v.description for v in exp.violations],
-        }
-
-    # Build the strict JSON DeploymentGraph
+    report, baseline_b2 = DriftAnalyzer().analyze_cluster(
+        manifests_by_service=manifest_map,
+        runtime_pods_by_service={s["name"]: s.get("pods", []) for s in analyzed_services if s.get("name")},
+        cluster_nodes=_detector_nodes(nodes),
+    )
     builder = DeploymentGraphBuilder()
-    builder.attach_nodes(raw_nodes)
-    builder.attach_services(analyzed_services, drift_reports)
-    
+    builder.attach_nodes(nodes)
+    builder.attach_services(analyzed_services, _drift_reports(report), service_intents)
     elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-    return builder.build(runtime_overhead_ms=elapsed_ms)
+    return TopologyAnalysis(builder.build(runtime_overhead_ms=elapsed_ms), report, baseline_b2, data_source)
+
+
+def analyze_live_topology(namespace: str = "default", manifest_path: str | None = None) -> TopologyAnalysis:
+    """Graph, exposure report and Baseline B2 computed from one live collection."""
+    start_time = time.perf_counter()
+    nodes, analyzed = collect_live_cluster(namespace)
+    return _analyse(nodes, analyzed, manifest_path, "live", start_time)
+
+
+def get_live_deployment_graph(namespace: str = "default", manifest_path: str | None = None) -> DeploymentGraph:
+    """The validated DeploymentGraph handed to Components 3 and 4."""
+    return analyze_live_topology(namespace, manifest_path).graph
 
 
 def analyze_resilience_drift(
-    namespace: str = "default",
-    manifest_path: str | None = None,
+    namespace: str = "default", manifest_path: str | None = None
 ) -> tuple[ClusterExposureReport, BaselineB2Result]:
-    """Public interface for Component 3/4 to retrieve cluster exposure and baseline B2."""
-    project_root = Path(__file__).resolve().parents[3]
-    default_manifest = project_root / "deploy" / "kubernetes" / "boutique.yaml"
-    target_manifest = Path(manifest_path) if manifest_path else default_manifest
-
-    manifest_map = {}
-    if target_manifest.exists():
-        try:
-            parsed_manifests = run_manifest_pipeline(str(target_manifest))
-            manifest_map = {m.service_name: m for m in parsed_manifests}
-        except Exception:
-            manifest_map = {}
-
-    raw_nodes, analyzed_services = _get_nodes_and_workloads(namespace=namespace)
-
-    pods_by_service = {
-        svc.get("name", ""): svc.get("pods", [])
-        for svc in analyzed_services
-        if svc.get("name")
-    }
-    nodes_dicts = [
-        {"name": n.name, "zone": n.zone, "labels": {"kubernetes.io/hostname": n.name}}
-        for n in raw_nodes
-    ]
-
-    analyzer = DriftAnalyzer()
-    return analyzer.analyze_cluster(
-        manifests_by_service=manifest_map,
-        runtime_pods_by_service=pods_by_service,
-        cluster_nodes=nodes_dicts,
-    )
+    """Cluster exposure report and Baseline B2 for the live cluster."""
+    analysis = analyze_live_topology(namespace, manifest_path)
+    return analysis.report, analysis.baseline_b2
 
 
 def diff_cluster_snapshots(
     baseline_snapshot: ClusterExposureReport | dict,
     target_snapshot: ClusterExposureReport | dict,
 ) -> PlacementDriftDiffReport:
-    """Public interface to diff two cluster snapshots (D_rate calculation)."""
+    """Placement drift rate between two exposure reports."""
     return PlacementDriftDiffEngine.diff_snapshots(baseline_snapshot, target_snapshot)
 
 
+# ---------------------------------------------------------------------------------------------
+# Sample fixture (explicitly labelled; never used as a hidden fallback)
+# ---------------------------------------------------------------------------------------------
+
 def get_sample_deployment() -> DeploymentGraph:
-    """Provides fallback static JSON mocking for independent UI interface testing."""
-    project_root = Path(__file__).resolve().parents[3]
-    sample_file = project_root / "sample_data" / "deployment.json"
-
-    if sample_file.exists():
-        with open(sample_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return DeploymentGraph.model_validate(data)
-
+    """The static contract fixture in sample_data/deployment.json."""
+    if SAMPLE_FILE.exists():
+        return DeploymentGraph.model_validate(json.loads(SAMPLE_FILE.read_text(encoding="utf-8")))
     return DeploymentGraph(nodes=[], services=[])
 
 
-def run_chaos_benchmark_pipeline(
-    namespace: str = "default",
-) -> dict[str, Any]:
-    """
-    Public facade for Phase 4: Runs the complete battery of 8 disruption scenarios
-    and returns aggregate benchmark metrics and scenario results.
-    """
-    from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
-    from experiments.placement_drift.disruption_reporter import DisruptionReporter
+def analyze_sample_topology() -> TopologyAnalysis:
+    """Runs the same exposure analysis on the sample fixture (no declared intent available)."""
+    start_time = time.perf_counter()
+    sample = get_sample_deployment()
+    nodes = [
+        ClusterNode(name=n.name, zone=n.zone, cpu_available=str(n.cpu_available),
+                    memory_available=str(n.memory_available), labels=n.labels, ready=n.ready)
+        for n in sample.nodes
+    ]
+    workloads = {
+        s.name: {
+            "name": s.name,
+            "namespace": s.namespace,
+            "declaredReplicas": s.declared_replicas,
+            "pods": [{"name": p.name, "node": p.node, "ready": p.ready, "phase": p.phase,
+                      "restartCount": p.restart_count, "namespace": p.namespace} for p in s.pods],
+            "deploymentNames": s.deployment_names,
+        }
+        for s in sample.services
+    }
+    analyzed = analyze_replica_concentration(workloads, {n.name: n.ready for n in nodes})
+    return _analyse(nodes, analyzed, manifest_path=None, data_source="sample",
+                    start_time=start_time, load_manifests=False)
 
-    orchestrator = DisruptionOrchestrator(namespace=namespace)
-    results = orchestrator.run_all()
-    metrics = orchestrator.compute_aggregate_metrics(results)
-    return DisruptionReporter.generate_json_payload(results, metrics)
 
-
-def run_single_chaos_scenario(
-    scenario_id: str,
-    namespace: str = "default",
-) -> Any:
-    """
-    Public facade for Phase 4: Runs a single designated chaos scenario by ID.
-    """
-    from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
-
-    orchestrator = DisruptionOrchestrator(namespace=namespace)
-    return orchestrator.run_scenario(scenario_id)
-
+# ---------------------------------------------------------------------------------------------
+# Manifest intent
+# ---------------------------------------------------------------------------------------------
 
 def get_manifest_intent() -> list[dict[str, Any]]:
-    """
-    Public facade for Phase 2: Runs the manifest parsing pipeline and returns declared intent.
-    Prefers deploy/kubernetes (where the real boutique microservice manifests live),
-    falling back to deploy/test-workloads.
-    """
-    project_root = Path(__file__).resolve().parents[3]
-    k8s_dir = project_root / "deploy" / "kubernetes"
-    target = str(k8s_dir) if k8s_dir.exists() and any(k8s_dir.glob("*.yaml")) else "deploy/test-workloads"
-    intents = run_manifest_pipeline(target)
-    return [i.model_dump() if hasattr(i, "model_dump") else dict(i) for i in intents]
+    """Declared Deployment intent from the default manifest, else deploy/test-workloads."""
+    target = DEFAULT_MANIFEST_PATH if DEFAULT_MANIFEST_PATH.exists() else FALLBACK_MANIFEST_DIR
+    return [i.model_dump() for i in run_manifest_pipeline(str(target))]
 
 
-def get_academic_accuracy_certificate() -> Any:
-    """
-    Public facade: Evaluates ground-truth modeling accuracy metrics (>=98% mapping, >=95% concentration).
-    """
-    from app.engine.deployment_topology_modeling.drift_analysis.ground_truth_validator import (
-        GroundTruthValidator,
+def get_manifest_service_detail(service_name: str) -> dict[str, Any] | None:
+    return next((i for i in get_manifest_intent() if i.get("service_name") == service_name), None)
+
+
+# ---------------------------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------------------------
+
+def get_academic_accuracy_certificate() -> ModelAccuracyCertificate:
+    """Accuracy against the stored, kubectl-inspected KinD snapshot in
+    experiments/single-node-failure/concentrated-baseline (see ground_truth_evaluation)."""
+    from app.engine.deployment_topology_modeling.ground_truth_evaluation import evaluate_snapshot
+    return evaluate_snapshot().certificate
+
+
+def get_ground_truth_evaluation() -> dict[str, Any]:
+    from app.engine.deployment_topology_modeling.ground_truth_evaluation import (
+        KIND_CONCENTRATED_BASELINE,
+        evaluate_snapshot,
     )
+    evaluation = evaluate_snapshot()
+    return {
+        "ground_truth_source": str(KIND_CONCENTRATED_BASELINE.relative_to(PROJECT_ROOT)),
+        "pods_evaluated": evaluation.pods_evaluated,
+        "services_evaluated": evaluation.services_evaluated,
+        "failure_experiments": evaluation.failure_experiments,
+        "certificate": evaluation.certificate.model_dump(),
+        "exposure_checks": evaluation.exposure_checks,
+    }
 
-    graph = get_live_deployment_graph()
-    pod_svc: dict[str, str] = {}
-    pod_node: dict[str, str] = {}
-    owner_map: dict[str, str] = {}
-    for svc in graph.services:
-        for p in svc.pods:
-            pod_svc[p.name] = svc.name
-            pod_node[p.name] = p.node
-            owner_map[p.name] = svc.name
 
-    report, _ = analyze_resilience_drift()
-    exposed_names = {s.service_name for s in report.services if s.replica_concentration > 0.5}
-
-    return GroundTruthValidator.evaluate_mapping_accuracies(
-        predicted_pod_service_map=pod_svc,
-        ground_truth_pod_service_map=pod_svc,
-        predicted_pod_node_map=pod_node,
-        ground_truth_pod_node_map=pod_node,
-        predicted_owner_map=owner_map,
-        ground_truth_owner_map=owner_map,
-        predicted_exposures=report.services,
-        ground_truth_exposed_services=exposed_names,
-    )
-
-# Global snapshot repository shared across chaos runs and snapshot queries
-from experiments.placement_drift.snapshot_repository import SnapshotRepository
-from experiments.placement_drift.cluster_state_freezer import ClusterStateFreezer
-from experiments.placement_drift.safety_guard import SafetyGuard
-from experiments.placement_drift.constants import ScenarioExecutionMode, PROTECTED_NAMESPACES
-from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix
-from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
-from experiments.placement_drift.parametric_ensemble_evaluator import ParametricEnsembleEvaluator
-
-_GLOBAL_SNAPSHOT_REPO = SnapshotRepository()
-
+# ---------------------------------------------------------------------------------------------
+# Views over one live analysis
+# ---------------------------------------------------------------------------------------------
 
 def get_cluster_zones(namespace: str = "default") -> list[dict[str, Any]]:
-    """Summarizes failure-domain zones, their member nodes, and hosted pod counts."""
+    """Zones, their nodes and hosted pod counts. Nodes without a zone label are 'unassigned-zone'."""
     graph = get_live_deployment_graph(namespace=namespace)
     zone_map: dict[str, dict[str, Any]] = {}
     for node in graph.nodes:
         z = node.zone or "unassigned-zone"
-        if z not in zone_map:
-            zone_map[z] = {"zone": z, "nodes": [], "total_pods": 0, "services": set()}
+        zone_map.setdefault(z, {"zone": z, "nodes": [], "total_pods": 0, "services": set()})
         zone_map[z]["nodes"].append(node.name)
-
     for svc in graph.services:
         for p in svc.pods:
             z = p.zone or "unassigned-zone"
             if z in zone_map:
                 zone_map[z]["total_pods"] += 1
                 zone_map[z]["services"].add(svc.name)
-
     return [
-        {
-            "zone": v["zone"],
-            "nodes": v["nodes"],
-            "node_count": len(v["nodes"]),
-            "total_pods": v["total_pods"],
-            "hosted_services": sorted(v["services"]),
-        }
+        {"zone": v["zone"], "nodes": v["nodes"], "node_count": len(v["nodes"]),
+         "total_pods": v["total_pods"], "hosted_services": sorted(v["services"])}
         for v in zone_map.values()
     ]
 
 
 def get_node_detail(node_name: str, namespace: str = "default") -> dict[str, Any] | None:
-    """Retrieves comprehensive workload placement detail for a designated worker node."""
     graph = get_live_deployment_graph(namespace=namespace)
     match_node = next((n for n in graph.nodes if n.name == node_name), None)
     if not match_node:
         return None
-
-    hosted_pods = []
-    hosted_services = set()
-    for svc in graph.services:
-        for p in svc.pods:
-            if p.node == node_name:
-                hosted_pods.append({
-                    "pod_name": p.name,
-                    "service_name": svc.name,
-                    "is_ready": p.ready,
-                    "restart_count": p.restart_count,
-                })
-                hosted_services.add(svc.name)
-
+    hosted_pods = [
+        {"pod_name": p.name, "service_name": svc.name, "is_ready": p.ready, "restart_count": p.restart_count}
+        for svc in graph.services for p in svc.pods if p.node == node_name
+    ]
+    services = sorted({p["service_name"] for p in hosted_pods})
     return {
         "node_name": match_node.name,
         "zone": match_node.zone,
+        "ready": match_node.ready,
+        "schedulable": match_node.schedulable,
         "cpu_available": match_node.cpu_available,
         "memory_available": match_node.memory_available,
         "total_pods": len(hosted_pods),
-        "total_services": len(hosted_services),
-        "services": sorted(hosted_services),
+        "total_services": len(services),
+        "services": services,
         "pods": hosted_pods,
     }
 
 
-def get_manifest_service_detail(service_name: str) -> dict[str, Any] | None:
-    """Retrieves declared manifest constraints for a designated service."""
-    intents = get_manifest_intent()
-    for item in intents:
-        if item.get("service_name") == service_name:
-            return item
-    return None
-
-
 def get_drift_spofs(namespace: str = "default") -> list[dict[str, Any]]:
-    """Identifies all microservices exhibiting Single Point of Failure (SPOF) exposure."""
-    report, _ = analyze_resilience_drift(namespace=namespace)
-    spofs = []
-    for svc in report.services:
-        if getattr(svc, "replica_concentration", 0.0) >= 0.99 or len(getattr(svc, "hosting_nodes", [])) == 1:
-            spofs.append({
-                "service_name": svc.service_name,
-                "replica_concentration": svc.replica_concentration,
-                "hosting_nodes": getattr(svc, "hosting_nodes", []),
-                "exposure_level": getattr(svc, "exposure_level", "HIGH"),
-                "reason": "All active replicas are colocated on a single node/failure domain.",
-            })
-    return spofs
+    """Services whose ready replicas all run on one node (exposed to that node's failure)."""
+    return spofs_from_report(analyze_resilience_drift(namespace=namespace)[0])
+
+
+def spofs_from_report(report: ClusterExposureReport) -> list[dict[str, Any]]:
+    return [
+        {
+            "service_name": svc.service_name,
+            "replica_concentration": svc.replica_concentration,
+            "ready_replicas": svc.ready_replicas,
+            "hosting_nodes": svc.exposed_failure_domains,
+            "exposure_level": svc.exposure_level.value,
+            "reason": (f"All {svc.ready_replicas} ready replica(s) run on node "
+                       f"{', '.join(svc.exposed_failure_domains)}."),
+        }
+        for svc in report.services if svc.exposure_status == pm.ExposureStatus.EXPOSED
+    ]
+
+
+_CATEGORY_BY_TYPE = {
+    DriftType.SCALE_DRIFT: "scale_drift",
+    DriftType.AFFINITY_DRIFT: "node_affinity_drift",
+    DriftType.TOPOLOGY_SPREAD_DRIFT: "topology_spread_violations",
+    DriftType.RESOURCE_CONTENTION_DRIFT: "resource_limit_drift",
+}
 
 
 def get_drift_categories_summary(namespace: str = "default") -> dict[str, Any]:
-    """Categorizes active resilience violations across the 5 core detectors."""
-    report, _ = analyze_resilience_drift(namespace=namespace)
-    categories = {
-        "scale_drift": [],
-        "resource_limit_drift": [],
-        "node_affinity_drift": [],
-        "resource_contention": [],
-        "topology_spread_violations": [],
+    """Violations grouped by detector. `resource_contention` stays empty: no detector measures
+    node contention (the resource detector only reports missing limits)."""
+    return categories_from_report(analyze_resilience_drift(namespace=namespace)[0])
+
+
+def categories_from_report(report: ClusterExposureReport) -> dict[str, Any]:
+    categories: dict[str, list] = {
+        "scale_drift": [], "resource_limit_drift": [], "node_affinity_drift": [],
+        "resource_contention": [], "topology_spread_violations": [],
     }
     for svc in report.services:
-        for v in getattr(svc, "violations", []):
-            item = v.model_dump() if hasattr(v, "model_dump") else dict(v)
-            item["service_name"] = svc.service_name
-            cat = str(item.get("drift_type", "") or item.get("category", "")).lower()
-            if "scale" in cat:
-                categories["scale_drift"].append(item)
-            elif "resource_contention" in cat or "contention" in cat:
-                categories["resource_contention"].append(item)
-            elif "resource" in cat or "limit" in cat:
-                categories["resource_limit_drift"].append(item)
-            elif "affinity" in cat:
-                categories["node_affinity_drift"].append(item)
-            else:
-                categories["topology_spread_violations"].append(item)
-
+        for v in svc.violations:
+            categories[_CATEGORY_BY_TYPE[v.drift_type]].append({**v.model_dump(), "service_name": svc.service_name})
     return {
         "summary": {k: len(v) for k, v in categories.items()},
         "total_violations": sum(len(v) for v in categories.values()),
@@ -409,92 +382,101 @@ def get_drift_categories_summary(namespace: str = "default") -> dict[str, Any]:
 
 
 def get_concentration_rankings(namespace: str = "default") -> list[dict[str, Any]]:
-    """Ranks all microservices descending by Herfindahl-Hirschman Concentration Index (HHI)."""
+    """Services ordered by concentration: concentrated first, then by max/total ratio."""
     graph = get_live_deployment_graph(namespace=namespace)
-    ranked = []
-    for svc in graph.services:
-        c = svc.replica_concentration if svc.replica_concentration is not None else 0.0
-        ranked.append({
+    ranked = [
+        {
             "service_name": svc.name,
-            "replica_concentration": c,
+            "replica_concentration": svc.replica_concentration,
             "declared_replicas": svc.declared_replicas,
             "ready_replicas": svc.ready_replicas,
-            "is_concentrated": c > 0.5,
-        })
-    ranked.sort(key=lambda x: x["replica_concentration"], reverse=True)
+            "is_concentrated": svc.concentrated,
+        }
+        for svc in graph.services
+    ]
+    ranked.sort(key=lambda x: (x["is_concentrated"] is not True, -(x["replica_concentration"] or 0.0), x["service_name"]))
     return ranked
 
 
 def get_node_risk_rankings(namespace: str = "default") -> list[dict[str, Any]]:
-    """Calculates worker node risk index based on workload density and hosted microservices."""
-    graph = get_live_deployment_graph(namespace=namespace)
-    total_cluster_pods = sum(len(s.pods) for s in graph.services) or 1
-    node_stats: dict[str, dict[str, Any]] = {
-        n.name: {"name": n.name, "zone": n.zone, "pod_count": 0, "services": set()}
-        for n in graph.nodes
-    }
+    """Service-level view per node: which services would lose all ready replicas if the node
+    failed. Workflow-level node blast radius belongs to Component 3 and is not computed here."""
+    return node_risks_from_analysis(analyze_live_topology(namespace=namespace))
 
-    for svc in graph.services:
+
+def node_risks_from_analysis(analysis: TopologyAnalysis) -> list[dict[str, Any]]:
+    exposed_by_node = analysis.baseline_b2.exposed_services_by_node
+    pod_counts = {n.name: 0 for n in analysis.graph.nodes}
+    hosted: dict[str, set] = {n.name: set() for n in analysis.graph.nodes}
+    for svc in analysis.graph.services:
         for p in svc.pods:
-            if p.node in node_stats:
-                node_stats[p.node]["pod_count"] += 1
-                node_stats[p.node]["services"].add(svc.name)
-
-    rankings = []
-    for n in node_stats.values():
-        pod_share = round(n["pod_count"] / total_cluster_pods, 3)
-        if pod_share >= 0.5:
-            risk_level = "CRITICAL"
-        elif pod_share >= 0.3:
-            risk_level = "ELEVATED"
-        else:
-            risk_level = "BALANCED"
-
-        rankings.append({
-            "node_name": n["name"],
-            "zone": n["zone"],
-            "pod_count": n["pod_count"],
-            "service_count": len(n["services"]),
-            "cluster_workload_share": pod_share,
-            "risk_level": risk_level,
-            "hosted_services": sorted(n["services"]),
-        })
-
-    rankings.sort(key=lambda x: x["cluster_workload_share"], reverse=True)
+            if p.node in pod_counts:
+                pod_counts[p.node] += 1
+                hosted[p.node].add(svc.name)
+    rankings = [
+        {
+            "node_name": n.name,
+            "zone": n.zone,
+            "pod_count": pod_counts[n.name],
+            "service_count": len(hosted[n.name]),
+            "exposed_services": exposed_by_node.get(n.name, []),
+            "exposed_service_count": len(exposed_by_node.get(n.name, [])),
+            "risk_level": "CRITICAL" if exposed_by_node.get(n.name) else "BALANCED",
+            "hosted_services": sorted(hosted[n.name]),
+        }
+        for n in analysis.graph.nodes
+    ]
+    rankings.sort(key=lambda x: (-x["exposed_service_count"], -x["pod_count"], x["node_name"]))
     return rankings
 
 
+# ---------------------------------------------------------------------------------------------
+# Phase 4 scenario experiments (dry-run fixtures)
+# ---------------------------------------------------------------------------------------------
+
+from experiments.placement_drift.snapshot_repository import SnapshotRepository  # noqa: E402
+from experiments.placement_drift.cluster_state_freezer import ClusterStateFreezer  # noqa: E402
+from experiments.placement_drift.safety_guard import SafetyGuard  # noqa: E402
+from experiments.placement_drift.constants import ScenarioExecutionMode, PROTECTED_NAMESPACES  # noqa: E402
+from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix  # noqa: E402
+from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator  # noqa: E402
+from experiments.placement_drift.disruption_reporter import DisruptionReporter  # noqa: E402
+from experiments.placement_drift.parametric_ensemble_evaluator import ParametricEnsembleEvaluator  # noqa: E402
+
+_GLOBAL_SNAPSHOT_REPO = SnapshotRepository()
+
+
+def run_chaos_benchmark_pipeline(namespace: str = "default") -> dict[str, Any]:
+    """Runs the 8 dry-run scenarios and returns their results and aggregate metrics."""
+    orchestrator = DisruptionOrchestrator(namespace=namespace)
+    results = orchestrator.run_all()
+    return DisruptionReporter.generate_json_payload(results, orchestrator.compute_aggregate_metrics(results))
+
+
+def run_single_chaos_scenario(scenario_id: str, namespace: str = "default") -> Any:
+    return DisruptionOrchestrator(namespace=namespace).run_scenario(scenario_id)
+
+
 def list_cluster_snapshots() -> list[str]:
-    """Returns all snapshot keys registered in memory or disk."""
     return _GLOBAL_SNAPSHOT_REPO.list_keys()
 
 
 def get_cluster_snapshot(scenario_id: str, phase_tag: str) -> dict[str, Any] | None:
-    """Retrieves an immutable cluster snapshot and verifies cryptographic integrity."""
     snap = _GLOBAL_SNAPSHOT_REPO.get(scenario_id, phase_tag)
-    if snap:
-        return snap.model_dump() if hasattr(snap, "model_dump") else dict(snap)
-    return None
+    return snap.model_dump() if snap else None
 
 
 def freeze_cluster_state(snapshot_id: str, namespace: str = "default") -> dict[str, Any]:
-    """Freezes the current live cluster placement into an immutable SHA-256 snapshot."""
+    """Freezes the current live placement into a hashed snapshot."""
     graph = get_live_deployment_graph(namespace=namespace)
-    all_pods = []
-    for svc in graph.services:
-        for p in svc.pods:
-            all_pods.append({
-                "pod_name": p.name,
-                "service_name": svc.name,
-                "node_name": p.node,
-                "zone": p.zone or "default-zone",
-                "is_ready": p.ready,
-            })
-    nodes_dicts = [{"name": n.name, "zone": n.zone} for n in graph.nodes]
+    all_pods = [
+        {"pod_name": p.name, "service_name": svc.name, "node_name": p.node, "zone": p.zone, "is_ready": p.ready}
+        for svc in graph.services for p in svc.pods
+    ]
     snapshot = ClusterStateFreezer.freeze(
         snapshot_id=snapshot_id,
         raw_pods=all_pods,
-        nodes=nodes_dicts,
+        nodes=[{"name": n.name, "zone": n.zone} for n in graph.nodes],
         namespace=namespace,
     )
     _GLOBAL_SNAPSHOT_REPO.save(scenario_id=snapshot_id, phase_tag="MANUAL", snapshot=snapshot)
@@ -502,87 +484,65 @@ def freeze_cluster_state(snapshot_id: str, namespace: str = "default") -> dict[s
 
 
 def clear_cluster_snapshots() -> dict[str, Any]:
-    """Clears in-memory snapshot cache."""
     _GLOBAL_SNAPSHOT_REPO.clear()
     return {"message": "Snapshot cache cleared successfully."}
 
 
 def get_chaos_safety_status() -> dict[str, Any]:
-    """Returns cluster pre-flight safety status for chaos experiment injection."""
-    graph = get_live_deployment_graph()
-    nodes_count = len(graph.nodes)
-    is_safe = nodes_count >= 2
+    """Safety status; node count is None when no cluster is reachable."""
+    try:
+        nodes_count: int | None = len(get_live_deployment_graph().nodes)
+    except ClusterUnavailableError:
+        nodes_count = None
     return {
         "execution_mode": ScenarioExecutionMode.DRY_RUN_SIMULATION.value,
-        "protected_namespaces": list(PROTECTED_NAMESPACES),
+        "protected_namespaces": sorted(PROTECTED_NAMESPACES),
         "cluster_nodes_detected": nodes_count,
-        "multi_node_anti_affinity_feasible": is_safe,
+        "multi_node_anti_affinity_feasible": None if nodes_count is None else nodes_count >= 2,
         "safety_guard_enforced": True,
     }
 
 
 def validate_chaos_action(namespace: str = "default", service_name: str | None = None) -> dict[str, Any]:
-    """Evaluates whether an intended disruption action satisfies all safety guardrails."""
     guard = SafetyGuard(allow_default_namespace=True)
     try:
         guard.validate_namespace_safety(namespace)
         graph = get_live_deployment_graph(namespace=namespace)
-        nodes_dicts = [{"name": n.name} for n in graph.nodes]
-        guard.validate_preflight_nodes(nodes_dicts)
-        valid = True
-        reason = "Target namespace and cluster topology satisfy all pre-flight safety checks."
+        guard.validate_preflight_nodes([{"name": n.name} for n in graph.nodes])
+        valid, reason = True, "Target namespace and cluster topology satisfy all pre-flight safety checks."
     except Exception as exc:
-        valid = False
-        reason = str(exc)
-
-    return {
-        "namespace": namespace,
-        "service_name": service_name,
-        "action_allowed": valid,
-        "reason": reason,
-    }
+        valid, reason = False, str(exc)
+    return {"namespace": namespace, "service_name": service_name, "action_allowed": valid, "reason": reason}
 
 
 def get_scenario_latex_table(scenario_id: str) -> dict[str, Any] | None:
-    """Returns publication-ready LaTeX table code snippet for a scenario's transition matrix."""
     repo = _GLOBAL_SNAPSHOT_REPO
-    orchestrator = DisruptionOrchestrator(repository=repo)
-    result = orchestrator.run_scenario(scenario_id)
+    result = DisruptionOrchestrator(repository=repo).run_scenario(scenario_id)
     if result is None:
         return None
-
-    t0 = repo.get(scenario_id, "T0")
-    t1 = repo.get(scenario_id, "T1")
+    t0, t1 = repo.get(scenario_id, "T0"), repo.get(scenario_id, "T1")
     if not t0 or not t1:
         return None
-
     nodes, matrix, _ = DriftTransitionMatrix.build_matrix(t0, t1)
-    latex_code = DriftTransitionMatrix.format_latex_table(nodes, matrix)
     return {
         "scenario_id": scenario_id,
+        "execution_mode": result.execution_mode.value,
         "nodes": nodes,
-        "latex_table": latex_code,
+        "latex_table": DriftTransitionMatrix.format_latex_table(nodes, matrix),
         "d_rate": result.d_rate,
         "delta_e_rate": result.delta_e_rate,
     }
 
 
 def run_parametric_ensemble_pipeline() -> dict[str, Any]:
-    """Executes the multi-service parametric sweep and returns statistical ensemble metrics."""
-    evaluator = ParametricEnsembleEvaluator(repository=_GLOBAL_SNAPSHOT_REPO)
-    metrics = evaluator.run_ensemble()
-    return metrics.model_dump()
+    return ParametricEnsembleEvaluator(repository=_GLOBAL_SNAPSHOT_REPO).run_ensemble().model_dump()
 
 
 def get_parametric_ensemble_markdown_report() -> str:
-    """Generates an academic publication-grade Markdown report for the parametric ensemble sweep."""
-    evaluator = ParametricEnsembleEvaluator(repository=_GLOBAL_SNAPSHOT_REPO)
-    metrics = evaluator.run_ensemble()
+    metrics = ParametricEnsembleEvaluator(repository=_GLOBAL_SNAPSHOT_REPO).run_ensemble()
     return ParametricEnsembleEvaluator.generate_markdown_report(metrics)
 
 
 if __name__ == "__main__":
-    print("--- LIVE DEPLOYMENT GRAPH MODEL (ENTERPRISE EDITION) ---")
-    graph = get_live_deployment_graph()
-    print(f"Total Worker Nodes Resolved: {len(graph.nodes)}")
-    print(f"Total Active Services Found: {len(graph.services)}")
+    analysis = analyze_live_topology()
+    print(f"Worker nodes: {len(analysis.graph.nodes)}; services: {len(analysis.graph.services)}")
