@@ -128,5 +128,6 @@
         }
     });
 
+    window.addEventListener("resilience-cluster-changed", refresh);
     refresh();
 })();

@@ -515,6 +515,19 @@ textarea.form-input { width: 100%; resize: vertical; }
 .connect__message[data-kind="ok"] { background: var(--dd-success-soft); border-left: 3px solid var(--dd-success); }
 .connect__hint { display: block; margin-top: 4px; color: var(--dd-text-2); }
 
+/* Automatic setup: the cluster list, the renewal problem banner, and the manual disclosure. */
+.connect__lead { margin: 0 0 12px; color: var(--dd-text-2); }
+.connect__clusters { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.connect__cluster label { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--dd-border); border-radius: var(--dd-radius); cursor: pointer; }
+.connect__cluster label:has(input:checked) { border-color: var(--dd-primary); }
+.connect__cluster input { grid-row: 1 / span 2; margin: 0; }
+.connect__cluster[data-usable="false"] label { cursor: default; opacity: 0.7; }
+.connect__cluster-name { font-weight: 500; overflow-wrap: anywhere; }
+.connect__cluster-meta { grid-column: 2; color: var(--dd-text-2); font-size: 13px; overflow-wrap: anywhere; }
+.connect__attention { margin: 12px 0 0; padding: 10px 12px; border-radius: var(--dd-radius); background: var(--dd-danger-soft); border-left: 3px solid var(--dd-danger); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.connect__manual > summary { cursor: pointer; }
+.connect__manual[open] > summary { margin-bottom: 12px; }
+
 /* ---- Narrow extension views: the navigation becomes a tab strip ------------------------------ */
 @media (max-width: 820px) {
     .metric-grid { grid-template-columns: repeat(2, 1fr); }

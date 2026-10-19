@@ -90,8 +90,33 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         </dl>
     </section>
 
-    <section class="card" aria-labelledby="connect-new-title">
-        <h3 class="section-header__title" id="connect-new-title">Connect or renew</h3>
+    <section class="card" aria-labelledby="connect-auto-title" data-role="auto-card" hidden>
+        <h3 class="section-header__title" id="connect-auto-title">Set up automatically</h3>
+        <p class="ui-note" data-role="auto-note"></p>
+        <div data-role="auto-controls">
+            <p class="connect__lead">Find a local kind cluster and approve read-only access once. The extension then keeps
+                the credential renewed while it is open, and recovers by itself when you reopen it.</p>
+            <ul class="connect__clusters" data-role="auto-clusters" aria-live="polite"></ul>
+            <div class="connect__picker">
+                <button type="button" class="secondary-button" data-role="auto-refresh">Find clusters</button>
+                <button type="button" class="primary-button" data-role="auto-connect" disabled>Set up access</button>
+                <button type="button" class="secondary-button" data-role="auto-remove" hidden>Remove access…</button>
+            </div>
+            <p class="connect__message" data-role="auto-message" role="status"></p>
+            <p class="connect__attention" data-role="auto-attention" role="alert" hidden>
+                <span data-role="auto-attention-text"></span>
+                <button type="button" class="secondary-button" data-role="auto-retry">Try again</button>
+            </p>
+            <p class="ui-note">
+                A system dialog shows the exact cluster, the permissions and every change before anything happens, and
+                nothing is changed unless you approve there. Your own kubeconfig stays on this computer; the extension
+                only ever receives a read-only token that expires after hours.
+            </p>
+        </div>
+    </section>
+
+    <details class="card connect__manual" data-role="manual-details" open>
+        <summary class="section-header__title" id="connect-new-title">Advanced: use a kubeconfig file</summary>
         <ol class="connect__steps">
             <li>In the project folder, run <code>./scripts/extension-cluster-access.sh</code>. It asks before
                 creating a read-only service account in your kind cluster and writes
@@ -108,10 +133,11 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <p class="connect__message" data-role="connect-message" role="alert"></p>
         <p class="ui-note">
             The file goes only to the extension's local backend and is stored in its private data volume.
-            Its contents are never shown or logged. Tokens expire: run the script again to renew, or
+            Its contents are never shown or logged. A credential connected this way is not renewed
+            automatically: run the script again to renew, or
             <code>./scripts/extension-cluster-access.sh --revoke</code> to remove access immediately.
         </p>
-    </section>
+    </details>
 </div>
 </main>"""
 
@@ -124,7 +150,7 @@ def _static_paths(html: str, key: str, title: str) -> str:
     # The Docker look loads after every app stylesheet (including the page-specific ones) so it wins.
     html = html.replace("</head>", '    <link rel="stylesheet" href="docker.css">\n</head>', 1)
     html = html.replace("<body>", f'<body data-page="{key}">', 1)
-    html = html.replace("</body>", '<script src="chrome.js" defer></script>\n</body>', 1)
+    html = html.replace("</body>", '<script src="chrome.js" defer></script>\n<script src="autoconnect.js" defer></script>\n</body>', 1)
 
     for old, new in NAV_LABELS.items():
         html = html.replace(f'<span class="sidebar__link-label">{old}</span>', f'<span class="sidebar__link-label">{new}</span>')
@@ -175,7 +201,7 @@ def _connect_page(index_html: str) -> str:
     html, count = re.subn(r'<main class="page" id="main-content">.*?</main>', lambda _m: CONNECT_MAIN, html, count=1, flags=re.S)
     if count != 1:
         raise SystemExit("Could not find the main content area for the Connect page.")
-    return html.replace("</body>", '<script src="connect.js" defer></script>\n</body>', 1)
+    return html.replace("</body>", '<script src="connect.js" defer></script>\n<script src="connect-auto.js" defer></script>\n</body>', 1)
 
 
 def _check_relative(name: str, html: str) -> None:

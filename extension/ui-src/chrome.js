@@ -97,6 +97,8 @@
         const panel = document.querySelector('[data-role="cluster-panel"]');
         refresh(chip, panel);
         document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(chip, panel); });
+        // autoconnect.js announces a renewal, a setup or a removal so the status here never goes stale.
+        window.addEventListener("resilience-cluster-changed", () => refresh(chip, panel));
     });
 
     // The approval dialog is a modal: Escape cancels it, like every other Docker Desktop dialog.
