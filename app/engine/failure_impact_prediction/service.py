@@ -26,6 +26,7 @@ from app.engine.failure_impact_prediction.portfolio_impact import (
 from app.engine.failure_impact_prediction.runtime_provider import (
     RuntimeInputUnavailableError,
     get_runtime_component_inputs,
+    get_runtime_portfolio_inputs,
 )
 from app.engine.failure_impact_prediction.service_survival import (
     calculate_service_survival,
@@ -153,6 +154,21 @@ def predict_runtime_failure_impact(
     )
 
 
+def predict_runtime_portfolio_failure_impact(
+    workflow_ids: tuple[str, ...],
+    failed_node: str,
+    namespace: str = "default",
+) -> PortfolioFailureImpact:
+    """Predict portfolio impact from frozen workflows and one live topology."""
+
+    inputs = get_runtime_portfolio_inputs(workflow_ids, namespace)
+    return predict_portfolio_failure_impact(
+        inputs.workflows,
+        inputs.deployment,
+        failed_node,
+    )
+
+
 def get_sample_failure_impact() -> FailureImpactReport:
     """Keep the original sample endpoint while returning a calculated report."""
 
@@ -168,5 +184,6 @@ __all__ = [
     "predict_failure_impact",
     "predict_portfolio_failure_impact",
     "predict_runtime_failure_impact",
+    "predict_runtime_portfolio_failure_impact",
     "RuntimeInputUnavailableError",
 ]
