@@ -46,6 +46,7 @@ def test_snapshot_diff_api_endpoint(client):
                     "total_replicas": 2,
                     "ready_replicas": 2,
                     "replica_concentration": 0.5,
+                    "exposure_status": "NOT_EXPOSED",
                     "exposure_level": "RESILIENT",
                     "exposed_failure_domains": [],
                 }
@@ -60,8 +61,9 @@ def test_snapshot_diff_api_endpoint(client):
                     "total_replicas": 2,
                     "ready_replicas": 2,
                     "replica_concentration": 1.0,
+                    "exposure_status": "EXPOSED",
                     "exposure_level": "FULL_EXPOSURE",
-                    "exposed_failure_domains": ["c2-worker"],
+                    "exposed_failure_domains": ["worker-1"],
                 }
             ],
         },
@@ -75,5 +77,12 @@ def test_snapshot_diff_api_endpoint(client):
     assert "drifted_services_count" in diff_data
     assert diff_data["total_services_compared"] == 1
     assert diff_data["drifted_services_count"] == 1
+    assert diff_data["newly_exposed_services"] == ["payment"]
+
+
+def test_snapshot_diff_rejects_reports_without_exposure_status(client):
+    legacy = {"services": [{"service_name": "payment", "exposure_level": "RESILIENT"}]}
+    response = client.post("/api/deployments/diff", json={"baseline": legacy, "target": legacy})
+    assert response.status_code == 422
 
 

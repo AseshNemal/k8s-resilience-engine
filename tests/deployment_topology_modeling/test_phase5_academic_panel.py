@@ -18,8 +18,9 @@ def test_academic_panel_rendered_in_html(client):
     html = response.text
 
     assert 'id="academic-panel"' in html
-    assert "THESIS BENCHMARK CERTIFICATE" in html
-    assert "Empirical Modeling Accuracy & Rigor" in html
+    assert "MODEL VALIDATION (kubectl ground truth)" in html
+    assert "Self-chosen target" in html
+    assert "Model Accuracy &amp; Runtime Metrics" in html or "Model Accuracy & Runtime Metrics" in html
     assert 'id="stat-svc-pod-acc"' in html
     assert 'id="stat-pod-node-acc"' in html
     assert 'id="stat-owner-acc"' in html
@@ -39,7 +40,21 @@ def test_accuracy_endpoint_returns_valid_certificate(client):
     assert "concentration_detection_accuracy" in data
     assert "is_statistically_sound" in data
 
-    assert data["service_pod_mapping_accuracy"] >= 0.95
-    assert data["pod_node_mapping_accuracy"] >= 0.95
-    assert data["concentration_detection_accuracy"] >= 0.95
-    assert data["is_statistically_sound"] is True
+    # Measured against kubectl output of the stored KinD snapshot (3 pods, 1 service, 1 node failure).
+    assert data["service_pod_mapping_accuracy"] == pytest.approx(1.0)
+    assert data["pod_node_mapping_accuracy"] == pytest.approx(1.0)
+    assert data["exposure_detection_accuracy"] == pytest.approx(1.0)
+    # The snapshot holds no ReplicaSet objects, so owner resolution is not scored...
+    assert data["owner_resolution_accuracy"] is None
+    # ...and one tiny snapshot is never reported as statistically sound.
+    assert data["is_statistically_sound"] is False
+
+
+def test_ground_truth_endpoint_reports_sample_sizes(client):
+    data = client.get("/api/deployments/benchmarks/ground-truth").json()
+    assert data["pods_evaluated"] == 3
+    assert data["services_evaluated"] == 1
+    assert data["failure_experiments"] == 1
+    (check,) = data["exposure_checks"]
+    assert check["failed_nodes"] == ["resilience-research-worker"]
+    assert check["predicted_available"] is False and check["observed_available"] is False

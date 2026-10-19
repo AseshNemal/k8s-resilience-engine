@@ -1,95 +1,95 @@
 import pytest
-from unittest.mock import patch, MagicMock
-from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import get_cluster_nodes, get_cluster_pods
+from unittest.mock import MagicMock, patch
 
-@patch('app.engine.deployment_topology_modeling.live_state.cluster_state_parser.client.CoreV1Api')
-@patch('app.engine.deployment_topology_modeling.live_state.cluster_state_parser.config.load_kube_config')
-def test_control_plane_nodes_are_excluded(mock_kube_config, mock_core_api):
-    """Test: control-plane nodes are not returned"""
-    
-    # Setup mock
-    mock_api_instance = MagicMock()
-    mock_core_api.return_value = mock_api_instance
-
-    # Mock a worker node and a control-plane node
-    worker_node = MagicMock()
-    worker_node.metadata.name = "worker-1"
-    worker_node.metadata.labels = {"topology.kubernetes.io/zone": "zone-a"}
-    worker_node.status.allocatable = {"cpu": "4", "memory": "16Gi"}
-
-    cp_node1 = MagicMock()
-    cp_node1.metadata.name = "cp-1"
-    cp_node1.metadata.labels = {"node-role.kubernetes.io/control-plane": "true"}
-    cp_node1.status.allocatable = {"cpu": "4", "memory": "16Gi"}
-
-    cp_node2 = MagicMock()
-    cp_node2.metadata.name = "cp-2"
-    cp_node2.metadata.labels = {"node-role.kubernetes.io/master": "true"}
-    cp_node2.status.allocatable = {"cpu": "4", "memory": "16Gi"}
-
-    mock_node_list = MagicMock()
-    mock_node_list.items = [worker_node, cp_node1, cp_node2]
-    mock_api_instance.list_node.return_value = mock_node_list
-
-    # Execute
-    nodes = get_cluster_nodes()
-
-    # Assert
-    assert len(nodes) == 1
-    assert nodes[0].name == "worker-1"
+from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import (
+    get_cluster_pods,
+    nodes_from_objects,
+    pods_from_objects,
+)
+from tests.deployment_topology_modeling import kind_snapshot
 
 
-@patch('app.engine.deployment_topology_modeling.live_state.cluster_state_parser.client.CoreV1Api')
-@patch('app.engine.deployment_topology_modeling.live_state.cluster_state_parser.config.load_kube_config')
-def test_pod_readiness_mapped_correctly(mock_kube_config, mock_core_api):
-    """Test: pod readiness mapped correctly from conditions"""
+def _node(name, labels=None, ready="True", unschedulable=None, cpu="4", memory="8Gi"):
+    return {
+        "metadata": {"name": name, "labels": labels or {}},
+        "spec": {"unschedulable": unschedulable} if unschedulable is not None else {},
+        "status": {"allocatable": {"cpu": cpu, "memory": memory},
+                   "conditions": [{"type": "Ready", "status": ready}]},
+    }
 
-    # Setup mock
-    mock_api_instance = MagicMock()
-    mock_core_api.return_value = mock_api_instance
 
-    # Pod 1: Ready is True
-    ready_pod = MagicMock()
-    ready_pod.metadata.name = "pod-ready"
-    ready_pod.spec.node_name = "node-1"
-    ready_cond = MagicMock()
-    ready_cond.type = "Ready"
-    ready_cond.status = "True"
-    ready_pod.status.conditions = [ready_cond]
-    ready_pod.metadata.owner_references = None
-    ready_pod.metadata.labels = {}
+def _pod(name, node, ready="True", phase="Running", requests=None, owner=None):
+    return {
+        "metadata": {"name": name, "namespace": "ns", "labels": {"app": "x"},
+                     "ownerReferences": [owner] if owner else []},
+        "spec": {"nodeName": node, "containers": [{"resources": {"requests": requests or {}}}]},
+        "status": {"phase": phase, "conditions": [{"type": "Ready", "status": ready}],
+                   "containerStatuses": [{"restartCount": 2}]},
+    }
 
-    # Pod 2: Ready is False
-    unready_pod = MagicMock()
-    unready_pod.metadata.name = "pod-unready"
-    unready_pod.spec.node_name = "node-1"
-    unready_cond = MagicMock()
-    unready_cond.type = "Ready"
-    unready_cond.status = "False"
-    unready_pod.status.conditions = [unready_cond]
-    unready_pod.metadata.owner_references = None
-    unready_pod.metadata.labels = {}
 
-    # Pod 3: No conditions array
-    no_cond_pod = MagicMock()
-    no_cond_pod.metadata.name = "pod-noconds"
-    no_cond_pod.spec.node_name = "node-2"
-    no_cond_pod.status.conditions = None
-    no_cond_pod.metadata.owner_references = None
-    no_cond_pod.metadata.labels = {}
+def test_control_plane_nodes_are_excluded():
+    nodes = nodes_from_objects([
+        _node("worker-1"),
+        _node("cp-1", {"node-role.kubernetes.io/control-plane": ""}),
+        _node("cp-2", {"node-role.kubernetes.io/master": "true"}),
+    ], [])
+    assert [n.name for n in nodes] == ["worker-1"]
 
-    mock_pod_list = MagicMock()
-    mock_pod_list.items = [ready_pod, unready_pod, no_cond_pod]
-    mock_api_instance.list_namespaced_pod.return_value = mock_pod_list
 
-    # Execute
-    pods = get_cluster_pods()
+def test_real_kind_snapshot_nodes():
+    nodes = nodes_from_objects(kind_snapshot.node_objects(), kind_snapshot.pod_objects())
+    assert [n.name for n in nodes] == [
+        "resilience-research-worker", "resilience-research-worker2", "resilience-research-worker3",
+    ]
+    assert all(n.ready is True and n.schedulable for n in nodes)
+    assert nodes[0].labels["research-node"] == "worker-1"
+    assert nodes[0].zone is None  # KinD nodes have no zone label; none is invented
+    # Hand-computed: allocatable 8 CPU, 4010356Ki memory; 3 pods x (50m CPU, 32Mi) requested.
+    assert float(nodes[0].cpu_available) == pytest.approx(8 - 3 * 0.05)
+    assert float(nodes[0].memory_available) == pytest.approx(4010356 * 1024 - 3 * 32 * 1024 ** 2)
+    assert float(nodes[1].cpu_available) == pytest.approx(8.0)
 
-    # Assert
+
+def test_node_ready_and_cordon_state():
+    nodes = nodes_from_objects([_node("a", ready="Unknown"), _node("b", unschedulable=True)], [])
+    assert nodes[0].ready is False
+    assert nodes[1].schedulable is False
+
+
+def test_terminal_pods_do_not_consume_capacity():
+    pods = [_pod("done", "a", phase="Succeeded", requests={"cpu": "1"}),
+            _pod("run", "a", requests={"cpu": "500m"})]
+    (node,) = nodes_from_objects([_node("a")], pods)
+    assert float(node.cpu_available) == pytest.approx(3.5)
+
+
+def test_pod_readiness_phase_and_owner():
+    owner = {"kind": "ReplicaSet", "name": "x-rs", "uid": "u1", "controller": True}
+    pods = pods_from_objects([
+        _pod("ready", "n1", owner=owner),
+        _pod("unready", "n1", ready="False"),
+        {"metadata": {"name": "noconds"}, "spec": {}, "status": {"phase": "Pending"}},
+    ], namespace="ns")
+    assert [p.ready for p in pods] == [True, False, False]
+    assert pods[0].owner_kind == "ReplicaSet" and pods[0].owner_uid == "u1"
+    assert pods[0].restart_count == 2
+    assert pods[2].node is None and pods[2].phase == "Pending"
+
+
+def test_real_kind_snapshot_pods():
+    pods = pods_from_objects(kind_snapshot.pod_objects(), "resilience-test")
     assert len(pods) == 3
-    assert pods[0].name == "pod-ready"
-    assert pods[0].ready is True
-    assert pods[1].name == "pod-unready"
-    assert pods[1].ready is False
-    assert pods[2].name == "pod-noconds"
-    assert pods[2].ready is False
+    assert {p.node for p in pods} == {"resilience-research-worker"}
+    assert all(p.ready and p.phase == "Running" and p.owner_name == "paymentservice-74d644658f" for p in pods)
+
+
+@patch("app.engine.deployment_topology_modeling.live_state.cluster_state_parser.client")
+@patch("app.engine.deployment_topology_modeling.live_state.cluster_state_parser._load_kubernetes_config")
+def test_get_cluster_pods_converts_api_objects(_mock_config, mock_client):
+    api = MagicMock()
+    mock_client.CoreV1Api.return_value = api
+    mock_client.ApiClient.return_value.sanitize_for_serialization.return_value = kind_snapshot.pod_objects()
+    pods = get_cluster_pods("resilience-test")
+    api.list_namespaced_pod.assert_called_once_with(namespace="resilience-test")
+    assert len(pods) == 3
