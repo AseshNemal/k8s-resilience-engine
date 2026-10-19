@@ -2,10 +2,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Response, status
 
-from app.engine.workflow_dependency_modeling.evaluator import (
-    GraphEvaluationResult,
-    run_sensitivity_analysis,
-)
+from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
 from app.engine.workflow_dependency_modeling.service import (
     approve_experiment_campaign,
     assess_experiment_campaign,
@@ -21,8 +18,7 @@ from app.engine.workflow_dependency_modeling.service import (
     create_experiment_campaign,
     discover_live_workflows,
     discover_analysis_workflows,
-    evaluate_workflow_by_id,
-    evaluate_approved_dependency_assessment,
+    evaluate_approved_dependency_assessment_with_reference,
     freeze_workflow_graph,
     get_live_workflow,
     get_workflow_analysis,
@@ -35,11 +31,8 @@ from app.engine.workflow_dependency_modeling.service import (
     get_dependency_assessment,
     get_dependency_classification_evaluation,
     get_dependency_classification_reference,
-    get_sample_workflow,
-    get_workflow_by_id,
     get_versioned_scenario,
     get_validated_workflow_graph,
-    list_benchmark_workflows,
     list_executions,
     list_experiment_campaigns,
     list_dependency_assessments,
@@ -51,7 +44,6 @@ from app.engine.workflow_dependency_modeling.service import (
     register_jaeger_execution,
     run_dependency_repeatability_analysis,
     run_dependency_sensitivity_analysis,
-    run_benchmark_batch,
     run_campaign_baseline_trial,
     run_campaign_intervention_trial,
     scenario_etag,
@@ -289,38 +281,6 @@ def revise_workflow_scenario(
 
 
 @router.post(
-    "/execution-batches/benchmarks/{workflow_id}",
-    status_code=status.HTTP_201_CREATED,
-    responses={
-        404: {"description": "Benchmark workflow or evidence was not found"},
-        409: {"description": "Execution ID already exists"},
-        422: {"description": "Execution registration is invalid"},
-    },
-)
-def execute_benchmark_batch(
-    workflow_id: str,
-    actor: str = Header(..., alias="X-Actor", min_length=1),
-    batch_id: str | None = Query(None, min_length=1),
-) -> list[dict[str, Any]]:
-    """Evaluate each separated fixture trace as an immutable execution record."""
-    try:
-        return [
-            outcome.to_mapping()
-            for outcome in run_benchmark_batch(
-                workflow_id,
-                actor=actor,
-                batch_id=batch_id,
-            )
-        ]
-    except FileNotFoundError as err:
-        raise HTTPException(status_code=404, detail=str(err)) from err
-    except ExecutionAlreadyExistsError as err:
-        raise HTTPException(status_code=409, detail=str(err)) from err
-    except ValueError as err:
-        raise HTTPException(status_code=422, detail=str(err)) from err
-
-
-@router.post(
     "/executions/jaeger",
     status_code=status.HTTP_201_CREATED,
     responses={
@@ -425,19 +385,32 @@ def read_workflow_dependency_assessment(assessment_id: str) -> dict[str, Any]:
 
 @router.get(
     "/dependency-assessments/{assessment_id}/graph-evaluation",
-    responses={404: {"description": "Assessment, approval, or reference was not found"}},
+    responses={
+        404: {"description": "Assessment or approval was not found"},
+        409: {"description": "No reference graph is available to score against (insufficient evidence)"},
+    },
 )
 def evaluate_approved_workflow_dependency_graph(
     assessment_id: str,
 ) -> dict[str, Any]:
-    """Evaluate an approved graph and its explicit mandatory-edge predictions."""
+    """Evaluate an approved graph against an explicitly supplied reference graph.
+
+    There is no built-in reference: without a configured reference source this answers 409
+    ``REFERENCE_EVIDENCE_UNAVAILABLE``. A successful answer states which source supplied the reference and
+    whether that reference is synthetic.
+    """
     try:
-        result = evaluate_approved_dependency_assessment(assessment_id)
+        result, reference, source = evaluate_approved_dependency_assessment_with_reference(assessment_id)
         return {
             "assessmentId": assessment_id,
+            "referenceProvenance": {
+                "source": source.name,
+                "workflowId": reference.workflow_id,
+                "synthetic": reference.synthetic,
+            },
             **_graph_evaluation_payload(result),
         }
-    except (DependencyAssessmentNotFoundError, FileNotFoundError) as err:
+    except DependencyAssessmentNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
@@ -1014,103 +987,6 @@ def read_live_evidence(
 
 
 @router.get(
-    "/sample",
-    response_model=WorkflowGraph,
-    response_model_by_alias=True,
-    summary="Get sample workflow graph",
-)
-def read_sample_workflow() -> WorkflowGraph:
-    """Return the checkout workflow graph computed from sample Jaeger trace data."""
-    return get_sample_workflow()
-
-
-@router.get(
-    "/benchmarks",
-    summary="List separated synthetic workflow fixtures",
-)
-def get_benchmark_workflows() -> list[dict[str, Any]]:
-    """List scenario/evidence fixtures and whether a reference is available."""
-    return list_benchmark_workflows()
-
-
-@router.get(
-    "/benchmark/{workflow_id}",
-    response_model_by_alias=True,
-    summary="Get workflow graph for a specific benchmark workflow",
-    responses=NOT_FOUND_RESPONSE,
-)
-def read_benchmark_workflow(
-    workflow_id: str,
-    mandatory_threshold: float = Query(
-        1.0, ge=0.0, le=1.0, description="Mandatory-candidate frequency threshold"
-    ),
-) -> WorkflowGraph:
-    """Build and return a WorkflowGraph for a specific benchmark workflow ID."""
-    try:
-        return get_workflow_by_id(workflow_id, mandatory_threshold=mandatory_threshold)
-    except FileNotFoundError as err:
-        raise HTTPException(status_code=404, detail=str(err)) from err
-
-
-@router.get(
-    "/evaluation/accuracy",
-    summary="Compare a fixture prediction with its separate synthetic reference",
-    responses=NOT_FOUND_RESPONSE,
-)
-def evaluate_workflow_accuracy(
-    workflow_id: str = Query("checkout", description="Benchmark workflow ID"),
-    mandatory_threshold: float = Query(
-        1.0, ge=0.0, le=1.0, description="Mandatory-candidate frequency threshold"
-    ),
-) -> dict[str, Any]:
-    """Evaluate only after prediction, using the separate reference store."""
-    try:
-        result = evaluate_workflow_by_id(
-            workflow_id, mandatory_threshold=mandatory_threshold
-        )
-    except FileNotFoundError as err:
-        raise HTTPException(status_code=404, detail=str(err)) from err
-
-    return _graph_evaluation_payload(
-        result,
-        mandatory_threshold=mandatory_threshold,
-        graph_processing_time_ms=result.graph_processing_time_ms,
-    )
-
-
-@router.get(
-    "/evaluation/sensitivity",
-    summary="Run sensitivity analysis across threshold range",
-    deprecated=True,
-    responses=NOT_FOUND_RESPONSE,
-)
-def get_sensitivity_analysis(
-    workflow_id: str = Query("checkout", description="Benchmark workflow ID"),
-) -> list[dict[str, Any]]:
-    """Run mandatory-aware synthetic fixture sensitivity for compatibility."""
-    try:
-        steps = run_sensitivity_analysis(workflow_id)
-        return [
-            {
-                "threshold": s.threshold,
-                "precision": s.precision,
-                "recall": s.recall,
-                "f1": s.f1,
-                "edgeAccuracy": s.edge_accuracy,
-                "mandatoryServicesCount": s.mandatory_services_count,
-                "optionalServicesCount": s.optional_services_count,
-                "mandatoryServices": s.mandatory_services,
-                "optionalServices": s.optional_services,
-            }
-            for s in steps
-        ]
-    except FileNotFoundError as err:
-        raise HTTPException(status_code=404, detail=str(err)) from err
-
-
-
-
-@router.get(
     "/jaeger/status",
     summary="Check Jaeger server connectivity",
 )
@@ -1124,28 +1000,6 @@ def check_jaeger_status(
         "healthy": healthy,
         "jaegerUrl": jaeger_url,
         "message": "Jaeger is reachable" if healthy else "Jaeger server unreachable",
-    }
-
-
-@router.post(
-    "/jaeger/seed",
-    summary="Seed demo traces into Jaeger OTLP receiver",
-    responses=JAEGER_UNAVAILABLE_RESPONSE,
-)
-def seed_jaeger_traces(
-    otlp_url: str = Query("http://localhost:4318", description="Jaeger OTLP HTTP receiver URL"),
-) -> dict[str, Any]:
-    """Push synthetic demo spans directly into Jaeger for testing and discovery."""
-    client = JaegerClient()
-    success = client.seed_demo_traces(otlp_url=otlp_url)
-    if not success:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Could not seed demo traces to Jaeger OTLP receiver at {otlp_url}",
-        )
-    return {
-        "success": True,
-        "message": "Successfully seeded demo traces into Jaeger for service 'frontend'",
     }
 
 

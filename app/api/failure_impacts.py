@@ -1,13 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.engine.failure_impact_prediction.service import (
-    RuntimeInputUnavailableError,
-    get_demo_deployment,
-    get_sample_failure_impact,
-    predict_demo_failure_impact,
-    predict_runtime_failure_impact,
+    predict_runtime_failure_impact_with_evidence,
 )
-from app.shared.schemas.deployment import DeploymentGraph
 from app.shared.schemas.failure_impact import FailureImpactReport
 
 
@@ -18,57 +13,19 @@ router = APIRouter(
 
 
 @router.get(
-    "/sample",
-    response_model=FailureImpactReport,
-    response_model_by_alias=True,
-)
-def read_sample_failure_impact() -> FailureImpactReport:
-    return get_sample_failure_impact()
-
-
-@router.get(
-    "/demo-deployment",
-    response_model=DeploymentGraph,
-    response_model_by_alias=True,
-)
-def read_demo_deployment() -> DeploymentGraph:
-    """Return disclosed synthetic placements completing current upstream samples."""
-
-    return get_demo_deployment()
-
-
-@router.get(
-    "/simulate",
-    response_model=FailureImpactReport,
-    response_model_by_alias=True,
-    responses={422: {"description": "The selected worker node is unknown"}},
-)
-def simulate_demo_failure(
-    failed_node: str = Query(
-        "node-1",
-        min_length=1,
-        description="Worker node to remove virtually from the demo topology",
-    ),
-) -> FailureImpactReport:
-    """Run Component 3's deterministic engine over contract-compatible fixtures."""
-
-    try:
-        return predict_demo_failure_impact(failed_node)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-
-
-@router.get(
     "/runtime",
     response_model=FailureImpactReport,
     response_model_by_alias=True,
     responses={
-        404: {"description": "A frozen workflow graph was not found"},
+        404: {"description": "No frozen workflow graph exists for the workflow"},
+        409: {"description": "The discovered topology is not complete enough for this workflow"},
         422: {"description": "The runtime inputs or failed node are invalid"},
-        503: {"description": "An upstream component input is unavailable"},
+        502: {"description": "The connected cluster could not be read"},
+        503: {"description": "No cluster is connected, or an upstream component input is unavailable"},
     },
 )
 def simulate_runtime_failure(
+    response: Response,
     workflow_id: str = Query(
         ...,
         min_length=1,
@@ -85,17 +42,22 @@ def simulate_runtime_failure(
         description="Kubernetes namespace collected by Component 2",
     ),
 ) -> FailureImpactReport:
-    """Run Component 3 over validated workflow and current topology inputs."""
+    """Predict the impact of a virtual worker-node failure on the connected cluster's real topology.
+
+    The result is a prediction, not an observation. Evidence problems (no cluster, cluster errors,
+    incomplete topology, no frozen workflow) are explicit errors with stable codes. The topology's
+    status, capture time and warning codes are returned in ``X-Topology-*`` headers.
+    """
 
     try:
-        return predict_runtime_failure_impact(
-            workflow_id,
-            failed_node,
-            namespace,
+        report, evidence = predict_runtime_failure_impact_with_evidence(
+            workflow_id, failed_node, namespace
         )
-    except LookupError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    except RuntimeInputUnavailableError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+    codes = sorted({w.code for w in evidence.topology_warnings} | {u.reason for u in evidence.topology_unresolved})
+    response.headers["X-Topology-Status"] = evidence.topology_status
+    response.headers["X-Topology-Captured-At"] = evidence.topology_captured_at
+    response.headers["X-Topology-Warnings"] = ",".join(codes)
+    return report

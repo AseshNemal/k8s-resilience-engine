@@ -18,7 +18,7 @@ class PodPlacementRecord(BaseModel):
     pod_name: str = Field(..., description="Unique name of the pod")
     service_name: str = Field(..., description="Logical microservice owning this pod")
     node_name: str = Field(..., description="Physical worker node hosting the pod")
-    zone: str = Field(default="default-zone", description="Availability zone label")
+    zone: str | None = Field(default="default-zone", description="Availability zone label; None when the cluster reports none")
     is_ready: bool = Field(default=True, description="Whether the pod passes readiness probes")
 
 

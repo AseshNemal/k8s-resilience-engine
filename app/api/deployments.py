@@ -1,47 +1,41 @@
 """
 Deployment Topology Modeling API Endpoints (Member 2).
-Categorized into 6 distinct research topics for Swagger documentation:
-- Topic 1: Topology & Live Cluster State (Nodes, Zones, Services, Placements)
-- Topic 2: Declared Manifest Intent (YAML parsing, Replicas, Constraints, Compliance)
+
+Every route reads the connected cluster. When the cluster cannot be read the response is an explicit
+error (see app/shared/evidence_errors.py); there is no sample, demo or benchmark data behind any route.
+
+- Topic 1: Topology & Live Cluster State (Nodes, Zones, Services, Placements, discovery envelope)
+- Topic 2: Declared Manifest Intent (needs an explicitly selected declared-state source)
 - Topic 3: Resilience Drift & Failure Domain Exposure (HHI Concentration, SPOFs, 5 Detectors, Baseline B2)
-- Topic 4: Chaos Engineering (8 Section 10 Disruption Scenarios, Markov Pod Migrations, Safety Guards)
-- Topic 5: Cluster Snapshots & Cryptographic Provenance (SHA-256 Immutable State Freezing)
-- Topic 6: Academic Benchmarks & Publications (>=98% Accuracy Certificate, LaTeX Tables, Markdown Reports)
+- Topic 4: Chaos safety pre-flight checks (read-only)
+- Topic 5: Cluster Snapshots & Provenance (SHA-256 snapshots of live placement)
 """
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query
 
+from app.engine.deployment_topology_modeling.discovery import DiscoveryResult
 from app.engine.deployment_topology_modeling.service import (
-    get_sample_deployment,
+    analyze_resilience_drift,
+    clear_cluster_snapshots,
+    diff_cluster_snapshots,
+    discover_live,
+    freeze_cluster_state,
+    get_chaos_safety_status,
+    get_cluster_snapshot,
+    get_cluster_zones,
+    get_concentration_rankings,
+    get_drift_categories_summary,
+    get_drift_spofs,
     get_live_deployment_graph,
     get_manifest_intent,
     get_manifest_service_detail,
-    analyze_resilience_drift,
-    diff_cluster_snapshots,
-    run_chaos_benchmark_pipeline,
-    run_single_chaos_scenario,
-    get_academic_accuracy_certificate,
-    get_cluster_zones,
     get_node_detail,
-    get_drift_spofs,
-    get_drift_categories_summary,
-    get_concentration_rankings,
     get_node_risk_rankings,
     list_cluster_snapshots,
-    get_cluster_snapshot,
-    freeze_cluster_state,
-    clear_cluster_snapshots,
-    get_chaos_safety_status,
     validate_chaos_action,
-    get_scenario_latex_table,
-    run_parametric_ensemble_pipeline,
-    get_parametric_ensemble_markdown_report,
 )
+from app.shared.evidence_errors import unavailable
 from app.shared.schemas.deployment import DeploymentGraph
-from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
-from experiments.placement_drift.disruption_reporter import DisruptionReporter
-from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix
-from experiments.placement_drift.snapshot_repository import SnapshotRepository
 
 
 router = APIRouter(prefix="/api/deployments")
@@ -49,9 +43,8 @@ router = APIRouter(prefix="/api/deployments")
 TAG_TOPOLOGY = "1. Topology & Live Cluster State"
 TAG_MANIFEST = "2. Declared Manifest Intent"
 TAG_DRIFT = "3. Resilience Drift & Failure Domain Exposure"
-TAG_CHAOS = "4. Chaos Engineering (Disruption Scenarios)"
-TAG_SNAPSHOTS = "5. Cluster Snapshots & Cryptographic Provenance"
-TAG_BENCHMARKS = "6. Academic Benchmarks & Publications"
+TAG_CHAOS = "4. Chaos Safety Pre-flight"
+TAG_SNAPSHOTS = "5. Cluster Snapshots & Provenance"
 
 DESC_K8S_NAMESPACE = "Target Kubernetes namespace"
 DESC_TARGET_NAMESPACE = "Target namespace"
@@ -62,17 +55,6 @@ DESC_TARGET_NAMESPACE = "Target namespace"
 # =====================================================================
 
 @router.get(
-    "/sample",
-    response_model_by_alias=True,
-    tags=[TAG_TOPOLOGY],
-    summary="[Phase 1] Retrieve baseline static sample deployment graph",
-)
-def read_sample_deployment() -> DeploymentGraph:
-    """Returns static golden reference topology model for offline testing."""
-    return get_sample_deployment()
-
-
-@router.get(
     "/live",
     response_model_by_alias=True,
     tags=[TAG_TOPOLOGY],
@@ -81,8 +63,22 @@ def read_sample_deployment() -> DeploymentGraph:
 def read_live_deployment(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> DeploymentGraph:
-    """Queries live Kubernetes API (Docker Desktop / KinD) and compiles topology graph."""
+    """The DeploymentGraph of the connected cluster. Fails explicitly when the cluster cannot be read."""
     return get_live_deployment_graph(namespace=namespace)
+
+
+@router.get(
+    "/discovery",
+    response_model_by_alias=True,
+    tags=[TAG_TOPOLOGY],
+    summary="[Phase 1] Live topology with discovery status, warnings and unresolved relationships",
+)
+def read_discovery(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> DiscoveryResult:
+    """The DeploymentGraph wrapped with: status (ok/empty/partial), capture time, connection fingerprint
+    (not proof of cluster identity), warnings, unresolved relationships and per-service evidence."""
+    return discover_live(namespace=namespace)
 
 
 @router.get(
@@ -200,7 +196,8 @@ def get_service_topology_detail(
     summary="[Phase 2] Parse declared YAML intent from deployment manifests",
 )
 def read_manifest_intent() -> List[Dict[str, Any]]:
-    """Parses deploy/kubernetes/ manifests and extracts declared replicas, limits, and topology spread."""
+    """Declared intent from an explicitly selected source. None is selected by default, so this reports
+    that declared state is unavailable (409)."""
     return get_manifest_intent()
 
 
@@ -247,6 +244,12 @@ def get_manifest_compliance_rate(
 ) -> Dict[str, Any]:
     """Calculates percentage of live workloads strictly meeting their declared intent constraints."""
     report, _ = analyze_resilience_drift(namespace=namespace)
+    if report.constraint_compliance_rate is None:
+        raise unavailable(
+            "DECLARED_STATE_UNAVAILABLE",
+            "Constraint compliance needs declared deployment intent, and no declared-state source is selected.",
+            "deployment_topology",
+        )
     return {
         "constraint_compliance_rate": report.constraint_compliance_rate,
         "total_services": report.total_services,
@@ -390,108 +393,6 @@ def diff_snapshots(
 # =====================================================================
 
 @router.get(
-    "/chaos/scenarios",
-    tags=[TAG_CHAOS],
-    summary="[Phase 4] Catalog of all 8 Section 10 controlled disruption scenarios",
-)
-def list_chaos_scenarios() -> List[Dict[str, Any]]:
-    """Returns metadata for all 8 controlled Kubernetes disruption scenarios from the Study Guide."""
-    scenarios = []
-    for cls in DisruptionOrchestrator.ALL_SCENARIO_CLASSES:
-        dummy = cls()
-        scenarios.append({
-            "scenario_id": dummy.scenario_id,
-            "scenario_name": dummy.scenario_name,
-            "disruption_type": dummy.disruption_type.value,
-            "target_service": dummy.target_service,
-            "description": cls.__doc__.strip() if cls.__doc__ else "",
-        })
-    return scenarios
-
-
-@router.get(
-    "/chaos/scenarios/{scenario_id}",
-    tags=[TAG_CHAOS],
-    summary="[Phase 4] Inspect scenario specification, parameters, and rollback design",
-    responses={404: {"description": "Scenario not found"}},
-)
-def get_chaos_scenario_detail(
-    scenario_id: str,
-) -> Dict[str, Any]:
-    """Retrieves target parameters and lifecycle specifications for a single chaos scenario."""
-    for cls in DisruptionOrchestrator.ALL_SCENARIO_CLASSES:
-        dummy = cls()
-        if dummy.scenario_id == scenario_id:
-            return {
-                "scenario_id": dummy.scenario_id,
-                "scenario_name": dummy.scenario_name,
-                "disruption_type": dummy.disruption_type.value,
-                "target_service": dummy.target_service,
-                "namespace": dummy.namespace,
-                "execution_mode": dummy.execution_mode.value,
-                "description": cls.__doc__.strip() if cls.__doc__ else "",
-            }
-    raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
-
-
-@router.post(
-    "/chaos/run/{scenario_id}",
-    tags=[TAG_CHAOS],
-    summary="[Phase 4] Execute a single designated disruption scenario by ID",
-    responses={404: {"description": "Scenario not found"}},
-)
-def run_chaos_scenario(
-    scenario_id: str,
-    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
-) -> Dict[str, Any]:
-    """Injects a specific disruption fault (e.g. node drain, pod crash) and calculates placement drift."""
-    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
-    return result.model_dump()
-
-
-@router.get(
-    "/chaos/matrix/{scenario_id}",
-    tags=[TAG_CHAOS],
-    summary="[Phase 4] Get Markov pod migration transition matrix for a scenario",
-    responses={
-        400: {"description": "Snapshot data missing for scenario"},
-        404: {"description": "Scenario not found"},
-    },
-)
-def get_scenario_transition_matrix(
-    scenario_id: str,
-) -> Dict[str, Any]:
-    """Builds and formats the Markov pod transition grid T[i, j] between T0 and T1 snapshots."""
-    repo = SnapshotRepository()
-    orchestrator = DisruptionOrchestrator(repository=repo)
-    result = orchestrator.run_scenario(scenario_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
-
-    t0 = repo.get(scenario_id, "T0")
-    t1 = repo.get(scenario_id, "T1")
-    if not t0 or not t1:
-        raise HTTPException(status_code=400, detail="Snapshot data missing for scenario.")
-
-    nodes, matrix, records = DriftTransitionMatrix.build_matrix(t0, t1)
-    ascii_table = DriftTransitionMatrix.format_ascii_table(nodes, matrix)
-    latex_table = DriftTransitionMatrix.format_latex_table(nodes, matrix)
-
-    return {
-        "scenario_id": scenario_id,
-        "nodes": nodes,
-        "transition_matrix": matrix,
-        "ascii_table": ascii_table,
-        "latex_table": latex_table,
-        "migration_records": [r.model_dump() for r in records],
-        "d_rate": result.d_rate,
-        "delta_e_rate": result.delta_e_rate,
-    }
-
-
-@router.get(
     "/chaos/safety/status",
     tags=[TAG_CHAOS],
     summary="[Phase 4] Inspect pre-flight safety guard status and protected namespaces",
@@ -569,93 +470,3 @@ def freeze_live_snapshot(
 def clear_snapshots_cache() -> Dict[str, Any]:
     """Clears in-memory snapshots cache."""
     return clear_cluster_snapshots()
-
-
-# =====================================================================
-# Topic 6: Academic Benchmarks & Publications
-# =====================================================================
-
-@router.get(
-    "/chaos/benchmarks",
-    tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Run all 8 disruption scenarios and compile benchmark metrics",
-)
-def get_chaos_benchmarks(
-    namespace: str = Query("default", description=f"{DESC_TARGET_NAMESPACE} for chaos simulation"),
-) -> Dict[str, Any]:
-    """Executes all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions."""
-    return run_chaos_benchmark_pipeline(namespace=namespace)
-
-
-@router.get(
-    "/benchmarks/accuracy",
-    tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Model Accuracy Certificate (>=98% Mapping, >=95% Concentration)",
-)
-def get_accuracy_certificate() -> Dict[str, Any]:
-    """Evaluates ground-truth accuracy metrics required by the viva evaluation panel."""
-    cert = get_academic_accuracy_certificate()
-    return cert.model_dump() if hasattr(cert, "model_dump") else dict(cert)
-
-
-@router.get(
-    "/benchmarks/report/markdown",
-    tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export publication-grade Markdown benchmark report",
-)
-def get_markdown_benchmark_report() -> Response:
-    """Returns formatted Markdown benchmark table with dissertation defense observations."""
-    orchestrator = DisruptionOrchestrator()
-    results = orchestrator.run_all()
-    metrics = orchestrator.compute_aggregate_metrics(results)
-    md_content = DisruptionReporter.generate_markdown_report(results, metrics)
-    return Response(content=md_content, media_type="text/markdown")
-
-
-@router.get(
-    "/benchmarks/report/json",
-    tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export full publication-grade JSON benchmark dataset",
-)
-def get_json_benchmark_report(
-    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
-) -> Dict[str, Any]:
-    """Returns serialized JSON benchmark dataset with aggregate metrics and per-scenario telemetry."""
-    return run_chaos_benchmark_pipeline(namespace=namespace)
-
-
-@router.get(
-    "/benchmarks/latex/{scenario_id}",
-    tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export publication-ready LaTeX transition matrix table",
-    responses={404: {"description": "Scenario not found or snapshot missing"}},
-)
-def get_latex_transition_table(
-    scenario_id: str,
-) -> Dict[str, Any]:
-    """Returns LaTeX table code snippet for the Markov transition grid T[i, j] of a scenario."""
-    res = get_scenario_latex_table(scenario_id=scenario_id)
-    if res is None:
-        raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found or snapshot missing.")
-    return res
-
-
-@router.get(
-    "/benchmarks/ensemble",
-    tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Multi-Service Parametric Ensemble Evaluation (Mean, Std Dev, 95% CI)",
-)
-def get_parametric_ensemble_dataset() -> Dict[str, Any]:
-    """Executes a 12-trial multi-workload parametric sweep and returns statistical ensemble metrics."""
-    return run_parametric_ensemble_pipeline()
-
-
-@router.get(
-    "/benchmarks/ensemble/markdown",
-    tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export publication-grade Markdown report for Multi-Service Ensemble",
-)
-def get_parametric_ensemble_markdown() -> Response:
-    """Returns formatted Markdown report with statistical summary and sensitivity tables for publication."""
-    md_content = get_parametric_ensemble_markdown_report()
-    return Response(content=md_content, media_type="text/markdown")

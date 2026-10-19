@@ -1,6 +1,5 @@
 from collections import Counter
 from typing import Dict, List, Any
-from app.engine.deployment_topology_modeling.live_state.ownership_resolver import resolve_deployment_ownership
 
 
 def analyze_replica_concentration(workloads: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -45,19 +44,3 @@ def analyze_replica_concentration(workloads: Dict[str, Dict[str, Any]]) -> List[
         })
 
     return analyzed_services
-
-
-if __name__ == "__main__":
-    from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import get_cluster_pods
-    print("--- REPLICA CONCENTRATION ANALYSIS ---")
-    live_pods = get_cluster_pods()
-    workloads = resolve_deployment_ownership(live_pods)
-    results = analyze_replica_concentration(workloads)
-
-    for svc in results:
-        if svc["pods"]:
-            print(f"Service: {svc['name']}")
-            print(f"  Ready Replicas:        {svc['readyReplicas']} / {svc['declaredReplicas']}")
-            print(f"  Replica Concentration: {svc['replicaConcentration']}")
-            print(f"  Exposed to Node(s):    {svc['exposedNodes']}")
-            print("-" * 40)

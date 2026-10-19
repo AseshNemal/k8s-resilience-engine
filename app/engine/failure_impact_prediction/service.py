@@ -17,6 +17,7 @@ from app.engine.failure_impact_prediction.node_failure_simulator import (
     simulate_node_failure,
 )
 from app.engine.failure_impact_prediction.runtime_provider import (
+    RuntimeComponentInputs,
     RuntimeInputUnavailableError,
     get_runtime_component_inputs,
 )
@@ -118,6 +119,23 @@ def predict_demo_failure_impact(failed_node: str) -> FailureImpactReport:
     return predict_failure_impact(workflow, deployment, failed_node)
 
 
+def predict_runtime_failure_impact_with_evidence(
+    workflow_id: str,
+    failed_node: str,
+    namespace: str = "default",
+) -> tuple[FailureImpactReport, RuntimeComponentInputs]:
+    """Predict from Component 1's frozen graph and Component 2's live topology.
+
+    Returns the report together with the evidence it was computed from (topology status, capture
+    time, warnings and unresolved items), so callers can show how complete the input was. The report
+    is a prediction about a virtual node failure, not an observation.
+    """
+
+    inputs = get_runtime_component_inputs(workflow_id, namespace)
+    report = predict_failure_impact(inputs.workflow, inputs.deployment, failed_node)
+    return report, inputs
+
+
 def predict_runtime_failure_impact(
     workflow_id: str,
     failed_node: str,
@@ -125,16 +143,11 @@ def predict_runtime_failure_impact(
 ) -> FailureImpactReport:
     """Predict from Component 1's frozen graph and Component 2's live topology."""
 
-    inputs = get_runtime_component_inputs(workflow_id, namespace)
-    return predict_failure_impact(
-        inputs.workflow,
-        inputs.deployment,
-        failed_node,
-    )
+    return predict_runtime_failure_impact_with_evidence(workflow_id, failed_node, namespace)[0]
 
 
 def get_sample_failure_impact() -> FailureImpactReport:
-    """Keep the original sample endpoint while returning a calculated report."""
+    """Test-fixture helper: a calculated report over the contract fixtures. No route or page uses it."""
 
     return predict_demo_failure_impact("node-1")
 
@@ -145,6 +158,7 @@ __all__ = [
     "get_sample_failure_impact",
     "predict_demo_failure_impact",
     "predict_failure_impact",
+    "predict_runtime_failure_impact_with_evidence",
     "predict_runtime_failure_impact",
     "RuntimeInputUnavailableError",
 ]

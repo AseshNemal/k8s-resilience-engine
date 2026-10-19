@@ -76,11 +76,12 @@ def test_placement_drift_report_markdown():
     assert "node-1" in md
 
 
-from unittest.mock import patch
+from tests.support.fake_cluster import cluster_from_graph
+from app.engine.deployment_topology_modeling.service import get_sample_deployment
 
 
-@patch("app.engine.deployment_topology_modeling.service.get_cluster_nodes", side_effect=Exception("No cluster in test"))
-def test_service_live_deployment_graph_integration(mock_nodes):
+def test_service_live_deployment_graph_integration(use_cluster):
+    use_cluster(cluster_from_graph(get_sample_deployment()))
     graph = get_live_deployment_graph()
     assert graph.nodes is not None
     assert graph.services is not None
@@ -91,22 +92,23 @@ def test_service_live_deployment_graph_integration(mock_nodes):
         assert isinstance(svc.drift_reasons, list)
 
 
-@patch("app.engine.deployment_topology_modeling.service.get_cluster_nodes", side_effect=Exception("No cluster in test"))
-def test_service_analyze_resilience_drift_facade(mock_nodes):
+def test_service_analyze_resilience_drift_facade(use_cluster):
+    use_cluster(cluster_from_graph(get_sample_deployment()))
     cluster_report, b2 = analyze_resilience_drift()
     assert isinstance(cluster_report, ClusterExposureReport)
     assert isinstance(b2, BaselineB2Result)
     assert cluster_report.total_services >= 0
     assert 0.0 <= cluster_report.exposure_rate <= 1.0
-    assert 0.0 <= cluster_report.constraint_compliance_rate <= 1.0
+    assert cluster_report.constraint_compliance_rate is None  # no declared-state source selected
+    assert cluster_report.declared_state == "unavailable"
 
 
 from fastapi import FastAPI
 from app.engine.deployment_topology_modeling.endpoints import router as engine_router
 
 
-@patch("app.engine.deployment_topology_modeling.service.get_cluster_nodes", side_effect=Exception("No cluster in test"))
-def test_engine_endpoints_drift_and_baseline(mock_nodes):
+def test_engine_endpoints_drift_and_baseline(use_cluster):
+    use_cluster(cluster_from_graph(get_sample_deployment()))
     test_app = FastAPI()
     test_app.include_router(engine_router)
     client = TestClient(test_app)

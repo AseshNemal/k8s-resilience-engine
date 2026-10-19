@@ -12,7 +12,7 @@ def test_approval_never_auto_applies(client: TestClient, mock_get_sample):
     and does not attempt to execute Kubernetes changes.
     """
     recommendation_id = "rec-safety-1"
-    mock_get_sample.side_effect = lambda: mock_get_sample._get_mock(recommendation_id)
+    mock_get_sample.set(recommendation_id)
     
     # 1. Request approval
     client.post(f"/api/recommendations/{recommendation_id}/request-approval", json={"recommendationId": recommendation_id, "proposalVersion": "v1"})

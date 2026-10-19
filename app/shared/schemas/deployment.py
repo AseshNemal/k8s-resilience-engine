@@ -14,7 +14,8 @@ class PodModel(APIModel):
     node: str
     zone: str | None = None
     ready: bool
-    restart_count: int = 0
+    # None means the cluster did not report container statuses; 0 is an observed zero.
+    restart_count: int | None = None
 
 
 class ClusterMetadata(APIModel):
@@ -23,9 +24,11 @@ class ClusterMetadata(APIModel):
 
 
 class ValidationMetrics(APIModel):
-    service_pod_mapping_accuracy: float = 1.0
-    pod_node_mapping_accuracy: float = 1.0
-    concentration_detection_accuracy: float = 1.0
+    # Accuracy is reported only when it has been measured against ground truth; None means
+    # "not measured". It is never defaulted to a perfect score.
+    service_pod_mapping_accuracy: float | None = None
+    pod_node_mapping_accuracy: float | None = None
+    concentration_detection_accuracy: float | None = None
     runtime_overhead_ms: float = 0.0
 
 

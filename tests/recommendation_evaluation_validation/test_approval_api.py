@@ -3,11 +3,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from alembic import command
 from alembic.config import Config
-from unittest.mock import patch
 
 from app.main import app
 from app.core.database import get_engine
-from app.api.recommendations import get_db
+from app.api.recommendations import get_db, get_recommendation_provider
+from app.engine.recommendation_evaluation_validation.approval import LIVE_EVIDENCE_SOURCE, LiveRecommendation
 from sqlalchemy.orm import Session
 from app.shared.schemas.recommendation import RecommendationReport, RecommendationCandidate
 from datetime import datetime, timezone
@@ -40,34 +40,58 @@ def override_get_db(sqlite_url: str):
 def client(override_get_db) -> TestClient:
     return TestClient(app)
 
-@pytest.fixture
-def mock_get_sample():
-    with patch("app.api.recommendations.get_sample_recommendation") as mock:
-        def _get_mock(rec_id: str, feasible: bool = True):
-            return RecommendationReport(
-                workflow_id="wf1",
-                recommendations=[
-                    RecommendationCandidate(
-                        id=rec_id,
-                        type="TOPOLOGY_SPREAD",
-                        service="test",
-                        feasible=feasible,
-                        predicted_blast_radius=0.5,
-                        risk_reduction=0.0,
-                        resource_cost="high",
-                        confidence=0.0,
-                        score=0.0
-                    )
-                ],
-                selected_recommendation_id=rec_id
+def make_report(rec_id: str, feasible: bool = True) -> RecommendationReport:
+    return RecommendationReport(
+        workflow_id="wf1",
+        recommendations=[
+            RecommendationCandidate(
+                id=rec_id,
+                type="TOPOLOGY_SPREAD",
+                service="test",
+                feasible=feasible,
+                predicted_blast_radius=0.5,
+                risk_reduction=0.0,
+                resource_cost="high",
+                confidence=0.0,
+                score=0.0
             )
-        mock.side_effect = lambda: _get_mock("default-rec")
-        mock._get_mock = _get_mock
-        yield mock
+        ],
+        selected_recommendation_id=rec_id
+    )
+
+
+LIVE_EVIDENCE = {
+    "source": LIVE_EVIDENCE_SOURCE,
+    "topologyCapturedAt": "2026-01-01T00:00:00Z",
+    "connectionFingerprint": "test-connection",
+}
+
+
+class LiveSource:
+    """Stands in for the future live recommendation pipeline (test double behind a dependency)."""
+
+    def __init__(self) -> None:
+        self.report = make_report("default-rec")
+
+    def set(self, rec_id: str, feasible: bool = True) -> None:
+        self.report = make_report(rec_id, feasible)
+
+    def __call__(self) -> LiveRecommendation:
+        return LiveRecommendation(report=self.report, evidence=dict(LIVE_EVIDENCE))
+
+
+@pytest.fixture
+def mock_get_sample(override_get_db):
+    """Kept under its old name for the tests below: a controllable *live* recommendation source."""
+    source = LiveSource()
+    app.dependency_overrides[get_recommendation_provider] = lambda: source
+    source._get_mock = make_report
+    yield source
+    app.dependency_overrides.pop(get_recommendation_provider, None)
 
 def test_request_approval_succeeds_and_get_returns_it(client: TestClient, mock_get_sample):
     recommendation_id = "rec-1"
-    mock_get_sample.side_effect = lambda: mock_get_sample._get_mock(recommendation_id)
+    mock_get_sample.set(recommendation_id)
     
     # 1. request approval succeeds
     req_payload = {"recommendationId": recommendation_id, "proposalVersion": "v1", "yamlSnapshot": "apiVersion: v1"}
@@ -85,7 +109,7 @@ def test_request_approval_succeeds_and_get_returns_it(client: TestClient, mock_g
 
 def test_approve_succeeds_after_request(client: TestClient, mock_get_sample):
     recommendation_id = "rec-approve-1"
-    mock_get_sample.side_effect = lambda: mock_get_sample._get_mock(recommendation_id)
+    mock_get_sample.set(recommendation_id)
     
     # request
     client.post(f"/api/recommendations/{recommendation_id}/request-approval", json={"recommendationId": recommendation_id, "proposalVersion": "v1"})
@@ -105,7 +129,7 @@ def test_approve_succeeds_after_request(client: TestClient, mock_get_sample):
 
 def test_reject_succeeds_after_request(client: TestClient, mock_get_sample):
     recommendation_id = "rec-reject-1"
-    mock_get_sample.side_effect = lambda: mock_get_sample._get_mock(recommendation_id)
+    mock_get_sample.set(recommendation_id)
     
     # request
     client.post(f"/api/recommendations/{recommendation_id}/request-approval", json={"recommendationId": recommendation_id, "proposalVersion": "v1"})
@@ -123,7 +147,7 @@ def test_reject_succeeds_after_request(client: TestClient, mock_get_sample):
 
 def test_failures(client: TestClient, mock_get_sample):
     recommendation_id = "rec-fail-1"
-    mock_get_sample.side_effect = lambda: mock_get_sample._get_mock(recommendation_id)
+    mock_get_sample.set(recommendation_id)
     
     # 7. unknown approval -> 404
     res = client.get("/api/recommendations/unknown-id/approval")
@@ -156,7 +180,7 @@ def test_failures(client: TestClient, mock_get_sample):
     assert res.status_code == 422
 
 def test_infeasible_recommendation_422(mock_get_sample, client: TestClient):
-    mock_get_sample.side_effect = lambda: mock_get_sample._get_mock("infeasible-rec", feasible=False)
+    mock_get_sample.set("infeasible-rec", feasible=False)
     
     # 12. infeasible recommendation -> 422
     res = client.post("/api/recommendations/infeasible-rec/request-approval", json={"recommendationId": "infeasible-rec", "proposalVersion": "v1"})

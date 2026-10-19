@@ -10,44 +10,57 @@ from app.shared.schemas.deployment import (
     ValidationMetrics,
 )
 
+_BYTES_PER_GIB = 1024 ** 3
+_MEMORY_UNITS = {
+    "Ki": 1024, "Mi": 1024 ** 2, "Gi": 1024 ** 3, "Ti": 1024 ** 4,
+    "k": 1000, "K": 1000, "M": 1000 ** 2, "G": 1000 ** 3, "T": 1000 ** 4,
+}
+
+
 class DeploymentGraphBuilder:
-    """Transforms raw analytics and state data into the strict JSON DeploymentGraph."""
-    
+    """Transforms raw analytics and state data into the strict JSON DeploymentGraph.
+
+    Anything the cluster did not report stays ``None`` in the graph. No zone, capacity, node or
+    accuracy value is ever invented to fill a gap.
+    """
+
     def __init__(self):
         self.node_models: List[NodeModel] = []
         self.service_models: List[ServicePlacement] = []
-        self.node_zone_map: Dict[str, str] = {}
-        
+        self.node_zone_map: Dict[str, str | None] = {}
+
     def attach_nodes(self, nodes: List[Any]) -> None:
         """Parses and attaches worker nodes into the graph."""
         for n in nodes:
-            # We assume 'n' is a ClusterNode dataclass object.
             self.node_zone_map[n.name] = n.zone
             self.node_models.append(NodeModel(
                 name=n.name,
                 zone=n.zone,
-                cpu_available=self._parse_cpu_value(str(n.cpu_available)),
-                memory_available=self._parse_memory_value(str(n.memory_available)),
+                cpu_available=self._parse_cpu_value(n.cpu_available),
+                memory_available=self._parse_memory_value(n.memory_available),
             ))
-            
+
     def attach_services(self, analyzed_services: List[Dict[str, Any]], drift_reports: Dict[str, Dict[str, Any]]) -> None:
-        """Parses and attaches workloads along with drift reports into the graph."""
+        """Parses and attaches workloads along with drift reports into the graph.
+
+        Every pod passed in must already have an assigned node; pods without one are reported by the
+        discovery layer as unresolved and never reach this method.
+        """
         for svc in analyzed_services:
             if not svc.get("pods"):
                 continue
 
-            pod_models = []
-            for p in svc["pods"]:
-                pod_node = p.get("node") or "unknown-node"
-                pod_models.append(PodModel(
-                    name=p.get("name", "unknown"),
-                    node=pod_node,
-                    zone=self.node_zone_map.get(pod_node, "default-zone"),
+            pod_models = [
+                PodModel(
+                    name=p["name"],
+                    node=p["node"],
+                    zone=self.node_zone_map.get(p["node"]),
                     ready=p.get("ready", False),
-                    restart_count=0,
-                ))
+                    restart_count=p.get("restart_count"),
+                )
+                for p in svc["pods"]
+            ]
 
-            # Fetch previously calculated drift logic
             drift_data = drift_reports.get(svc.get("name"), {"drift_detected": False, "drift_reasons": []})
 
             self.service_models.append(ServicePlacement(
@@ -59,54 +72,48 @@ class DeploymentGraphBuilder:
                 drift_reasons=drift_data["drift_reasons"],
                 pods=pod_models,
             ))
-            
+
     def build(self, runtime_overhead_ms: float = 0.0) -> DeploymentGraph:
-        """Generates the final strict Graph object including research validation layers."""
+        """Generates the final strict Graph object.
+
+        Only the measured runtime overhead is reported. The three accuracy fields stay ``None``
+        because no ground-truth validation has been run against this snapshot.
+        """
         node_names = [n.name for n in self.node_models]
-        
-        # Hardcoding academic accuracy to 100% for baseline Phase 1 implementation (to prove structure)
-        # Component 3 dynamically validates these over time.
-        validation_metrics = ValidationMetrics(
-            service_pod_mapping_accuracy=1.0, 
-            pod_node_mapping_accuracy=1.0,
-            concentration_detection_accuracy=1.0,
-            runtime_overhead_ms=runtime_overhead_ms
-        )
-        
-        cluster_meta = ClusterMetadata(
-            failure_domain_type="kubernetes.io/hostname",
-            node_names=node_names
-        )
 
         return DeploymentGraph(
             snapshot_id=f"snap-{uuid.uuid4().hex[:6]}",
             timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-            cluster=cluster_meta,
-            validation=validation_metrics,
+            cluster=ClusterMetadata(
+                failure_domain_type="kubernetes.io/hostname",
+                node_names=node_names,
+            ),
+            validation=ValidationMetrics(runtime_overhead_ms=runtime_overhead_ms),
             nodes=self.node_models,
             services=self.service_models,
         )
 
-    def _parse_cpu_value(self, cpu_str: str) -> float:
-        if not cpu_str or cpu_str == "0":
-            return 4.0
-        if cpu_str.endswith("m"):
-            return round(float(cpu_str[:-1]) / 1000.0, 2)
+    @staticmethod
+    def _parse_cpu_value(cpu: str | None) -> float | None:
+        """CPU cores from a Kubernetes quantity ("2", "1500m"); None if absent or unreadable."""
+        if not cpu:
+            return None
         try:
-            return float(cpu_str)
+            if cpu.endswith("m"):
+                return round(float(cpu[:-1]) / 1000.0, 2)
+            return float(cpu)
         except ValueError:
-            return 4.0
+            return None
 
-    def _parse_memory_value(self, mem_str: str) -> float:
-        if not mem_str or mem_str == "0":
-            return 8.0
-        if mem_str.endswith("Ki"):
-            return round(float(mem_str[:-2]) / (1024 * 1024), 2)
-        if mem_str.endswith("Mi"):
-            return round(float(mem_str[:-2]) / 1024, 2)
-        if mem_str.endswith("Gi"):
-            return round(float(mem_str[:-2]), 2)
+    @staticmethod
+    def _parse_memory_value(memory: str | None) -> float | None:
+        """GiB from a Kubernetes quantity ("4Gi", "8388608Ki", bytes); None if absent or unreadable."""
+        if not memory:
+            return None
         try:
-            return round(float(mem_str) / (1024 * 1024 * 1024), 2)
+            for suffix, factor in _MEMORY_UNITS.items():
+                if memory.endswith(suffix):
+                    return round(float(memory[:-len(suffix)]) * factor / _BYTES_PER_GIB, 2)
+            return round(float(memory) / _BYTES_PER_GIB, 2)
         except ValueError:
-            return 8.0
+            return None

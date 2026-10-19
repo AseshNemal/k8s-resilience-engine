@@ -24,7 +24,7 @@ from app.engine.workflow_dependency_modeling.service import (
     build_workflow_graph,
     get_sample_workflow,
 )
-from app.main import app
+from tests.support.research_app import app  # research-only routes are not served by app.main
 from app.engine.workflow_dependency_modeling.fixture_repository import get_scenario
 from app.shared.sample_loader import SAMPLE_DATA_DIR
 from app.shared.schemas.workflow import WorkflowGraph

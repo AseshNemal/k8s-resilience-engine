@@ -5,7 +5,7 @@ Component: Component 2 - Deployment Topology Modeling
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from tests.support.research_app import app  # research-only routes are not served by app.main
 from experiments.placement_drift.parametric_ensemble_evaluator import (
     ParametricEnsembleEvaluator,
     EnsembleBenchmarkMetrics,

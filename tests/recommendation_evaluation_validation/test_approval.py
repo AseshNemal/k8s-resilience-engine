@@ -5,6 +5,7 @@ from app.engine.recommendation_evaluation_validation.approval import (
     StateTransitionError,
     VersionConflictError,
     PreconditionError,
+    UnverifiedProvenanceError,
 )
 from app.shared.schemas.approval import ApprovalStatus
 from app.shared.schemas.recommendation import RecommendationReport, RecommendationCandidate
@@ -113,10 +114,25 @@ def test_get_approval_returns_none_if_not_found(approval_service, mock_repositor
     mock_repository.get_by_recommendation_id.return_value = None
     assert approval_service.get_approval("rec-1") is None
 
+def test_approve_refused_without_live_provenance(approval_service, mock_repository):
+    pending = MagicMock()
+    pending.status = ApprovalStatus.PENDING_APPROVAL
+    pending.proposal_version = "v1.0"
+    pending.evaluation_snapshot = {"score": 0.9}  # no provenance marker
+    mock_repository.get_by_recommendation_id.return_value = pending
+
+    with pytest.raises(UnverifiedProvenanceError):
+        approval_service.approve("rec-1", "v1.0", "Looks good")
+
+    mock_repository.update.assert_not_called()
+    assert pending.status == ApprovalStatus.PENDING_APPROVAL
+
+
 def test_approve_success(approval_service, mock_repository):
     pending = MagicMock()
     pending.status = ApprovalStatus.PENDING_APPROVAL
     pending.proposal_version = "v1.0"
+    pending.evaluation_snapshot = {"provenance": {"source": "live-discovery"}}
     mock_repository.get_by_recommendation_id.return_value = pending
     mock_repository.update.return_value = "updated"
 

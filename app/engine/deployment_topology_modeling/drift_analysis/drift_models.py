@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 from app.engine.deployment_topology_modeling.drift_analysis.constants import (
     DriftType,
@@ -42,7 +42,9 @@ class ClusterExposureReport(BaseModel):
     total_services: int = Field(ge=0)
     exposed_service_count: int = Field(ge=0)
     exposure_rate: float = Field(ge=0.0, le=1.0)
-    constraint_compliance_rate: float = Field(ge=0.0, le=1.0)
+    # None means "unknown": no declared deployment intent was available to comply with.
+    constraint_compliance_rate: float | None = Field(ge=0.0, le=1.0)
+    declared_state: Literal["available", "unavailable"] = "available"
     mean_concentration: float = Field(ge=0.0, le=1.0)
     services: list[ServiceExposureResult] = Field(default_factory=list)
     runtime_overhead_ms: float = Field(ge=0.0, default=0.0)

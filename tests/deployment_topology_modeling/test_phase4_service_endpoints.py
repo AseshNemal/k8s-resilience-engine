@@ -1,21 +1,30 @@
+import hashlib
+import json
+
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pathlib import Path
 
-from app.api.deployments import router as deployments_router
 from app.engine.deployment_topology_modeling.service import (
+    get_sample_deployment,
     run_chaos_benchmark_pipeline,
     run_single_chaos_scenario,
 )
 from experiments.placement_drift.run_benchmarks import run_benchmarks
+from tests.support.fake_cluster import cluster_from_graph
+from tests.support.research_app import app as research_app
+
+
+@pytest.fixture(autouse=True)
+def explicit_cluster(use_cluster):
+    """These tests run against a stated topology (the contract fixture), never a silent fallback."""
+    return use_cluster(cluster_from_graph(get_sample_deployment()))
 
 
 @pytest.fixture
 def client() -> TestClient:
-    app = FastAPI()
-    app.include_router(deployments_router)
-    return TestClient(app)
+    # The research app = production routes + the synthetic/benchmark routes that are not shipped.
+    return TestClient(research_app)
 
 
 def test_service_run_chaos_benchmark_pipeline():
@@ -76,20 +85,16 @@ def test_api_get_service_topology_detail(client: TestClient):
 # =====================================================================
 
 def test_api_get_manifests(client: TestClient):
+    # No declared-state source is selected, and no default manifest folder is ever read.
     response = client.get("/api/deployments/manifests")
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, list)
-    assert len(data) >= 1
-    assert "service_name" in data[0]
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "DECLARED_STATE_UNAVAILABLE"
 
 
 def test_api_get_manifest_compliance(client: TestClient):
     response = client.get("/api/deployments/manifests/compliance")
-    assert response.status_code == 200
-    data = response.json()
-    assert "constraint_compliance_rate" in data
-    assert "total_services" in data
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "DECLARED_STATE_UNAVAILABLE"
 
 
 # =====================================================================
@@ -217,19 +222,43 @@ def test_api_get_markdown_benchmark_report(client: TestClient):
     assert "# Component 2" in response.text
 
 
-def test_run_benchmarks_script_execution():
-    metrics = run_benchmarks()
+def _digest(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def test_run_benchmarks_script_execution(tmp_path):
+    """The runner writes its artifacts where it is told and leaves the tracked research results alone."""
+    tracked_dir = Path(__file__).resolve().parents[2] / "experiments" / "placement_drift"
+    names = ("benchmark_report.md", "benchmark_report.json")
+    before = {name: _digest(tracked_dir / name) for name in names}
+
+    metrics = run_benchmarks(output_dir=tmp_path)
+
     assert metrics["total_scenarios"] == 8.0
     assert metrics["completed_count"] == 8.0
+    for name in names:
+        assert (tmp_path / name).stat().st_size > 0
+    report = json.loads((tmp_path / "benchmark_report.json").read_text(encoding="utf-8"))
+    assert len(report["scenario_results"]) == 8
+    # The committed research evidence is byte-for-byte what it was before the run.
+    assert {name: _digest(tracked_dir / name) for name in names} == before
 
-    output_dir = Path(__file__).resolve().parents[2] / "experiments" / "placement_drift"
-    md_file = output_dir / "benchmark_report.md"
-    json_file = output_dir / "benchmark_report.json"
 
-    assert md_file.exists()
-    assert json_file.exists()
-    assert md_file.stat().st_size > 0
-    assert json_file.stat().st_size > 0
+def test_run_benchmarks_defaults_to_the_research_folder_for_the_cli(monkeypatch, tmp_path):
+    """Without an argument the CLI behaviour is unchanged: artifacts go next to the runner."""
+    import experiments.placement_drift.run_benchmarks as runner
+
+    requested = []
+
+    def record(results, metrics, output_dir):
+        requested.append(output_dir)
+        return tmp_path / "unused.md", tmp_path / "unused.json"
+
+    monkeypatch.setattr(runner, "_write_artifact_files", record)
+
+    runner.run_benchmarks()
+
+    assert requested == [Path(runner.__file__).resolve().parent]
 
 
 # =====================================================================
@@ -269,12 +298,8 @@ def test_api_get_topology_zones(client: TestClient):
 
 def test_api_get_manifest_service_detail(client: TestClient):
     resp = client.get("/api/deployments/manifests/services/paymentservice")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["service_name"] == "paymentservice"
-
-    err_resp = client.get("/api/deployments/manifests/services/non_existent_service")
-    assert err_resp.status_code == 404
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "DECLARED_STATE_UNAVAILABLE"
 
 
 # =====================================================================
