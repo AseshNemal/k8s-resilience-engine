@@ -11,8 +11,12 @@ from app.engine.failure_impact_prediction.fixture_provider import (
     get_current_component_inputs,
     get_demo_deployment,
     get_demo_inputs,
+    get_demo_portfolio_inputs,
 )
-from app.engine.failure_impact_prediction.models import CrossLayerGraph
+from app.engine.failure_impact_prediction.models import (
+    CrossLayerGraph,
+    PortfolioFailureImpact,
+)
 from app.engine.failure_impact_prediction.node_failure_simulator import (
     simulate_node_failure,
 )
@@ -121,6 +125,19 @@ def predict_demo_failure_impact(failed_node: str) -> FailureImpactReport:
     return predict_failure_impact(workflow, deployment, failed_node)
 
 
+def predict_demo_portfolio_failure_impact(
+    failed_node: str,
+) -> PortfolioFailureImpact:
+    """Run the portfolio evaluator over disclosed contract fixtures."""
+
+    workflows, deployment = get_demo_portfolio_inputs()
+    return predict_portfolio_failure_impact(
+        workflows,
+        deployment,
+        failed_node,
+    )
+
+
 def predict_runtime_failure_impact(
     workflow_id: str,
     failed_node: str,
@@ -147,6 +164,7 @@ __all__ = [
     "get_demo_deployment",
     "get_sample_failure_impact",
     "predict_demo_failure_impact",
+    "predict_demo_portfolio_failure_impact",
     "predict_failure_impact",
     "predict_portfolio_failure_impact",
     "predict_runtime_failure_impact",

@@ -1,22 +1,31 @@
 import pytest
 
-from app.engine.failure_impact_prediction.fixture_provider import get_demo_inputs
+from app.engine.failure_impact_prediction.fixture_provider import (
+    get_demo_inputs,
+    get_demo_portfolio_inputs,
+)
 from app.engine.failure_impact_prediction.portfolio_impact import (
     predict_portfolio_failure_impact,
 )
-from app.shared.schemas.workflow import WorkflowEdge
+from app.engine.failure_impact_prediction.service import (
+    predict_demo_portfolio_failure_impact,
+)
 
 
 def _two_workflow_portfolio():
-    checkout, deployment = get_demo_inputs()
-    browsing = checkout.model_copy(deep=True)
-    browsing.workflow_id = "browse-catalog"
-    browsing.mandatory_services = ["frontend"]
-    browsing.optional_services = ["emailservice"]
-    browsing.edges = [
-        WorkflowEdge(source="frontend", target="emailservice")
+    return get_demo_portfolio_inputs()
+
+
+def test_demo_portfolio_is_explicit_and_uses_one_deployment_snapshot() -> None:
+    workflows, deployment = get_demo_portfolio_inputs()
+
+    assert [workflow.workflow_id for workflow in workflows] == [
+        "checkout",
+        "storefront",
     ]
-    return (checkout, browsing), deployment
+    assert workflows[1].mandatory_services == ["frontend"]
+    assert workflows[1].optional_services == ["emailservice"]
+    assert deployment.snapshot_id == "component3-demo-snapshot-v1"
 
 
 def test_portfolio_aggregates_failed_and_surviving_workflows() -> None:
@@ -31,7 +40,7 @@ def test_portfolio_aggregates_failed_and_surviving_workflows() -> None:
     assert result.failed_node == "node-1"
     assert result.total_workflows == 2
     assert result.failed_workflows == ("checkout",)
-    assert result.surviving_workflows == ("browse-catalog",)
+    assert result.surviving_workflows == ("storefront",)
     assert result.failed_services == ("cartservice",)
     assert result.blast_radius == pytest.approx(50.0)
     assert result.survivability == pytest.approx(50.0)
@@ -49,7 +58,7 @@ def test_portfolio_keeps_optional_service_failure_separate_from_workflow_failure
     browse_impact = next(
         impact
         for impact in result.workflow_impacts
-        if impact.workflow_id == "browse-catalog"
+        if impact.workflow_id == "storefront"
     )
     assert "emailservice" in browse_impact.failed_services
     assert browse_impact.failed_mandatory_services == ()
@@ -78,6 +87,14 @@ def test_portfolio_ranks_nodes_by_aggregate_workflow_impact() -> None:
         0.0,
     ]
     assert result.node_risk_ranking[0].failed_workflows == ("checkout",)
+
+
+def test_demo_portfolio_service_runs_the_real_evaluator() -> None:
+    result = predict_demo_portfolio_failure_impact("node-1")
+
+    assert result.total_workflows == 2
+    assert result.failed_workflows == ("checkout",)
+    assert result.blast_radius == pytest.approx(50.0)
 
 
 def test_portfolio_rejects_empty_workflow_collection() -> None:
