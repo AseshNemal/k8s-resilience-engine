@@ -1,0 +1,31 @@
+# Extension backend service (runs in the Docker Desktop VM). No ports are published: the API
+# is served on a Unix socket only. SQLite and the stored read-only kubeconfig live on the volume.
+services:
+  resilience-engine:
+    image: ${DESKTOP_PLUGIN_IMAGE}
+    environment:
+      DATABASE_URL: sqlite:////data/resilience.db
+      KUBECONFIG: /data/kube/config
+    volumes:
+      - resilience-engine-data:/data
+    # Root is needed only for the entrypoint to prepare /data and the socket directory before it
+    # drops to UID 10001. Everything else is dropped.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Docker runs this as root, which cannot enter the app-private socket directory, so it
+      # drops to the app user first (SETUID/SETGID are among the capabilities kept above).
+      test: ["CMD", "setpriv", "--reuid=10001", "--regid=10001", "--clear-groups", "python", "/app/extension/healthcheck.py"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  resilience-engine-data:

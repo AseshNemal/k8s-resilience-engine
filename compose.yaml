@@ -1,0 +1,43 @@
+name: resilience-engine
+
+services:
+  app:
+    build: .
+    environment:
+      # SQLite on the named volume below. To use an external PostgreSQL instead, replace this
+      # with a postgresql:// URL (the driver is installed in the image).
+      DATABASE_URL: sqlite:////data/resilience.db
+      KUBECONFIG: /run/kube/config
+      WORKFLOW_JAEGER_ALLOWED_HOSTS: ${WORKFLOW_JAEGER_ALLOWED_HOSTS:-localhost,127.0.0.1,::1,jaeger}
+    # The app is deliberately NOT attached to the kind Docker network, so cluster nodes and pods
+    # cannot resolve it by name. This does NOT isolate it: on Docker Desktop they can still reach
+    # it by IP or through the published port (see "Security notes" in docs/DOCKER.md). It reaches
+    # the Kubernetes API through the host-published port instead (see scripts/cluster-up.sh).
+    ports:
+      # Loopback only: the app has no authentication.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - appdata:/data
+      # Dedicated kubeconfig written by scripts/cluster-up.sh. The entrypoint copies it into the
+      # tmpfs below for the unprivileged app user. Never create it implicitly.
+      - type: bind
+        source: ./.kube/kind-app.config
+        target: /run/secrets/kubeconfig
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: tmpfs
+        target: /run/kube
+        tmpfs:
+          size: 1048576
+          mode: 0700
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  appdata:

@@ -123,3 +123,444 @@
     font-weight: 600;
     margin-bottom: 4px;
 }
+
+/* Parametric Ensemble Dashboard Styles */
+.ensemble-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.ensemble-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+.ensemble-metric-box {
+    padding: var(--space-md);
+    background: var(--color-surface-soft);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.ensemble-metric-box__label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+}
+
+.ensemble-metric-box__value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.ensemble-metric-box__sub {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.ensemble-breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+.ensemble-breakdown-card {
+    background: var(--color-surface-soft);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+    padding: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.ensemble-breakdown-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: var(--space-xs);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.ensemble-breakdown-card__title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.ensemble-breakdown-card__sub {
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+.data-table--compact th,
+.data-table--compact td {
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+.ensemble-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-sm) 0;
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    align-items: center;
+}
+
+.filter-btn {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    padding: 5px 11px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.filter-btn:hover {
+    background: var(--color-surface-soft);
+    border-color: var(--color-primary);
+}
+
+.filter-btn--active {
+    background: var(--color-primary);
+    color: #ffffff;
+    border-color: var(--color-primary);
+}
+
+.filter-btn--active:hover {
+    background: var(--color-primary-dark);
+}
+
+.ensemble-search-input {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    padding: 6px 14px;
+    border-radius: var(--radius-small);
+    font-size: 13px;
+    min-width: 260px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.ensemble-search-input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.drift-cell-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.drift-progress-bar {
+    width: 60px;
+    height: 6px;
+    background: var(--color-border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.drift-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.drift-progress-fill--green {
+    background: var(--color-success);
+}
+
+.drift-progress-fill--yellow {
+    background: var(--color-warning);
+}
+
+.drift-progress-fill--red {
+    background: var(--color-danger);
+}
+
+/* Confidence Interval Visual Band */
+.ci-visual-container {
+    margin-top: 8px;
+    width: 100%;
+}
+
+.ci-visual-track {
+    position: relative;
+    height: 8px;
+    background: var(--color-border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.ci-visual-band {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, #6366f1, #3b82f6);
+    opacity: 0.85;
+    border-radius: 4px;
+}
+
+.ci-visual-mean {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: #ffffff;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+    transform: translateX(-50%);
+    border-radius: 2px;
+}
+
+.ci-visual-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+.ci-badge {
+    color: var(--color-primary);
+    font-weight: 700;
+}
+
+/* Phase 4 Formal Markov Transition Matrix Panel */
+.markov-matrix-card {
+    background: var(--color-surface-soft);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.markov-matrix-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.markov-matrix-title-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: 4px;
+}
+
+.markov-matrix-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.markov-matrix-desc {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin: 0;
+    max-width: 650px;
+    line-height: 1.4;
+}
+
+.markov-matrix-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.markov-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.markov-select {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    padding: 6px 12px;
+    border-radius: var(--radius-small);
+    font-size: 12px;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+}
+
+.markov-select:focus {
+    border-color: var(--color-primary);
+}
+
+.markov-grid-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.markov-grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    overflow: hidden;
+}
+
+.markov-grid-table th,
+.markov-grid-table td {
+    padding: 10px 14px;
+    text-align: center;
+    border: 1px solid var(--color-border);
+}
+
+.markov-grid-table th {
+    background: var(--color-surface-soft);
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.markov-grid-table th.markov-header-corner {
+    text-align: left;
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+.markov-grid-table td.markov-row-node {
+    font-weight: 600;
+    text-align: left;
+    background: var(--color-surface-soft);
+    font-family: monospace;
+}
+
+.markov-cell--stayed {
+    background: rgba(34, 197, 94, 0.06);
+    color: var(--color-success);
+    font-weight: 600;
+}
+
+.markov-cell--migration {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--color-danger);
+    font-weight: 700;
+    box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.25);
+}
+
+.markov-cell--empty {
+    color: var(--color-text-muted);
+    opacity: 0.4;
+}
+
+.markov-metrics-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    align-items: center;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+}
+
+.markov-metric-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.markov-metric-pill__label {
+    color: var(--color-text-muted);
+    font-weight: 500;
+}
+
+.markov-metric-pill__val {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.markov-migrations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.markov-migration-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 4px 8px;
+    background: var(--color-surface);
+    border-radius: var(--radius-small);
+    border-left: 3px solid var(--color-danger);
+}
+
+.markov-latex-preview {
+    margin-top: var(--space-xs);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.markov-latex-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-xs);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.markov-latex-code {
+    font-family: monospace;
+    font-size: 11px;
+    background: var(--color-surface-soft);
+    padding: var(--space-sm);
+    border-radius: var(--radius-small);
+    overflow-x: auto;
+    color: var(--color-text);
+    margin: 0;
+    line-height: 1.4;
+}
+
+
