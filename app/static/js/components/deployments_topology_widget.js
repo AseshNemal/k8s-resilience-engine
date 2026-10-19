@@ -72,7 +72,7 @@ window.DeploymentsTopologyWidget = (function () {
                     <div class="node-chip-container">
                         <div class="node-chip__header">
                             <span class="node-name">🖥️ ${n.name}</span>
-                            <span class="node-capacity">${n.cpu_available || "4"} CPU · ${n.memory_available || "8Gi"}</span>
+                            <span class="node-capacity">${n.cpu_available == null ? "—" : `${n.cpu_available} vCPU`} · ${n.memory_available == null ? "—" : `${n.memory_available} GiB`}</span>
                         </div>
                         <div class="pod-badge-list">
                             ${podsHtml}

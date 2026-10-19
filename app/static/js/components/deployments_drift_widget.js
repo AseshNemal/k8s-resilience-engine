@@ -10,6 +10,14 @@ window.DeploymentsDriftWidget = (function () {
         try {
             // 1. Categories Breakdown
             const catResp = await fetch("/api/deployments/drift/categories");
+            if (catResp.status === 503) {
+                const body = await catResp.json().catch(() => ({}));
+                const container = document.getElementById("spof-workloads-list");
+                if (container) {
+                    container.textContent = `No Kubernetes cluster reachable — live drift analysis unavailable. ${body.detail || ""}`;
+                }
+                return;
+            }
             if (catResp.ok) {
                 const catData = await catResp.json();
                 renderCategoryCounters(catData.summary || {});
@@ -73,7 +81,7 @@ window.DeploymentsDriftWidget = (function () {
                     </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <span class="status-badge status-badge--danger">${Math.round((s.replica_concentration || 1.0) * 100)}% Concentration</span>
+                    <span class="status-badge status-badge--danger">${s.ready_replicas ?? 0} ready on ${(s.hosting_nodes || []).join(", ") || "n/a"}</span>
                     <button type="button" class="spof-drilldown-btn" data-spof-svc="${s.service_name}">
                         <span>Drill Down</span>
                         <span class="btn-arrow">→</span>
@@ -99,18 +107,18 @@ window.DeploymentsDriftWidget = (function () {
             const item = document.createElement("div");
             const riskClass = n.risk_level === "CRITICAL"
                 ? "node-risk-item--critical"
-                : (n.risk_level === "ELEVATED" ? "node-risk-item--elevated" : "node-risk-item--balanced");
+                : "node-risk-item--balanced";
 
             item.className = `node-risk-item ${riskClass}`;
             item.innerHTML = `
                 <div>
                     <strong>🖥️ ${n.node_name}</strong>
                     <div style="font-size: 11px; color: var(--color-text-muted); margin-top: 2px;">
-                        Zone: ${n.zone || "default"} · ${n.pod_count || 0} Pods hosted
+                        Zone: ${n.zone || "unassigned"} · ${n.pod_count || 0} pods · sole host of ${n.exposed_service_count || 0} service(s)
                     </div>
                 </div>
                 <span class="status-badge ${n.risk_level === 'CRITICAL' ? 'status-badge--danger' : 'status-badge--success'}">
-                    ${n.risk_level}
+                    ${n.exposed_service_count > 0 ? (n.exposed_services || []).join(", ") : "No exposed services"}
                 </span>
             `;
             container.appendChild(item);

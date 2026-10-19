@@ -72,8 +72,9 @@ window.DeploymentsScenariosWidget = (function () {
 
         tableHtml += `
             <div style="display: flex; gap: 1rem; margin-top: 1rem; font-size: 12px; background: var(--color-surface-soft); padding: 8px 12px; border-radius: 6px;">
-                <span>Calculated Drift Rate ($D_{rate}$): <strong>${((data.d_rate || 0) * 100).toFixed(1)}%</strong></span>
-                <span>Net Exposure Delta ($\Delta E$): <strong>${((data.delta_e_rate || 0) * 100).toFixed(1)}%</strong></span>
+                <span>Drift Rate ($D_{rate}$): <strong>${data.d_rate == null ? "n/a" : (data.d_rate * 100).toFixed(1) + "%"}</strong></span>
+                <span>Exposure Rate Change ($\Delta E$): <strong>${data.delta_e_rate == null ? "n/a" : (data.delta_e_rate * 100).toFixed(1) + "%"}</strong></span>
+                <span>Mode: <strong>${data.execution_mode || "DRY_RUN_SIMULATION"}</strong> (scripted placements)</span>
             </div>
         `;
 
@@ -84,36 +85,40 @@ window.DeploymentsScenariosWidget = (function () {
         if (!container || !ensemble) return;
         container.innerHTML = "";
 
-        const meanPct = (ensemble.mean_d_rate * 100).toFixed(1);
-        const stdDevPct = (ensemble.std_dev_d_rate * 100).toFixed(1);
-        const ciLow = (ensemble.confidence_interval_95[0] * 100).toFixed(1);
-        const ciHigh = (ensemble.confidence_interval_95[1] * 100).toFixed(1);
-        const deltaEPct = (ensemble.mean_delta_e_rate * 100).toFixed(1);
+        const pct = (v) => (v == null ? "n/a" : `${(v * 100).toFixed(1)}%`);
+        const ci = ensemble.confidence_interval_95;
+
+        const notice = document.createElement("div");
+        notice.className = "ui-note";
+        notice.textContent = ensemble.is_experimental_evidence
+            ? "Live-cluster observations."
+            : `⚠ ${ensemble.evidence_note}`;
+        container.appendChild(notice);
 
         const items = [
             {
-                label: "Total Trials",
-                value: `${ensemble.total_trials}`,
-                sub: "Empirical perturbations completed",
+                label: "Trials",
+                value: `${ensemble.measured_trials} / ${ensemble.total_trials}`,
+                sub: `Measurable D_rate / executed (${ensemble.execution_mode})`,
             },
             {
                 label: "Mean Drift Rate (μ)",
-                value: `${meanPct}%`,
-                sub: `Standard deviation σ = ${stdDevPct}%`,
+                value: pct(ensemble.mean_d_rate),
+                sub: `Sample standard deviation s = ${pct(ensemble.std_dev_d_rate)}`,
             },
             {
                 label: "95% Confidence Interval",
-                value: `[${ciLow}%, ${ciHigh}%]`,
-                sub: "True population drift estimate",
-                isCi: true,
-                ciLow: parseFloat(ciLow),
-                ciHigh: parseFloat(ciHigh),
-                mean: parseFloat(meanPct),
+                value: ci ? `[${pct(ci[0])}, ${pct(ci[1])}]` : "n/a",
+                sub: ensemble.ci_method,
+                isCi: Boolean(ci),
+                ciLow: ci ? ci[0] * 100 : 0,
+                ciHigh: ci ? ci[1] * 100 : 0,
+                mean: (ensemble.mean_d_rate ?? 0) * 100,
             },
             {
-                label: "Failure Exposure (ΔE)",
-                value: `+${deltaEPct}%`,
-                sub: "Net increase in SPOF risk",
+                label: "Mean Change in Exposure Rate (ΔE)",
+                value: pct(ensemble.mean_delta_e_rate),
+                sub: "E_rate(T1) − E_rate(T0), averaged",
             },
         ];
 
@@ -171,19 +176,13 @@ window.DeploymentsScenariosWidget = (function () {
         const svcTbody = root.querySelector("[data-role='ensemble-service-sensitivity-body']");
         const catTbody = root.querySelector("[data-role='ensemble-category-sensitivity-body']");
 
+        // Label derived only from the measured mean D_rate of the row (no per-service presets).
+        const rateLabel = (rate) => (rate > 0
+            ? { label: "EXPOSURE CHANGED", variant: "warning" }
+            : { label: "NO EXPOSURE CHANGE", variant: "success" });
+
         if (svcTbody && ensemble.per_service_drift) {
             svcTbody.innerHTML = "";
-            const tierMap = {
-                "multi_workload": { label: "CRITICAL DRIFT", variant: "danger" },
-                "productcatalogservice": { label: "MODERATE DRIFT", variant: "warning" },
-                "paymentservice": { label: "MODERATE DRIFT (SPOF)", variant: "danger" },
-                "cartservice": { label: "MODERATE DRIFT", variant: "warning" },
-                "checkoutservice": { label: "MINIMAL DRIFT", variant: "success" },
-                "shippingservice": { label: "MINIMAL DRIFT", variant: "success" },
-                "frontend": { label: "MINIMAL DRIFT", variant: "success" },
-                "all_services": { label: "CONTROL BASELINE", variant: "muted" },
-            };
-
             const sortedServices = Object.entries(ensemble.per_service_drift).sort((a, b) => b[1] - a[1]);
 
             sortedServices.forEach(([svc, rate]) => {
@@ -222,7 +221,7 @@ window.DeploymentsScenariosWidget = (function () {
                 driftCell.appendChild(dWrapper);
 
                 const tierCell = document.createElement("td");
-                const tierInfo = tierMap[svc] || { label: "STABLE", variant: "success" };
+                const tierInfo = rateLabel(rate);
                 const badge = document.createElement("span");
                 badge.className = `status-badge status-badge--${tierInfo.variant}`;
                 badge.textContent = tierInfo.label;
@@ -235,15 +234,6 @@ window.DeploymentsScenariosWidget = (function () {
 
         if (catTbody && ensemble.per_disruption_drift) {
             catTbody.innerHTML = "";
-            const catMap = {
-                "NODE_DRAIN": { label: "HIGH DISPLACEMENT", variant: "danger" },
-                "SCALE_DOWN_LOSS": { label: "BALANCED RE-PLACEMENT", variant: "warning" },
-                "POD_DELETION": { label: "BALANCED RE-PLACEMENT", variant: "warning" },
-                "ROLLING_UPDATE": { label: "BALANCED RE-PLACEMENT", variant: "warning" },
-                "SCALE_UP_STRESS": { label: "STABLE", variant: "success" },
-                "BASELINE": { label: "STABLE", variant: "muted" },
-            };
-
             const sortedCategories = Object.entries(ensemble.per_disruption_drift).sort((a, b) => b[1] - a[1]);
 
             sortedCategories.forEach(([cat, rate]) => {
@@ -280,7 +270,7 @@ window.DeploymentsScenariosWidget = (function () {
                 driftCell.appendChild(dWrapper);
 
                 const impactCell = document.createElement("td");
-                const catInfo = catMap[cat] || { label: "STABLE", variant: "success" };
+                const catInfo = rateLabel(rate);
                 const badge = document.createElement("span");
                 badge.className = `status-badge status-badge--${catInfo.variant}`;
                 badge.textContent = catInfo.label;
@@ -336,7 +326,7 @@ window.DeploymentsScenariosWidget = (function () {
             const dWrapper = document.createElement("div");
             dWrapper.className = "drift-cell-wrapper";
 
-            const dPct = (trial.d_rate * 100).toFixed(1);
+            const dPct = trial.d_rate == null ? "n/a " : (trial.d_rate * 100).toFixed(1);
             let fillClass = "green";
             if (trial.d_rate >= 0.5) fillClass = "red";
             else if (trial.d_rate >= 0.2) fillClass = "yellow";
@@ -357,14 +347,14 @@ window.DeploymentsScenariosWidget = (function () {
 
             // Exposure Delta
             const expCell = document.createElement("td");
-            const ePct = (trial.delta_e_rate * 100).toFixed(1);
             const expBadge = document.createElement("span");
-            if (trial.delta_e_rate > 0) {
-                expBadge.className = "status-badge status-badge--danger";
-                expBadge.textContent = `+${ePct}%`;
-            } else {
+            if (trial.delta_e_rate == null) {
                 expBadge.className = "status-badge status-badge--muted";
-                expBadge.textContent = "0.0%";
+                expBadge.textContent = "n/a";
+            } else {
+                const ePct = (trial.delta_e_rate * 100).toFixed(1);
+                expBadge.className = `status-badge status-badge--${trial.delta_e_rate > 0 ? "danger" : "muted"}`;
+                expBadge.textContent = `${trial.delta_e_rate > 0 ? "+" : ""}${ePct}%`;
             }
             expCell.appendChild(expBadge);
 
@@ -375,8 +365,8 @@ window.DeploymentsScenariosWidget = (function () {
             // Status
             const statusCell = document.createElement("td");
             const statusBadge = document.createElement("span");
-            statusBadge.className = "status-badge status-badge--success";
-            statusBadge.textContent = "COMPLETED";
+            statusBadge.className = `status-badge status-badge--${trial.status === "COMPLETED" ? "success" : "danger"}`;
+            statusBadge.textContent = `${trial.status} · ${trial.execution_mode}`;
             statusCell.appendChild(statusBadge);
 
             row.append(idCell, catCell, workCell, specCell, driftCell, expCell, dispCell, statusCell);
@@ -392,26 +382,7 @@ window.DeploymentsScenariosWidget = (function () {
         let activeCat = "ALL";
         let searchQuery = "";
 
-        let allItems = (ensemble && ensemble.trials) ? [...ensemble.trials] : [];
-
-        if (benchmarks && benchmarks.scenario_results) {
-            benchmarks.scenario_results.forEach((s) => {
-                const cat = s.disruption_type;
-                if (cat === "NODE_CORDON" || cat === "RESOURCE_CONTENTION") {
-                    allItems.push({
-                        trial_id: s.scenario_id,
-                        scenario_category: cat,
-                        target_service: s.target_service || (s.drifted_services && s.drifted_services.length ? s.drifted_services.join(", ") : "multi_workload"),
-                        parameter_spec: cat === "NODE_CORDON"
-                            ? "Unschedulable node diversion (worker-2 cordoned)"
-                            : "CPU & memory pressure under quota limits (worker-3)",
-                        d_rate: s.d_rate || 0,
-                        delta_e_rate: s.delta_e_rate || 0,
-                        migrated_pods: 0,
-                    });
-                }
-            });
-        }
+        const allItems = (ensemble && ensemble.trials) ? [...ensemble.trials] : [];
 
         function filterAndRender() {
             let filtered = allItems;
@@ -529,7 +500,7 @@ window.DeploymentsScenariosWidget = (function () {
                 try {
                     const resp = await fetch("/api/deployments/chaos/benchmarks");
                     if (resp.ok) {
-                        alert("✓ All 8 Chaos Benchmark Scenarios successfully executed! Rollback idempotency verified.");
+                        alert("All 8 dry-run scenarios executed (scripted placements, no cluster changes).");
                         if (select) loadMarkovMatrix(select.value);
                         loadEnsemble();
                     }

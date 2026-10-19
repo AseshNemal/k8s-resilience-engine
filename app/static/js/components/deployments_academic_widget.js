@@ -10,39 +10,51 @@ window.DeploymentsAcademicWidget = (function () {
 
     async function loadAccuracyCertificate() {
         try {
-            const resp = await fetch("/api/deployments/benchmarks/accuracy");
+            const resp = await fetch("/api/deployments/benchmarks/ground-truth");
             if (!resp.ok) return;
-            const cert = await resp.json();
-            cachedCertificate = cert;
-            renderCertificate(cert);
+            const evaluation = await resp.json();
+            cachedCertificate = evaluation;
+            renderCertificate(evaluation.certificate, evaluation);
         } catch (err) {
             console.warn("Could not load academic accuracy certificate:", err);
         }
     }
 
-    function renderCertificate(cert) {
+    function renderCertificate(cert, evaluation) {
         const svcPodEl = document.getElementById("stat-svc-pod-acc");
         const podNodeEl = document.getElementById("stat-pod-node-acc");
         const ownerEl = document.getElementById("stat-owner-acc");
         const concEl = document.getElementById("stat-conc-acc");
 
-        if (svcPodEl && cert.service_pod_mapping_accuracy != null) {
-            svcPodEl.textContent = `${(cert.service_pod_mapping_accuracy * 100).toFixed(1)}%`;
-        }
-        if (podNodeEl && cert.pod_node_mapping_accuracy != null) {
-            podNodeEl.textContent = `${(cert.pod_node_mapping_accuracy * 100).toFixed(1)}%`;
-        }
-        if (ownerEl && cert.owner_resolution_accuracy != null) {
-            ownerEl.textContent = `${(cert.owner_resolution_accuracy * 100).toFixed(1)}%`;
-        }
-        if (concEl && cert.concentration_detection_accuracy != null) {
-            concEl.textContent = `${(cert.concentration_detection_accuracy * 100).toFixed(1)}%`;
+        const showAccuracy = (element, value) => {
+            if (!element) return;
+            element.textContent = value == null ? "Not measured" : `${(value * 100).toFixed(1)}%`;
+            element.classList.toggle("is-unmeasured", value == null);
+            const fill = element.closest(".academic-stat")?.querySelector(".academic-stat__fill");
+            if (fill) {
+                fill.style.width = value == null ? "0%" : `${Math.max(0, Math.min(1, value)) * 100}%`;
+                fill.classList.toggle("academic-stat__fill--success", value != null);
+            }
+        };
+        showAccuracy(svcPodEl, cert.service_pod_mapping_accuracy);
+        showAccuracy(podNodeEl, cert.pod_node_mapping_accuracy);
+        showAccuracy(ownerEl, cert.owner_resolution_accuracy);
+        showAccuracy(concEl, cert.concentration_detection_accuracy);
+        const latencyEl = document.getElementById("stat-latency-overhead");
+        if (latencyEl) {
+            const latency = cert.runtime_overhead_ms;
+            latencyEl.textContent = latency == null ? "Not measured" : `${latency.toFixed(2)} ms`;
+            const fill = latencyEl.closest(".academic-stat")?.querySelector(".academic-stat__fill");
+            if (fill) fill.style.width = latency == null ? "0%" : `${Math.min(100, latency / 50 * 100)}%`;
         }
 
         const overallStatusEl = document.getElementById("academic-overall-status");
-        if (overallStatusEl && cert.is_statistically_sound) {
-            overallStatusEl.textContent = "✓ Verified Research Standard (≥ 98.0%)";
-            overallStatusEl.className = "status-pill status-pill--success";
+        if (overallStatusEl) {
+            overallStatusEl.textContent = evaluation
+                ? `Measured on ${evaluation.ground_truth_source}: ${evaluation.pods_evaluated} pods, ` +
+                  `${evaluation.services_evaluated} service(s), ${evaluation.failure_experiments} node-failure run(s) — too small to generalise`
+                : "Accuracy not measured against ground truth";
+            overallStatusEl.className = "status-pill status-pill--warning";
         }
     }
 

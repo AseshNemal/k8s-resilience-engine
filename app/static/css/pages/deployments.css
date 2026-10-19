@@ -663,6 +663,10 @@
     color: var(--c2-accent-success);
 }
 
+.academic-stat__value.is-unmeasured {
+    color: var(--color-text-muted);
+}
+
 .academic-stat__target {
     font-size: 11px;
     color: var(--color-text-muted);

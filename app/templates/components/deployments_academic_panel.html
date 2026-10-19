@@ -1,14 +1,14 @@
-{# Academic Validation Panel: Highlights >=98% accuracy and <50ms latency for viva evaluation panels #}
+{# Academic Validation Panel: Shows measured accuracy only when independent ground truth is available. #}
 <section class="academic-validation-panel" id="academic-panel" aria-label="Academic Validation Certificate">
     <div class="academic-card">
         <div class="academic-card__header">
             <div class="academic-card__title-group">
-                <span class="academic-badge academic-badge--primary">THESIS BENCHMARK CERTIFICATE</span>
-                <h3 class="academic-card__title">Empirical Modeling Accuracy & Rigor</h3>
+                <span class="academic-badge academic-badge--primary">MODEL VALIDATION (kubectl ground truth)</span>
+                <h3 class="academic-card__title">Model Accuracy & Runtime Metrics</h3>
             </div>
             <div class="academic-card__status">
-                <span class="status-pill status-pill--success" id="academic-overall-status">
-                    ✓ Verified Research Standard (≥ 98.0%)
+                <span class="status-pill status-pill--warning" id="academic-overall-status">
+                    Accuracy not measured against ground truth
                 </span>
             </div>
         </div>
@@ -17,62 +17,62 @@
             <div class="academic-stat">
                 <span class="academic-stat__label">Service-to-Pod Mapping</span>
                 <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-svc-pod-acc">100.0%</span>
-                    <span class="academic-stat__target">Target ≥ 98%</span>
+                    <span class="academic-stat__value" id="stat-svc-pod-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
                 </div>
                 <div class="academic-stat__bar">
-                    <div class="academic-stat__fill academic-stat__fill--success" style="width: 100%;"></div>
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
                 </div>
             </div>
 
             <div class="academic-stat">
                 <span class="academic-stat__label">Pod-to-Node Placement</span>
                 <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-pod-node-acc">100.0%</span>
-                    <span class="academic-stat__target">Target ≥ 98%</span>
+                    <span class="academic-stat__value" id="stat-pod-node-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
                 </div>
                 <div class="academic-stat__bar">
-                    <div class="academic-stat__fill academic-stat__fill--success" style="width: 100%;"></div>
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
                 </div>
             </div>
 
             <div class="academic-stat">
                 <span class="academic-stat__label">Owner Reference Resolution</span>
                 <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-owner-acc">100.0%</span>
-                    <span class="academic-stat__target">Target ≥ 98%</span>
+                    <span class="academic-stat__value" id="stat-owner-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
                 </div>
                 <div class="academic-stat__bar">
-                    <div class="academic-stat__fill academic-stat__fill--success" style="width: 100%;"></div>
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
                 </div>
             </div>
 
             <div class="academic-stat">
                 <span class="academic-stat__label">Concentration Detection</span>
                 <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-conc-acc">100.0%</span>
-                    <span class="academic-stat__target">Target ≥ 95%</span>
+                    <span class="academic-stat__value" id="stat-conc-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 95%</span>
                 </div>
                 <div class="academic-stat__bar">
-                    <div class="academic-stat__fill academic-stat__fill--success" style="width: 100%;"></div>
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
                 </div>
             </div>
 
             <div class="academic-stat">
                 <span class="academic-stat__label">Execution Latency</span>
                 <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-latency-overhead">3.43 ms</span>
-                    <span class="academic-stat__target">Target &lt; 50 ms</span>
+                    <span class="academic-stat__value" id="stat-latency-overhead">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target &lt; 50 ms</span>
                 </div>
                 <div class="academic-stat__bar">
-                    <div class="academic-stat__fill academic-stat__fill--accent" style="width: 15%;"></div>
+                    <div class="academic-stat__fill academic-stat__fill--accent" style="width: 0%;"></div>
                 </div>
             </div>
         </div>
 
         <div class="academic-card__footer">
             <span class="academic-footnote">
-                🔐 Cryptographic Auditability: All states validated against synthetic ground-truth and SHA-256 frozen snapshots.
+                Accuracy is reported only after comparison with independent ground-truth data.
             </span>
             <button type="button" class="academic-copy-btn" id="btn-copy-accuracy-json" title="Copy Raw Accuracy Certificate JSON">
                 📋 Copy Certificate JSON

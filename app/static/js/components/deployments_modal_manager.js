@@ -21,24 +21,27 @@ window.DeploymentsModalManager = (function () {
             if (!resp.ok) return;
             const exp = await resp.json();
 
-            document.getElementById("violation-exposure-level").textContent = exp.exposure_level || "EXPOSED";
-            document.getElementById("violation-concentration-val").textContent = `${Math.round((exp.replica_concentration || 1.0) * 100)}% Concentration`;
-            document.getElementById("violation-severity-score").textContent = (exp.severity_score || 0.75).toFixed(2);
+            document.getElementById("violation-exposure-level").textContent = exp.exposure_level ?? "Unknown";
+            document.getElementById("violation-concentration-val").textContent =
+                exp.replica_concentration == null
+                    ? "Concentration n/a (no ready replicas)"
+                    : `${Math.round(exp.replica_concentration * 100)}% of ready replicas on one node`;
+            document.getElementById("violation-severity-score").textContent =
+                `${exp.ready_replicas ?? 0} ready replica(s)`;
 
-            // Hosting nodes
             const nodesList = document.getElementById("violation-hosting-nodes");
             if (nodesList) {
-                nodesList.innerHTML = (exp.exposed_failure_domains || ["c2-worker"])
-                    .map((n) => `<li>🖥️ <strong>${n}</strong> (Single failure domain)</li>`)
-                    .join("");
+                const domains = exp.exposed_failure_domains || [];
+                nodesList.innerHTML = domains.length > 0
+                    ? domains.map((n) => `<li>🖥️ <strong>${n}</strong> (losing this node leaves 0 ready replicas)</li>`).join("")
+                    : "<li>No single node removes all ready replicas.</li>";
             }
 
-            // Violations
             const rulesList = document.getElementById("violation-rules-list");
             if (rulesList) {
                 rulesList.innerHTML = (exp.violations && exp.violations.length > 0)
-                    ? exp.violations.map((v) => `<div class="violation-chip">⚠️ ${v.description || v.category}</div>`).join("")
-                    : '<div style="font-size: 12px; color: var(--color-text-muted);">Concentration exceeds 0.50 threshold without zone anti-affinity.</div>';
+                    ? exp.violations.map((v) => `<div class="violation-chip">⚠️ ${v.description}</div>`).join("")
+                    : '<div style="font-size: 12px; color: var(--color-text-muted);">No declared-intent violations detected.</div>';
             }
         } catch (e) {
             console.warn("Could not fetch service exposure detail:", e);
@@ -70,18 +73,8 @@ window.DeploymentsModalManager = (function () {
         if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Comparing snapshots...</td></tr>';
 
         try {
-            // First ensure snapshots exist by executing scenario
-            await fetch(`/api/deployments/chaos/run/${scenarioId}`, { method: "POST" });
-
-            // Now diff T0 and T1
-            const resp = await fetch("/api/deployments/diff", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    baseline_snapshot_id: `${scenarioId}_T0`,
-                    target_snapshot_id: `${scenarioId}_T1`,
-                }),
-            });
+            // The scenario result carries its own T0/T1 hashes, D_rate and pod moves.
+            const resp = await fetch(`/api/deployments/chaos/run/${scenarioId}`, { method: "POST" });
 
             if (!resp.ok) {
                 if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--color-danger);">Diff failed for scenario.</td></tr>';
@@ -102,8 +95,9 @@ window.DeploymentsModalManager = (function () {
         const t0HashEl = document.getElementById("diff-t0-hash");
         const t1HashEl = document.getElementById("diff-t1-hash");
 
-        if (dRateEl) dRateEl.textContent = `${((data.d_rate || 0) * 100).toFixed(2)}%`;
-        if (deltaEEl) deltaEEl.textContent = `${((data.delta_e_rate || 0) * 100).toFixed(2)}%`;
+        const pct = (v) => (v == null ? "n/a" : `${(v * 100).toFixed(2)}%`);
+        if (dRateEl) dRateEl.textContent = pct(data.d_rate);
+        if (deltaEEl) deltaEEl.textContent = pct(data.delta_e_rate);
         if (t0HashEl && data.baseline_hash) t0HashEl.textContent = data.baseline_hash.substring(0, 12) + "...";
         if (t1HashEl && data.target_hash) t1HashEl.textContent = data.target_hash.substring(0, 12) + "...";
 
@@ -111,24 +105,22 @@ window.DeploymentsModalManager = (function () {
         if (!tbody) return;
 
         tbody.innerHTML = "";
-        const diffs = data.pod_diffs || [];
-        if (diffs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">All pods maintained identical placements.</td></tr>';
+        const moves = data.transitions || [];
+        const changed = data.drifted_services || [];
+        if (moves.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center;">No pod changed node (pods matched by name).` +
+                `${changed.length ? " Exposure status changed for: " + changed.join(", ") : ""}</td></tr>`;
             return;
         }
 
-        diffs.forEach((p) => {
-            const isDrifted = p.status === "DRIFTED" || p.baseline_node !== p.target_node;
-            const statusClass = isDrifted ? "status-tag--drifted" : "status-tag--steady";
-            const statusText = isDrifted ? "→ [DRIFTED!]" : "(Steady)";
-
+        moves.forEach((t) => {
             const tr = document.createElement("tr");
             tr.innerHTML = `
-                <td><code>${p.pod_name}</code></td>
-                <td><strong>${p.service_name || "-"}</strong></td>
-                <td>${p.baseline_node || "-"}</td>
-                <td>${p.target_node || "TERMINATED"}</td>
-                <td class="${statusClass}">${statusText}</td>
+                <td><code>${t.pod_count} pod(s)</code></td>
+                <td><strong>${(t.services_affected || []).join(", ") || "-"}</strong></td>
+                <td>${t.from_node}</td>
+                <td>${t.to_node}</td>
+                <td class="status-tag--drifted">moved</td>
             `;
             tbody.appendChild(tr);
         });
