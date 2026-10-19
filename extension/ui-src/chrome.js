@@ -6,6 +6,8 @@
 (function () {
     "use strict";
 
+    const QUICK_ACTION = "Set up automatic renewal";
+
     function formatExpiry(iso, now) {
         if (!iso) return null;
         const when = new Date(iso);
@@ -20,7 +22,9 @@
     }
 
     // One source of truth for how a connection state is worded, used by the chip and the Overview panel.
-    function describeCluster(status, now) {
+    // `automatic` is true where the host helper can set up self-renewing access (see autoconnect.js).
+    // A credential added by hand never renews itself, so there the wording leads to that setup.
+    function describeCluster(status, now, automatic) {
         if (!status) {
             return { state: "error", chip: "Backend unavailable", title: "The extension backend is not responding",
                 detail: "Wait a few seconds and reload. If it persists, restart the extension.", action: null };
@@ -31,13 +35,23 @@
                 action: "Connect cluster" };
         }
         const expiry = formatExpiry(status.expiresAt, now);
+        const byHand = !status.managed;
         if (status.expired) {
-            return { state: "expired", chip: "Credential expired", title: `Credential for ${status.server} has expired`,
-                detail: "Renew it to read your cluster again. Results on this page are sample data either way.", action: "Renew credential" };
+            let detail = "Renew it to read your cluster again. Results on this page are sample data either way.";
+            let action = "Renew credential";
+            if (byHand && automatic) {
+                detail = "This credential was added by hand, so it cannot renew itself. Set it up automatically once and it renews itself while the extension is open. Results on this page are sample data either way.";
+                action = "Set up automatic renewal";
+            } else if (byHand) {
+                action = "Replace credential";
+            }
+            return { state: "expired", chip: "Credential expired", title: `Credential for ${status.server} has expired`, detail, action };
         }
+        const live = "Overview and the research pages show sample data; Deployment topology can show your live cluster.";
+        const hint = byHand && automatic ? " It was added by hand and will not renew itself." : "";
         return { state: "connected", chip: "Connected · read-only", title: `Connected to ${status.server}`,
-            detail: `Read-only access${expiry ? `, credential expires ${expiry}` : ""}. Overview and the research pages show sample data; Deployment topology can show your live cluster.`,
-            action: "Manage connection" };
+            detail: `Read-only access${expiry ? `, credential expires ${expiry}` : ""}.${hint} ${live}`,
+            action: byHand && automatic ? "Set up automatic renewal" : "Manage connection" };
     }
 
     window.__resilienceChrome = { formatExpiry, describeCluster };
@@ -64,7 +78,8 @@
     }
 
     function render(chip, panel, status) {
-        const info = describeCluster(status, new Date());
+        const support = window.__resilienceAutoSupport;
+        const info = describeCluster(status, new Date(), Boolean(support && support.automatic));
         if (chip) {
             chip.dataset.state = info.state;
             chip.lastChild.textContent = info.chip;
@@ -78,7 +93,28 @@
             link.textContent = info.action || "";
             link.hidden = !info.action;
             link.href = connectHref();
+            // The automatic-setup button does the setup in place; the href stays as the fallback.
+            link.dataset.quick = info.action === QUICK_ACTION ? "true" : "";
+            link.dataset.server = (status && status.server) || "";
         }
+    }
+
+    // One click on the banner: set up automatic renewal for the cluster the credential points at.
+    // The macOS approval dialog still appears; this only removes the hop to the Connect page.
+    async function quickSetup(chip, panel, link) {
+        const controller = window.__resilienceController;
+        if (!controller || link.dataset.busy) return false;
+        link.dataset.busy = "true";
+        link.textContent = "Waiting for your approval…";
+        const result = await controller.quickSetup(link.dataset.server);
+        delete link.dataset.busy;
+        await refresh(chip, panel);
+        if (result.ok) return true;
+        // "choose" means several clusters matched: that decision belongs on the Connect page.
+        if (result.state === "choose") { window.location.href = connectHref(); return true; }
+        const detail = panel && panel.querySelector('[data-role="cluster-panel-detail"]');
+        if (detail && window.__resilienceAuto) detail.textContent = window.__resilienceAuto.messageFor(result.state);
+        return true;
     }
 
     async function refresh(chip, panel) {
@@ -96,6 +132,14 @@
         const chip = buildChip();
         const panel = document.querySelector('[data-role="cluster-panel"]');
         refresh(chip, panel);
+        const link = panel && panel.querySelector('[data-role="cluster-panel-link"]');
+        if (link) {
+            link.addEventListener("click", (event) => {
+                if (link.dataset.quick !== "true" || !window.__resilienceController) return; // plain link to Connect
+                event.preventDefault();
+                quickSetup(chip, panel, link);
+            });
+        }
         document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(chip, panel); });
         // autoconnect.js announces a renewal, a setup or a removal so the status here never goes stale.
         window.addEventListener("resilience-cluster-changed", () => refresh(chip, panel));

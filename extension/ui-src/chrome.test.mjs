@@ -51,10 +51,41 @@ test("connected without an expiry still reads correctly", () => {
 });
 
 test("an expired credential is flagged and offers renewal", () => {
-    const info = describeCluster({ connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true }, NOW);
+    const info = describeCluster({ connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: true }, NOW);
     assert.equal(info.state, "expired");
     assert.equal(info.chip, "Credential expired");
     assert.equal(info.action, "Renew credential");
+});
+
+test("an expired hand-added credential cannot renew itself, so it offers automatic setup", () => {
+    const status = { connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: false };
+    const info = describeCluster(status, NOW, true);
+    assert.equal(info.state, "expired");
+    assert.equal(info.action, "Set up automatic renewal");
+    assert.match(info.detail, /added by hand/);
+    assert.match(info.detail, /renews itself/);
+});
+
+test("an expired hand-added credential without automatic setup offers a replacement, not renewal", () => {
+    const status = { connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: false };
+    const info = describeCluster(status, NOW, false);
+    assert.equal(info.action, "Replace credential");
+    assert.doesNotMatch(info.detail, /renews itself/);
+});
+
+test("an expired helper-managed credential still says renew: the extension retries it on its own", () => {
+    const status = { connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: true };
+    assert.equal(describeCluster(status, NOW, true).action, "Renew credential");
+});
+
+test("a live hand-added credential warns it will not renew and offers automatic setup", () => {
+    const status = { connected: true, server: "h:1", expiresAt: "2026-10-25T12:00:00Z", expired: false, managed: false };
+    const info = describeCluster(status, NOW, true);
+    assert.equal(info.state, "connected");
+    assert.equal(info.action, "Set up automatic renewal");
+    assert.match(info.detail, /will not renew/);
+    // the unmanaged wording only appears where automatic setup exists
+    assert.equal(describeCluster(status, NOW, false).action, "Manage connection");
 });
 
 test("no answer from the backend is reported as unavailable, not as disconnected", () => {

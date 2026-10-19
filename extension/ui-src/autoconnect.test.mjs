@@ -225,6 +225,53 @@ test("discover and remove call the helper with fixed arguments", async () => {
     assert.deepEqual(plain(w.calls.map((c) => c.args)), [["discover"], ["revoke", CTX]]);
 });
 
+// ------------------------------------------------------------------ one-click setup from the banner
+
+const listing = (contexts) => JSON.stringify({ ok: true, command: "discover", state: "connected", contexts });
+const kind = (name, port, extra = {}) => ({ name, server: `https://127.0.0.1:${port}`, supported: true, reachable: true, ...extra });
+const authorized = JSON.stringify({ ok: true, command: "authorize", state: "connected", context: CTX });
+
+function quickWorld(contexts, authorizeReply = authorized) {
+    return world({ statuses: [{ connected: true, managed: false }], helper: (args) => (args[0] === "discover" ? listing(contexts) : authorizeReply) });
+}
+
+test("quick setup finds the cluster the stored credential points at, by port, and authorizes only that one", async () => {
+    const w = quickWorld([kind("other", 6443), kind(CTX, 58227)]);
+    const r = await w.controller.quickSetup("host.docker.internal:58227");
+    assert.equal(r.ok, true);
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["discover"], ["authorize", CTX]]);
+    assert.equal(w.controller.snapshot().phase, "ready");
+});
+
+test("quick setup uses the only usable cluster when the stored server is not recognised", async () => {
+    const w = quickWorld([kind(CTX, 58227), kind("down", 9999, { reachable: false }), kind("remote", 1, { supported: false })]);
+    const r = await w.controller.quickSetup("host.docker.internal:1234");
+    assert.equal(r.ok, true);
+    assert.deepEqual(plain(w.calls[1].args), ["authorize", CTX]);
+});
+
+test("quick setup never guesses between several clusters: it asks the person to choose", async () => {
+    const w = quickWorld([kind("a", 1111), kind("b", 2222)]);
+    const r = await w.controller.quickSetup("host.docker.internal:58227");
+    assert.equal(r.state, "choose");
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["discover"]], "nothing is authorized without a clear target");
+});
+
+test("quick setup with no usable cluster says the cluster is unreachable and authorizes nothing", async () => {
+    const w = quickWorld([kind(CTX, 58227, { reachable: false })]);
+    const r = await w.controller.quickSetup("host.docker.internal:58227");
+    assert.equal(r.state, "cluster-unreachable");
+    assert.equal(w.calls.length, 1);
+});
+
+test("quick setup passes a failed discovery through and a decline is not an error", async () => {
+    const down = world({ statuses: [{ connected: true }], helper: JSON.stringify({ ok: false, command: "discover", state: "helper-unavailable" }) });
+    assert.equal((await down.controller.quickSetup("h:1")).state, "helper-unavailable");
+    const declined = quickWorld([kind(CTX, 58227)], JSON.stringify({ ok: false, command: "authorize", state: "declined" }));
+    assert.equal((await declined.controller.quickSetup("host.docker.internal:58227")).state, "declined");
+    assert.notEqual(declined.controller.snapshot().phase, "attention");
+});
+
 // ------------------------------------------------------------------ platform handling
 
 test("automatic setup is offered only where it was verified, and says so honestly elsewhere", () => {
@@ -271,6 +318,6 @@ test("every state has a fixed, human message, and an unknown state falls back to
 
 test("the controller exposes no way to read a credential", () => {
     const c = A.createController({ platform: "darwin", now: () => 0, getStatus: async () => null, exec: async () => ({ stdout: "" }) });
-    assert.deepEqual(plain(Object.keys(c).sort()), ["discover", "remove", "retryNow", "setup", "snapshot", "tick"]);
+    assert.deepEqual(plain(Object.keys(c).sort()), ["discover", "quickSetup", "remove", "retryNow", "setup", "snapshot", "tick"]);
     assert.ok(!JSON.stringify(c.snapshot()).toLowerCase().includes("token"));
 });

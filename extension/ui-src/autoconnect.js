@@ -207,6 +207,24 @@
             return result;
         }
 
+        // One-click setup from the status banner: find the cluster the stored credential points at and
+        // run the normal setup, which still waits for the native approval dialog. A kind cluster's API
+        // server port is what ties host.docker.internal:PORT (the backend's view) to 127.0.0.1:PORT
+        // (the host's view). With no match and several candidates it never guesses: the caller sends
+        // the person to the Connect page to choose.
+        async function quickSetup(storedServer) {
+            const found = await discover();
+            if (!found.ok || !Array.isArray(found.contexts)) return found;
+            const usable = found.contexts.filter((c) => c.supported && c.reachable === true);
+            if (!usable.length) return { ok: false, state: "cluster-unreachable" };
+            const port = (text) => { const m = /:(\d+)\/?$/.exec(String(text || "")); return m ? m[1] : ""; };
+            const wanted = port(storedServer);
+            const same = wanted ? usable.filter((c) => port(c.server) === wanted) : [];
+            const pick = same.length === 1 ? same[0] : usable.length === 1 ? usable[0] : null;
+            if (!pick) return { ok: false, state: "choose" };
+            return setup(pick.name);
+        }
+
         async function remove(name) {
             if (busy) return { ok: false, state: "error" };
             busy = true;
@@ -227,7 +245,7 @@
             return tick();
         }
 
-        return { tick, discover, setup, remove, retryNow, snapshot };
+        return { tick, discover, setup, quickSetup, remove, retryNow, snapshot };
     }
 
     window.__resilienceAuto = {

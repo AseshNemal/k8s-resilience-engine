@@ -26,8 +26,8 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
 COPY experiments ./experiments
-COPY sample_data ./sample_data
-COPY deploy ./deploy
+# sample_data/ and deploy/ are deliberately not copied: the extension never serves fixture data, and
+# declared deployment intent must come from an explicitly selected source, not a folder in the image.
 COPY extension/__init__.py extension/asgi.py extension/cluster_connection.py extension/cluster_ingest.py extension/error_envelope.py extension/healthcheck.py ./extension/
 
 # --- Render the existing dashboard pages to static files (build time only) ------------------
