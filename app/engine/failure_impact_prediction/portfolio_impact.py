@@ -9,7 +9,9 @@ from app.engine.failure_impact_prediction.cross_layer_graph import (
     build_cross_layer_graph,
 )
 from app.engine.failure_impact_prediction.models import (
+    CrossLayerGraph,
     PortfolioFailureImpact,
+    PortfolioNodeRisk,
     WorkflowImpactSummary,
     WorkflowSurvivalPrediction,
 )
@@ -36,6 +38,76 @@ def _duplicate_workflow_ids(workflows: Sequence[WorkflowGraph]) -> list[str]:
     return sorted(duplicates)
 
 
+def _evaluate_graphs(
+    graphs: tuple[CrossLayerGraph, ...],
+    failed_node: str,
+) -> tuple[
+    tuple[WorkflowSurvivalPrediction, ...],
+    tuple[WorkflowImpactSummary, ...],
+    tuple[str, ...],
+]:
+    workflow_predictions: list[WorkflowSurvivalPrediction] = []
+    workflow_impacts: list[WorkflowImpactSummary] = []
+    failed_services: set[str] = set()
+
+    for graph in graphs:
+        simulation = simulate_node_failure(graph, failed_node)
+        service_predictions = calculate_service_survival(simulation)
+        workflow_prediction = calculate_workflow_survival(
+            graph,
+            service_predictions,
+        )
+        unavailable_services = tuple(
+            prediction.service
+            for prediction in service_predictions
+            if not prediction.survives
+        )
+
+        workflow_predictions.append(workflow_prediction)
+        failed_services.update(unavailable_services)
+        workflow_impacts.append(
+            WorkflowImpactSummary(
+                workflow_id=graph.workflow_id,
+                survives=workflow_prediction.survives,
+                failed_services=unavailable_services,
+                failed_mandatory_services=workflow_prediction.failed_due_to,
+            )
+        )
+
+    return (
+        tuple(workflow_predictions),
+        tuple(workflow_impacts),
+        tuple(sorted(failed_services)),
+    )
+
+
+def _rank_nodes(
+    graphs: tuple[CrossLayerGraph, ...],
+) -> tuple[PortfolioNodeRisk, ...]:
+    node_risks: list[PortfolioNodeRisk] = []
+    for node_name in graphs[0].node_names:
+        workflow_predictions, _, _ = _evaluate_graphs(graphs, node_name)
+        blast_radius, _ = calculate_blast_radius(workflow_predictions)
+        node_risks.append(
+            PortfolioNodeRisk(
+                node=node_name,
+                blast_radius=blast_radius,
+                failed_workflows=tuple(
+                    prediction.workflow_id
+                    for prediction in workflow_predictions
+                    if not prediction.survives
+                ),
+            )
+        )
+
+    return tuple(
+        sorted(
+            node_risks,
+            key=lambda risk: (-risk.blast_radius, risk.node),
+        )
+    )
+
+
 def predict_portfolio_failure_impact(
     workflows: Sequence[WorkflowGraph],
     deployment: DeploymentGraph,
@@ -57,37 +129,18 @@ def predict_portfolio_failure_impact(
             "Duplicate workflow IDs: " + ", ".join(duplicate_ids)
         )
 
-    workflow_predictions: list[WorkflowSurvivalPrediction] = []
-    workflow_impacts: list[WorkflowImpactSummary] = []
-    failed_services: set[str] = set()
-
-    for workflow in workflows:
-        graph = build_cross_layer_graph(workflow, deployment)
-        simulation = simulate_node_failure(graph, failed_node)
-        service_predictions = calculate_service_survival(simulation)
-        workflow_prediction = calculate_workflow_survival(
-            graph,
-            service_predictions,
-        )
-        unavailable_services = tuple(
-            prediction.service
-            for prediction in service_predictions
-            if not prediction.survives
-        )
-
-        workflow_predictions.append(workflow_prediction)
-        failed_services.update(unavailable_services)
-        workflow_impacts.append(
-            WorkflowImpactSummary(
-                workflow_id=workflow.workflow_id,
-                survives=workflow_prediction.survives,
-                failed_services=unavailable_services,
-                failed_mandatory_services=workflow_prediction.failed_due_to,
-            )
-        )
+    graphs = tuple(
+        build_cross_layer_graph(workflow, deployment)
+        for workflow in workflows
+    )
+    (
+        workflow_predictions,
+        workflow_impacts,
+        failed_services,
+    ) = _evaluate_graphs(graphs, failed_node)
 
     blast_radius, survivability = calculate_blast_radius(
-        tuple(workflow_predictions)
+        workflow_predictions
     )
 
     return PortfolioFailureImpact(
@@ -103,10 +156,11 @@ def predict_portfolio_failure_impact(
             for prediction in workflow_predictions
             if prediction.survives
         ),
-        failed_services=tuple(sorted(failed_services)),
+        failed_services=failed_services,
         blast_radius=blast_radius,
         survivability=survivability,
-        workflow_impacts=tuple(workflow_impacts),
+        workflow_impacts=workflow_impacts,
+        node_risk_ranking=_rank_nodes(graphs),
     )
 
 

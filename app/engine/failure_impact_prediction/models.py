@@ -110,6 +110,15 @@ class WorkflowImpactSummary:
 
 
 @dataclass(frozen=True)
+class PortfolioNodeRisk:
+    """Portfolio-wide workflow impact caused by one worker node."""
+
+    node: str
+    blast_radius: float
+    failed_workflows: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PortfolioFailureImpact:
     """Aggregated workflow impact for one assumed worker-node failure."""
 
@@ -121,3 +130,4 @@ class PortfolioFailureImpact:
     blast_radius: float
     survivability: float
     workflow_impacts: tuple[WorkflowImpactSummary, ...]
+    node_risk_ranking: tuple[PortfolioNodeRisk, ...]

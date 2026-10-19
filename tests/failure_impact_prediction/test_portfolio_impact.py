@@ -58,6 +58,28 @@ def test_portfolio_keeps_optional_service_failure_separate_from_workflow_failure
     assert result.blast_radius == pytest.approx(0.0)
 
 
+def test_portfolio_ranks_nodes_by_aggregate_workflow_impact() -> None:
+    workflows, deployment = _two_workflow_portfolio()
+
+    result = predict_portfolio_failure_impact(
+        workflows,
+        deployment,
+        "node-2",
+    )
+
+    assert [risk.node for risk in result.node_risk_ranking] == [
+        "node-1",
+        "node-2",
+        "node-3",
+    ]
+    assert [risk.blast_radius for risk in result.node_risk_ranking] == [
+        50.0,
+        0.0,
+        0.0,
+    ]
+    assert result.node_risk_ranking[0].failed_workflows == ("checkout",)
+
+
 def test_portfolio_rejects_empty_workflow_collection() -> None:
     _, deployment = get_demo_inputs()
 
