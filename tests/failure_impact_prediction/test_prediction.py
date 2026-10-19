@@ -1,9 +1,14 @@
 import pytest
 
 from app.engine.failure_impact_prediction import service as failure_service
-from app.engine.failure_impact_prediction.fixture_provider import get_demo_inputs
+from app.engine.failure_impact_prediction.fixture_provider import (
+    get_demo_inputs,
+    get_demo_portfolio_inputs,
+)
 from app.engine.failure_impact_prediction.runtime_provider import (
     RuntimeComponentInputs,
+    RuntimePortfolioInputs,
+    WorkflowInputProvenance,
 )
 from app.engine.failure_impact_prediction.service import predict_failure_impact
 
@@ -140,3 +145,53 @@ def test_runtime_prediction_uses_validated_component_inputs(monkeypatch) -> None
     }
     assert report.failed_node == "node-1"
     assert report.failed_workflows == ["checkout"]
+
+
+def test_runtime_portfolio_prediction_uses_validated_component_inputs(
+    monkeypatch,
+) -> None:
+    workflows, deployment = get_demo_portfolio_inputs()
+    calls: dict[str, object] = {}
+
+    def runtime_inputs(
+        workflow_ids: tuple[str, ...],
+        namespace: str,
+    ) -> RuntimePortfolioInputs:
+        calls["workflow_ids"] = workflow_ids
+        calls["namespace"] = namespace
+        return RuntimePortfolioInputs(
+            workflows=workflows,
+            deployment=deployment,
+            workflow_provenance=(
+                WorkflowInputProvenance(
+                    workflow_id="checkout",
+                    freeze_id="freeze-checkout-v1",
+                    assessment_id="assessment-checkout-v1",
+                ),
+                WorkflowInputProvenance(
+                    workflow_id="storefront",
+                    freeze_id="freeze-storefront-v1",
+                    assessment_id="assessment-storefront-v1",
+                ),
+            ),
+            namespace=namespace,
+        )
+
+    monkeypatch.setattr(
+        failure_service,
+        "get_runtime_portfolio_inputs",
+        runtime_inputs,
+    )
+
+    result = failure_service.predict_runtime_portfolio_failure_impact(
+        ("checkout", "storefront"),
+        "node-1",
+        "research",
+    )
+
+    assert calls == {
+        "workflow_ids": ("checkout", "storefront"),
+        "namespace": "research",
+    }
+    assert result.failed_workflows == ("checkout",)
+    assert result.blast_radius == pytest.approx(50.0)

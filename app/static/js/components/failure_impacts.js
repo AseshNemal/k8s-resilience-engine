@@ -11,7 +11,9 @@
 (function () {
     const DEMO_IMPACT_ENDPOINT = "/api/failure-impacts/simulate";
     const DEMO_DEPLOYMENT_ENDPOINT = "/api/failure-impacts/demo-deployment";
+    const PORTFOLIO_DEMO_ENDPOINT = "/api/failure-impacts/portfolio/simulate";
     const RUNTIME_IMPACT_ENDPOINT = "/api/failure-impacts/runtime";
+    const PORTFOLIO_RUNTIME_ENDPOINT = "/api/failure-impacts/portfolio/runtime";
     const RUNTIME_DEPLOYMENT_ENDPOINT = "/api/deployments/live";
     const { fetchJson } = window.ResilienceApi;
     const {
@@ -29,6 +31,9 @@
     const inputMode = document.querySelector('[data-role="input-mode"]');
     const runtimeFields = document.querySelector('[data-role="runtime-fields"]');
     const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
+    const workflowIdLabel = document.querySelector(
+        '[data-role="workflow-id-label"]'
+    );
     const namespaceInput = document.querySelector('[data-role="namespace"]');
     const inputModeNote = document.querySelector('[data-role="input-mode-note"]');
     const inputSourceBadge = document.querySelector(
@@ -80,20 +85,53 @@
     }
 
     function selectedMode() {
-        return inputMode?.value === "runtime" ? "runtime" : "demo";
+        const mode = inputMode?.value;
+        if (
+            mode === "runtime" ||
+            mode === "portfolio-demo" ||
+            mode === "portfolio-runtime"
+        ) {
+            return mode;
+        }
+        return "demo";
+    }
+
+    function runtimeNamespace() {
+        const namespace = namespaceInput?.value.trim() || "";
+        if (!namespace) {
+            throw new Error("Enter the Kubernetes namespace.");
+        }
+        return namespace;
     }
 
     function runtimeSelection() {
         const workflowId = workflowIdInput?.value.trim() || "";
-        const namespace = namespaceInput?.value.trim() || "";
-
         if (!workflowId) {
             throw new Error("Enter the frozen Component 1 workflow ID.");
         }
-        if (!namespace) {
-            throw new Error("Enter the Kubernetes namespace.");
-        }
+        const namespace = runtimeNamespace();
         return { workflowId, namespace };
+    }
+
+    function portfolioRuntimeSelection() {
+        const rawWorkflowIds = workflowIdInput?.value || "";
+        const workflowIds = rawWorkflowIds
+            .split(",")
+            .map((workflowId) => workflowId.trim());
+
+        if (
+            !rawWorkflowIds.trim() ||
+            workflowIds.some((workflowId) => !workflowId)
+        ) {
+            throw new Error(
+                "Enter one or more frozen workflow IDs separated by commas."
+            );
+        }
+        if (new Set(workflowIds).size !== workflowIds.length) {
+            throw new Error("Workflow IDs must not be duplicated.");
+        }
+        const namespace = runtimeNamespace();
+        return { workflowIds, namespace };
     }
 
     function requestContext() {
@@ -109,34 +147,77 @@
             };
         }
 
-        const { workflowId, namespace } = runtimeSelection();
+        if (selectedMode() === "portfolio-demo") {
+            return {
+                deploymentEndpoint: DEMO_DEPLOYMENT_ENDPOINT,
+                deploymentKey: "portfolio-demo",
+                impactEndpoint(failedNode) {
+                    return `${PORTFOLIO_DEMO_ENDPOINT}?failed_node=${encodeURIComponent(
+                        failedNode
+                    )}`;
+                },
+            };
+        }
+
+        if (selectedMode() === "runtime") {
+            const { workflowId, namespace } = runtimeSelection();
+            const namespaceQuery = encodeURIComponent(namespace);
+            return {
+                deploymentEndpoint: `${RUNTIME_DEPLOYMENT_ENDPOINT}?namespace=${namespaceQuery}`,
+                deploymentKey: `runtime:${namespace}`,
+                impactEndpoint(failedNode) {
+                    const params = new URLSearchParams({
+                        workflow_id: workflowId,
+                        failed_node: failedNode,
+                        namespace,
+                    });
+                    return `${RUNTIME_IMPACT_ENDPOINT}?${params.toString()}`;
+                },
+            };
+        }
+
+        const { workflowIds, namespace } = portfolioRuntimeSelection();
         const namespaceQuery = encodeURIComponent(namespace);
         return {
             deploymentEndpoint: `${RUNTIME_DEPLOYMENT_ENDPOINT}?namespace=${namespaceQuery}`,
-            deploymentKey: `runtime:${namespace}`,
+            deploymentKey: `portfolio-runtime:${namespace}`,
             impactEndpoint(failedNode) {
                 const params = new URLSearchParams({
-                    workflow_id: workflowId,
                     failed_node: failedNode,
                     namespace,
                 });
-                return `${RUNTIME_IMPACT_ENDPOINT}?${params.toString()}`;
+                workflowIds.forEach((workflowId) => {
+                    params.append("workflow_id", workflowId);
+                });
+                return `${PORTFOLIO_RUNTIME_ENDPOINT}?${params.toString()}`;
             },
         };
     }
 
     function updateInputModeUi() {
-        const runtime = selectedMode() === "runtime";
+        const mode = selectedMode();
+        const runtime = mode === "runtime" || mode === "portfolio-runtime";
         if (runtimeFields) runtimeFields.hidden = !runtime;
+        if (workflowIdLabel) {
+            workflowIdLabel.textContent = mode === "portfolio-runtime"
+                ? "Workflow IDs"
+                : "Workflow ID";
+        }
         if (inputSourceBadge) {
-            inputSourceBadge.textContent = runtime
-                ? "Validated Runtime"
-                : "Contract Fixtures";
+            inputSourceBadge.textContent = {
+                demo: "Contract Fixtures",
+                "portfolio-demo": "Portfolio Fixtures",
+                runtime: "Validated Runtime",
+                "portfolio-runtime": "Runtime Portfolio",
+            }[mode];
         }
         if (inputModeNote) {
-            inputModeNote.textContent = runtime
-                ? "Runtime mode — requires configured Component 1 persistence and a frozen workflow, then uses Component 2 topology; simulation remains virtual."
-                : "Contract-fixture mode — this runs a virtual prediction and never changes a cluster.";
+            inputModeNote.textContent = {
+                demo: "Contract-fixture mode — this runs a virtual prediction and never changes a cluster.",
+                "portfolio-demo": "Portfolio-fixture mode — evaluates the selected node across two disclosed workflows without changing a cluster.",
+                runtime: "Runtime mode — requires configured Component 1 persistence and a frozen workflow, then uses Component 2 topology; simulation remains virtual.",
+                "portfolio-runtime": "Runtime portfolio mode — enter comma-separated frozen workflow IDs and evaluate them against one Component 2 topology; simulation remains virtual.",
+            }[mode];
         }
     }
 
@@ -195,8 +276,15 @@
         });
     }
 
-    function renderRootCauses(container, rootCauses) {
+    function renderRootCauses(root, rootCauses) {
+        const section = root.querySelector('[data-role="root-causes-section"]');
+        const container = root.querySelector('[data-role="impact-root-causes"]');
+        if (!section || !container) return;
+
+        const hasRootCauseContract = Array.isArray(rootCauses);
+        section.hidden = !hasRootCauseContract;
         container.innerHTML = "";
+        if (!hasRootCauseContract) return;
 
         if (!rootCauses.length) {
             const empty = document.createElement("p");
@@ -242,6 +330,52 @@
                 item.appendChild(row);
             });
 
+            container.appendChild(item);
+        });
+    }
+
+    function renderPortfolioOutcomes(root, workflowImpacts) {
+        const section = root.querySelector(
+            '[data-role="portfolio-workflow-section"]'
+        );
+        const container = root.querySelector(
+            '[data-role="portfolio-workflow-outcomes"]'
+        );
+        if (!section || !container) return;
+
+        const hasPortfolio = Array.isArray(workflowImpacts);
+        section.hidden = !hasPortfolio;
+        container.innerHTML = "";
+        if (!hasPortfolio) return;
+
+        workflowImpacts.forEach((impact) => {
+            const item = document.createElement("div");
+            item.className = "workflow-outcome";
+
+            const identity = document.createElement("div");
+            identity.className = "workflow-outcome__identity";
+
+            const name = document.createElement("strong");
+            name.textContent = impact.workflowId;
+
+            const badge = document.createElement("span");
+            badge.className = impact.survives
+                ? "status-badge status-badge--success"
+                : "status-badge status-badge--danger";
+            badge.textContent = impact.survives ? "Survived" : "Failed";
+            identity.append(name, badge);
+
+            const explanation = document.createElement("span");
+            explanation.className = "workflow-outcome__explanation muted";
+            if (impact.failedMandatoryServices.length) {
+                explanation.textContent = `Mandatory failures: ${impact.failedMandatoryServices.join(", ")}`;
+            } else if (impact.failedServices.length) {
+                explanation.textContent = `Optional unavailable services: ${impact.failedServices.join(", ")}`;
+            } else {
+                explanation.textContent = "All required services survived.";
+            }
+
+            item.append(identity, explanation);
             container.appendChild(item);
         });
     }
@@ -358,9 +492,10 @@
                 impact.failedWorkflows
             );
             renderRootCauses(
-                region.querySelector('[data-role="impact-root-causes"]'),
+                region,
                 impact.rootCauses
             );
+            renderPortfolioOutcomes(region, impact.workflowImpacts);
             renderNodeRanking(
                 region.querySelector('[data-role="impact-node-ranking-body"]'),
                 impact.nodeRiskRanking

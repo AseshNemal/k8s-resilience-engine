@@ -11,14 +11,22 @@ from app.engine.failure_impact_prediction.fixture_provider import (
     get_current_component_inputs,
     get_demo_deployment,
     get_demo_inputs,
+    get_demo_portfolio_inputs,
 )
-from app.engine.failure_impact_prediction.models import CrossLayerGraph
+from app.engine.failure_impact_prediction.models import (
+    CrossLayerGraph,
+    PortfolioFailureImpact,
+)
 from app.engine.failure_impact_prediction.node_failure_simulator import (
     simulate_node_failure,
+)
+from app.engine.failure_impact_prediction.portfolio_impact import (
+    predict_portfolio_failure_impact,
 )
 from app.engine.failure_impact_prediction.runtime_provider import (
     RuntimeInputUnavailableError,
     get_runtime_component_inputs,
+    get_runtime_portfolio_inputs,
 )
 from app.engine.failure_impact_prediction.service_survival import (
     calculate_service_survival,
@@ -27,7 +35,13 @@ from app.engine.failure_impact_prediction.workflow_survival import (
     calculate_workflow_survival,
 )
 from app.shared.schemas.deployment import DeploymentGraph
-from app.shared.schemas.failure_impact import FailureImpactReport, RootCause
+from app.shared.schemas.failure_impact import (
+    FailureImpactReport,
+    PortfolioFailureImpactReport,
+    PortfolioNodeRisk,
+    PortfolioWorkflowImpact,
+    RootCause,
+)
 from app.shared.schemas.workflow import WorkflowGraph
 
 
@@ -118,6 +132,19 @@ def predict_demo_failure_impact(failed_node: str) -> FailureImpactReport:
     return predict_failure_impact(workflow, deployment, failed_node)
 
 
+def predict_demo_portfolio_failure_impact(
+    failed_node: str,
+) -> PortfolioFailureImpact:
+    """Run the portfolio evaluator over disclosed contract fixtures."""
+
+    workflows, deployment = get_demo_portfolio_inputs()
+    return predict_portfolio_failure_impact(
+        workflows,
+        deployment,
+        failed_node,
+    )
+
+
 def predict_runtime_failure_impact(
     workflow_id: str,
     failed_node: str,
@@ -133,6 +160,56 @@ def predict_runtime_failure_impact(
     )
 
 
+def predict_runtime_portfolio_failure_impact(
+    workflow_ids: tuple[str, ...],
+    failed_node: str,
+    namespace: str = "default",
+) -> PortfolioFailureImpact:
+    """Predict portfolio impact from frozen workflows and one live topology."""
+
+    inputs = get_runtime_portfolio_inputs(workflow_ids, namespace)
+    return predict_portfolio_failure_impact(
+        inputs.workflows,
+        inputs.deployment,
+        failed_node,
+    )
+
+
+def build_portfolio_failure_impact_report(
+    prediction: PortfolioFailureImpact,
+) -> PortfolioFailureImpactReport:
+    """Convert the internal immutable result to the public API contract."""
+
+    return PortfolioFailureImpactReport(
+        failed_node=prediction.failed_node,
+        total_workflows=prediction.total_workflows,
+        failed_workflows=list(prediction.failed_workflows),
+        surviving_workflows=list(prediction.surviving_workflows),
+        failed_services=list(prediction.failed_services),
+        blast_radius=prediction.blast_radius,
+        survivability=prediction.survivability,
+        workflow_impacts=[
+            PortfolioWorkflowImpact(
+                workflow_id=impact.workflow_id,
+                survives=impact.survives,
+                failed_services=list(impact.failed_services),
+                failed_mandatory_services=list(
+                    impact.failed_mandatory_services
+                ),
+            )
+            for impact in prediction.workflow_impacts
+        ],
+        node_risk_ranking=[
+            PortfolioNodeRisk(
+                node=risk.node,
+                blast_radius=risk.blast_radius,
+                failed_workflows=list(risk.failed_workflows),
+            )
+            for risk in prediction.node_risk_ranking
+        ],
+    )
+
+
 def get_sample_failure_impact() -> FailureImpactReport:
     """Keep the original sample endpoint while returning a calculated report."""
 
@@ -140,11 +217,15 @@ def get_sample_failure_impact() -> FailureImpactReport:
 
 
 __all__ = [
+    "build_portfolio_failure_impact_report",
     "build_current_cross_layer_graph",
     "get_demo_deployment",
     "get_sample_failure_impact",
     "predict_demo_failure_impact",
+    "predict_demo_portfolio_failure_impact",
     "predict_failure_impact",
+    "predict_portfolio_failure_impact",
     "predict_runtime_failure_impact",
+    "predict_runtime_portfolio_failure_impact",
     "RuntimeInputUnavailableError",
 ]
