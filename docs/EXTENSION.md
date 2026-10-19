@@ -76,7 +76,31 @@ docker extension ls                                                    # shows t
 - The open tab reloads itself. Wait about five seconds if a page briefly says it cannot reach the
   backend; reads are retried automatically. Writes are not retried, so repeat a failed action by hand.
 - Old image tags stay on disk. After confirming the new version works, remove the ones you no longer
-  need yourself (`docker image rm k8s-resilience-engine:<old tag>`). Nothing deletes them for you.
+  need yourself (`docker image rm k8s-resilience-engine:<old tag>`) or with `extension-manage.sh clean`
+  below. Nothing deletes them for you.
+- **If the read-only role changed between versions** (it now also reads services and replicasets), the
+  stored grant no longer matches. Connect cluster shows "Access needs updating" and renewal pauses until
+  you click **Set up access** and approve once; the dialog lists exactly the role update.
+
+### One command: `scripts/extension-manage.sh`
+
+The build, install, update and clean-up steps above are wrapped in one script, run from the repository
+root. It only manages the Docker extension and its image; it never touches your cluster or its access
+objects, and every command accepts `--dry-run` to print what it would run.
+
+| Command | What it does |
+|---|---|
+| `install [--version X.Y.Z]` | Run the tests, build, and install. Refuses if already installed. |
+| `update [--version X.Y.Z]` | Run the tests, build the next unused version, and replace the installed one. The data volume is kept. |
+| `uninstall` | Remove the extension after asking. Remove cluster access separately with `extension-cluster-access.sh --revoke`. |
+| `status` | Installed version, VM state, and the local image tags. |
+| `check` | Run the Python, Go and Node suites without building. |
+| `clean` | Delete old local `X.Y.Z` image tags after asking. The installed tag is never removed; tags such as `0.1.5-qs` are left alone. |
+
+Other options: `--skip-checks` (build without running the tests first) and `--yes` (no prompts). With no
+`--version`, `update` uses the next patch version above both the installed version and every local tag,
+because Docker keeps running the old image when a tag is reused. The extension's backend container is
+hidden from `docker ps`, so there is no `logs` command.
 
 ### Check that it is healthy
 

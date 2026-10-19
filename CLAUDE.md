@@ -43,6 +43,13 @@ This is an early-stage scaffold, not a working system yet:
 - `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
   deployment, failure_impact, recommendation, validation); `sample_data/` is test-only.
   `app/integrations/kubernetes/` and `app/integrations/jaeger/` exist; `app/core/` is minimal config.
+  The Kubernetes client lists nodes, pods, deployments, services and replicasets (read-only). The
+  extension's role grants exactly those five (`deploy/rbac/resilience-readonly.yaml`, mirrored in
+  `extension/helper/internal/rbac/rbac.go` and checked against each other by a Go test). Discovery does
+  not use services/replicasets yet: Service-selector and Pod → ReplicaSet → Deployment resolution is
+  Member 2's pending work. The rules: a graph service is a Kubernetes Service with a selector, its pods
+  are those whose labels contain every selector pair, and a pod's Deployment comes from owner references.
+  Anything unresolvable is reported, never guessed.
 - `tests/test_sample_endpoints.py` checks that the research fixtures still validate against the
   contracts (through the research-only app in `tests/support/`, not the product).
 
@@ -65,6 +72,11 @@ uvicorn app.main:app --reload
 python -m pytest
 python -m pytest tests/test_live_evidence_api.py  # a single file
 node --test tests/frontend/connection-state.test.mjs tests/frontend/api.test.mjs  # page-script logic
+node --test extension/ui-src/*.test.mjs                                          # extension page scripts
+(cd extension/helper && go test ./... -count=1)                                  # Go host helper (RBAC, flow)
+
+# Docker Desktop extension: install, update, uninstall, status, check, clean (add --dry-run to preview)
+./scripts/extension-manage.sh update
 ```
 
 There is no configured linter, formatter, or `pyproject.toml`/`pytest.ini` in this repo yet.

@@ -39,7 +39,12 @@ Run:
 
 ```bash
 python -m pytest -v
+node --test extension/ui-src/*.test.mjs tests/frontend/*.test.mjs
+(cd extension/helper && go test ./... -count=1)
 ```
+
+Docker Desktop extension: `./scripts/extension-manage.sh install|update|uninstall|status|check|clean`
+(add `--dry-run` to preview; it never touches the cluster or its access objects).
 
 Run the application:
 
@@ -66,8 +71,11 @@ endpoints, tests, and Member 4's topology-spread candidate generation (with feas
 checking and concentration metrics) have been created. Members 1–3 still only have empty
 `service.py` stubs — no real algorithms yet.
 
-Latest test result: 9 passed, 0 failed (`python -m pytest -v`). The earlier floating-point
-assertion failure was fixed with `pytest.approx`.
+Latest test result (2026-10-19): 966 passed, 2 skipped, 0 failed (`python -m pytest`); 114 Node tests
+and every Go package pass. Floating-point assertions use `pytest.approx`.
+
+The extension's read-only role grants `get`/`list` on exactly nodes, pods, services, deployments and
+replicasets. Discovery does not use services/replicasets yet; the resolver is Member 2's pending work.
 
 ## Real data only
 

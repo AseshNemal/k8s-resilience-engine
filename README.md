@@ -974,6 +974,11 @@ read-only cluster access). Quick start (details, updating, removal and troublesh
 5. After changing code or pulling `main`, rebuild with a new tag and run
    `docker extension update k8s-resilience-engine:<new tag>`. Your data is kept.
 
+Steps 2 and 5 are also one command each: `./scripts/extension-manage.sh install` and
+`./scripts/extension-manage.sh update` run the tests, build the next unused version and install or
+update it. The same script offers `uninstall`, `status`, `check` and `clean`, and `--dry-run` prints
+what it would do (see [`docs/EXTENSION.md`](docs/EXTENSION.md)).
+
 Recommendations are never applied to Kubernetes automatically; approving one only records the approval.
 
 Writing real Kubernetes manifests for `deploy/kubernetes/` is future work — see
@@ -1082,7 +1087,9 @@ The checklist above predates the real-data-only work and was not re-audited. As 
       Deployments by `app` label equal to the Deployment name, so applications whose Deployments are
       named differently (for example Istio Bookinfo: `productpage-v1` with `app: productpage`) are
       reported as *unresolved*, not discovered. Pod → ReplicaSet → Deployment ownership and
-      Service-selector resolution are planned for Member 2.
+      Service-selector resolution are planned for Member 2. The read-only role already allows reading
+      Services and ReplicaSets and `tests/support/fake_cluster.py` has a Bookinfo-shaped fixture, so
+      only the resolver itself is missing.
 - [ ] **The live recommendation pipeline is incomplete.** No producer yet turns the engine's
       simulation into a `RecommendationReport`, a YAML proposal or a `ValidationReport`, so the
       Recommendations page shows explicit missing-evidence states and no approval can be requested.
