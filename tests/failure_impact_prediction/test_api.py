@@ -261,7 +261,9 @@ def test_failure_impact_page_contains_node_simulation_controls() -> None:
     assert 'data-role="input-mode"' in response.text
     assert 'value="portfolio-demo"' in response.text
     assert 'value="runtime"' in response.text
+    assert 'value="portfolio-runtime"' in response.text
     assert 'data-role="workflow-id"' in response.text
+    assert 'data-role="workflow-id-label"' in response.text
     assert 'data-role="namespace"' in response.text
     assert 'data-role="node-selector"' in response.text
     assert 'data-role="portfolio-workflow-outcomes"' in response.text
