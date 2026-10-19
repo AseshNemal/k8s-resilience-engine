@@ -16,6 +16,9 @@ from app.engine.failure_impact_prediction.models import CrossLayerGraph
 from app.engine.failure_impact_prediction.node_failure_simulator import (
     simulate_node_failure,
 )
+from app.engine.failure_impact_prediction.portfolio_impact import (
+    predict_portfolio_failure_impact,
+)
 from app.engine.failure_impact_prediction.runtime_provider import (
     RuntimeInputUnavailableError,
     get_runtime_component_inputs,
@@ -145,6 +148,7 @@ __all__ = [
     "get_sample_failure_impact",
     "predict_demo_failure_impact",
     "predict_failure_impact",
+    "predict_portfolio_failure_impact",
     "predict_runtime_failure_impact",
     "RuntimeInputUnavailableError",
 ]

@@ -97,3 +97,27 @@ class WorkflowSurvivalPrediction:
     workflow_id: str
     survives: bool
     failed_due_to: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkflowImpactSummary:
+    """Outcome of one workflow within a portfolio failure simulation."""
+
+    workflow_id: str
+    survives: bool
+    failed_services: tuple[str, ...]
+    failed_mandatory_services: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PortfolioFailureImpact:
+    """Aggregated workflow impact for one assumed worker-node failure."""
+
+    failed_node: str
+    total_workflows: int
+    failed_workflows: tuple[str, ...]
+    surviving_workflows: tuple[str, ...]
+    failed_services: tuple[str, ...]
+    blast_radius: float
+    survivability: float
+    workflow_impacts: tuple[WorkflowImpactSummary, ...]
