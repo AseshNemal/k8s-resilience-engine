@@ -1,3 +1,5 @@
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.api import failure_impacts as failure_impact_routes
@@ -54,6 +56,105 @@ def test_component_three_routes_are_registered() -> None:
     assert "/api/failure-impacts/simulate" in paths
     assert "/api/failure-impacts/demo-deployment" in paths
     assert "/api/failure-impacts/runtime" in paths
+    assert "/api/failure-impacts/portfolio/simulate" in paths
+    assert "/api/failure-impacts/portfolio/runtime" in paths
+
+
+def test_demo_portfolio_route_returns_public_contract() -> None:
+    report = failure_impact_routes.simulate_demo_portfolio_failure("node-1")
+    payload = report.model_dump(by_alias=True)
+
+    assert payload["failedNode"] == "node-1"
+    assert payload["totalWorkflows"] == 2
+    assert payload["failedWorkflows"] == ["checkout"]
+    assert payload["survivingWorkflows"] == ["storefront"]
+    assert payload["blastRadius"] == 50.0
+    assert payload["nodeRiskRanking"][0] == {
+        "node": "node-1",
+        "blastRadius": 50.0,
+        "failedWorkflows": ["checkout"],
+    }
+
+
+def test_demo_portfolio_route_rejects_unknown_node() -> None:
+    with pytest.raises(HTTPException) as caught:
+        failure_impact_routes.simulate_demo_portfolio_failure("node-99")
+
+    assert caught.value.status_code == 422
+    assert "Unknown failed node" in caught.value.detail
+
+
+def test_runtime_portfolio_route_forwards_selection(monkeypatch) -> None:
+    prediction = failure_impact_routes.predict_demo_portfolio_failure_impact(
+        "node-1"
+    )
+    calls: dict[str, object] = {}
+
+    def runtime_prediction(
+        workflow_ids: tuple[str, ...],
+        failed_node: str,
+        namespace: str,
+    ):
+        calls.update(
+            workflow_ids=workflow_ids,
+            failed_node=failed_node,
+            namespace=namespace,
+        )
+        return prediction
+
+    monkeypatch.setattr(
+        failure_impact_routes,
+        "predict_runtime_portfolio_failure_impact",
+        runtime_prediction,
+    )
+
+    report = failure_impact_routes.simulate_runtime_portfolio_failure(
+        ["checkout", "storefront"],
+        "node-1",
+        "research",
+    )
+
+    assert calls == {
+        "workflow_ids": ("checkout", "storefront"),
+        "failed_node": "node-1",
+        "namespace": "research",
+    }
+    assert report.total_workflows == 2
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [
+        (LookupError("Missing frozen workflow"), 404),
+        (ValueError("Unknown failed node"), 422),
+        (
+            RuntimeInputUnavailableError("Component 2 is unavailable"),
+            503,
+        ),
+    ],
+)
+def test_runtime_portfolio_route_maps_errors(
+    monkeypatch,
+    error: Exception,
+    status_code: int,
+) -> None:
+    def failing_prediction(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(
+        failure_impact_routes,
+        "predict_runtime_portfolio_failure_impact",
+        failing_prediction,
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        failure_impact_routes.simulate_runtime_portfolio_failure(
+            ["checkout", "storefront"],
+            "node-1",
+            "default",
+        )
+
+    assert caught.value.status_code == status_code
 
 
 def test_runtime_endpoint_forwards_validated_input_selection(monkeypatch) -> None:

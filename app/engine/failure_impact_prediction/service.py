@@ -35,7 +35,13 @@ from app.engine.failure_impact_prediction.workflow_survival import (
     calculate_workflow_survival,
 )
 from app.shared.schemas.deployment import DeploymentGraph
-from app.shared.schemas.failure_impact import FailureImpactReport, RootCause
+from app.shared.schemas.failure_impact import (
+    FailureImpactReport,
+    PortfolioFailureImpactReport,
+    PortfolioNodeRisk,
+    PortfolioWorkflowImpact,
+    RootCause,
+)
 from app.shared.schemas.workflow import WorkflowGraph
 
 
@@ -169,6 +175,41 @@ def predict_runtime_portfolio_failure_impact(
     )
 
 
+def build_portfolio_failure_impact_report(
+    prediction: PortfolioFailureImpact,
+) -> PortfolioFailureImpactReport:
+    """Convert the internal immutable result to the public API contract."""
+
+    return PortfolioFailureImpactReport(
+        failed_node=prediction.failed_node,
+        total_workflows=prediction.total_workflows,
+        failed_workflows=list(prediction.failed_workflows),
+        surviving_workflows=list(prediction.surviving_workflows),
+        failed_services=list(prediction.failed_services),
+        blast_radius=prediction.blast_radius,
+        survivability=prediction.survivability,
+        workflow_impacts=[
+            PortfolioWorkflowImpact(
+                workflow_id=impact.workflow_id,
+                survives=impact.survives,
+                failed_services=list(impact.failed_services),
+                failed_mandatory_services=list(
+                    impact.failed_mandatory_services
+                ),
+            )
+            for impact in prediction.workflow_impacts
+        ],
+        node_risk_ranking=[
+            PortfolioNodeRisk(
+                node=risk.node,
+                blast_radius=risk.blast_radius,
+                failed_workflows=list(risk.failed_workflows),
+            )
+            for risk in prediction.node_risk_ranking
+        ],
+    )
+
+
 def get_sample_failure_impact() -> FailureImpactReport:
     """Keep the original sample endpoint while returning a calculated report."""
 
@@ -176,6 +217,7 @@ def get_sample_failure_impact() -> FailureImpactReport:
 
 
 __all__ = [
+    "build_portfolio_failure_impact_report",
     "build_current_cross_layer_graph",
     "get_demo_deployment",
     "get_sample_failure_impact",
