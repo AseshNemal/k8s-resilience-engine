@@ -1,6 +1,8 @@
 import time
 from datetime import datetime, timezone
 from typing import Any
+from app.engine.deployment_topology_modeling import placement_metrics as pm
+from app.engine.deployment_topology_modeling.drift_analysis import intent_access as ia
 from app.engine.deployment_topology_modeling.drift_analysis.drift_config import DriftConfig
 from app.engine.deployment_topology_modeling.drift_analysis.drift_models import (
     DriftViolation,
@@ -8,7 +10,6 @@ from app.engine.deployment_topology_modeling.drift_analysis.drift_models import 
     ClusterExposureReport,
     BaselineB2Result,
 )
-from app.engine.deployment_topology_modeling.drift_analysis.constants import ExposureLevel
 from app.engine.deployment_topology_modeling.drift_analysis.scale_drift_detector import ScaleDriftDetector
 from app.engine.deployment_topology_modeling.drift_analysis.affinity_drift_detector import AffinityDriftDetector
 from app.engine.deployment_topology_modeling.drift_analysis.topology_spread_detector import (
@@ -27,12 +28,7 @@ from app.engine.deployment_topology_modeling.drift_analysis.drift_audit_trail im
 
 
 class DriftAnalyzer:
-    """
-    Central Orchestrator for Phase 3 Resilience Drift & Placement Exposure Modeling.
-    
-    Coordinates the detector suite, failure domain simulations, audit logging,
-    and Baseline B2 ranking generation.
-    """
+    """Runs the detectors and the exposure engine per service and aggregates cluster metrics."""
 
     def __init__(self, config: DriftConfig | None = None):
         self.config = config or DriftConfig()
@@ -53,28 +49,25 @@ class DriftAnalyzer:
         runtime_pods: list[dict[str, Any]],
         cluster_nodes: list[dict[str, Any]],
     ) -> ServiceExposureResult:
-        # Run all specialized detectors
         violations: list[DriftViolation] = []
         for detector in self.detectors:
-            det_violations = detector.detect(
+            found = detector.detect(
                 service_name=service_name,
                 declared_intent=declared_intent,
                 runtime_pods=runtime_pods,
                 cluster_nodes=cluster_nodes,
             )
-            violations.extend(det_violations)
-
+            violations.extend(found)
             if self.config.enable_audit_logging:
-                for v in det_violations:
+                for v in found:
                     self.audit_trail.record_violation(service_name, v)
 
-        # Run single failure-domain evaluation
-        exposure_result = self.exposure_engine.evaluate_service_exposure(
+        return self.exposure_engine.evaluate_service_exposure(
             service_name=service_name,
             runtime_pods=runtime_pods,
             violations=violations,
+            has_placement_rules=ia.has_placement_rules(declared_intent),
         )
-        return exposure_result
 
     def analyze_cluster(
         self,
@@ -83,79 +76,52 @@ class DriftAnalyzer:
         cluster_nodes: list[dict[str, Any]],
         cluster_name: str = "production-cluster",
     ) -> tuple[ClusterExposureReport, BaselineB2Result]:
+        """Services are the runtime services; a manifest with no runtime service is not evaluated,
+        because exposure is a property of running replicas."""
         start_time = time.perf_counter()
 
-        all_services = sorted(
-            set(manifests_by_service.keys()).union(runtime_pods_by_service.keys())
-        )
-        total_services_count = len(all_services)
-
-        service_exposures: list[ServiceExposureResult] = []
-        compliant_services_count = 0
-        exposed_services_count = 0
-        total_concentration = 0.0
-
-        for svc in all_services:
-            declared = manifests_by_service.get(svc)
-            pods = runtime_pods_by_service.get(svc, [])
-            exposure = self.analyze_service(
+        exposures = [
+            self.analyze_service(
                 service_name=svc,
-                declared_intent=declared,
-                runtime_pods=pods,
+                declared_intent=manifests_by_service.get(svc),
+                runtime_pods=runtime_pods_by_service.get(svc, []),
                 cluster_nodes=cluster_nodes,
             )
-            service_exposures.append(exposure)
+            for svc in sorted(runtime_pods_by_service)
+        ]
 
-            total_concentration += exposure.replica_concentration
+        statuses = [e.exposure_status for e in exposures]
+        rate = pm.exposure_rate(statuses)
+        compliance = pm.compliance_rate({e.service_name: e.placement_rules_satisfied for e in exposures})
+        ratios = [e.replica_concentration for e in exposures if e.replica_concentration is not None]
+        exposed = [e.service_name for e in exposures if e.exposure_status == pm.ExposureStatus.EXPOSED]
 
-            # Compliance means no violations detected
-            if len(exposure.violations) == 0:
-                compliant_services_count += 1
-
-            # Exposed if FULL_EXPOSURE or SINGLE_REPLICA_EXPOSURE
-            if exposure.exposure_level in (
-                ExposureLevel.FULL_EXPOSURE,
-                ExposureLevel.SINGLE_REPLICA_EXPOSURE,
-            ):
-                exposed_services_count += 1
-
-        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-        exposure_rate = (
-            exposed_services_count / total_services_count
-            if total_services_count > 0
-            else 0.0
-        )
-        compliance_rate = (
-            compliant_services_count / total_services_count
-            if total_services_count > 0
-            else 1.0
-        )
-        mean_conc = (
-            total_concentration / total_services_count
-            if total_services_count > 0
-            else 0.0
-        )
-
-        cluster_report = ClusterExposureReport(
+        report = ClusterExposureReport(
             timestamp=datetime.now(timezone.utc).isoformat(),
-            total_services=total_services_count,
-            exposed_service_count=exposed_services_count,
-            exposure_rate=round(exposure_rate, 4),
-            constraint_compliance_rate=round(compliance_rate, 4),
-            mean_concentration=round(mean_conc, 4),
-            services=service_exposures,
-            runtime_overhead_ms=round(elapsed_ms, 2),
+            total_services=len(exposures),
+            evaluated_services=sum(s != pm.ExposureStatus.UNAVAILABLE for s in statuses),
+            unavailable_services=[
+                e.service_name for e in exposures if e.exposure_status == pm.ExposureStatus.UNAVAILABLE
+            ],
+            exposed_services=exposed,
+            exposed_service_count=len(exposed),
+            exposure_rate=round(rate, 4) if rate is not None else None,
+            services_with_placement_rules=sum(e.has_placement_rules for e in exposures),
+            constraint_compliance_rate=round(compliance, 4) if compliance is not None else None,
+            mean_concentration=round(sum(ratios) / len(ratios), 4) if ratios else None,
+            services=exposures,
+            runtime_overhead_ms=round((time.perf_counter() - start_time) * 1000.0, 2),
         )
 
-        baseline_b2 = self.baseline_engine.generate_baseline_b2(service_exposures)
+        baseline_b2 = self.baseline_engine.generate_baseline_b2(exposures)
 
         if self.config.enable_audit_logging:
             self.audit_trail.record_run(
                 cluster_name=cluster_name,
-                total_services=total_services_count,
-                exposed_count=exposed_services_count,
-                exposure_rate=cluster_report.exposure_rate,
-                compliance_rate=cluster_report.constraint_compliance_rate,
+                total_services=report.total_services,
+                exposed_count=report.exposed_service_count,
+                exposure_rate=report.exposure_rate,
+                compliance_rate=report.constraint_compliance_rate,
             )
 
-        return cluster_report, baseline_b2
+        return report, baseline_b2

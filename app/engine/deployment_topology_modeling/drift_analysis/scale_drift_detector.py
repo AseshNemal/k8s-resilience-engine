@@ -1,4 +1,5 @@
 from typing import Any
+from app.engine.deployment_topology_modeling import placement_metrics as pm
 from app.engine.deployment_topology_modeling.drift_analysis.constants import (
     DriftType,
     DriftSeverity,
@@ -38,11 +39,7 @@ class ScaleDriftDetector(BaseDriftDetector):
         if declared_replicas is None:
             return violations
 
-        # Count ready pods
-        ready_pods_count = sum(
-            1 for pod in runtime_pods
-            if pod.get("is_ready", pod.get("ready", False))
-        )
+        ready_pods_count = pm.ready_replica_count(runtime_pods)
         total_pods_count = len(runtime_pods)
 
         if ready_pods_count != declared_replicas:

@@ -9,14 +9,17 @@ from app.engine.deployment_topology_modeling.drift_analysis.base_detector import
 
 class ResourceContentionDetector(BaseDriftDetector):
     """
-    Detects resource contention risks, such as missing CPU/memory limits.
-    
-    Unbounded pods scheduled onto the same worker node create noisy-neighbor 
-    vulnerabilities, risking unexpected OOMKills and involuntary pod evictions.
+    Reports containers declared without CPU/memory limits.
+
+    Informational only: this does not measure node contention, and missing limits are not a
+    placement rule, so its findings never count against constraint compliance or drift_detected.
     """
 
     @staticmethod
     def _extract_resources(declared_intent: Any | None) -> list[Any]:
+        per_container_limits = getattr(declared_intent, "resource_limits_by_container", None)
+        if per_container_limits:
+            return [{"limits": limits} for limits in per_container_limits]
         if hasattr(declared_intent, "resource_limits"):
             rl = getattr(declared_intent, "resource_limits")
             if rl and getattr(rl, "cpu", None) and getattr(rl, "memory", None):
