@@ -9,6 +9,7 @@ import (
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/transport"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -127,6 +128,29 @@ func TestTamperedAccessIsRefusedSoNoOverPrivilegedTokenIsEverIssued(t *testing.T
 
 	if r.OK || r.State != StateDrifted {
 		t.Fatalf("result = %+v", r)
+	}
+	assertNoTokenNoWrite(t, cs, b, p)
+}
+
+func TestARoleApprovedBeforeTheNewReadsIsRefusedWithAnExplanationNotAnAccusation(t *testing.T) {
+	cs := approvedCluster(t)
+	cr, _ := cs.RbacV1().ClusterRoles().Get(bg, rbac.Name, metav1.GetOptions{})
+	cr.Rules = []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
+		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
+	}
+	if _, err := cs.RbacV1().ClusterRoles().Update(bg, cr, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	cs.ClearActions()
+	p, b := neverPrompt(t), managedBackend()
+	r := Renew(bg, deps(newLoader(cs), p, b), ctxName)
+
+	if r.OK || r.State != StateDrifted {
+		t.Fatalf("result = %+v", r)
+	}
+	if strings.Contains(r.Message, "changed from what you approved") || !strings.Contains(r.Message, "needs") {
+		t.Errorf("an upgrade must not be reported as a change someone made: %q", r.Message)
 	}
 	assertNoTokenNoWrite(t, cs, b, p)
 }

@@ -107,7 +107,7 @@ func TestAuthorizeOnAnEmptyClusterShowsTheExactChangesThenCreatesThemAndConnects
 	dialog := p.requests[0].Title + "\n" + p.requests[0].Body
 	for _, want := range []string{
 		ctxName, "127.0.0.1:58227", "Kubernetes v1.37.0",
-		"Read (get, list) nodes and pods", "Read (get, list) deployments", "No access to Secrets",
+		"Read (get, list) nodes, pods and services", "Read (get, list) deployments and replicasets", "No access to Secrets",
 		"Create Namespace resilience-engine", "Create ServiceAccount resilience-engine-reader",
 		"Create ClusterRole resilience-engine-reader", "Create ClusterRoleBinding resilience-engine-reader",
 		"8 hours", "renewed automatically",

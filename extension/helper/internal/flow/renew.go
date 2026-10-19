@@ -47,6 +47,9 @@ func Renew(ctx context.Context, d Deps, name string) Result {
 		case rbac.OverallOverGranted:
 			return overGranted(cmd, report)
 		case rbac.OverallDrifted:
+			if report.NeedsMoreAccess() {
+				return fail(cmd, StateDrifted, "this version of the extension needs more read access than you approved before, so no token was issued; approve again to add it")
+			}
 			return fail(cmd, StateDrifted, "the extension's access in the cluster was changed from what you approved, so no token was issued; review it and approve again")
 		default: // absent or partial
 			return fail(cmd, StateAuthorizationGone, "the extension's access was removed from the cluster, so no token was issued; approve it again to restore it")

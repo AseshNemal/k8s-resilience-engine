@@ -82,6 +82,9 @@ type ObjectState struct {
 	// Owner is the value of the managed-by label, if any. A different owner means the object is not
 	// ours, and Revoke will never delete it.
 	Owner string `json:"owner,omitempty"`
+	// Outdated marks a role that grants only part of what this version needs and nothing beyond it,
+	// typically one approved by an earlier version. It is not tampering, so it is described differently.
+	Outdated bool `json:"outdated,omitempty"`
 }
 
 // foreign reports whether another tool, not this extension, has labelled the object as its own.
@@ -102,8 +105,8 @@ func labels() map[string]string { return map[string]string{ManagedByKey: Managed
 
 func desiredRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
-		{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
-		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
+		{APIGroups: []string{""}, Resources: []string{"nodes", "pods", "services"}, Verbs: []string{"get", "list"}},
+		{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets"}, Verbs: []string{"get", "list"}},
 	}
 }
 
@@ -118,8 +121,8 @@ func desiredRoleRef() rbacv1.RoleRef {
 // Permissions describes in plain words what the credential can do, for the approval dialog.
 func Permissions() []string {
 	return []string{
-		"Read (get, list) nodes and pods",
-		"Read (get, list) deployments",
+		"Read (get, list) nodes, pods and services",
+		"Read (get, list) deployments and replicasets",
 		"No access to Secrets, ConfigMaps or any other resource; no create, update, patch or delete",
 	}
 }
@@ -190,6 +193,9 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return r, wrap(err)
 	}
+	if err == nil {
+		r.markOutdated(cr)
+	}
 
 	crb, err := cs.RbacV1().ClusterRoleBindings().Get(ctx, Name, metav1.GetOptions{})
 	r.add(KindClusterRoleBinding, Name, err, func() string { return crb.Labels[ManagedByKey] }, func() (State, string) {
@@ -211,6 +217,81 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 	}
 	r.ExtraGrants = extras
 	return r, nil
+}
+
+// ruleTriples flattens rules into "group/resource/verb". ok is false when a rule restricts by resource
+// name or non-resource URL, which this comparison does not model.
+func ruleTriples(rules []rbacv1.PolicyRule) (set map[string]bool, ok bool) {
+	set = map[string]bool{}
+	for _, rule := range rules {
+		if len(rule.ResourceNames) > 0 || len(rule.NonResourceURLs) > 0 {
+			return nil, false
+		}
+		for _, group := range rule.APIGroups {
+			for _, resource := range rule.Resources {
+				for _, verb := range rule.Verbs {
+					set[group+"/"+resource+"/"+verb] = true
+				}
+			}
+		}
+	}
+	return set, true
+}
+
+// markOutdated tells a role that is merely narrower than the approved set (every grant it has is
+// still wanted) from one that was changed or widened. Only the first is a normal upgrade.
+func (r *Report) markOutdated(cr *rbacv1.ClusterRole) {
+	have, okHave := ruleTriples(cr.Rules)
+	want, _ := ruleTriples(desiredRules())
+	if cr.AggregationRule != nil || !okHave || len(have) == 0 {
+		return
+	}
+	for triple := range have {
+		if !want[triple] {
+			return
+		}
+	}
+	haveResources := map[string]bool{}
+	for triple := range have {
+		haveResources[triple[:strings.LastIndex(triple, "/")]] = true
+	}
+	var missing []string
+	for triple := range want {
+		key := triple[:strings.LastIndex(triple, "/")]
+		if !haveResources[key] {
+			missing = append(missing, key[strings.LastIndex(key, "/")+1:])
+			haveResources[key] = true // report each resource once
+		}
+	}
+	sort.Strings(missing)
+	what := "more read access"
+	if len(missing) > 0 {
+		what = "read access to " + strings.Join(missing, ", ")
+	}
+	for i := range r.Objects {
+		if o := &r.Objects[i]; o.Kind == KindClusterRole && o.State == Drifted {
+			o.Outdated = true
+			o.Detail = "this version of the extension also needs " + what
+		}
+	}
+}
+
+// NeedsMoreAccess reports that the only difference from the approved set is a role that predates it:
+// nothing was widened, changed or added by anyone else.
+func (r Report) NeedsMoreAccess() bool {
+	if len(r.ExtraGrants) > 0 {
+		return false
+	}
+	found := false
+	for _, o := range r.Objects {
+		switch {
+		case o.State == Drifted && o.Kind == KindClusterRole && o.Outdated:
+			found = true
+		case o.State == Drifted:
+			return false
+		}
+	}
+	return found
 }
 
 func (r *Report) add(kind Kind, name string, err error, owner func() string, classify func() (State, string)) {
@@ -316,7 +397,11 @@ func Plan(r Report) []Change {
 		case NeedsLabel:
 			out = append(out, Change{Action: "label", Kind: o.Kind, Name: o.Name, Detail: "add " + ManagedByKey + " so it is recognised as the extension's"})
 		case Drifted:
-			out = append(out, Change{Action: "update", Kind: o.Kind, Name: o.Name, Detail: o.Detail + "; will be reset to the approved read-only set"})
+			suffix := "; will be reset to the approved read-only set"
+			if o.Outdated {
+				suffix = "; the missing read access will be added"
+			}
+			out = append(out, Change{Action: "update", Kind: o.Kind, Name: o.Name, Detail: o.Detail + suffix})
 		}
 	}
 	return out

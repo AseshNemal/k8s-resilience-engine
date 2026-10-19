@@ -134,8 +134,8 @@ func TestRuleOrderDoesNotMatterButContentDoes(t *testing.T) {
 	objs := goodObjects(true)
 	cr := objs[2].(*rbacv1.ClusterRole)
 	cr.Rules = []rbacv1.PolicyRule{ // same rules, reversed order everywhere
-		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"list", "get"}},
-		{APIGroups: []string{""}, Resources: []string{"pods", "nodes"}, Verbs: []string{"list", "get"}},
+		{APIGroups: []string{"apps"}, Resources: []string{"replicasets", "deployments"}, Verbs: []string{"list", "get"}},
+		{APIGroups: []string{""}, Resources: []string{"services", "pods", "nodes"}, Verbs: []string{"list", "get"}},
 	}
 	if r := inspect(t, fake.NewClientset(objs...)); r.Overall() != OverallApproved {
 		t.Fatalf("reordered rules should still match, got %s", r.Overall())
@@ -501,6 +501,112 @@ func TestRevokeReportsForbiddenWhenTheUsersKubeconfigCannotDelete(t *testing.T) 
 	forbid(cs, "delete", "clusterrolebindings")
 	if err := Revoke(ctx, cs, plan); err == nil || !strings.Contains(err.Error(), ErrForbidden.Error()) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// ---------------------------------------------------------------- the granted resources
+
+func TestRolePermitsExactlyTheFiveReadResources(t *testing.T) {
+	got := map[string]bool{}
+	for _, rule := range desiredRules() {
+		for _, verb := range rule.Verbs {
+			if verb != "get" && verb != "list" {
+				t.Errorf("verb %q is not read-only", verb)
+			}
+		}
+		for _, group := range rule.APIGroups {
+			for _, resource := range rule.Resources {
+				got[group+"/"+resource] = true
+			}
+		}
+	}
+	want := map[string]bool{
+		"/nodes": true, "/pods": true, "/services": true,
+		"apps/deployments": true, "apps/replicasets": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("resources = %v, want exactly %v", got, want)
+	}
+	for resource := range want {
+		if !got[resource] {
+			t.Errorf("missing %s in %v", resource, got)
+		}
+	}
+}
+
+func TestRolesApprovedBeforeServicesAndReplicasetsAreDriftedAndRepairedByOneApproval(t *testing.T) {
+	previous := []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
+		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
+	}
+	objs := goodObjects(true)
+	objs[2].(*rbacv1.ClusterRole).Rules = previous
+	cs := fake.NewClientset(objs...)
+
+	r := inspect(t, cs)
+	if r.Overall() != OverallDrifted || r.Usable() {
+		t.Fatalf("overall = %s usable = %v; an old grant must stop renewal until re-approved", r.Overall(), r.Usable())
+	}
+	var updatesRole bool
+	for _, c := range Plan(r) {
+		if c.Action == "update" && c.Kind == KindClusterRole && c.Name == Name {
+			updatesRole = true
+		} else {
+			t.Errorf("unexpected change in the plan: %s", c)
+		}
+	}
+	if !updatesRole {
+		t.Fatalf("the plan does not update the ClusterRole: %+v", Plan(r))
+	}
+
+	if err := Apply(ctx, cs, r); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if after := inspect(t, cs); after.Overall() != OverallApproved || !after.Usable() {
+		t.Fatalf("after one approval: overall = %s usable = %v", after.Overall(), after.Usable())
+	}
+}
+
+func TestAnOlderNarrowerRoleIsExplainedAsNeedingMoreAccessNotAsTampering(t *testing.T) {
+	objs := goodObjects(true)
+	objs[2].(*rbacv1.ClusterRole).Rules = []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
+		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
+	}
+	r := inspect(t, fake.NewClientset(objs...))
+
+	if !r.NeedsMoreAccess() {
+		t.Fatal("a role that is only missing the newly required reads should be reported as needing more access")
+	}
+	var role ObjectState
+	for _, o := range r.Objects {
+		if o.Kind == KindClusterRole {
+			role = o
+		}
+	}
+	if !strings.Contains(role.Detail, "services") || !strings.Contains(role.Detail, "replicasets") {
+		t.Errorf("detail should name the added access, got %q", role.Detail)
+	}
+	for _, c := range Plan(r) {
+		if strings.Contains(c.Detail, "reset") || !strings.Contains(c.Detail, "added") {
+			t.Errorf("an extension of the role must not be described as a reset: %q", c.Detail)
+		}
+	}
+}
+
+func TestAWidenedRoleIsStillDescribedAsAResetAndNeverAsNeedingMoreAccess(t *testing.T) {
+	objs := goodObjects(true)
+	cr := objs[2].(*rbacv1.ClusterRole)
+	cr.Rules = append(cr.Rules, rbacv1.PolicyRule{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}})
+	r := inspect(t, fake.NewClientset(objs...))
+
+	if r.NeedsMoreAccess() {
+		t.Fatal("a role that grants more than approved is tampering, not an upgrade")
+	}
+	for _, c := range Plan(r) {
+		if !strings.Contains(c.Detail, "reset") {
+			t.Errorf("a widened role must be described as reset: %q", c.Detail)
+		}
 	}
 }
 
