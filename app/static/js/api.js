@@ -1,5 +1,5 @@
 /*
- * Shared fetch helper for sample API endpoints.
+ * Shared fetch helper for API endpoints.
  * SHARED FILE — changes require team review.
  *
  * This module only performs HTTP requests and JSON parsing. It does NOT
@@ -7,6 +7,34 @@
  */
 
 const DEFAULT_TIMEOUT_MS = 8000;
+
+/**
+ * Build an Error for a non-2xx response. When the backend sent a structured evidence error
+ * ({detail: {code, message, details}}) the Error carries `status`, `code` and `details`, and its
+ * message is the backend's sanitised message; otherwise the message is the plain HTTP status as before.
+ */
+async function buildHttpError(response) {
+    let detail = null;
+    try {
+        const body = await response.json();
+        detail = body && body.detail;
+    } catch (_error) {
+        detail = null;
+    }
+    const structured = detail && typeof detail === "object" && typeof detail.code === "string";
+    const message = structured
+        ? detail.message || `Request failed with HTTP ${response.status}`
+        : `Request failed with HTTP ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    if (structured) {
+        error.code = detail.code;
+        error.details = detail.details || null;
+    } else if (typeof detail === "string") {
+        error.detail = detail;
+    }
+    return error;
+}
 
 /**
  * Fetch JSON from an endpoint with timeout and clear error messages.
@@ -27,7 +55,7 @@ async function fetchJson(endpoint, options = {}) {
         });
 
         if (!response.ok) {
-            throw new Error(`Request failed with HTTP ${response.status}`);
+            throw await buildHttpError(response);
         }
 
         return await response.json();

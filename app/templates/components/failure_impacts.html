@@ -23,7 +23,7 @@
         <span
             class="status-badge status-badge--muted status-badge--no-dot"
             data-role="input-source-badge"
-        >Contract Fixtures</span>
+        >Not run</span>
     </div>
 </div>
 
@@ -31,26 +31,16 @@
     <div class="scenario-panel">
         <div class="scenario-panel__controls">
             <div class="section-header__title" style="margin-bottom: 4px;">Failure Scenario</div>
-            <label class="scenario-panel__field" for="failure-input-mode">
-                <span>Input source</span>
-                <select
-                    class="scenario-panel__select"
-                    id="failure-input-mode"
-                    data-role="input-mode"
-                >
-                    <option value="demo">Contract fixtures</option>
-                    <option value="runtime">Validated runtime</option>
-                </select>
-            </label>
-            <div class="scenario-panel__runtime-fields" data-role="runtime-fields" hidden>
+            <div class="scenario-panel__runtime-fields" data-role="runtime-fields">
                 <label class="scenario-panel__field" for="failure-workflow-id">
-                    <span>Workflow ID</span>
+                    <span>Frozen workflow ID</span>
                     <input
                         class="scenario-panel__input"
                         id="failure-workflow-id"
                         data-role="workflow-id"
                         type="text"
-                        value="checkout"
+                        value=""
+                        placeholder="ID of an approved, frozen workflow graph"
                         autocomplete="off"
                     >
                 </label>
@@ -75,7 +65,8 @@
                 ></select>
             </label>
             <p class="ui-note scenario-panel__note" data-role="input-mode-note">
-                Contract-fixture mode — this runs a virtual prediction and never changes a cluster.
+                Runs a virtual node failure on the connected cluster's real topology and an approved workflow.
+                The result is a prediction, not an observation, and nothing in the cluster is changed.
             </p>
         </div>
         <button type="button" class="action-button" data-role="reload-button">
@@ -85,7 +76,10 @@
 </div>
 
 <div data-role="page-region">
-    {{ loading_state("Loading sample FailureImpactReport…") }}
+    <div class="state empty-state" role="status">
+        <p class="state__title">No prediction yet</p>
+        <p>Enter a frozen workflow ID, choose a worker node, and select Simulate Node Failure.</p>
+    </div>
 </div>
 
 <template data-role="page-template">

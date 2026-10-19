@@ -2,30 +2,20 @@
  * Overview dashboard page script.
  * Shared page (no single member owns Overview) — coordinate before editing.
  *
- * Only reads values already returned by the sample APIs (node count,
- * blastRadius, survivability, recommendation fields, etc.) and formats them
- * for display. No blast-radius, survivability, or score calculation happens
- * here.
+ * Shows only what the connected cluster reported through /api/deployments/discovery. When the cluster
+ * cannot be read the page shows that failure; it never displays placeholder or estimated figures.
  */
 
 (function () {
-    const { fetchAll } = window.ResilienceApi;
-    const {
-        setError,
-        formatPercentage,
-        formatCodeLabel,
-        updateLastRefreshed,
-    } = window.ResilienceUi;
-
-    const ENDPOINTS = {
-        workflow: "/api/workflows/sample",
-        deployment: "/api/deployments/sample",
-        failureImpact: "/api/failure-impacts/sample",
-        recommendation: "/api/recommendations/sample",
-    };
+    const { fetchJson } = window.ResilienceApi;
+    const { updateLastRefreshed } = window.ResilienceUi;
+    const { describeError, describeDiscovery, renderStateCard, applyBadge } = window.ResilienceConnection;
 
     const errorRegion = document.querySelector('[data-role="overview-error-region"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
+    const namespaceInput = document.querySelector('[data-role="namespace"]');
+    const badge = document.querySelector('[data-role="source-badge"]');
+    const summary = document.querySelector('[data-role="discovery-summary"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
 
     function setMetric(name, value) {
@@ -33,120 +23,49 @@
         if (element) element.textContent = value;
     }
 
-    function setRole(name, mutate) {
-        const element = document.querySelector(`[data-role="${name}"]`);
-        if (element) mutate(element);
+    function clearFigures() {
+        setMetric("cluster-nodes", "—");
+        setMetric("services-discovered", "—");
+        setMetric("unresolved-items", "—");
+        if (summary) summary.hidden = true;
     }
 
-    // Same UI-display thresholds already used on the Failure Impact page —
-    // presentation labels only, not a research classification.
-    function blastRadiusTier(value) {
-        if (value >= 80) return { text: "Critical", variant: "danger" };
-        if (value >= 50) return { text: "High", variant: "warning" };
-        return { text: "Low", variant: "success" };
-    }
-
-    // Survivability is "higher is better", so the tier direction is inverted
-    // relative to blast radius, using the same three thresholds.
-    function survivabilityTier(value) {
-        if (value >= 80) return { text: "High", variant: "success" };
-        if (value >= 50) return { text: "Moderate", variant: "warning" };
-        return { text: "Low", variant: "danger" };
+    function showSummary(described) {
+        const headline = document.querySelector('[data-role="discovery-headline"]');
+        const notes = document.querySelector('[data-role="discovery-notes"]');
+        const provenance = document.querySelector('[data-role="discovery-provenance"]');
+        if (headline) headline.textContent = described.headline;
+        if (provenance) provenance.textContent = described.provenance;
+        if (notes) {
+            notes.replaceChildren(...described.notes.map((note) => {
+                const item = document.createElement("li");
+                item.textContent = note;
+                return item;
+            }));
+        }
+        if (summary) summary.hidden = false;
     }
 
     async function loadOverview() {
-        if (errorRegion) errorRegion.innerHTML = "";
+        if (errorRegion) errorRegion.replaceChildren();
         if (reloadButton) reloadButton.disabled = true;
+        // Never leave the previous cluster's figures on screen while (or after) a refresh fails.
+        clearFigures();
+        applyBadge(badge, { variant: "muted", text: "Loading…" });
 
+        const namespace = (namespaceInput && namespaceInput.value.trim()) || "default";
         try {
-            const data = await fetchAll(ENDPOINTS);
-
-            // UI summaries only — these are direct reads of API fields.
-            setMetric("workflows-modelled", "1");
-            setMetric("cluster-nodes", String(data.deployment.nodes.length));
-            setMetric(
-                "highest-blast-radius",
-                formatPercentage(data.failureImpact.blastRadius)
-            );
-            setMetric(
-                "recommendations-generated",
-                String(data.recommendation.recommendations.length)
-            );
-
-            const topTier = blastRadiusTier(data.failureImpact.blastRadius);
-            setRole("blast-radius-tag", (el) => {
-                el.className = `status-badge status-badge--${topTier.variant}`;
-                el.textContent = topTier.text;
-            });
-
-            const selectedRecommendation =
-                data.recommendation.recommendations.find(
-                    (item) => item.id === data.recommendation.selectedRecommendationId
-                ) || data.recommendation.recommendations[0];
-
-            setMetric("analysis-workflow", data.workflow.workflowId);
-            setMetric("analysis-failed-node", data.failureImpact.failedNode);
-            setMetric(
-                "analysis-blast-radius",
-                formatPercentage(data.failureImpact.blastRadius)
-            );
-            setMetric(
-                "analysis-survivability",
-                formatPercentage(data.failureImpact.survivability)
-            );
-            setMetric(
-                "analysis-recommended-action",
-                selectedRecommendation
-                    ? formatCodeLabel(selectedRecommendation.type)
-                    : "—"
-            );
-            setMetric(
-                "analysis-predicted-blast-radius",
-                selectedRecommendation
-                    ? formatPercentage(selectedRecommendation.predictedBlastRadius)
-                    : "—"
-            );
-
-            const blastTier = blastRadiusTier(data.failureImpact.blastRadius);
-            setRole("analysis-blast-radius-bar", (el) => {
-                el.style.width = formatPercentage(data.failureImpact.blastRadius);
-            });
-            setRole("analysis-blast-radius-tag", (el) => {
-                el.className = `status-badge status-badge--${blastTier.variant} analysis-card__tag`;
-                el.textContent = blastTier.text;
-            });
-
-            const survivalTier = survivabilityTier(data.failureImpact.survivability);
-            setRole("analysis-survivability-bar", (el) => {
-                el.style.width = formatPercentage(data.failureImpact.survivability);
-            });
-            setRole("analysis-survivability-tag", (el) => {
-                el.className = `status-badge status-badge--${survivalTier.variant} analysis-card__tag`;
-                el.textContent = survivalTier.text;
-            });
-
-            if (selectedRecommendation) {
-                const predictedTier = blastRadiusTier(
-                    selectedRecommendation.predictedBlastRadius
-                );
-                setRole("analysis-predicted-bar", (el) => {
-                    el.style.width = formatPercentage(
-                        selectedRecommendation.predictedBlastRadius
-                    );
-                });
-                setRole("analysis-predicted-tag", (el) => {
-                    el.className = `status-badge status-badge--${predictedTier.variant} analysis-card__tag`;
-                    el.textContent = predictedTier.text;
-                });
-            }
-
+            const result = await fetchJson(`/api/deployments/discovery?namespace=${encodeURIComponent(namespace)}`);
+            const described = describeDiscovery(result);
+            applyBadge(badge, described.badge);
+            setMetric("cluster-nodes", String(result.graph.nodes.length));
+            setMetric("services-discovered", String(result.graph.services.length));
+            setMetric("unresolved-items", String(result.unresolved.length));
+            showSummary(described);
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
-            setError(errorRegion, {
-                message: error.message,
-                onRetry: loadOverview,
-            });
-            console.error("Failed to load overview sample data:", error);
+            applyBadge(badge, { variant: "danger", text: "Not showing live data" });
+            renderStateCard(errorRegion, describeError(error), { onRetry: loadOverview });
         } finally {
             if (reloadButton) reloadButton.disabled = false;
         }
