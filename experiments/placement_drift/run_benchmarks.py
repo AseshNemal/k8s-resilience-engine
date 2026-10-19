@@ -8,14 +8,18 @@ to the terminal, and exports publication-grade Markdown and JSON benchmark artif
 """
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List
 
-from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
-from experiments.placement_drift.disruption_reporter import DisruptionReporter
-from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix
-from experiments.placement_drift.scenario_models import ScenarioResult
-from experiments.placement_drift.snapshot_repository import SnapshotRepository
+# Running this file directly puts only its own folder on sys.path; add the project root.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator  # noqa: E402
+from experiments.placement_drift.disruption_reporter import DisruptionReporter  # noqa: E402
+from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix  # noqa: E402
+from experiments.placement_drift.scenario_models import ScenarioResult  # noqa: E402
+from experiments.placement_drift.snapshot_repository import SnapshotRepository  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
