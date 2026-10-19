@@ -1,0 +1,182 @@
+/**
+ * Phase 5 Resilience Drift & Signal Animations Stylesheet
+ * Component: Component 2 - Deployment Topology Modeling
+ */
+
+.spof-alert-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #dc2626;
+    font-weight: 600;
+    font-size: 0.875rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 9999px;
+}
+
+.pulsing-dot {
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    box-shadow: 0 0 0 rgba(239, 68, 68, 0.7);
+    animation: pulse-ring 1.8s infinite;
+}
+
+@keyframes pulse-ring {
+    0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    }
+    70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+    100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+.drift-categories-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.category-card {
+    background: var(--c2-glass-bg);
+    border: 1px solid var(--c2-glass-border);
+    border-radius: var(--c2-radius-md);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    box-shadow: var(--c2-glass-shadow);
+    transition: var(--c2-transition);
+}
+
+.category-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--c2-accent-primary);
+}
+
+.category-card__label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--c2-text-muted);
+    margin-bottom: 0.25rem;
+}
+
+.category-card__count {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--c2-text-main);
+}
+
+.drift-split-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.spof-list, .node-risk-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.spof-item {
+    background: var(--c2-surface-subtle);
+    border: 1px solid var(--c2-border-light);
+    border-left: 4px solid var(--c2-accent-danger);
+    border-radius: var(--c2-radius-sm);
+    padding: 0.75rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: var(--c2-transition);
+}
+
+.spof-item:hover {
+    background: rgba(239, 68, 68, 0.05);
+    border-color: var(--c2-accent-danger);
+    transform: translateX(3px);
+}
+
+.node-risk-item {
+    background: var(--c2-surface-subtle);
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-sm);
+    padding: 0.75rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.node-risk-item--critical {
+    border-left: 4px solid var(--c2-accent-danger);
+}
+
+.node-risk-item--elevated {
+    border-left: 4px solid var(--c2-accent-warning);
+}
+
+.node-risk-item--balanced {
+    border-left: 4px solid var(--c2-accent-success);
+}
+
+/* Beautiful Drill-Down Action Button */
+.spof-drilldown-btn,
+.btn--xs {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--c2-accent-primary, #2563eb);
+    background: #ffffff;
+    border: 1px solid rgba(37, 99, 235, 0.28);
+    border-radius: 6px;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    user-select: none;
+}
+
+.spof-drilldown-btn .btn-arrow,
+.btn--xs .btn-arrow {
+    display: inline-block;
+    font-size: 13px;
+    transition: transform 0.2s ease;
+}
+
+.spof-drilldown-btn:hover,
+.btn--xs:hover {
+    color: #ffffff;
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    border-color: #1d4ed8;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+    transform: translateY(-1px);
+}
+
+.spof-drilldown-btn:hover .btn-arrow,
+.btn--xs:hover .btn-arrow {
+    transform: translateX(3px);
+}
+
+.spof-drilldown-btn:active,
+.btn--xs:active {
+    transform: translateY(0) scale(0.97);
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.2);
+}

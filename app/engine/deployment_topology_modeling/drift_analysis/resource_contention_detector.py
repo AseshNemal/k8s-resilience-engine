@@ -17,9 +17,16 @@ class ResourceContentionDetector(BaseDriftDetector):
 
     @staticmethod
     def _extract_resources(declared_intent: Any | None) -> list[Any]:
+        if hasattr(declared_intent, "resource_limits"):
+            rl = getattr(declared_intent, "resource_limits")
+            if rl and getattr(rl, "cpu", None) and getattr(rl, "memory", None):
+                return [{"limits": {"cpu": rl.cpu, "memory": rl.memory}}]
         if hasattr(declared_intent, "resources"):
             return getattr(declared_intent, "resources", [])
         if isinstance(declared_intent, dict):
+            if "resource_limits" in declared_intent and isinstance(declared_intent["resource_limits"], dict):
+                rl = declared_intent["resource_limits"]
+                return [{"limits": {"cpu": rl.get("cpu"), "memory": rl.get("memory")}}]
             return declared_intent.get("resources", [])
         return []
 

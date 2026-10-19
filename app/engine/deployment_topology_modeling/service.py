@@ -105,7 +105,7 @@ def get_live_deployment_graph(
     if target_manifest.exists():
         try:
             parsed_manifests = run_manifest_pipeline(str(target_manifest))
-            manifest_map = {m.workload_name: m for m in parsed_manifests}
+            manifest_map = {m.service_name: m for m in parsed_manifests}
         except Exception:
             manifest_map = {}
 
@@ -158,7 +158,7 @@ def analyze_resilience_drift(
     if target_manifest.exists():
         try:
             parsed_manifests = run_manifest_pipeline(str(target_manifest))
-            manifest_map = {m.workload_name: m for m in parsed_manifests}
+            manifest_map = {m.service_name: m for m in parsed_manifests}
         except Exception:
             manifest_map = {}
 
@@ -235,8 +235,13 @@ def run_single_chaos_scenario(
 def get_manifest_intent() -> list[dict[str, Any]]:
     """
     Public facade for Phase 2: Runs the manifest parsing pipeline and returns declared intent.
+    Prefers deploy/kubernetes (where the real boutique microservice manifests live),
+    falling back to deploy/test-workloads.
     """
-    intents = run_manifest_pipeline()
+    project_root = Path(__file__).resolve().parents[3]
+    k8s_dir = project_root / "deploy" / "kubernetes"
+    target = str(k8s_dir) if k8s_dir.exists() and any(k8s_dir.glob("*.yaml")) else "deploy/test-workloads"
+    intents = run_manifest_pipeline(target)
     return [i.model_dump() if hasattr(i, "model_dump") else dict(i) for i in intents]
 
 
@@ -384,15 +389,15 @@ def get_drift_categories_summary(namespace: str = "default") -> dict[str, Any]:
         for v in getattr(svc, "violations", []):
             item = v.model_dump() if hasattr(v, "model_dump") else dict(v)
             item["service_name"] = svc.service_name
-            cat = str(item.get("category", "")).lower()
+            cat = str(item.get("drift_type", "") or item.get("category", "")).lower()
             if "scale" in cat:
                 categories["scale_drift"].append(item)
+            elif "resource_contention" in cat or "contention" in cat:
+                categories["resource_contention"].append(item)
             elif "resource" in cat or "limit" in cat:
                 categories["resource_limit_drift"].append(item)
             elif "affinity" in cat:
                 categories["node_affinity_drift"].append(item)
-            elif "contention" in cat:
-                categories["resource_contention"].append(item)
             else:
                 categories["topology_spread_violations"].append(item)
 

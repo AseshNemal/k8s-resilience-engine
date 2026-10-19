@@ -1,0 +1,51 @@
+{# Modal 1: Failure-Domain & Resilience Violation Drill-Down #}
+<div class="modal-backdrop" id="modal-violation-backdrop" hidden>
+    <div class="modal-dialog card card--glass" role="dialog" aria-modal="true" aria-labelledby="modal-violation-title">
+        <div class="modal-header">
+            <div>
+                <span class="modal-tag">FAILURE DOMAIN DRILL-DOWN</span>
+                <h3 class="modal-title" id="modal-violation-title">Microservice Exposure Analysis</h3>
+            </div>
+            <button type="button" class="modal-close-btn" id="btn-close-violation-modal" aria-label="Close modal">✕</button>
+        </div>
+
+        <div class="modal-body" id="modal-violation-body">
+            <div class="modal-info-grid">
+                <div class="info-block">
+                    <span class="info-block__label">Target Microservice</span>
+                    <strong class="info-block__value" id="violation-service-name">-</strong>
+                </div>
+                <div class="info-block">
+                    <span class="info-block__label">Exposure Level</span>
+                    <strong class="info-block__value" id="violation-exposure-level">-</strong>
+                </div>
+                <div class="info-block">
+                    <span class="info-block__label">Replica Concentration</span>
+                    <strong class="info-block__value" id="violation-concentration-val">-</strong>
+                </div>
+                <div class="info-block">
+                    <span class="info-block__label">Severity Score</span>
+                    <strong class="info-block__value" id="violation-severity-score">-</strong>
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <h5 class="modal-section__title">Affected Failure Domains & Hosting Nodes</h5>
+                <ul class="domain-node-list" id="violation-hosting-nodes">
+                    <!-- Populated by JS -->
+                </ul>
+            </div>
+
+            <div class="modal-section">
+                <h5 class="modal-section__title">Detected Resilience Violations</h5>
+                <div class="violation-detail-list" id="violation-rules-list">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn--secondary" id="btn-dismiss-violation-modal">Close</button>
+        </div>
+    </div>
+</div>

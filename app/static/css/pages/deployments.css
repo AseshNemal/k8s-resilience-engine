@@ -103,25 +103,53 @@
 }
 
 .concentration-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-md, 12px);
+    margin-top: var(--space-sm, 8px);
+    margin-bottom: var(--space-sm, 8px);
+}
+
+.concentration-row {
+    background: var(--color-surface, #ffffff);
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: var(--radius-sm, 6px);
+    padding: 10px 14px;
     display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.concentration-row__header {
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: var(--space-lg);
-}
-
-.concentration-panel__value {
-    font-size: 32px;
-    font-weight: 700;
-    min-width: 90px;
-}
-
-.concentration-panel__body {
-    flex: 1;
-}
-
-.concentration-panel__label {
     font-size: 13px;
+}
+
+.concentration-row__name {
     font-weight: 600;
-    margin-bottom: 4px;
+    color: var(--color-text-main, #1e293b);
+}
+
+.concentration-row__stat {
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.concentration-progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--color-surface-soft, #f1f5f9);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.concentration-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
 }
 
 /* Parametric Ensemble Dashboard Styles */
@@ -563,4 +591,207 @@
     line-height: 1.4;
 }
 
+/* =====================================================================
+ * Phase 5 Executive Dashboard & Academic Panel Styles
+ * ===================================================================== */
 
+.academic-validation-panel {
+    margin-bottom: var(--space-lg);
+}
+
+.academic-card {
+    background: var(--c2-glass-bg);
+    border: 1px solid var(--c2-glass-border);
+    border-radius: var(--radius-large);
+    box-shadow: var(--c2-glass-shadow);
+    padding: var(--space-md) var(--space-lg);
+}
+
+.academic-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-md);
+}
+
+.academic-badge--primary {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--c2-accent-primary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+
+.academic-card__title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 4px 0 0 0;
+}
+
+.academic-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+.academic-stat {
+    background: var(--c2-surface-subtle);
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--radius-medium);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.academic-stat__label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.academic-stat__value-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 4px 0;
+}
+
+.academic-stat__value {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--c2-accent-success);
+}
+
+.academic-stat__target {
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+.academic-stat__bar {
+    width: 100%;
+    height: 4px;
+    background: var(--c2-border-light);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.academic-stat__fill--success {
+    background: var(--c2-accent-success);
+    height: 100%;
+}
+
+.academic-stat__fill--accent {
+    background: var(--c2-accent-primary);
+    height: 100%;
+}
+
+.academic-card__footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: var(--space-sm);
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+.academic-copy-btn {
+    background: transparent;
+    border: 1px solid var(--c2-border-light);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--color-text);
+}
+
+.academic-copy-btn:hover {
+    background: var(--c2-surface-subtle);
+}
+
+/* Dashboard Tab Navigation */
+.dashboard-tabs-wrapper {
+    margin: var(--space-lg) 0 var(--space-md) 0;
+    border-bottom: 2px solid var(--color-border);
+}
+
+.dashboard-tabs-nav {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.tab-nav-btn {
+    background: transparent;
+    border: none;
+    padding: var(--space-sm) var(--space-lg);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: var(--c2-transition);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tab-nav-btn:hover {
+    color: var(--color-text);
+}
+
+.tab-nav-btn.active {
+    color: var(--c2-accent-primary);
+    border-bottom-color: var(--c2-accent-primary);
+}
+
+.tab-pane {
+    animation: tab-fade-in 0.25s ease-out;
+}
+
+.tab-pane[hidden] {
+    display: none !important;
+}
+
+@keyframes tab-fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.tab-pane__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-md);
+}
+
+.tab-pane__title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.tab-pane__desc {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin: 2px 0 0 0;
+}
+
+/* Intent Table */
+.intent-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.intent-table th, .intent-table td {
+    padding: var(--space-sm) var(--space-md);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.intent-table th {
+    background: var(--color-surface-soft);
+    font-weight: 600;
+    color: var(--color-text-muted);
+}

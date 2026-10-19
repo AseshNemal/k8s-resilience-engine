@@ -1,0 +1,154 @@
+{# Tab 4: Chaos Engineering & Disruption Scenarios Runner #}
+<div class="tab-pane" id="tab-scenarios" role="tabpanel" aria-labelledby="tab-btn-scenarios" hidden>
+    <div class="tab-pane__header">
+        <div>
+            <h3 class="tab-pane__title">Controlled Chaos & Disruption Simulation</h3>
+            <p class="tab-pane__desc">Evaluate parametric placement drift rate ($D_{rate}$), Markov pod migrations ($T[i,j]$), and empirical resilience bounds.</p>
+        </div>
+        <div class="scenario-actions">
+            <button type="button" class="btn btn--primary" id="btn-run-all-benchmarks">
+                ⚡ Run All 8 Chaos Benchmarks
+            </button>
+            <button type="button" class="btn btn--secondary" id="btn-open-diff-modal">
+                🔍 Compare Snapshots (T0 vs T1)
+            </button>
+        </div>
+    </div>
+
+    <!-- Multi-Service Chaos Resilience Ensemble Card (28 Symmetrical Trials) -->
+    <div class="card card--glass ensemble-card" data-role="ensemble-panel">
+        <div class="ensemble-panel__header" style="margin-bottom: var(--space-md);">
+            <div>
+                <span class="status-badge status-badge--success">Phase 4 Empirical Validation</span>
+                <h4 class="ensemble-panel__title" style="font-size: 1.15rem; font-weight: 700; margin: 4px 0 2px 0;">Multi-Service Chaos Resilience Ensemble (28 Symmetrical Trials)</h4>
+                <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 0;">Empirical placement drift benchmarks across 6 core microservices and 3 cluster nodes under controlled chaos perturbations.</p>
+            </div>
+        </div>
+
+        <div class="ensemble-summary-grid" data-role="ensemble-summary-grid"></div>
+
+        <div class="ensemble-breakdown-grid">
+            <div class="ensemble-breakdown-card">
+                <div class="ensemble-breakdown-card__header">
+                    <div>
+                        <h4 class="ensemble-breakdown-card__title">Microservice Sensitivity Breakdown</h4>
+                        <span class="ensemble-breakdown-card__sub">Workload resilience ranking across 28 chaos trials</span>
+                    </div>
+                </div>
+                <div class="table-scroll">
+                    <table class="data-table data-table--compact">
+                        <thead>
+                            <tr>
+                                <th scope="col">Microservice</th>
+                                <th scope="col">Trials</th>
+                                <th scope="col">Mean Drift</th>
+                                <th scope="col">Resilience Tier</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="ensemble-service-sensitivity-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="ensemble-breakdown-card">
+                <div class="ensemble-breakdown-card__header">
+                    <div>
+                        <h4 class="ensemble-breakdown-card__title">Disruption Category Sensitivity Breakdown</h4>
+                        <span class="ensemble-breakdown-card__sub">Failure domain perturbation impact ranking</span>
+                    </div>
+                </div>
+                <div class="table-scroll">
+                    <table class="data-table data-table--compact">
+                        <thead>
+                            <tr>
+                                <th scope="col">Disruption Category</th>
+                                <th scope="col">Trials</th>
+                                <th scope="col">Mean Drift</th>
+                                <th scope="col">Scheduling Impact</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="ensemble-category-sensitivity-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Formal Markov Transition Matrix Visualizer -->
+        <div class="markov-matrix-card" data-role="markov-matrix-panel" style="margin-top: var(--space-lg);">
+            <div class="markov-matrix-header">
+                <div>
+                    <div class="markov-matrix-title-row">
+                        <span class="status-badge status-badge--primary">Phase 4 Mathematical Model</span>
+                        <h4 class="markov-matrix-title">Markov Pod Migration Transition Matrix ($T[i, j]$)</h4>
+                    </div>
+                    <p class="markov-matrix-desc">
+                        Quantifies stochastic pod migrations across physical nodes: \( T[i,j] \) represents pod replicas relocated from source node \( n_i \) to destination node \( n_j \) upon disruption.
+                    </p>
+                </div>
+                <div class="markov-matrix-actions">
+                    <label for="scenario-matrix-select" class="markov-label">Disruption Scenario:</label>
+                    <select id="scenario-matrix-select" class="markov-select" data-role="markov-scenario-select">
+                        <option value="07_node_drain_eviction" selected>Scenario 07: Node Drain & Eviction (High Displacement)</option>
+                        <option value="05_pod_deletion_chaos">Scenario 05: Involuntary Pod Deletion (Reschedule Drift)</option>
+                        <option value="04_rolling_update">Scenario 04: Rolling Update (Surge Churn)</option>
+                        <option value="02_scale_up_stress">Scenario 02: Scale Up Stress (Bin-packing)</option>
+                        <option value="03_scale_down_loss">Scenario 03: Scale Down Loss (Redundancy)</option>
+                        <option value="06_node_cordon">Scenario 06: Node Cordon (Unschedulable)</option>
+                        <option value="08_resource_contention">Scenario 08: Resource Contention (Constrained)</option>
+                        <option value="01_initial_deployment">Scenario 01: Initial Baseline (Control)</option>
+                    </select>
+                    <button type="button" class="secondary-button" id="btn-copy-latex-matrix" data-role="markov-toggle-latex-btn">
+                        View LaTeX Table
+                    </button>
+                </div>
+            </div>
+
+            <div class="markov-matrix-content" id="markov-matrix-container" data-role="markov-matrix-content">
+                <div class="loading-state">Loading Markov Transition Matrix…</div>
+            </div>
+
+            <div class="markov-latex-preview" data-role="markov-latex-preview" style="display: none;">
+                <div class="markov-latex-header">
+                    <span>LaTeX Table Code (Overleaf / Dissertation Ready):</span>
+                    <button type="button" class="secondary-button" data-role="markov-copy-latex-btn">Copy LaTeX</button>
+                </div>
+                <pre class="markov-latex-code" data-role="markov-latex-code"></pre>
+            </div>
+        </div>
+
+        <!-- Filter Bar for 28 Trials -->
+        <div class="ensemble-filter-bar" style="margin-top: var(--space-lg);">
+            <div class="filter-group" data-role="ensemble-category-filters">
+                <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All (28)</button>
+                <button type="button" class="filter-btn" data-cat="BASELINE">Baseline (1)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_UP_STRESS">Scale Up (6)</button>
+                <button type="button" class="filter-btn" data-cat="SCALE_DOWN_LOSS">Scale Down (6)</button>
+                <button type="button" class="filter-btn" data-cat="ROLLING_UPDATE">Rolling Update (6)</button>
+                <button type="button" class="filter-btn" data-cat="POD_DELETION">Pod Deletion (6)</button>
+                <button type="button" class="filter-btn" data-cat="NODE_CORDON">Node Cordon (1)</button>
+                <button type="button" class="filter-btn" data-cat="NODE_DRAIN">Node Drain (3)</button>
+                <button type="button" class="filter-btn" data-cat="RESOURCE_CONTENTION">Resource Contention (1)</button>
+            </div>
+            <input type="text" class="ensemble-search-input" data-role="ensemble-search" placeholder="Search service, category, or trial..." aria-label="Search trials" />
+        </div>
+
+        <!-- Full 28 Trials Data Table -->
+        <div class="table-scroll" style="margin-top: var(--space-sm);">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Trial ID</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Workload</th>
+                        <th scope="col">Chaos Specification</th>
+                        <th scope="col">Placement Drift (D_rate)</th>
+                        <th scope="col">Failure Exposure (ΔE)</th>
+                        <th scope="col">Displaced</th>
+                        <th scope="col">Status</th>
+                    </tr>
+                </thead>
+                <tbody data-role="ensemble-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>

@@ -10,12 +10,16 @@ def read_yaml_manifests(directory_path: str = "deploy/test-workloads") -> List[D
     """
     manifests = []
     # Force absolute resolution based on current root execution context (usually project base)
-    target_dir = Path(os.getcwd()) / directory_path
+    target_path = Path(directory_path)
+    if not target_path.is_absolute():
+        target_path = Path(os.getcwd()) / directory_path
 
-    if not target_dir.exists() or not target_dir.is_dir():
+    if not target_path.exists():
         return manifests
 
-    for file_path in target_dir.glob("*.yaml"):
+    files = [target_path] if target_path.is_file() else list(target_path.glob("*.yaml"))
+
+    for file_path in files:
         # Explicit bypass for hidden files
         if file_path.name.startswith("."):
             continue
@@ -29,7 +33,6 @@ def read_yaml_manifests(directory_path: str = "deploy/test-workloads") -> List[D
                         manifests.append(doc)
         except Exception:
             # We silently bypass malformed files as per the Phase 2 definition of done.
-            # E.g. If someone puts a corrupted YAML in the folder, the backend stays alive.
             pass
 
     return manifests
