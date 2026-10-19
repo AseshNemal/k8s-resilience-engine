@@ -582,7 +582,9 @@ app/shared/schemas/
 ```
 
 `app/shared/sample_loader.py` loads fixture JSON from `sample_data/` and validates it
-against these schemas for the mock API routes.
+against these schemas. It exists for automated tests and research runs only: no route, page or
+runtime analysis uses it (enforced by `tests/test_no_sample_runtime.py` and
+`tests/test_runtime_fixture_reachability.py`).
 
 No member should independently change these shared schemas without team agreement.
 
@@ -781,6 +783,10 @@ All members work together.
 
 Each member develops using mock inputs.
 
+> Mock inputs are for tests and research runs only. The running application never serves mock or
+> sample data: it reads the connected cluster, or fails with an explicit error code. See
+> [`docs/REAL_DATA_PHASE1.md`](docs/REAL_DATA_PHASE1.md).
+
 ```text
 Member 1 → Workflow Discovery
 Member 2 → Deployment Graph
@@ -955,9 +961,9 @@ read-only cluster access). Quick start (details, updating, removal and troublesh
    docker extension install k8s-resilience-engine:0.1.4
    ```
 
-3. Open **Resilience Engine** in Docker Desktop's left sidebar. It works straight away with the
-   built-in sample data; no cluster is needed to look around.
-4. Optional, to see a real cluster (requires `kind` and `kubectl`):
+3. Open **Resilience Engine** in Docker Desktop's left sidebar. Until a cluster is connected every
+   page says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never shows sample data in its place.
+4. To analyse a real cluster (requires `kind` and `kubectl`):
 
    ```bash
    ./scripts/cluster-up.sh                  # create or reuse the local kind test cluster
@@ -987,9 +993,12 @@ this document.
 | POST | `/api/recommendations` | Member 4 |
 | GET | `/api/validations` | Member 4 |
 
-Currently these are served as `/api/workflows/sample`, `/api/deployments/sample`, etc. — the
-`/sample` suffix will drop once each component returns request-driven output instead of a
-fixture.
+The `/sample`, demo, benchmark and Jaeger-seeding routes have been removed from the application.
+The routes that serve live evidence today include `GET /api/deployments/discovery` and `/live`
+(Member 2), `GET /api/failure-impacts/runtime` (Member 3), `GET /api/recommendations/live` and the
+approval routes (Member 4), and the workflow scenario, assessment and Jaeger-evidence routes
+(Member 1). When live evidence is missing they answer with a coded error, never a substitute. The
+codes are listed in [`docs/REAL_DATA_PHASE1.md`](docs/REAL_DATA_PHASE1.md).
 
 # Web Page Routes
 
@@ -1001,8 +1010,10 @@ fixture.
 | `GET /components/failure-impacts` | Failure Impact Prediction |
 | `GET /components/recommendations` | Recommendation Evaluation and Validation |
 
-Each page fetches its component's `/sample` endpoint client-side and renders it into cards,
-tables, and visualizations — raw JSON stays available behind a collapsible panel. See
+Each page fetches its component's live endpoint client-side and renders it into cards, tables,
+and visualizations — raw JSON stays available behind a collapsible panel. A page whose evidence is
+missing shows why (not connected, access denied, partial topology, no live recommendation) instead
+of placeholder content. See
 `docs/COMPONENT_INTERFACE_OWNERSHIP.md` for which files each member owns in this UI layer.
 
 ---
@@ -1027,7 +1038,8 @@ Shared changes should be reviewed before merging.
 - Do not change shared schemas without team agreement.
 - Keep integration code separate from research algorithms.
 - Add unit tests for each major function.
-- Use mock data when another component is incomplete.
+- Use mock data when another component is incomplete — in tests only. Runtime analysis uses live
+  evidence or fails explicitly; it never falls back to sample data.
 - Keep thresholds configurable.
 - Document assumptions.
 - Record all experiment configurations.
@@ -1047,7 +1059,7 @@ Shared changes should be reviewed before merging.
 - [x] Mock API routes completed
 - [x] Dashboard prototype completed
 - [x] Full research-dashboard UI completed (Overview + 4 component pages, shared
-      design system, icon library, collapsible sidebar) — still rendering sample data only
+      design system, icon library, collapsible sidebar) — now renders live evidence only (see below)
 - [ ] Member 1 component completed (engine service is still a fixture loader)
 - [ ] Member 2 component completed (engine service is still a fixture loader)
 - [ ] Member 3 component completed (engine service is still a fixture loader)
@@ -1057,6 +1069,25 @@ Shared changes should be reviewed before merging.
 - [ ] Full integration completed
 - [ ] Controlled experiments completed
 - [ ] Final validation completed
+
+### Runtime data status
+
+The checklist above predates the real-data-only work and was not re-audited. As of this change:
+
+- [x] The running application serves live cluster evidence only. Cluster failures, incomplete
+      topology, missing workflow evidence and missing recommendations are explicit coded errors.
+- [x] Unknown facts (zone, capacity, restart counts, accuracy) stay unknown (`null`); nothing is
+      defaulted to a perfect or zero value.
+- [ ] **Generic Kubernetes Service/ownership resolution is incomplete.** Pods are attributed to
+      Deployments by `app` label equal to the Deployment name, so applications whose Deployments are
+      named differently (for example Istio Bookinfo: `productpage-v1` with `app: productpage`) are
+      reported as *unresolved*, not discovered. Pod → ReplicaSet → Deployment ownership and
+      Service-selector resolution are planned for Member 2.
+- [ ] **The live recommendation pipeline is incomplete.** No producer yet turns the engine's
+      simulation into a `RecommendationReport`, a YAML proposal or a `ValidationReport`, so the
+      Recommendations page shows explicit missing-evidence states and no approval can be requested.
+      See [`docs/RECOMMENDATION_LIVE_DATA.md`](docs/RECOMMENDATION_LIVE_DATA.md).
+- [ ] Controlled read-only validation against the kind cluster has not been run yet.
 
 ---
 

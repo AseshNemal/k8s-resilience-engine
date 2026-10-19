@@ -33,15 +33,18 @@ This is an early-stage scaffold, not a working system yet:
   what-if simulation on a deep-copied `DeploymentGraph` (never mutating the original), and
   `service.py` ties them together as `evaluate_first_recommendation()` → `SimulationResult`.
   Ranking, YAML generation, and calling Member 3's evaluator are still unbuilt.
-- `app/api/*.py` route handlers are wired end-to-end (router → engine `get_sample_*` service →
-  `sample_loader` → schema-validated response) for the `/sample` endpoints, but every response
-  is still the same fixture data regardless of input — there's no request-driven behavior yet.
+- `app/api/*.py` routes serve live evidence only. Topology comes from `discovery.py` (Member 2),
+  which reads the connected cluster through `app/integrations/kubernetes/client.py` and returns the
+  unchanged `DeploymentGraph` inside a status envelope (`/api/deployments/discovery`); failure
+  prediction (`/api/failure-impacts/runtime`) needs a frozen workflow plus that topology and refuses
+  when either is missing or incomplete; recommendations/approvals have no live source yet and report
+  `RECOMMENDATION_EVIDENCE_UNAVAILABLE`. The earlier `/sample`, demo, benchmark, chaos-fixture and
+  Jaeger-seed routes were removed from the product.
 - `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
-  deployment, failure_impact, recommendation, validation). `app/core/` and
-  `app/integrations/*` are still empty placeholders (no config, logging, or
-  Kubernetes/Jaeger/Prometheus clients exist yet).
-- `tests/test_sample_endpoints.py` smoke-tests that every `/api/*/sample` endpoint returns
-  200 with a JSON body — it does not assert on response shape/values yet.
+  deployment, failure_impact, recommendation, validation); `sample_data/` is test-only.
+  `app/integrations/kubernetes/` and `app/integrations/jaeger/` exist; `app/core/` is minimal config.
+- `tests/test_sample_endpoints.py` checks that the research fixtures still validate against the
+  contracts (through the research-only app in `tests/support/`, not the product).
 
 When asked to "run the app" or "add tests", check whether the relevant piece has actually
 been built yet rather than assuming the README's planned structure is already in place.
@@ -60,7 +63,8 @@ uvicorn app.main:app --reload
 # Tests — use `python -m pytest`, not bare `pytest`: there's no pytest.ini/pyproject.toml,
 # so plain `pytest` won't put the project root on sys.path and `import app` will fail.
 python -m pytest
-python -m pytest tests/test_sample_endpoints.py::test_sample_endpoint_returns_success  # single test
+python -m pytest tests/test_live_evidence_api.py  # a single file
+node --test tests/frontend/connection-state.test.mjs tests/frontend/api.test.mjs  # page-script logic
 ```
 
 There is no configured linter, formatter, or `pyproject.toml`/`pytest.ini` in this repo yet.
@@ -113,7 +117,19 @@ contract instead when integrating against an unfinished upstream component.
   metric definitions — each member can freely change their own engine folder, API route,
   template/JS, and tests, but the shared surface needs team sign-off.
 - Keep integration code (`app/integrations/`) separate from research algorithms (`app/engine/`).
-- Use mock/sample JSON when another component's real output isn't ready yet.
+- Use mock/sample JSON when another component's real output isn't ready yet — in tests only, never
+  behind a runtime route (see the real-data rule below).
+- **Real data only at runtime.** No route, page, dashboard, prediction, recommendation, approval or
+  validation may load sample, demo or fixture data in place of live evidence. If the cluster (or any
+  other required evidence) cannot be read, fail with an explicit `EvidenceError` code
+  (`app/shared/evidence_errors.py`), never a substituted answer. `sample_data/`, the `get_sample_*`
+  loaders and `experiments/` are for automated tests and research runs only; research-only HTTP routes
+  live in `tests/support/research_routes.py` and are never mounted by `app.main`.
+  `tests/test_no_sample_runtime.py` enforces this. Unknown facts stay `None`; never default them
+  (no `accuracy=1.0`, `restart_count=0`, `zone="default-zone"`, invented nodes or capacities).
+- Unit tests must not read the developer's kubeconfig: use `tests/support/fake_cluster.py` and the
+  `use_cluster` fixture; real-cluster tests are opt-in (`@pytest.mark.live_cluster`,
+  `RESILIENCE_TEST_KUBECONFIG`).
 - Never mutate the original `DeploymentGraph` during what-if simulation — always operate on a
   deep copy (see `virtual_model.py`'s `create_virtual_deployment`).
 - Do not duplicate another member's research algorithm — call their component's public

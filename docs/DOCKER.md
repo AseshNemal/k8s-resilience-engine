@@ -137,12 +137,16 @@ Pointing the workflow probes at an Online Boutique frontend needs `WORKFLOW_TARG
 
 ## Current limitations
 
-- Only Component 2 (deployment topology, `/api/deployments/live`) reads the live cluster.
-  Component 3 runs its prediction over contract fixtures (not your cluster) and Component 4 still serves
-  sample data, there is no recommendation apply or validation step,
-  and Components 1 to 4 are not yet connected end to end.
+- Component 2 (deployment topology, `/api/deployments/discovery` and `/live`) reads the live cluster.
+  Component 3 predicts over that live topology plus an approved, frozen workflow, and refuses when either
+  is missing or incomplete. Component 4 has no live recommendation source yet, so no approval can be
+  requested. There is no recommendation apply or validation step. No endpoint serves sample data.
 - The fresh kind cluster contains no application workloads, so live topology shows the three
-  worker nodes and no services. Online Boutique is not deployed into kind by this setup.
+  worker nodes and an empty (valid) result with no services. Online Boutique is not deployed into kind by
+  this setup.
+- Generic Service/ownership resolution is incomplete: applications whose Deployment names differ from their
+  pods' `app` label (Istio Bookinfo) are reported as unresolved, not discovered. The live recommendation
+  pipeline is also incomplete (`docs/RECOMMENDATION_LIVE_DATA.md`).
 - kind worker nodes are containers on the same Docker host. They are **logical** worker-node failure
   domains, not independent physical machines, and share one kernel and one Docker VM. Results
   from this setup are not evidence about independent hardware failures.

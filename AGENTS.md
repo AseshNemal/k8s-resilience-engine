@@ -53,11 +53,10 @@ Expected routes:
 /
  /docs
  /api/health
- /api/workflows/sample
- /api/deployments/sample
- /api/failure-impacts/sample
- /api/recommendations/sample
- /api/validations/sample
+ /api/deployments/live
+ /api/deployments/discovery
+ /api/failure-impacts/runtime
+ /api/recommendations/live
 ```
 
 ## Current Status
@@ -69,3 +68,17 @@ checking and concentration metrics) have been created. Members 1–3 still only 
 
 Latest test result: 9 passed, 0 failed (`python -m pytest -v`). The earlier floating-point
 assertion failure was fixed with `pytest.approx`.
+
+## Real data only
+
+- **Real data only at runtime.** No route, page, dashboard, prediction, recommendation, approval or
+  validation may load sample, demo or fixture data in place of live evidence. If the cluster (or any
+  other required evidence) cannot be read, fail with an explicit `EvidenceError` code
+  (`app/shared/evidence_errors.py`), never a substituted answer. `sample_data/`, the `get_sample_*`
+  loaders and `experiments/` are for automated tests and research runs only; research-only HTTP routes
+  live in `tests/support/research_routes.py` and are never mounted by `app.main`.
+  `tests/test_no_sample_runtime.py` enforces this. Unknown facts stay `None`; never default them
+  (no `accuracy=1.0`, `restart_count=0`, `zone="default-zone"`, invented nodes or capacities).
+- Unit tests must not read the developer's kubeconfig: use `tests/support/fake_cluster.py` and the
+  `use_cluster` fixture; real-cluster tests are opt-in (`@pytest.mark.live_cluster`,
+  `RESILIENCE_TEST_KUBECONFIG`).

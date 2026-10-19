@@ -110,7 +110,7 @@ not touched by uninstalling: revoke it separately with `--revoke`.
 | Install says the extension is not from the Marketplace | Untick "Allow only extensions distributed through the Docker Marketplace" (Prerequisites). |
 | A page shows "Failed to fetch" right after install, update or Docker Desktop start | The backend is still starting. Wait about five seconds and reload the tab. Persisting longer: check `docker logs` and the health command above. |
 | Page keeps failing and `docker ps` shows the backend `unhealthy` or restarting | Read `docker logs`. A failed migration or an unreadable volume prints the reason. Do not delete the volume to "fix" it unless you accept losing the database and credential. |
-| Deployment Topology shows sample nodes, not your cluster | No cluster is connected. Run `./scripts/extension-cluster-access.sh`, then **Connect cluster** and pick `.kube/extension-readonly.kubeconfig`. |
+| Deployment Topology says "No cluster connected" (`CLUSTER_NOT_CONNECTED`) | No cluster is connected. Run `./scripts/extension-cluster-access.sh`, then **Connect cluster** and pick `.kube/extension-readonly.kubeconfig`. The app never shows sample topology in its place. |
 | "This credential can change the cluster (…)" | Working as intended: only the read-only file from the script is accepted. Do not upload your personal or the kind admin kubeconfig. |
 | "Could not reach the cluster API server" after Docker Desktop restarted | Re-run `./scripts/cluster-up.sh` (restarts the kind nodes; the published API port can change), then `./scripts/extension-cluster-access.sh` and pick the new file. |
 | "The cluster rejected the credential. It may have expired." or the page flags the credential as expired | The token reached its time limit or was revoked. Run `./scripts/extension-cluster-access.sh` again and pick the new file. |
@@ -125,8 +125,8 @@ not touched by uninstalling: revoke it separately with `--revoke`.
 ```
 
 Then open **Resilience Engine** in Docker Desktop, choose **Connect cluster**, and pick
-`.kube/extension-readonly.kubeconfig`. Until a cluster is connected the Deployment Topology page
-shows the app's built-in sample topology, as it does outside Docker.
+`.kube/extension-readonly.kubeconfig`. Until a cluster is connected every page that needs the cluster
+says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never substitutes sample data.
 
 ## The cluster credential
 
@@ -210,9 +210,9 @@ edited, so the standalone web app looks exactly as before.
 - **Header**: the page title, and one cluster chip (not connected, connected read-only, credential
   expired) that links to Connect cluster. The decorative badges and refresh time are hidden; the health
   badge appears only if the backend is unreachable.
-- **Sample vs live** is stated in the same place on every page: the data-source chip leads each page's
-  row, and the Overview opens with a connection panel that says plainly the overview shows sample data
-  and that only Deployment topology can show the live cluster. No metric is invented.
+- **Live vs unavailable** is stated in the same place on every page: the data-source chip shows whether
+  the figures come from the connected cluster (complete, partial, or connected with no workloads), or that
+  nothing is shown because the cluster could not be read. No metric is invented.
 - **Overview** shows connection status first, then the existing metrics as one continuous strip, the
   analysis, and the components as a list with "Open component" links.
 - **Recommendations** keeps its comparison table and approval gate, adds a plain note ahead of the
@@ -274,12 +274,23 @@ package.
   stopped the page loading anywhere (also in the plain browser app): `recommendations.js` passed its
   `approvalBase` URL prefix to `fetchAll()`, which requested `GET /api/recommendations` (404). The fix
   is four lines in `app/static/js/components/recommendations.js`; it belongs to Member 4's area and is
-  isolated in its own commit so it can be reviewed or dropped independently.
-- Component 3 (Failure impact) now runs its own deterministic prediction, but over disclosed contract
-  fixtures, not your cluster, and the page says so ("Contract Fixtures"). Component 4 still serves sample
-  data, and there is no recommendation apply or validation step.
+  isolated in its own commit so it can be reviewed or dropped independently. (The page script has since
+  been reworked for real-data-only operation.)
+- Component 3 (Failure impact) runs its deterministic prediction over the connected cluster's live
+  topology and an approved, frozen workflow from Component 1, and refuses (`TOPOLOGY_INCOMPLETE`,
+  `WORKFLOW_EVIDENCE_UNAVAILABLE`) when that evidence is missing. Component 4 has no live recommendation
+  source yet, so the Recommendations page says so (`RECOMMENDATION_EVIDENCE_UNAVAILABLE`) and no approval
+  can be requested; there is no recommendation apply or validation step.
   Nothing here applies Kubernetes changes, runs chaos experiments or deploys workloads.
-- The live topology of a fresh kind cluster shows its three worker nodes and no services.
+- The live topology of a fresh kind cluster shows its three worker nodes and an empty (valid) result with no services.
+- **Generic Kubernetes Service/ownership resolution is incomplete.** Pods are attributed to Deployments by
+  `app` label equal to the Deployment name. Applications named otherwise (Istio Bookinfo's `productpage-v1`
+  with `app: productpage`) are reported as unresolved (`partial`), not discovered, and predictions that
+  depend on them are refused (`TOPOLOGY_INCOMPLETE`).
+- **The live recommendation pipeline is incomplete** (see `docs/RECOMMENDATION_LIVE_DATA.md`): nothing yet
+  produces a `RecommendationReport`, YAML proposal or `ValidationReport` from live evidence.
+- An installed extension keeps running the image it was installed from. Changes only appear after
+  rebuilding and running `docker extension update`.
 - kind workers are containers on one Docker host: logical failure domains, not independent machines.
 - Component 1's pages default to `localhost` Jaeger and workload URLs, which do not point at anything
   useful from the extension backend. Jaeger-dependent features report that Jaeger is unreachable.
@@ -292,6 +303,9 @@ package.
 ## Verification status
 
 Checked in Docker Desktop 4.95.0 (macOS, Apple silicon, host architecture only).
+
+> Everything in this section was verified **before the real-data-only change** and has not been re-run
+> against it. Treat the rows as the record of that earlier build, not of the current code.
 
 **How the UI was verified.** Docker Desktop's tab cannot be driven by a browser tool and its console
 is not logged, so a temporary diagnostic script (never part of the repository or of the shipped
@@ -320,12 +334,12 @@ SDK that reproduces its behaviour:
 | `docker extension install`, `update`, `uninstall`, reinstall | Done |
 | Backend container configuration as Docker Desktop created it | Done (`docker inspect`) |
 | Every page loads in the tab with the SDK present, reached by clicking links | Done |
-| Overview, Deployment Topology, Failure Impact, Recommendations show real API results (metric values, tables, sample content), no error states, no console errors | Done |
+| Overview, Deployment Topology, Failure Impact, Recommendations show real API results (metric values, tables, sample content), no error states, no console errors | Done (before the real-data-only change; not re-run since) |
 | Workflows page shows its own "trace service is unavailable" message (Jaeger is not running) with no errors | Done |
-| GET over the SDK; POST through the UI (Request Approval → `PENDING_APPROVAL`, Approve/Reject offered, nothing applied) | Done |
+| GET over the SDK; POST through the UI (Request Approval → `PENDING_APPROVAL`, Approve/Reject offered, nothing applied) | Done before the real-data-only change; **superseded**: a request now needs a live recommendation (`RECOMMENDATION_EVIDENCE_UNAVAILABLE` until Member 4's pipeline exists) |
 | Error reporting: backend messages reach the page (invalid kubeconfig → "The kubeconfig needs a current-context.") | Done |
 | Connect page: not-connected state, connected state (server, credential, expiry), Disconnect | Done |
-| Deployment Topology live view shows the three real worker nodes, none of the sample nodes | Done |
+| Deployment Topology live view shows the three real worker nodes, none of the sample nodes | Done before the real-data-only change; not re-run |
 | Requests after more than 5 s idle (stale keep-alive) | Done, all pages |
 | First load racing a starting backend (install/update) | Done: pages recover via the retry |
 | No application TCP listener; unreachable from kind nodes (same-network positive control) | Done (final build) |
