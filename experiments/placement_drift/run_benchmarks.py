@@ -21,14 +21,18 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
+def _pct(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.2%}"
+
+
 def _print_scenario_banner(result: ScenarioResult) -> None:
     """Prints a formatted summary for an individual scenario result."""
     total_migrated = sum(t.pod_count for t in result.transitions)
     status_icon = "[PASS]" if result.rollback_successful else "[FAIL]"
     print(
         f"  {status_icon} Scenario: {result.scenario_id:<28} | "
-        f"D_rate: {result.d_rate:.2%} | "
-        f"Delta_E: {result.delta_e_rate:+.2%} | "
+        f"D_rate: {_pct(result.d_rate)} | "
+        f"Delta_E: {_pct(result.delta_e_rate)} | "
         f"Migrated: {total_migrated:>2} pods | "
         f"Latency: {result.runtime_ms:.1f}ms"
     )
@@ -75,7 +79,7 @@ def run_benchmarks() -> Dict[str, float]:
     and saves academic artifacts.
     """
     print("=" * 80)
-    print("COMPONENT 2: CONTROLLED CHAOS & PLACEMENT DRIFT BENCHMARK RUNNER")
+    print("COMPONENT 2: PLACEMENT DRIFT SCENARIO RUNNER (DRY-RUN SIMULATION)")
     print("Author: P.A.M. Minara (IT23154476) | Research Component 2")
     print("=" * 80 + "\n")
 
@@ -101,11 +105,12 @@ def run_benchmarks() -> Dict[str, float]:
     print("=" * 80)
     print(f"Total Scenarios Evaluated: {int(metrics['total_scenarios'])}")
     print(f"Scenarios Completed:      {int(metrics['completed_count'])}")
-    print(f"Mean Placement Drift Rate: {metrics['mean_d_rate']:.2%}")
-    print(f"Max Placement Drift Rate:  {metrics['max_d_rate']:.2%}")
+    print(f"Execution Mode:            {metrics['execution_mode']} (scripted placements)")
+    print(f"Mean Placement Drift Rate: {_pct(metrics['mean_d_rate'])}")
+    print(f"Max Placement Drift Rate:  {_pct(metrics['max_d_rate'])}")
     print(f"Total Execution Latency:   {metrics['total_runtime_ms']:.2f} ms")
     print("-" * 80)
-    print(f"Saved Academic Markdown:   {md_path}")
+    print(f"Saved Markdown report:     {md_path}")
     print(f"Saved Machine JSON Data:   {json_path}")
     print("=" * 80)
 

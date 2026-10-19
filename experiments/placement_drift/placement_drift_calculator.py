@@ -1,87 +1,50 @@
 """
-Placement Drift Calculator: Formal mathematical formulations of Drate, Erate, and delta-Erate.
-Component: Component 2 - Deployment Topology Modeling
-"""
-from typing import Dict, List, Set
+Placement drift metrics for scenario snapshots, using the single definitions in
+app/engine/deployment_topology_modeling/placement_metrics.py:
 
-from experiments.placement_drift.scenario_models import ClusterSnapshot, PodPlacementRecord
+    D_rate       = share of services (present in T0 and T1) whose exposure status changed
+    E_rate       = exposed services / services with at least one ready replica
+    Delta_E_rate = E_rate(T1) - E_rate(T0)
+"""
+from typing import Dict, List
+
+from app.engine.deployment_topology_modeling import placement_metrics as pm
+from experiments.placement_drift.scenario_models import ClusterSnapshot
 
 
 class PlacementDriftCalculator:
-    """
-    Mathematical engine calculating formal placement drift metrics:
-        D_rate = |Services with changed placement| / |Total Services|
-        E_rate = |Exposed Services| / |Total Services|
-        Delta_E_rate = E_rate(T1) - E_rate(T0)
-    """
+
+    @staticmethod
+    def exposure_statuses(snapshot: ClusterSnapshot) -> Dict[str, pm.ExposureStatus]:
+        pods_by_service: Dict[str, list] = {}
+        for p in snapshot.pods:
+            pods_by_service.setdefault(p.service_name, []).append(
+                {"name": p.pod_name, "node": p.node_name, "ready": p.is_ready}
+            )
+        return {svc: pm.exposure_status(pods) for svc, pods in pods_by_service.items()}
 
     @classmethod
-    def compute_drift_rate(
-        cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot
-    ) -> float:
-        """Computes the fraction of services whose physical placement shifted."""
-        t0_svcs = cls._group_pods_by_service(t0_snapshot.pods)
-        t1_svcs = cls._group_pods_by_service(t1_snapshot.pods)
-
-        all_services = set(t0_svcs.keys()).union(t1_svcs.keys())
-        if not all_services:
-            return 0.0
-
-        drifted_count = 0
-        for svc in all_services:
-            nodes_t0 = t0_svcs.get(svc, set())
-            nodes_t1 = t1_svcs.get(svc, set())
-            if nodes_t0 != nodes_t1:
-                drifted_count += 1
-
-        return round(drifted_count / len(all_services), 4)
+    def drift(cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot) -> pm.PlacementDriftResult:
+        return pm.placement_drift(cls.exposure_statuses(t0_snapshot), cls.exposure_statuses(t1_snapshot))
 
     @classmethod
-    def compute_exposure_rate(cls, snapshot: ClusterSnapshot) -> float:
-        """
-        Calculates E_rate: percentage of services concentrated on a single failure domain.
-        """
-        svc_map = cls._group_pods_by_service(snapshot.pods)
-        if not svc_map:
-            return 0.0
-
-        exposed_count = 0
-        for nodes in svc_map.values():
-            if len(nodes) == 1:
-                exposed_count += 1
-
-        return round(exposed_count / len(svc_map), 4)
+    def compute_drift_rate(cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot) -> float | None:
+        rate = cls.drift(t0_snapshot, t1_snapshot).rate
+        return round(rate, 4) if rate is not None else None
 
     @classmethod
-    def compute_delta_exposure_rate(
-        cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot
-    ) -> float:
-        """Computes net change in failure domain exposure rate: Delta_E = E(T1) - E(T0)."""
+    def compute_exposure_rate(cls, snapshot: ClusterSnapshot) -> float | None:
+        rate = pm.exposure_rate(cls.exposure_statuses(snapshot).values())
+        return round(rate, 4) if rate is not None else None
+
+    @classmethod
+    def compute_delta_exposure_rate(cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot) -> float | None:
         e0 = cls.compute_exposure_rate(t0_snapshot)
         e1 = cls.compute_exposure_rate(t1_snapshot)
+        if e0 is None or e1 is None:
+            return None
         return round(e1 - e0, 4)
 
     @classmethod
-    def get_drifted_services(
-        cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot
-    ) -> List[str]:
-        """Identifies names of services whose placement shifted between T0 and T1."""
-        t0_svcs = cls._group_pods_by_service(t0_snapshot.pods)
-        t1_svcs = cls._group_pods_by_service(t1_snapshot.pods)
-        all_services = set(t0_svcs.keys()).union(t1_svcs.keys())
-        return [
-            svc for svc in sorted(all_services)
-            if t0_svcs.get(svc, set()) != t1_svcs.get(svc, set())
-        ]
-
-    @staticmethod
-    def _group_pods_by_service(
-        pods: List[PodPlacementRecord],
-    ) -> Dict[str, Set[str]]:
-        """Groups assigned worker nodes by service name."""
-        grouped: Dict[str, Set[str]] = {}
-        for p in pods:
-            if p.service_name not in grouped:
-                grouped[p.service_name] = set()
-            grouped[p.service_name].add(p.node_name)
-        return grouped
+    def get_drifted_services(cls, t0_snapshot: ClusterSnapshot, t1_snapshot: ClusterSnapshot) -> List[str]:
+        return cls.drift(t0_snapshot, t1_snapshot).changed_services

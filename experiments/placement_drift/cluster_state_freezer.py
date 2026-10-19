@@ -50,8 +50,8 @@ class ClusterStateFreezer:
                         pod_name=p.get("name", p.get("pod_name", "unknown-pod")),
                         service_name=p.get("service_name", p.get("service", "unknown-service")),
                         node_name=p.get("node_name", p.get("node", "unassigned")),
-                        zone=p.get("zone", "default-zone"),
-                        is_ready=p.get("is_ready", p.get("ready", True)),
+                        zone=p.get("zone"),
+                        is_ready=bool(p.get("is_ready", p.get("ready", False))),
                     )
                 )
             else:
@@ -60,8 +60,8 @@ class ClusterStateFreezer:
                         pod_name=getattr(p, "name", getattr(p, "pod_name", "unknown-pod")),
                         service_name=getattr(p, "service_name", getattr(p, "service", "unknown-service")),
                         node_name=getattr(p, "node_name", getattr(p, "node", "unassigned")),
-                        zone=getattr(p, "zone", "default-zone"),
-                        is_ready=getattr(p, "is_ready", getattr(p, "ready", True)),
+                        zone=getattr(p, "zone", None),
+                        is_ready=bool(getattr(p, "is_ready", getattr(p, "ready", False))),
                     )
                 )
         return records
