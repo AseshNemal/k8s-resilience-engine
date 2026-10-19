@@ -85,7 +85,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <dl class="connect__details" data-role="connect-details" hidden>
             <dt>Cluster API</dt><dd data-role="connect-server"></dd>
             <dt>Credential</dt><dd data-role="connect-credential"></dd>
-            <dt>Access</dt><dd>Read-only: nodes, pods and deployments</dd>
+            <dt>Access</dt><dd>Read-only: nodes, pods, services, deployments and replicasets</dd>
             <dt>Expires</dt><dd data-role="connect-expiry"></dd>
         </dl>
     </section>

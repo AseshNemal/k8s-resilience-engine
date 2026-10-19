@@ -132,8 +132,8 @@ shows the app's built-in sample topology, as it does outside Docker.
 
 `scripts/extension-cluster-access.sh` is the only thing that changes the cluster, and only when you
 run it and confirm. It creates `namespace/resilience-engine`, a service account, and a cluster role
-(`deploy/rbac/resilience-readonly.yaml`) that allows **only `get`/`list` on nodes, pods and
-deployments**; it deploys nothing and modifies nothing else. It then issues a **time-limited bearer
+(`deploy/rbac/resilience-readonly.yaml`) that allows **only `get`/`list` on nodes, pods, services,
+deployments and replicasets**; it deploys nothing and modifies nothing else. It then issues a **time-limited bearer
 token** (default 168 h, `--duration 24h` for shorter) and writes the kubeconfig file, mode 600.
 
 - **Renew:** run the script again and pick the new file. The page shows the expiry and flags an
@@ -141,7 +141,7 @@ token** (default 168 h, `--duration 24h` for shorter) and writes the kubeconfig 
 - **Revoke:** `./scripts/extension-cluster-access.sh --revoke` deletes the service account's access
   objects, which invalidates every issued token immediately. Then use **Disconnect cluster**.
 - **Trade-off:** anyone who can read the file (or the extension's data volume) can read this cluster's
-  nodes, pods and deployments until the token expires or is revoked. They cannot change anything or
+  nodes, pods, services, deployments and replicasets until the token expires or is revoked. They cannot change anything or
   read secrets. A shorter `--duration` reduces that window at the cost of more frequent renewal.
 - **The backend refuses anything stronger.** On upload it asks the cluster what the credential may do
   and rejects it if it can create or delete pods, patch or create deployments, delete nodes, read

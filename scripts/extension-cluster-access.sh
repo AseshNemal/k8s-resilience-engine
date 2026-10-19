@@ -68,9 +68,9 @@ fi
 cat <<EOF
 This will CREATE in cluster '$CONTEXT' (see deploy/rbac/resilience-readonly.yaml):
   namespace/resilience-engine, serviceaccount/resilience-engine-reader,
-  clusterrole + clusterrolebinding granting ONLY get/list on nodes, pods and deployments.
+  clusterrole + clusterrolebinding granting ONLY get/list on nodes, pods, services, deployments and replicasets.
 It then issues a bearer token valid for $DURATION and writes $OUT_FILE (mode 600).
-No workloads are deployed and no existing objects are modified.
+No workloads are deployed. Existing access objects are updated to match the manifest; no other objects are modified.
 EOF
 confirm
 
@@ -129,6 +129,6 @@ Next: open the extension in Docker Desktop, go to "Connect cluster", and pick th
 
 Renew:   re-run this script and pick the new file (older tokens stay valid until they expire).
 Revoke:  ./scripts/extension-cluster-access.sh --revoke   (invalidates every token immediately)
-Note:    anyone who can read the file can read this cluster's nodes, pods and deployments until
+Note:    anyone who can read the file can read this cluster's nodes, pods, services, deployments and replicasets until
          it expires or is revoked. It cannot change anything or read secrets. Do not commit it.
 EOF

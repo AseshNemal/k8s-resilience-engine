@@ -53,7 +53,7 @@
             ? "Choose a read-only kubeconfig to read your cluster. Until then the app uses sample data."
             : expired
                 ? "Renew the credential to keep reading your cluster."
-                : "The app can list nodes, pods and deployments. It cannot change your cluster.";
+                : "The app can list nodes, pods, services, deployments and replicasets. It cannot change your cluster.";
         details.hidden = !connected;
         disconnect.hidden = !connected;
         submit.textContent = connected ? "Replace credential" : "Connect";

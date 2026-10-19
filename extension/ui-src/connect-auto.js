@@ -33,7 +33,7 @@
         "approved-unlabelled": "Access exists from an earlier setup",
         absent: "Access not set up yet",
         partial: "Access partly removed; setting up restores it",
-        drifted: "Access was changed; setting up resets it to read-only",
+        drifted: "Access needs updating; setting up resets it to the current read-only set",
         "over-granted": "Another binding gives it extra access; remove that first",
     };
 
