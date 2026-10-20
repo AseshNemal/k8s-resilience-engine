@@ -23,7 +23,7 @@ class PodPlacementRecord(BaseModel):
 
 
 class ClusterSnapshot(BaseModel):
-    """Immutable, timestamped, hash-verified snapshot of cluster pod placement."""
+    """Timestamped snapshot of cluster pod placement with a SHA-256 content hash."""
     snapshot_id: str = Field(..., description="Unique snapshot identifier (e.g. T0-baseline)")
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),

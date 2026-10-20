@@ -1,7 +1,6 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pathlib import Path
 
 from app.api.deployments import router as deployments_router
 from app.engine.deployment_topology_modeling.service import (
@@ -217,14 +216,14 @@ def test_api_get_markdown_benchmark_report(client: TestClient):
     assert "# Component 2" in response.text
 
 
-def test_run_benchmarks_script_execution():
-    metrics = run_benchmarks()
+def test_run_benchmarks_script_execution(tmp_path):
+    # Writes to a temporary folder so running the tests never rewrites the committed reports.
+    metrics = run_benchmarks(output_dir=tmp_path)
     assert metrics["total_scenarios"] == 8.0
     assert metrics["completed_count"] == 8.0
 
-    output_dir = Path(__file__).resolve().parents[2] / "experiments" / "placement_drift"
-    md_file = output_dir / "benchmark_report.md"
-    json_file = output_dir / "benchmark_report.json"
+    md_file = tmp_path / "benchmark_report.md"
+    json_file = tmp_path / "benchmark_report.json"
 
     assert md_file.exists()
     assert json_file.exists()

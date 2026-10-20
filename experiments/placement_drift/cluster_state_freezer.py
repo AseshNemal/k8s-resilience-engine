@@ -1,5 +1,5 @@
 """
-Cluster State Freezer: Captures immutable, SHA-256 cryptographic snapshots of cluster placement.
+Cluster State Freezer: Captures snapshots of cluster placement with a SHA-256 content hash.
 Component: Component 2 - Deployment Topology Modeling
 """
 import hashlib
@@ -14,8 +14,8 @@ from experiments.placement_drift.scenario_models import (
 
 class ClusterStateFreezer:
     """
-    Freezes cluster placement state into deterministic, immutable snapshots.
-    Generates cryptographic SHA-256 hashes to guarantee experiment auditability.
+    Turns cluster placement into deterministic snapshots with a SHA-256 hash of the sorted
+    placement, so a later change to a stored snapshot can be detected (integrity check only).
     """
 
     @staticmethod
@@ -74,7 +74,7 @@ class ClusterStateFreezer:
         nodes: List[Dict[str, Any]] | None = None,
         namespace: str = "default",
     ) -> ClusterSnapshot:
-        """Constructs an immutable ClusterSnapshot with cryptographic SHA-256 hash."""
+        """Builds a ClusterSnapshot with the SHA-256 hash of its placement."""
         nodes = nodes or []
         pod_records = cls.normalize_pod_records(raw_pods)
         state_hash = cls.compute_placement_hash(pod_records)

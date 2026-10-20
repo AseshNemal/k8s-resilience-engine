@@ -321,12 +321,12 @@ def get_resilience_drift(
 @router.get(
     "/drift/violations",
     tags=[TAG_DRIFT],
-    summary="[Phase 3] List all active resilience drift violations across all 5 detectors",
+    summary="[Phase 3] List all active resilience drift violations across the 4 detectors",
 )
 def list_drift_violations(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
-    """Extracts all active violations from scale, resource, affinity, contention, and spread detectors."""
+    """All violations from the scale, affinity, topology-spread and missing-limits (informational) detectors."""
     report, _ = analyze_resilience_drift(namespace=namespace)
     violations: List[Dict[str, Any]] = []
     for svc in report.services:
@@ -340,7 +340,7 @@ def list_drift_violations(
 @router.get(
     "/drift/categories",
     tags=[TAG_DRIFT],
-    summary="[Phase 3] Categorical breakdown of violations across all 5 detectors",
+    summary="[Phase 3] Categorical breakdown of violations across the 4 detectors",
 )
 def get_drift_categories(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),

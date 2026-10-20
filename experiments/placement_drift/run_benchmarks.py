@@ -77,10 +77,10 @@ def _write_artifact_files(
     return md_file, json_file
 
 
-def run_benchmarks() -> Dict[str, float]:
+def run_benchmarks(output_dir: Path | None = None) -> Dict[str, float]:
     """
     Executes all 8 Section 10 disruption scenarios, outputs live matrices,
-    and saves academic artifacts.
+    and saves the Markdown and JSON reports to output_dir (default: this folder).
     """
     print("=" * 80)
     print("COMPONENT 2: PLACEMENT DRIFT SCENARIO RUNNER (DRY-RUN SIMULATION)")
@@ -100,8 +100,7 @@ def run_benchmarks() -> Dict[str, float]:
         if r.transitions:
             _render_transition_matrix(repo, r.scenario_id)
 
-    # Output directory
-    output_dir = Path(__file__).parent
+    output_dir = output_dir or Path(__file__).parent
     md_path, json_path = _write_artifact_files(results, metrics, output_dir)
 
     print("=" * 80)
