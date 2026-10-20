@@ -83,7 +83,8 @@ def test_placement_drift_diff_report():
         remediated_services=["cart"],
     )
     assert diff.placement_drift_rate == pytest.approx(0.25)
-    assert diff.added_services == [] and diff.removed_services == []
+    assert diff.added_services == []
+    assert diff.removed_services == []
 
 
 def test_baseline_b2_result():

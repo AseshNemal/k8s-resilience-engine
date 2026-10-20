@@ -72,9 +72,11 @@ def test_pod_readiness_phase_and_owner():
         {"metadata": {"name": "noconds"}, "spec": {}, "status": {"phase": "Pending"}},
     ], namespace="ns")
     assert [p.ready for p in pods] == [True, False, False]
-    assert pods[0].owner_kind == "ReplicaSet" and pods[0].owner_uid == "u1"
+    assert pods[0].owner_kind == "ReplicaSet"
+    assert pods[0].owner_uid == "u1"
     assert pods[0].restart_count == 2
-    assert pods[2].node is None and pods[2].phase == "Pending"
+    assert pods[2].node is None
+    assert pods[2].phase == "Pending"
 
 
 def test_real_kind_snapshot_pods():

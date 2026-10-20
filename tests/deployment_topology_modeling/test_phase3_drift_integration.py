@@ -67,7 +67,10 @@ def test_live_graph_from_real_snapshot():
 
 
 def test_snapshot_id_is_reproducible():
-    assert service.get_live_deployment_graph().snapshot_id == service.get_live_deployment_graph().snapshot_id
+    first = service.get_live_deployment_graph().snapshot_id
+    second = service.get_live_deployment_graph().snapshot_id
+    assert first.startswith("snap-")
+    assert second == first
 
 
 def test_exposure_report_from_real_snapshot():

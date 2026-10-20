@@ -81,7 +81,8 @@ def test_anti_affinity_uses_the_rules_topology_key():
     host_rule = {"affinity": {"podAntiAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": [
         {"topologyKey": "kubernetes.io/hostname"}]}}}
     (v,) = detector.detect("svc", zone_rule, pods, nodes)
-    assert v.affected_failure_domain == "a" and v.actual == 2
+    assert v.affected_failure_domain == "a"
+    assert v.actual == 2
     assert detector.detect("svc", host_rule, pods, nodes) == []
 
 

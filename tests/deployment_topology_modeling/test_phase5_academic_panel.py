@@ -57,4 +57,5 @@ def test_ground_truth_endpoint_reports_sample_sizes(client):
     assert data["failure_experiments"] == 1
     (check,) = data["exposure_checks"]
     assert check["failed_nodes"] == ["resilience-research-worker"]
-    assert check["predicted_available"] is False and check["observed_available"] is False
+    assert check["predicted_available"] is False
+    assert check["observed_available"] is False
