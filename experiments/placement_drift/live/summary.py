@@ -56,7 +56,8 @@ def summarise(results_dir: Path) -> dict[str, Any]:
                                         for s in sorted({r["target_status_t1"] for r in ok})},
             "observation_ms": describe(_values(ok, "observation_ms_t0") + _values(ok, "observation_ms_t1"), rate=False),
         })
-    summary = {"results_dir": str(results_dir), "total_runs": len(rows), "conditions": conditions}
+    # Folder name only: the absolute path would expose the local machine's directory layout.
+    summary = {"results_dir": results_dir.name, "total_runs": len(rows), "conditions": conditions}
     (results_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     (results_dir / "summary.md").write_text(to_markdown(summary), encoding="utf-8")
     return summary

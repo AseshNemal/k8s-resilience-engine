@@ -1,5 +1,5 @@
 {
-  "results_dir": "experiments\\placement_drift\\results\\five-repetitions",
+  "results_dir": "five-repetitions",
   "total_runs": 80,
   "conditions": [
     {
