@@ -853,7 +853,20 @@
 
     async function discoverGuidedWorkflows(event) {
         if (event) event.preventDefault();
-        if (!guidedForm || !guidedForm.reportValidity()) return;
+        if (!guidedForm) return;
+        if (!guidedForm.reportValidity()) {
+            // The page starts in a "Loading…" state. Returning silently here would leave it there forever, so
+            // say what is missing and put the controls back.
+            guidedWorkflows = [];
+            guidedOperation.replaceChildren();
+            const missing = document.createElement("option");
+            missing.value = "";
+            missing.textContent = "Enter the trace service address to load workflows";
+            guidedOperation.appendChild(missing);
+            updateGuidedSelectionAction();
+            setGuidedStatus("Enter the workflow trace service address (under Advanced connection settings) to load workflows.", true);
+            return;
+        }
         const button = guidedForm.querySelector('[data-role="guided-discover-button"]');
         button.disabled = true;
         guidedInspectButton.disabled = true;
@@ -1942,6 +1955,17 @@
         });
     }
 
+    // The address fields start empty, because the right address depends on where the backend runs. Ask the server
+    // which one it uses before anything needs it; if that fails the fields stay empty and the page says so.
+    async function ensureJaegerDefault() {
+        try {
+            const res = await fetchJson("/api/workflows/jaeger/status");
+            fillJaegerDefault(res.jaegerUrl);
+        } catch (_error) {
+            // Nothing to fill in; discoverGuidedWorkflows reports the missing address.
+        }
+    }
+
     async function checkJaegerHealth() {
         if (!jaegerStatusBadge || !jaegerUrlInput) return;
         try {
@@ -2098,6 +2122,6 @@
         activateWorkflowStage("define");
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
         if (sourcePill) sourcePill.textContent = "No active campaign";
-        discoverGuidedWorkflows().then(loadLatestExperiment);
+        ensureJaegerDefault().then(discoverGuidedWorkflows).then(loadLatestExperiment);
     });
 })();
