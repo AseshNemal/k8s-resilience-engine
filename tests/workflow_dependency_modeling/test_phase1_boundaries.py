@@ -125,4 +125,5 @@ def test_trace_derived_names_are_not_inserted_as_html() -> None:
     assert "${nodeName}</text>" not in script
     assert "<td><code>${edge.source}" not in script
     assert "nameText.textContent = nodeName" in script
-    assert "sourceCode.textContent = edge.source" in script
+    assert "element.textContent = value" in script
+    assert "${edge.source} → ${edge.target}" in script

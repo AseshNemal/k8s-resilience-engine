@@ -1,86 +1,66 @@
-"""Static contract tests for the presentation-ready Phase 6 operator flow."""
-
+"""Rendered input contracts. Interactive lifecycle checks run in workflow_browser.test.cjs."""
+from html.parser import HTMLParser
 from pathlib import Path
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = PROJECT_ROOT / "app" / "templates" / "components" / "workflows.html"
-SCRIPT = PROJECT_ROOT / "app" / "static" / "js" / "components" / "workflows.js"
-STYLES = PROJECT_ROOT / "app" / "static" / "css" / "pages" / "workflows.css"
+from fastapi.testclient import TestClient
+from app.main import app
 
 
-def test_operator_actions_come_before_optional_method_explanation() -> None:
-    markup = TEMPLATE.read_text(encoding="utf-8")
+class Fields(HTMLParser):
+    def __init__(self, markup):
+        super().__init__()
+        self.fields = {}
+        self.feed(markup)
 
-    assert 'class="operator-preflight"' in markup
-    assert "Workflow is callable" in markup
-    assert "Telemetry is complete" in markup
-    assert "Success is measurable" in markup
-    assert "Run normally" in markup
-    assert markup.index('class="guided-analysis"') < markup.index('class="workflow-method"')
-    assert '<ol class="experiment-path" aria-label="Workflow dependency steps" hidden>' in markup
-    assert "Build a workflow from real traces" in markup
-    assert "Online Boutique · controlled experiment" not in markup
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag in {"input", "select", "textarea"} and "name" in attrs:
+            self.fields[attrs["name"]] = attrs
 
 
-def test_guided_flow_gates_collection_and_exports_research_artifacts() -> None:
-    script = SCRIPT.read_text(encoding="utf-8")
-
-    assert "loadManifestGate(campaign, manifestGate, runButton, runStatus)" in script
-    assert "Save test settings" in script
-    assert "runButton.disabled = true" in script
-    assert "manifest.integrityVerified" in script
-    assert "Download experiment record JSON" in script
-    assert "Download validated graph JSON" in script
-    assert 'guidedText("h4", "", campaign.workflowName)' in script
-    assert 'name="traceSourceType"' in TEMPLATE.read_text(encoding="utf-8")
-    assert 'name="traceEndpoint"' in TEMPLATE.read_text(encoding="utf-8")
-    assert 'name="traceAuthentication"' in TEMPLATE.read_text(encoding="utf-8")
-    assert 'name="traceSecretEnv"' in TEMPLATE.read_text(encoding="utf-8")
-    assert "traceSource:" in script
-    assert 'values.get("traceSourceType")' in script
+def page():
+    response = TestClient(app).get("/components/workflows")
+    assert response.status_code == 200
+    return response.text
 
 
-def test_guided_flow_has_keyboard_mobile_and_reduced_motion_rules() -> None:
-    styles = STYLES.read_text(encoding="utf-8")
-
-    assert ":focus-visible" in styles
-    assert "min-height: 44px" in styles
-    assert "@media (max-width: 700px)" in styles
-    assert "@media (prefers-reduced-motion: reduce)" in styles
-
-
-def test_recorded_graph_is_shown_before_dependency_validation() -> None:
-    script = SCRIPT.read_text(encoding="utf-8")
-    styles = STYLES.read_text(encoding="utf-8")
-
-    assert 'guidedResult.append(heading, metrics, warning, renderObservedGraph(session), evidence, contract)' in script
-    assert 'renderObservedGraph(session)' in script
-    assert 'renderObservedGraphDisclosure(session)' in script
-    assert 'campaign.analysisSessionId' in script
-    assert 'They do not establish that a service is required for success.' in script
-    assert '.guided-observed-graph__edges' in styles
+def test_connection_does_not_assume_a_local_application_or_environment():
+    fields = Fields(page()).fields
+    for name in ("traceEndpoint", "environmentId"):
+        assert "required" in fields[name]
+        assert not fields[name].get("value")
+    assert "required" in fields["evidenceTier"]
 
 
-def test_saved_run_keeps_service_controls_compact_and_shows_next_action() -> None:
-    script = SCRIPT.read_text(encoding="utf-8")
-    markup = TEMPLATE.read_text(encoding="utf-8")
-
-    assert 'document.createElement("details")' in script
-    assert 'card.open = service.state === "active"' in script
-    assert '"Record service unavailable"' in script
-    assert '"Proof of service state"' in script
-    assert '"Next action"' in script
-    assert 'data-role="guided-result" hidden></div>' in markup
+def test_secret_environment_reference_starts_disabled():
+    fields = Fields(page()).fields
+    assert "disabled" in fields["traceSecretEnv"]
+    assert not fields["traceSecretEnv"].get("value")
 
 
-def test_approved_graph_also_loads_readable_validation_evidence() -> None:
-    script = SCRIPT.read_text(encoding="utf-8")
-    styles = STYLES.read_text(encoding="utf-8")
+def test_upload_accepts_a_file_and_requires_an_explicit_success_check():
+    fields = Fields(page()).fields
+    assert fields["traces"]["type"] == "file"
+    for name in ("workflowName", "entryService", "operationName", "outcome", "statuses", "criticality"):
+        assert "required" in fields[name]
+        assert not fields[name].get("value")
 
-    assert "loadApprovedEvidence(approval, target, report)" in script
-    assert "/api/workflows/dependency-assessments/${encodeURIComponent(approval.assessmentId)}" in script
-    assert "Normal ${baseline.succeededRecords}/${baseline.eligibleRecords} successful" in script
-    assert "edge-specific interventions were recorded" in script
-    assert "Download validation evidence JSON" in script
-    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 265px), 1fr))" in styles
+
+def test_raw_definition_is_optional_in_the_standard_upload_flow():
+    fields = Fields(page()).fields
+    assert "disabled" in fields["workflowDefinition"]
+    assert "required" not in fields["workflowDefinition"]
+
+
+def test_results_are_empty_until_the_user_selects_or_analyzes_a_workflow():
+    markup = page()
+    assert 'aria-label="Selected workflow" hidden' in markup
+    assert 'aria-label="Trace analysis results" hidden' in markup
+    assert 'data-role="saved-workflows"' in markup
+    assert 'role="status" aria-live="polite"' in markup
+
+
+def test_research_and_demonstration_shortcuts_are_absent():
+    markup = page()
+    for text in ("PP1", "Research Environment", "Research audit", "Seed Synthetic", "precision", "reproducibility"):
+        assert text not in markup
