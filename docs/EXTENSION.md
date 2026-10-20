@@ -187,6 +187,11 @@ not touched by uninstalling: revoke it separately with `--revoke`.
 ./scripts/extension-cluster-access.sh       # explicit setup: read-only access, asks before changing the cluster
 ```
 
+On Windows run the same two commands as `scripts\cluster-up.cmd` and `scripts\extension-cluster-access.cmd` in a
+normal Command Prompt or PowerShell; no WSL or bash is needed. All the scripts in `scripts/` are Python behind a
+thin launcher (`.sh` for macOS and Linux, `.cmd` for Windows), so they behave the same everywhere. They need
+Python 3.9 or newer and `docker`, `kind` and `kubectl` on `PATH`.
+
 Then open **Resilience Engine** in Docker Desktop, choose **Connect cluster**, and pick
 `.kube/extension-readonly.kubeconfig`. Until a cluster is connected every page that needs the cluster
 says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never substitutes sample data.
@@ -416,7 +421,9 @@ package.
 tests, and by a real macOS check that `plutil` accepts the generated plist and that launchd loads it
 (`run interval = 900 seconds`, run at load) and unloads it again, using a scratch label and `/usr/bin/true`.
 Not yet verified: the background job renewing a real expired credential end to end through Docker Desktop,
-and anything on Windows or Linux.
+and anything on Windows or Linux. The cluster scripts and `extension-manage` are cross-platform Python and their
+logic is covered by tests that run on every platform, but no real Windows machine has run them. The background
+renewal job exists on macOS only; on Windows and Linux the token is renewed while the extension tab is open.
 
 Checked in Docker Desktop 4.95.0 (macOS, Apple silicon, host architecture only).
 

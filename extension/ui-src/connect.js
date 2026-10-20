@@ -19,9 +19,9 @@
 
     // What to do next, for the failures people actually hit. Matched on the backend's own message.
     const HINTS = [
-        [/can change the cluster/, "Run ./scripts/extension-cluster-access.sh and choose the file it writes. It issues a read-only credential."],
-        [/Could not reach the cluster/, "Check that the cluster is running (./scripts/cluster-up.sh), then try again."],
-        [/rejected the credential|expired/, "Run ./scripts/extension-cluster-access.sh to issue a new token, then choose the new file."],
+        [/can change the cluster/, "Run ./scripts/extension-cluster-access.sh (Windows: scripts\\extension-cluster-access.cmd) and choose the file it writes. It issues a read-only credential."],
+        [/Could not reach the cluster/, "Check that the cluster is running (./scripts/cluster-up.sh, or scripts\\cluster-up.cmd on Windows), then try again."],
+        [/rejected the credential|expired/, "Run ./scripts/extension-cluster-access.sh (Windows: scripts\\extension-cluster-access.cmd) to issue a new token, then choose the new file."],
         [/current-context|valid YAML|not a kubeconfig|too large|embedded|https URL|exec|proxy|TLS/, "Choose the file written by ./scripts/extension-cluster-access.sh: .kube/extension-readonly.kubeconfig."],
     ];
 

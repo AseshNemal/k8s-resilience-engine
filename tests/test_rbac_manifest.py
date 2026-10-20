@@ -37,7 +37,7 @@ def test_role_never_reads_secrets_or_endpointslices():
 
 ROOT = MANIFEST.parents[2]
 DESCRIBING_THE_ACCESS = [
-    "scripts/extension-cluster-access.sh",
+    "scripts/extension_cluster_access.py",
     "extension/ui-src/connect.js",
     "extension/build_ui.py",
 ]
@@ -52,7 +52,7 @@ def test_descriptions_of_the_access_name_services_and_replicasets():
 
 
 def test_setup_script_does_not_claim_it_leaves_existing_objects_alone():
-    text = (ROOT / "scripts/extension-cluster-access.sh").read_text()
+    text = (ROOT / "scripts/extension_cluster_access.py").read_text()
 
     assert "no existing objects are modified" not in text
     assert "existing access objects are updated" in text.lower()

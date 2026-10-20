@@ -118,7 +118,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
     <details class="card connect__manual" data-role="manual-details" open>
         <summary class="section-header__title" id="connect-new-title">Advanced: use a kubeconfig file</summary>
         <ol class="connect__steps">
-            <li>In the project folder, run <code>./scripts/extension-cluster-access.sh</code>. It asks before
+            <li>In the project folder, run <code>./scripts/extension-cluster-access.sh</code> (on Windows, <code>scripts\\extension-cluster-access.cmd</code>). It asks before
                 creating a read-only service account in your kind cluster and writes
                 <code>.kube/extension-readonly.kubeconfig</code>.</li>
             <li>Choose that file here. The app checks that the credential cannot change the cluster and

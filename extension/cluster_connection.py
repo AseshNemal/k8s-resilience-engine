@@ -184,7 +184,7 @@ def _verify_read_only(document: dict) -> None:
     if writable:
         raise _bad(
             "This credential can change the cluster (" + ", ".join(writable[:3])
-            + "). Use scripts/extension-cluster-access.sh to create a read-only credential."
+            + "). Use scripts/extension-cluster-access.sh (Windows: scripts\\extension-cluster-access.cmd) to create a read-only credential."
         )
     if not readable:
         raise _bad("This credential cannot list nodes, pods and deployments, which the app needs.")

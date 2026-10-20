@@ -942,6 +942,22 @@ Prompt instead with `.venv\Scripts\activate.bat`.
 Stop the server with `Ctrl+C`. Deactivate the virtual environment with `deactivate` (same
 command on macOS and Windows).
 
+### Windows and the Docker Desktop extension
+
+Every script in `scripts/` that you run by hand is Python behind a launcher, so Windows does not need WSL or
+bash. Use the `.cmd` launcher where this README shows the `.sh` one:
+
+| macOS / Linux | Windows |
+|---|---|
+| `./scripts/cluster-up.sh` | `scripts\cluster-up.cmd` |
+| `./scripts/extension-cluster-access.sh` | `scripts\extension-cluster-access.cmd` |
+| `./scripts/extension-manage.sh update` | `scripts\extension-manage.cmd update` |
+
+They need Python 3.9 or newer (the `py` launcher is preferred on Windows) and `docker`, `kind` and `kubectl` on
+`PATH`. What is checked: their logic is covered by tests that run on every platform. What is not: they have been
+run on macOS, not on a real Windows machine. One real difference: automatic background renewal of the cluster
+credential exists on macOS only, so on Windows the token is renewed while the extension tab is open.
+
 ## Deployment
 
 There is no deployment pipeline yet — `deploy/kubernetes/` is currently an empty placeholder

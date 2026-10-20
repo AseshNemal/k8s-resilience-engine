@@ -94,6 +94,8 @@ node --test extension/ui-src/*.test.mjs                                         
 
 # Docker Desktop extension: install, update, uninstall, status, check, clean (add --dry-run to preview).
 # The logic is scripts/extension_manage.py; the .sh (macOS/Linux) and .cmd (Windows) files only launch it.
+# The same holds for scripts/cluster-up and scripts/extension-cluster-access (cluster_up.py, extension_cluster_access.py):
+# Python behind .sh/.cmd launchers, so nothing needs bash and Windows runs them directly.
 ./scripts/extension-manage.sh update
 ```
 

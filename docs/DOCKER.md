@@ -23,7 +23,10 @@ Docker Desktop
   Apple silicon).
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) and `kubectl` on your `PATH`
   (macOS: `brew install kind kubectl`).
-- A bash shell. Verified on macOS only; Windows needs WSL2 (untested).
+- Python 3.9 or newer. The scripts in `scripts/` are Python behind thin launchers, so they run on macOS, Linux
+  and Windows: `./scripts/cluster-up.sh` on macOS and Linux, `scripts\cluster-up.cmd` on Windows (the same
+  for `extension-cluster-access` and `extension-manage`). They are covered by tests that run on every platform;
+  they have been run on macOS only, and not yet on a real Windows machine.
 
 ## First-time setup
 
