@@ -44,7 +44,11 @@ node --test extension/ui-src/*.test.mjs tests/frontend/*.test.mjs
 ```
 
 Docker Desktop extension: `./scripts/extension-manage.sh install|update|uninstall|status|check|clean`
-(add `--dry-run` to preview; it never touches the cluster or its access objects).
+(add `--dry-run` to preview; it never touches the cluster or its access objects). The logic is
+`scripts/extension_manage.py`; `extension-manage.sh` (macOS/Linux) and `extension-manage.cmd` (Windows)
+only launch it. The Kubernetes access is plain HTTP on both sides: `app/integrations/kubernetes/rest.py`
+(httpx; no `kubernetes` package) and `extension/helper/internal/kube` (net/http; no client-go). TLS is always
+verified; `insecure-skip-tls-verify`, `proxy-url`, basic auth and credential plugins are refused, never run.
 
 Run the application:
 

@@ -43,8 +43,13 @@ This is an early-stage scaffold, not a working system yet:
 - `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
   deployment, failure_impact, recommendation, validation); `sample_data/` is test-only.
   `app/integrations/kubernetes/` and `app/integrations/jaeger/` exist; `app/core/` is minimal config.
-  The Kubernetes client lists nodes, pods, deployments, services and replicasets (read-only). The
-  extension's role grants exactly those five (`deploy/rbac/resilience-readonly.yaml`, mirrored in
+  The Kubernetes client lists nodes, pods, deployments, services and replicasets (read-only). It is a
+  small httpx client (`app/integrations/kubernetes/rest.py`); the heavy `kubernetes` package is not a
+  dependency and a test keeps it that way. TLS is always verified (`tls-server-name` is honoured);
+  `insecure-skip-tls-verify`, `proxy-url`, basic auth and credential plugins (`exec`, `auth-provider`) are
+  refused, never run. The host helper (`extension/helper`, Go) likewise speaks plain `net/http`, without
+  client-go; both read the same backend kubeconfig, pinned by `tests/fixtures/tls/backend-kubeconfig.yaml`.
+  The extension's role grants exactly those five (`deploy/rbac/resilience-readonly.yaml`, mirrored in
   `extension/helper/internal/rbac/rbac.go` and checked against each other by a Go test). Discovery does
   not use services/replicasets yet: Service-selector and Pod → ReplicaSet → Deployment resolution is
   Member 2's pending work. The rules: a graph service is a Kubernetes Service with a selector, its pods
@@ -75,7 +80,8 @@ node --test tests/frontend/connection-state.test.mjs tests/frontend/api.test.mjs
 node --test extension/ui-src/*.test.mjs                                          # extension page scripts
 (cd extension/helper && go test ./... -count=1)                                  # Go host helper (RBAC, flow)
 
-# Docker Desktop extension: install, update, uninstall, status, check, clean (add --dry-run to preview)
+# Docker Desktop extension: install, update, uninstall, status, check, clean (add --dry-run to preview).
+# The logic is scripts/extension_manage.py; the .sh (macOS/Linux) and .cmd (Windows) files only launch it.
 ./scripts/extension-manage.sh update
 ```
 

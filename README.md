@@ -981,9 +981,127 @@ what it would do (see [`docs/EXTENSION.md`](docs/EXTENSION.md)).
 
 Recommendations are never applied to Kubernetes automatically; approving one only records the approval.
 
+For the full walkthrough of the extension and every script, see
+[Using the Docker Desktop Extension and Scripts](#using-the-docker-desktop-extension-and-scripts).
+
 Writing real Kubernetes manifests for `deploy/kubernetes/` is future work — see
 [Development Phases](#development-phases) and the per-member "First" checklists earlier in
 this document.
+
+---
+
+# Using the Docker Desktop Extension and Scripts
+
+This is the step-by-step guide. Deeper detail, limits and a verification checklist are in
+[`docs/EXTENSION.md`](docs/EXTENSION.md).
+
+## What you need
+
+- Docker Desktop, with **Settings → Extensions → "Allow only extensions distributed through the Docker
+  Marketplace"** unticked (the extension is installed from a local image).
+- `kind` and `kubectl` if you want a real test cluster ([`docs/DOCKER.md`](docs/DOCKER.md)).
+- Nothing else: running the extension needs no Python or Node install.
+
+All commands below are run from the repository root.
+
+## First-time setup
+
+1. **Create the test cluster** (three workers, one control plane; an existing cluster is kept):
+
+   ```bash
+   ./scripts/cluster-up.sh
+   ```
+
+2. **Install the extension.** This runs the tests, builds the image and installs it:
+
+   ```bash
+   ./scripts/extension-manage.sh install
+   ```
+
+3. **Open Resilience Engine** in Docker Desktop's left sidebar and choose **Connect cluster**.
+4. **Approve read-only access.** Under *Set up automatically*, click **Find clusters**, pick your kind
+   cluster and click **Set up access**. A system dialog lists the exact cluster, permissions and changes;
+   nothing happens until you approve. The extension then holds only a read-only token (valid for up to
+   7 days) that renews itself with no button to press: while the extension is open, and, on macOS, from a
+   small background job (a LaunchAgent, named in the same dialog) that checks every 15 minutes even when
+   Docker Desktop is closed or the Mac was asleep. Your own kubeconfig never leaves your computer.
+   *(Manual alternative: run `./scripts/extension-cluster-access.sh`, then pick
+   `.kube/extension-readonly.kubeconfig` under *Advanced: use a kubeconfig file*.)*
+5. **Use the pages.** Every page reads your connected cluster; if it cannot, the page says so with an
+   explicit error and never shows placeholder figures.
+
+   | Page | What it shows |
+   |---|---|
+   | Overview | Every namespace in the connected cluster that runs workloads (system namespaces are listed as not shown): totals for worker nodes, services and unresolved items, then each namespace's services with their replicas and nodes. *Refresh from cluster* re-reads it |
+   | Deployment topology | Where each service's pods run, and replica concentration |
+   | Workflow dependencies | Business workflows and their service dependencies (needs trace evidence from Jaeger) |
+   | Failure impact | Which workflows survive a worker-node failure (needs a frozen workflow and a complete topology) |
+   | Recommendations | No live source yet, so it reports that explicitly |
+
+6. **Optional: try it on a deliberately concentrated workload.** These two commands change your
+   cluster, so they are yours to run:
+
+   ```bash
+   kubectl create namespace resilience-test
+   kubectl apply -f deploy/test-workloads/concentrated-paymentservice.yaml
+   ```
+
+   `resilience-test` then appears on Overview on its own. `paymentservice` has three replicas pinned to one
+   worker, so it shows replica concentration.
+
+## Scripts
+
+| Script | What it does |
+|---|---|
+| `scripts/cluster-up.sh` | Creates or reuses the local kind cluster `resilience-research` (`KIND_CLUSTER_NAME`, `CLUSTER_READY_TIMEOUT` override the defaults). Restarts stopped node containers after Docker Desktop restarts, keeping data. Never recreates the cluster or deploys workloads. |
+| `scripts/extension-manage.sh` | Installs, updates, uninstalls, inspects and cleans the extension. See below. |
+| `scripts/extension-cluster-access.sh` | The manual way to get a read-only credential: asks first, then creates the `resilience-engine` namespace, service account and role, and writes `.kube/extension-readonly.kubeconfig`. `--duration 24h` shortens the token, `--revoke` removes the access, `--yes` skips the prompt. The only script that changes the cluster. |
+| `scripts/setup_local.py` | `python scripts/setup_local.py` applies database migrations for local development (safe to repeat). |
+| `scripts/report_unverified_approvals.py` | Read-only audit of stored approval records: `DATABASE_URL=... python scripts/report_unverified_approvals.py`. |
+| `scripts/docker-entrypoint.sh` | The container's entrypoint. Not run by hand. |
+
+`extension-manage.sh` commands (add `--dry-run` to any of them to print instead of run; it never touches
+your cluster or its access objects). On Windows run `scripts\extension-manage.cmd` with the same commands:
+both launchers start `scripts/extension_manage.py`, which needs only Python 3.9 or newer and the Docker CLI
+(plus Go and Node for `check`). It warns when Docker Desktop has less than 3 GB of memory
+(`RESILIENCE_MIN_DOCKER_MEMORY_GB` changes the threshold) and stops with a clear message when Docker does not
+answer:
+
+| Command | What it does |
+|---|---|
+| `install [--version X.Y.Z]` | Run the tests, build and install. Refuses if already installed. |
+| `update [--version X.Y.Z]` | Run the tests, build the next unused version and replace the installed one. Your data is kept. |
+| `uninstall` | Remove the extension after asking. |
+| `status` | Installed version, VM state and local image tags. |
+| `check` | Run the Python, Go and Node test suites without building. |
+| `clean` | Delete old local image tags after asking. The installed one is never removed. |
+
+Other options: `--skip-checks` builds without running the tests first, and `--yes` skips prompts.
+
+## Everyday tasks
+
+| I want to | Run |
+|---|---|
+| Pick up code changes or a `git pull` | `./scripts/extension-manage.sh update` |
+| See what is installed | `./scripts/extension-manage.sh status` |
+| Preview what a command would do | add `--dry-run` |
+| Bring the cluster back after Docker Desktop restarted | `./scripts/cluster-up.sh` |
+| Remove the extension's access from the cluster | **Remove access…** on Connect cluster, or `./scripts/extension-cluster-access.sh --revoke` |
+| Uninstall the extension | `./scripts/extension-manage.sh uninstall` |
+| Free disk space from old builds | `./scripts/extension-manage.sh clean` |
+
+## Troubleshooting
+
+| You see | Why | Fix |
+|---|---|---|
+| Pages say `CLUSTER_NOT_CONNECTED` | No credential is stored | Connect cluster → *Set up access* |
+| `CLUSTER_CONNECTION_FAILED`, or `kubectl` says "connection refused" | The kind node containers stopped (Docker Desktop restarted) | `./scripts/cluster-up.sh` |
+| `CLUSTER_AUTH_FAILED` | The credential expired or was revoked | Nothing to click while it is renewing: the page shows "Renewing…" and retries by itself. If it says the access was removed or changed, *Set up access* again |
+| `CLUSTER_FORBIDDEN`, or Connect cluster says "Access needs updating" | The stored role is older than this version expects | *Set up access* and approve once |
+| An update changed nothing | The same image tag was reused | Use `extension-manage.sh update`; it always picks a new tag |
+| Failure impact says `TOPOLOGY_INCOMPLETE` | Some pods could not be attributed to a service | Expected for apps like Istio Bookinfo until Service resolution lands (see Current Status) |
+| Failure impact says `WORKFLOW_EVIDENCE_UNAVAILABLE` | No frozen workflow exists yet | Build and approve a workflow graph on the Workflow dependencies page (only an approved graph reaches Failure impact) |
+| The browser cannot open `127.0.0.1:<port>` | That port is the cluster's API, not a web page | Use the extension, or `kubectl` |
 
 ---
 

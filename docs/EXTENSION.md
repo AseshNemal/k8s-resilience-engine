@@ -88,6 +88,13 @@ The build, install, update and clean-up steps above are wrapped in one script, r
 root. It only manages the Docker extension and its image; it never touches your cluster or its access
 objects, and every command accepts `--dry-run` to print what it would run.
 
+It works the same on macOS, Linux and Windows. `scripts/extension-manage.sh` (macOS, Linux) and
+`scripts\extension-manage.cmd` (Windows) are launchers for `scripts/extension_manage.py`, which needs
+Python 3.9 or newer and the Docker CLI; `check` also needs Go and Node and lists any that are missing
+instead of skipping their tests. Before building it asks Docker for its memory: below 3 GB (override with
+`RESILIENCE_MIN_DOCKER_MEMORY_GB`) it prints a warning, and if Docker does not answer within 30 seconds it
+stops and says the Docker VM may be out of memory.
+
 | Command | What it does |
 |---|---|
 | `install [--version X.Y.Z]` | Run the tests, build, and install. Refuses if already installed. |
@@ -120,8 +127,13 @@ no published ports (`map[]`).
 
 ```bash
 ./scripts/extension-cluster-access.sh --revoke            # optional: invalidate the cluster token first
-docker extension uninstall k8s-resilience-engine
+./scripts/extension-manage.sh uninstall                   # also removes the background renewal job
 ```
+
+`extension-manage.sh uninstall` runs `resilience-helper agent-disable` first, so the macOS background job
+never outlives the helper binary it runs. (Plain `docker extension uninstall` does not know about the job;
+if you used it, run `~/Library/Containers/com.docker.docker/Data/extensions/k8s-resilience-engine/host/resilience-helper agent-disable`
+before removing the extension, or delete `~/Library/LaunchAgents/com.sliit.resilience-engine.renew.plist`.)
 
 **Uninstalling deletes the data volume** (the SQLite database and the stored credential), the backend
 container, and the local extension image. Rebuild the image to install again. Cluster-side access is
@@ -152,6 +164,32 @@ Then open **Resilience Engine** in Docker Desktop, choose **Connect cluster**, a
 `.kube/extension-readonly.kubeconfig`. Until a cluster is connected every page that needs the cluster
 says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never substitutes sample data.
 
+## Automatic renewal
+
+A credential the extension set up itself (not one uploaded by hand) renews with no button and shows no
+expiry. The token lasts up to **7 days** (what the cluster actually grants is what counts) and is renewed
+once **2 days** remain, so a long weekend with the laptop shut cannot let it lapse. Three things renew it:
+
+1. **The open extension** checks every 60 seconds (every 20 while a renewal is pending) and when the
+   tab becomes visible.
+2. **A macOS background job** (a per-user LaunchAgent, `com.sliit.resilience-engine.renew`, no
+   administrator rights) runs `resilience-helper renew-managed` every 15 minutes. It does nothing unless
+   the token is due. It is installed **only after you approve it in the native dialog** (the setup dialog
+   names it; a connection set up earlier shows a one-time *Turn on background renewal* action), is
+   removed when you remove the access or uninstall with `extension-manage.sh`, and logs to
+   `~/Library/Logs/ResilienceEngine/renew.log`. Windows and Linux have none yet.
+3. **A page that loaded while the token was expired** presses its own *Retry* the moment a renewal
+   succeeds, so it fills in without a click.
+
+Every renewal, from either path, only issues a read-only token: it shows no dialog, makes no write to the
+cluster, and **never recreates removed or changed access**. If the access was removed, changed or widened,
+the page says so and waits for you to approve again. That is the one case that needs a person.
+
+When Docker Desktop is overloaded, `docker exec` alone can take 30 seconds. The helper therefore allows a
+renewal 4 minutes, every call in the page has a watchdog (a call that never answers cannot stall the loop
+forever), and a run that still runs out of time is reported as `too-slow` and retried with back-off rather
+than as "backend unavailable". Closing unused kind clusters or giving Docker more memory makes it faster.
+
 ## The cluster credential
 
 `scripts/extension-cluster-access.sh` is the only thing that changes the cluster, and only when you
@@ -160,8 +198,9 @@ run it and confirm. It creates `namespace/resilience-engine`, a service account,
 deployments and replicasets**; it deploys nothing and modifies nothing else. It then issues a **time-limited bearer
 token** (default 168 h, `--duration 24h` for shorter) and writes the kubeconfig file, mode 600.
 
-- **Renew:** run the script again and pick the new file. The page shows the expiry and flags an
-  expired credential. Older tokens stay valid until they expire.
+- **Renew:** a credential added by hand never renews itself: run the script again and pick the new file.
+  The page shows its expiry and flags it when expired. (A credential set up from *Connect cluster* renews
+  itself; see Automatic renewal.) Older tokens stay valid until they expire.
 - **Revoke:** `./scripts/extension-cluster-access.sh --revoke` deletes the service account's access
   objects, which invalidates every issued token immediately. Then use **Disconnect cluster**.
 - **Trade-off:** anyone who can read the file (or the extension's data volume) can read this cluster's
@@ -325,6 +364,12 @@ package.
   Only the host architecture was built.
 
 ## Verification status
+
+**Automatic renewal (7-day tokens, background job, watchdogs).** Verified by Go, Node and Python unit
+tests, and by a real macOS check that `plutil` accepts the generated plist and that launchd loads it
+(`run interval = 900 seconds`, run at load) and unloads it again, using a scratch label and `/usr/bin/true`.
+Not yet verified: the background job renewing a real expired credential end to end through Docker Desktop,
+and anything on Windows or Linux.
 
 Checked in Docker Desktop 4.95.0 (macOS, Apple silicon, host architecture only).
 
