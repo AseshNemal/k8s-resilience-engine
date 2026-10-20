@@ -131,6 +131,7 @@ def _span_metrics(
         for process in processes.values()
         if isinstance(process, Mapping)
     }
+    span_by_id = {str(span.get("spanID", "")): span for span in spans}
     # An address is not a service name. For IP peers, use an actual linked
     # server span as identity evidence; otherwise retain the unresolved address.
     resolved_client_ids = {
@@ -143,6 +144,8 @@ def _span_metrics(
             for tag in (span.get("tags") if isinstance(span.get("tags"), list) else [])
         )
         and str(processes.get(str(span.get("processID", "")), {}).get("serviceName", "")).strip()
+        and processes.get(str(span.get("processID", "")), {}).get("serviceName")
+        != processes.get(str(span_by_id.get(_parent_id(span), {}).get("processID", "")), {}).get("serviceName")
     }
     missing_service_identities: set[str] = set()
     for span in spans:
@@ -155,6 +158,8 @@ def _span_metrics(
             continue
         raw_target = tags.get("server.address") or tags.get("net.peer.name")
         if not isinstance(raw_target, str):
+            continue
+        if str(span.get("spanID", "")).strip() in resolved_client_ids:
             continue
         address = raw_target.strip().lower()
         if address.startswith("[") and "]" in address:
@@ -244,6 +249,10 @@ def _trace_quality(
 
 def validate_trace_quality(raw_traces: Sequence[Mapping[str, Any]]) -> TraceQualitySummary:
     """Classify raw Jaeger traces without inventing missing relationships."""
+    if not isinstance(raw_traces, (list, tuple)) or any(
+        not isinstance(trace, Mapping) for trace in raw_traces
+    ):
+        raise ValueError("traces must be a list of trace objects")
     results: list[TraceQualityResult] = []
     trace_counts = Counter(str(trace.get("traceID", "")).strip() for trace in raw_traces)
     for index, trace in enumerate(raw_traces):
@@ -251,9 +260,46 @@ def validate_trace_quality(raw_traces: Sequence[Mapping[str, Any]]) -> TraceQual
         malformed = any(not isinstance(span, Mapping) for span in spans)
         spans = [span for span in spans if isinstance(span, Mapping)]
         structural_reasons: list[str] = []
+        if not isinstance(trace.get("traceID"), str) or not trace["traceID"].strip():
+            structural_reasons.append("Trace ID must be a non-empty string")
+        # Sanitize only the local inspection copy. Malformed nested values must
+        # become reported exclusions, never parser exceptions or invented IDs.
+        checked_spans = []
+        for span in spans:
+            checked = dict(span)
+            for key in ("spanID", "processID"):
+                if not isinstance(span.get(key), str) or not span[key].strip():
+                    structural_reasons.append(f"Span {key} must be a non-empty string")
+            duration = span.get("duration", 0)
+            if isinstance(duration, bool) or not isinstance(duration, int) or duration < 0:
+                structural_reasons.append("Span duration must be a non-negative integer")
+            if "operationName" in span and not isinstance(span["operationName"], str):
+                structural_reasons.append("Span operationName must be a string")
+            for key in ("references", "tags"):
+                values = span.get(key, [])
+                if not isinstance(values, list):
+                    structural_reasons.append(f"Span {key} must be a list")
+                    values = []
+                if any(not isinstance(value, Mapping) for value in values):
+                    structural_reasons.append(f"Span {key} must contain objects")
+                checked[key] = [value for value in values if isinstance(value, Mapping)]
+            for reference in checked["references"]:
+                if not isinstance(reference.get("spanID"), str) or not reference["spanID"].strip():
+                    structural_reasons.append("Reference spanID must be a non-empty string")
+            for tag in checked["tags"]:
+                if not isinstance(tag.get("key"), str) or not tag["key"].strip():
+                    structural_reasons.append("Tag key must be a non-empty string")
+            checked_spans.append(checked)
+        spans = checked_spans
         if any(not isinstance(process, Mapping) for process in process_map.values()):
             structural_reasons.append("Trace contains a non-object process")
             process_map = {key: value for key, value in process_map.items() if isinstance(value, Mapping)}
+        if any(
+            "serviceName" in process_map.get(str(span.get("processID", "")), {})
+            and not isinstance(process_map[str(span.get("processID", ""))]["serviceName"], str)
+            for span in spans
+        ):
+            structural_reasons.append("Process serviceName must be a string")
         if malformed:
             structural_reasons.append("Trace contains a non-object span")
         if trace_counts[trace_id] > 1:

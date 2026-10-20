@@ -149,6 +149,11 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
     for trace_id, trace_spans in by_trace.items():
         # Build a fast span_id → Span lookup for parent resolution -------
         span_index: dict[str, Span] = {s.span_id: s for s in trace_spans}
+        remote_children: dict[str, list[Span]] = defaultdict(list)
+        for child in trace_spans:
+            parent = span_index.get(child.parent_span_id)
+            if parent is not None and child.service_name != parent.service_name:
+                remote_children[parent.span_id].append(child)
 
         # Collect unique (source, target) pairs as a set to deduplicate --
         edge_set: set[tuple[str, str]] = set()
@@ -157,7 +162,9 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
         broken_parent_count = 0
 
         for span in trace_spans:
-            peer = _client_peer(span)
+            # Linked server instrumentation is authoritative. A DNS hostname
+            # may differ from service.name and must not create a phantom service.
+            peer = None if remote_children.get(span.span_id) else _client_peer(span)
             if peer is not None and peer != span.service_name.lower():
                 # A client span explicitly identifies both caller (its process)
                 # and callee (OpenTelemetry server.address/net.peer.name). This
@@ -190,7 +197,7 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
             edge_set.add((parent.service_name, span.service_name))
             token = (
                 parent.span_id
-                if _client_peer(parent) == span.service_name.lower()
+                if parent.tags.get("span.kind", "").lower() == "client"
                 else span.span_id
             )
             edge_call_tokens[(parent.service_name, span.service_name)].add(token)
@@ -215,7 +222,10 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
                     {
                         service
                         for span in trace_spans
-                        for service in (span.service_name, _client_peer(span))
+                        for service in (
+                            span.service_name,
+                            None if remote_children.get(span.span_id) else _client_peer(span),
+                        )
                         if service
                     }
                 ),

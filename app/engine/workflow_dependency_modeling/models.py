@@ -64,6 +64,8 @@ TEnum = TypeVar("TEnum", bound=Enum)
 
 
 def _required_text(data: Mapping[str, Any], key: str, kind: str) -> str:
+    if not isinstance(data, Mapping):
+        raise ComponentDataError(f"{kind} must be an object")
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ComponentDataError(f"{kind} requires a non-empty '{key}' string")
@@ -292,6 +294,8 @@ class WorkflowScenario:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "WorkflowScenario":
+        if not isinstance(data, Mapping):
+            raise ComponentDataError("WorkflowScenario must be an object")
         forbidden = {"expectedServices", "expectedEdges", "traceFile"} & data.keys()
         if forbidden:
             names = ", ".join(sorted(forbidden))
