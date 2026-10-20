@@ -69,15 +69,17 @@ docker extension update k8s-resilience-engine:0.1.5
 docker extension ls                                                    # shows the new version, VM Running(1)
 ```
 
-- Use a **new tag for every update**. That is what was tested; reusing a tag was not.
+- Use a **new tag for every update**. That is what was tested; reusing a tag was not. The script picks it
+  for you (see "How versions work" below).
 - `update` removes and reinstalls the extension (container and image are replaced). **The data
   volume is kept, so your database, approval records and stored credential survive**; new Alembic
   migrations run automatically on the next start.
 - The open tab reloads itself. Wait about five seconds if a page briefly says it cannot reach the
   backend; reads are retried automatically. Writes are not retried, so repeat a failed action by hand.
-- Old image tags stay on disk. After confirming the new version works, remove the ones you no longer
-  need yourself (`docker image rm k8s-resilience-engine:<old tag>`) or with `extension-manage.sh clean`
-  below. Nothing deletes them for you.
+- Old image tags stay on disk when you update by hand: Docker never deletes a tagged image you built.
+  `extension-manage.sh update` removes them for you after a successful update, keeping the new version and
+  the one it replaced so a rollback is one command (`docker extension update k8s-resilience-engine:<old tag>`).
+  Pass `--keep-all` to keep every image, or use `extension-manage.sh clean`.
 - **If the read-only role changed between versions** (it now also reads services and replicasets), the
   stored grant no longer matches. Connect cluster shows "Access needs updating" and renewal pauses until
   you click **Set up access** and approve once; the dialog lists exactly the role update.
@@ -98,16 +100,41 @@ stops and says the Docker VM may be out of memory.
 | Command | What it does |
 |---|---|
 | `install [--version X.Y.Z]` | Run the tests, build, and install. Refuses if already installed. |
-| `update [--version X.Y.Z]` | Run the tests, build the next unused version, and replace the installed one. The data volume is kept. |
+| `update [--version X.Y.Z] [--keep-all]` | Run the tests, build the version for this commit, and replace the installed one. The data volume is kept. Afterwards the older local images are deleted, keeping the new one and the previous one (`--keep-all` keeps everything). Does nothing if this commit is already installed. |
 | `uninstall` | Remove the extension after asking. Remove cluster access separately with `extension-cluster-access.sh --revoke`. |
-| `status` | Installed version, VM state, and the local image tags. |
+| `status` | Installed version, VM state, the commit and branch it was built from, whether that matches this folder, and the local image tags. |
 | `check` | Run the Python, Go and Node suites without building. |
 | `clean` | Delete old local `X.Y.Z` image tags after asking. The installed tag is never removed; tags such as `0.1.5-qs` are left alone. |
 
-Other options: `--skip-checks` (build without running the tests first) and `--yes` (no prompts). With no
-`--version`, `update` uses the next patch version above both the installed version and every local tag,
-because Docker keeps running the old image when a tag is reused. The extension's backend container is
-hidden from `docker ps`, so there is no `logs` command.
+Other options: `--skip-checks` (build without running the tests first), `--keep-all` (do not delete old
+images after an update) and `--yes` (no prompts). The extension's backend container is hidden from
+`docker ps`, so there is no `logs` command.
+
+#### How versions work
+
+With no `--version`, the script follows git, so everyone on the same commit builds the same version:
+
+| Situation | Version |
+|---|---|
+| Clean checkout, number not used here yet | `0.1.<number of commits>`, for example `0.1.214`. After a `git pull` it moves forward by itself |
+| Uncommitted changes, or that number is already taken | The next number nobody has used, because Docker keeps running the old image when a tag is reused |
+| Not a git checkout, or git missing | The next patch above the installed version and every local tag |
+| `--version X.Y.Z` | Exactly that |
+
+Every image is stamped with the commit it was built from (`-dirty` is added when uncommitted changes
+were included) and the branch, as the image labels `org.opencontainers.image.revision` and
+`org.opencontainers.image.ref.name`. **The number alone does not identify the code**: two branches with
+the same number of commits get the same number. `extension-manage.sh status` prints both, for example
+
+```
+Built from : commit aaaaaaa on integration/team-sync
+This folder: commit 16c62a1 on feature/x
+            It differs from the installed extension: run 'update' to install this folder.
+```
+
+so compare the commit and branch, not just the number, and only compare numbers between people on the
+same branch. `update` rebuilds when the installed image came from a different commit, even under the same
+number, and the number can go down when you switch to a branch with fewer commits.
 
 ### Check that it is healthy
 
