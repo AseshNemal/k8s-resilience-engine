@@ -1,6 +1,6 @@
 {# Modal 2: Before-and-After (T0 -> T1) Snapshot Diff Modal #}
 <div class="modal-backdrop" id="modal-diff-backdrop" hidden>
-    <div class="modal-dialog modal-dialog--wide card card--glass" role="dialog" aria-modal="true" aria-labelledby="modal-diff-title">
+    <dialog open class="modal-dialog modal-dialog--wide card card--glass" aria-labelledby="modal-diff-title">
         <div class="modal-header">
             <div>
                 <span class="modal-tag">CRYPTOGRAPHIC SNAPSHOT DIFF</span>
@@ -32,19 +32,19 @@
             <div class="diff-summary-row" id="diff-metrics-banner">
                 <div class="diff-metric-chip">
                     <span>Drift Rate ($D_{rate}$):</span>
-                    <strong id="diff-d-rate-val">66.67%</strong>
+                    <strong id="diff-d-rate-val">n/a</strong>
                 </div>
                 <div class="diff-metric-chip">
                     <span>Net Exposure Delta ($\Delta E$):</span>
-                    <strong id="diff-delta-e-val">+33.33%</strong>
+                    <strong id="diff-delta-e-val">n/a</strong>
                 </div>
                 <div class="diff-metric-chip">
                     <span>T0 SHA-256:</span>
-                    <code id="diff-t0-hash">21a6455b...</code>
+                    <code id="diff-t0-hash">—</code>
                 </div>
                 <div class="diff-metric-chip">
                     <span>T1 SHA-256:</span>
-                    <code id="diff-t1-hash">b67f7390...</code>
+                    <code id="diff-t1-hash">—</code>
                 </div>
             </div>
 
@@ -70,5 +70,5 @@
         <div class="modal-footer">
             <button type="button" class="btn btn--secondary" id="btn-dismiss-diff-modal">Close</button>
         </div>
-    </div>
+    </dialog>
 </div>

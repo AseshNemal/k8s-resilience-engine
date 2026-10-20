@@ -62,9 +62,13 @@ window.DeploymentsIntentWidget = (function () {
                 compliantCount++;
             }
 
-            const statusHtml = isCompliant
-                ? '<span class="status-pill status-pill--success">✓ Compliant</span>'
-                : `<span class="status-pill status-pill--warning" title="${replicaMismatch ? `Replica Drift: Declared ${declaredRep} vs Live ${readyRep}` : 'Resilience Drift Detected'}">⚠️ Drifted</span>`;
+            const driftTitle = replicaMismatch
+                ? "Replica Drift: Declared " + declaredRep + " vs Live " + readyRep
+                : "Resilience Drift Detected";
+            let statusHtml = '<span class="status-pill status-pill--success">✓ Compliant</span>';
+            if (!isCompliant) {
+                statusHtml = `<span class="status-pill status-pill--warning" title="${driftTitle}">⚠️ Drifted</span>`;
+            }
 
             const tr = document.createElement("tr");
             tr.innerHTML = `

@@ -8,8 +8,7 @@ window.DeploymentsScenariosWidget = (function () {
     "use strict";
 
     let currentLatexCode = "";
-    let cachedEnsemble = null;
-    let cachedBenchmarks = null;
+    const warn = (what) => (err) => console.warn(`${what}:`, err);
 
     async function loadMarkovMatrix(scenarioId) {
         const container = document.getElementById("markov-matrix-container");
@@ -41,7 +40,7 @@ window.DeploymentsScenariosWidget = (function () {
         const matrix = data.transition_matrix || {};
 
         let tableHtml = '<table class="data-table data-table--compact" style="width: 100%;">';
-        tableHtml += '<thead><tr><th style="background: var(--color-surface-soft);">FROM (T0) \\ TO (T1)</th>';
+        tableHtml += String.raw`<thead><tr><th style="background: var(--color-surface-soft);">FROM (T0) \ TO (T1)</th>`;
         nodes.forEach((n) => {
             tableHtml += `<th style="text-align: center; text-transform: uppercase;">${n}</th>`;
         });
@@ -241,7 +240,7 @@ window.DeploymentsScenariosWidget = (function () {
 
                 const catCell = document.createElement("td");
                 catCell.style.fontWeight = "600";
-                catCell.textContent = cat.replace(/_/g, " ");
+                catCell.textContent = cat.replaceAll("_", " ");
 
                 const countCell = document.createElement("td");
                 const count = ensemble.trials ? ensemble.trials.filter((t) => t.scenario_category === cat).length : 0;
@@ -307,7 +306,7 @@ window.DeploymentsScenariosWidget = (function () {
             const catCell = document.createElement("td");
             const catBadge = document.createElement("span");
             catBadge.className = "status-badge status-badge--muted";
-            catBadge.textContent = (trial.scenario_category || "").replace(/_/g, " ");
+            catBadge.textContent = (trial.scenario_category || "").replaceAll("_", " ");
             catCell.appendChild(catBadge);
 
             // Workload
@@ -382,7 +381,7 @@ window.DeploymentsScenariosWidget = (function () {
         let activeCat = "ALL";
         let searchQuery = "";
 
-        const allItems = (ensemble && ensemble.trials) ? [...ensemble.trials] : [];
+        const allItems = ensemble?.trials ? [...ensemble.trials] : [];
 
         function filterAndRender() {
             let filtered = allItems;
@@ -394,12 +393,8 @@ window.DeploymentsScenariosWidget = (function () {
             if (searchQuery.trim() !== "") {
                 const q = searchQuery.toLowerCase().trim();
                 filtered = filtered.filter((item) => {
-                    return (
-                        (item.trial_id && item.trial_id.toLowerCase().includes(q)) ||
-                        (item.target_service && item.target_service.toLowerCase().includes(q)) ||
-                        (item.scenario_category && item.scenario_category.toLowerCase().includes(q)) ||
-                        (item.parameter_spec && item.parameter_spec.toLowerCase().includes(q))
-                    );
+                    return [item.trial_id, item.target_service, item.scenario_category, item.parameter_spec]
+                        .some((field) => field?.toLowerCase().includes(q));
                 });
             }
 
@@ -410,7 +405,7 @@ window.DeploymentsScenariosWidget = (function () {
             btn.addEventListener("click", () => {
                 filterBtns.forEach((b) => b.classList.remove("filter-btn--active"));
                 btn.classList.add("filter-btn--active");
-                activeCat = btn.getAttribute("data-cat") || "ALL";
+                activeCat = btn.dataset.cat || "ALL";
                 filterAndRender();
             });
         });
@@ -435,11 +430,8 @@ window.DeploymentsScenariosWidget = (function () {
                 fetch("/api/deployments/chaos/benchmarks").catch(() => null),
             ]);
 
-            const ensemble = ensembleResp && ensembleResp.ok ? await ensembleResp.json() : null;
-            const benchmarks = benchmarksResp && benchmarksResp.ok ? await benchmarksResp.json() : null;
-
-            cachedEnsemble = ensemble;
-            cachedBenchmarks = benchmarks;
+            const ensemble = ensembleResp?.ok ? await ensembleResp.json() : null;
+            const benchmarks = benchmarksResp?.ok ? await benchmarksResp.json() : null;
 
             if (ensemble) {
                 renderEnsembleSummary(root.querySelector('[data-role="ensemble-summary-grid"]'), ensemble);
@@ -463,9 +455,9 @@ window.DeploymentsScenariosWidget = (function () {
 
         if (select) {
             select.addEventListener("change", function () {
-                loadMarkovMatrix(this.value);
+                loadMarkovMatrix(this.value).catch(warn("Matrix load failed"));
             });
-            loadMarkovMatrix(select.value);
+            loadMarkovMatrix(select.value).catch(warn("Matrix load failed"));
         }
 
         if (toggleLatexBtn && latexPreview) {
@@ -487,7 +479,7 @@ window.DeploymentsScenariosWidget = (function () {
                     setTimeout(() => {
                         copyLatexBtn.textContent = original;
                     }, 2000);
-                });
+                }).catch(warn("Clipboard copy failed"));
             });
         }
 
@@ -501,8 +493,8 @@ window.DeploymentsScenariosWidget = (function () {
                     const resp = await fetch("/api/deployments/chaos/benchmarks");
                     if (resp.ok) {
                         alert("All 8 dry-run scenarios executed (scripted placements, no cluster changes).");
-                        if (select) loadMarkovMatrix(select.value);
-                        loadEnsemble();
+                        if (select) await loadMarkovMatrix(select.value);
+                        await loadEnsemble();
                     }
                 } catch (e) {
                     alert("Error running chaos benchmarks: " + e);
@@ -514,7 +506,7 @@ window.DeploymentsScenariosWidget = (function () {
         }
 
         // Fetch ensemble benchmark dataset
-        loadEnsemble();
+        loadEnsemble().catch(warn("Ensemble load failed"));
     }
 
     return {

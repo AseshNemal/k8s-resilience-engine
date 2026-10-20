@@ -8,7 +8,7 @@ window.DeploymentsTopologyWidget = (function () {
 
     function renderZoneGrid(data) {
         const grid = document.getElementById("deployment-zone-grid");
-        if (!grid || !data || !data.nodes) return;
+        if (!grid || !data?.nodes) return;
 
         // Group nodes by zone
         const zoneMap = {};
@@ -35,9 +35,10 @@ window.DeploymentsTopologyWidget = (function () {
         }
 
         grid.innerHTML = "";
+        const zoneNames = Object.keys(zoneMap).sort((a, b) => a.localeCompare(b));
         const zoneSelect = document.getElementById("filter-topology-zone");
         if (zoneSelect && zoneSelect.options.length <= 1) {
-            Object.keys(zoneMap).sort().forEach((z) => {
+            zoneNames.forEach((z) => {
                 const opt = document.createElement("option");
                 opt.value = z;
                 opt.textContent = z;
@@ -45,11 +46,11 @@ window.DeploymentsTopologyWidget = (function () {
             });
         }
 
-        Object.keys(zoneMap).sort().forEach((zoneName) => {
+        zoneNames.forEach((zoneName) => {
             const nodes = zoneMap[zoneName];
             const zoneCard = document.createElement("div");
             zoneCard.className = "zone-card";
-            zoneCard.setAttribute("data-zone", zoneName);
+            zoneCard.dataset.zone = zoneName;
 
             let nodesHtml = "";
             nodes.forEach((n) => {
@@ -135,7 +136,7 @@ window.DeploymentsTopologyWidget = (function () {
             zoneSelect.addEventListener("change", function () {
                 const selected = this.value;
                 document.querySelectorAll(".zone-card").forEach((card) => {
-                    if (selected === "all" || card.getAttribute("data-zone") === selected) {
+                    if (selected === "all" || card.dataset.zone === selected) {
                         card.style.display = "";
                     } else {
                         card.style.display = "none";

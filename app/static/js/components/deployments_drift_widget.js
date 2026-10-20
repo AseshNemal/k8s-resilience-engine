@@ -126,7 +126,7 @@ window.DeploymentsDriftWidget = (function () {
     }
 
     function init() {
-        loadDriftSignals();
+        loadDriftSignals().catch((err) => console.warn("Could not load drift signals:", err));
     }
 
     return {

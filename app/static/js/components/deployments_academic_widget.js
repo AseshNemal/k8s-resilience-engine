@@ -70,11 +70,11 @@ window.DeploymentsAcademicWidget = (function () {
                     setTimeout(() => {
                         copyBtn.textContent = origText;
                     }, 2000);
-                });
+                }).catch((err) => console.warn("Clipboard copy failed:", err));
             });
         }
 
-        loadAccuracyCertificate();
+        loadAccuracyCertificate().catch((err) => console.warn("Could not load accuracy:", err));
     }
 
     return {

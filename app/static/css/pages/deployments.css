@@ -754,7 +754,7 @@
 }
 
 .tab-pane[hidden] {
-    display: none !important;
+    display: none;
 }
 
 @keyframes tab-fade-in {

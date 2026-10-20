@@ -9,7 +9,7 @@
     gap: 0.5rem;
     background: rgba(239, 68, 68, 0.12);
     border: 1px solid rgba(239, 68, 68, 0.35);
-    color: #dc2626;
+    color: #b91c1c;
     font-weight: 600;
     font-size: 0.875rem;
     padding: 0.4rem 0.85rem;
@@ -164,7 +164,7 @@
 .spof-drilldown-btn:hover,
 .btn--xs:hover {
     color: #ffffff;
-    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
     border-color: #1d4ed8;
     box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
     transform: translateY(-1px);

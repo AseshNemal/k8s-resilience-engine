@@ -5,7 +5,7 @@
 window.DeploymentsTabRouter = (function () {
     "use strict";
 
-    const VALID_TABS = ["topology", "intent", "drift", "scenarios"];
+    const VALID_TABS = new Set(["topology", "intent", "drift", "scenarios"]);
 
     function init() {
         const tabButtons = document.querySelectorAll(".tab-nav-btn");
@@ -13,7 +13,7 @@ window.DeploymentsTabRouter = (function () {
 
         tabButtons.forEach((btn) => {
             btn.addEventListener("click", function () {
-                const targetId = this.getAttribute("data-target");
+                const targetId = this.dataset.target;
                 if (targetId) {
                     const tabKey = targetId.replace("tab-", "");
                     switchTab(tabKey);
@@ -23,7 +23,7 @@ window.DeploymentsTabRouter = (function () {
 
         // Initialize from URL hash or default to topology
         const hash = window.location.hash.replace("#", "");
-        if (VALID_TABS.includes(hash)) {
+        if (VALID_TABS.has(hash)) {
             switchTab(hash);
         } else {
             switchTab("topology");
@@ -31,7 +31,7 @@ window.DeploymentsTabRouter = (function () {
 
         window.addEventListener("hashchange", function () {
             const newHash = window.location.hash.replace("#", "");
-            if (VALID_TABS.includes(newHash)) {
+            if (VALID_TABS.has(newHash)) {
                 switchTab(newHash, false);
             }
         });
@@ -58,11 +58,9 @@ window.DeploymentsTabRouter = (function () {
         // Activate target
         targetBtn.classList.add("active");
         targetBtn.setAttribute("aria-selected", "true");
-        targetPane.classList.remove("active");
         targetPane.removeAttribute("hidden");
-        // Trigger animation
-        void targetPane.offsetWidth;
-        targetPane.classList.add("active");
+        // Add the class on the next frame so the fade-in animation restarts.
+        requestAnimationFrame(() => targetPane.classList.add("active"));
 
         if (updateHash) {
             history.replaceState(null, "", `#${tabKey}`);

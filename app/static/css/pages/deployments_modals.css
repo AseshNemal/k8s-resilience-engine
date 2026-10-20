@@ -20,7 +20,7 @@
 }
 
 .modal-backdrop[hidden] {
-    display: none !important;
+    display: none;
 }
 
 @keyframes modal-fade-in {
@@ -39,6 +39,15 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+}
+
+/* The dialogs are <dialog open> elements inside the flex backdrop: drop the browser's
+   default absolute positioning, margin and padding for <dialog>. */
+dialog.modal-dialog {
+    position: static;
+    margin: 0;
+    padding: 0;
+    color: inherit;
 }
 
 .modal-dialog--wide {

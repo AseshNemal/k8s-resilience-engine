@@ -57,7 +57,7 @@ window.DeploymentsModalManager = (function () {
         const backdrop = document.getElementById("modal-diff-backdrop");
         if (!backdrop) return;
         backdrop.removeAttribute("hidden");
-        executeSnapshotDiff();
+        executeSnapshotDiff().catch((err) => console.warn("Snapshot diff error:", err));
     }
 
     function closeDiffModal() {
