@@ -1928,11 +1928,28 @@
     }
 
 
+    // The address the server was set up to use, filled into the address fields that are still empty. It is
+    // never hard-coded here: "localhost" means the container itself when the backend runs inside Docker.
+    // "&jaeger_url=..." only when an address was typed, so an empty field means "the server's own setting".
+    function jaegerQuery(address) {
+        return address ? `&jaeger_url=${encodeURIComponent(address)}` : "";
+    }
+
+    function fillJaegerDefault(address) {
+        const guided = document.getElementById("guided-jaeger-url");
+        [jaegerUrlInput, guided].forEach((input) => {
+            if (input && address && !input.value.trim()) input.value = address;
+        });
+    }
+
     async function checkJaegerHealth() {
         if (!jaegerStatusBadge || !jaegerUrlInput) return;
         try {
-            const url = `/api/workflows/jaeger/status?jaeger_url=${encodeURIComponent(jaegerUrlInput.value.trim())}`;
+            // With an empty field no address is sent, so the server checks the one it was set up with.
+            const typed = jaegerUrlInput.value.trim();
+            const url = `/api/workflows/jaeger/status${typed ? `?jaeger_url=${encodeURIComponent(typed)}` : ""}`;
             const res = await fetchJson(url);
+            fillJaegerDefault(res.jaegerUrl);
             if (res.healthy) {
                 jaegerStatusBadge.textContent = "Trace service connected";
                 jaegerStatusBadge.className = "status-badge status-badge--success";
@@ -1951,12 +1968,12 @@
         discoverButton.disabled = true;
         discoverButton.textContent = "Discovering…";
 
-        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "http://localhost:16686";
+        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
         const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
         const lookback = lookbackSelect ? lookbackSelect.value : "1h";
 
         try {
-            const url = `/api/workflows/discover?limit=1000&service_name=${encodeURIComponent(serviceName)}&jaeger_url=${encodeURIComponent(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
+            const url = `/api/workflows/discover?limit=1000&service_name=${encodeURIComponent(serviceName)}${jaegerQuery(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
             discoveredWorkflows = await fetchJson(url);
 
             if (discoveredSelect && discoveredContainer) {
@@ -1998,12 +2015,12 @@
         extractLiveButton.disabled = true;
         extractLiveButton.textContent = "Extracting…";
 
-        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "http://localhost:16686";
+        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
         const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
         const lookback = lookbackSelect ? lookbackSelect.value : "1h";
 
         try {
-            const url = `/api/workflows/live/evidence?service_name=${encodeURIComponent(serviceName)}&operation=${encodeURIComponent(operation)}&jaeger_url=${encodeURIComponent(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
+            const url = `/api/workflows/live/evidence?service_name=${encodeURIComponent(serviceName)}&operation=${encodeURIComponent(operation)}${jaegerQuery(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
             const workflow = await fetchJson(url);
             renderWorkflowData(workflow, true);
         } catch (error) {

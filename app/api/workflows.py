@@ -998,7 +998,8 @@ def check_jaeger_status(
     healthy = client.is_healthy()
     return {
         "healthy": healthy,
-        "jaegerUrl": jaeger_url,
+        # The address actually checked: the one asked for, or the server's own setting when none was given.
+        "jaegerUrl": client.base_url,
         "message": "Jaeger is reachable" if healthy else "Jaeger server unreachable",
     }
 

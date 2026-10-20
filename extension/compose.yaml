@@ -6,6 +6,11 @@ services:
     environment:
       DATABASE_URL: sqlite:////data/resilience.db
       KUBECONFIG: /data/kube/config
+      # Jaeger runs on the host, not in this container, so "localhost" would point at the container itself.
+      # host.docker.internal is how the extension already reaches the host (it is the cluster API address).
+      # The host must also be on the safelist the workflow component checks before it contacts a trace server.
+      WORKFLOW_JAEGER_URL: http://host.docker.internal:16686
+      WORKFLOW_JAEGER_ALLOWED_HOSTS: localhost,127.0.0.1,::1,jaeger,host.docker.internal
     volumes:
       - resilience-engine-data:/data
     # Measured 2026-10-20 on the built image: 62 MiB idle and an 80 MiB peak after 400 requests across the

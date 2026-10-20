@@ -87,8 +87,8 @@
             <div class="guided-field guided-field--wide">
                 <label for="guided-jaeger-url">Workflow trace service address</label>
                 <input id="guided-jaeger-url" name="jaegerUrl" type="url"
-                       value="http://localhost:16686" aria-describedby="guided-trace-service-help" required>
-                <small id="guided-trace-service-help">Jaeger records which application services called one another. The local project normally uses this default address.</small>
+                       placeholder="Filled in from the server's setting" aria-describedby="guided-trace-service-help" required>
+                <small id="guided-trace-service-help">Jaeger records which application services called one another. The address is filled in from the setting the server was started with; change it only to use a different trace service.</small>
             </div>
             <div class="guided-field">
                 <label for="guided-lookback">Trace window</label>
@@ -143,7 +143,7 @@
     <div class="live-config-form" style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-top: var(--space-sm);">
         <div class="form-group" style="flex: 1; min-width: 220px;">
             <label for="jaeger-url-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Workflow trace service address</label>
-            <input id="jaeger-url-input" type="text" data-role="jaeger-url-input" value="http://localhost:16686" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="http://localhost:16686">
+            <input id="jaeger-url-input" type="text" data-role="jaeger-url-input" placeholder="Filled in from the server's setting" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
         </div>
         <div class="form-group" style="width: 140px;">
             <label for="entry-service-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Entry Service</label>

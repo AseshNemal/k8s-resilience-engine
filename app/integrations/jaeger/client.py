@@ -7,13 +7,18 @@ to retrieve services, operations, and raw distributed traces.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any, Mapping
 import httpx
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_JAEGER_URL = "http://localhost:16686"
+# Where the backend looks for Jaeger when the caller names no address. It is the backend's own setting
+# (WORKFLOW_JAEGER_URL), because "localhost" means a different machine depending on where the backend runs:
+# on your computer it is Jaeger on your computer, inside the Docker Desktop extension it is the container
+# itself, and there Jaeger on the host is reached as host.docker.internal.
+DEFAULT_JAEGER_URL = (os.environ.get("WORKFLOW_JAEGER_URL") or "").strip() or "http://localhost:16686"
 SERVICE_NAME_KEY = "service.name"
 TRACE_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{16,32}$")
 
@@ -33,7 +38,8 @@ class JaegerClient:
             base_url: Base URL of the Jaeger query service (e.g. http://localhost:16686).
             timeout_seconds: HTTP request timeout in seconds.
         """
-        self.base_url = base_url.rstrip("/")
+        # An empty address means "not given", so it falls back to the backend's own setting.
+        self.base_url = (base_url or DEFAULT_JAEGER_URL).rstrip("/")
         self.timeout = timeout_seconds
         self.headers = dict(headers or {})
 

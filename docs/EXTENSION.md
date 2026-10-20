@@ -191,6 +191,23 @@ Then open **Resilience Engine** in Docker Desktop, choose **Connect cluster**, a
 `.kube/extension-readonly.kubeconfig`. Until a cluster is connected every page that needs the cluster
 says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never substitutes sample data.
 
+## Jaeger (optional)
+
+The Workflows page can read call traces from a Jaeger server. The extension does not start one. Inside the
+extension's container, `localhost` is the container itself, so the backend is set to look for Jaeger on your
+computer instead: `WORKFLOW_JAEGER_URL=http://host.docker.internal:16686`, with `host.docker.internal` on the
+safelist (`WORKFLOW_JAEGER_ALLOWED_HOSTS`) that the workflow component checks before it contacts a trace server.
+Both are set in `extension/compose.yaml`. The address fields on the Workflows page fill themselves in from that
+setting; type another address only to use a different trace service.
+
+To get real trace data you need two things the extension cannot do for you:
+
+1. A running Jaeger, for example `docker compose -f deploy/docker-compose.jaeger.yml up -d`, listening on port 16686
+   of your computer. Until then the page says "Trace service unavailable".
+2. Traces in it. Jaeger only knows what an application sent it. A plain Bookinfo deployment on kind sends no
+   traces unless it runs with Istio sidecars or is otherwise instrumented, and then Jaeger is reachable but empty.
+   Which services, operations and workflows can be discovered depends on what is instrumented.
+
 ## Automatic renewal
 
 A credential the extension set up itself (not one uploaded by hand) renews with no button and shows no
