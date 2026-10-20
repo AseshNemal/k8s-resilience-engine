@@ -94,3 +94,22 @@ def test_the_page_never_offers_a_simulated_placement_of_its_own():
     render = (ROOT / "app" / "static" / "js" / "recommendation-render.js").read_text(encoding="utf-8")
     assert "Sample Virtual Placement" not in page
     assert not re.search(r"%\s*\w*\.?(nodes|length)", script + render)
+
+
+# ---- the Overview ----------------------------------------------------------------------------------------------
+
+def test_overview_lists_every_namespace_and_has_no_namespace_box():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'data-role="overview-namespaces"' in response.text
+    assert 'data-role="namespace"' not in response.text
+    assert "sample data" not in response.text.lower()
+
+
+def test_overview_script_reads_the_all_namespaces_endpoint_only():
+    script = (SCRIPTS / "dashboard.js").read_text(encoding="utf-8")
+
+    assert "/api/deployments/discovery/all" in script
+    assert "discovery?namespace" not in script
+    assert "describeOverview" in script

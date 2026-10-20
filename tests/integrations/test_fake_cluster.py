@@ -90,3 +90,24 @@ def test_lists_are_copies_so_callers_cannot_change_the_cluster():
 
     assert len(cluster.list_services(NAMESPACE)) == 4
     assert cluster.list_replicasets(NAMESPACE)
+
+
+def test_workload_namespaces_are_the_populated_namespaces_in_order():
+    from tests.support.fake_cluster import multi_namespace_cluster
+
+    cluster = multi_namespace_cluster()
+
+    assert cluster.list_workload_namespaces() == ["kube-system", "resilience-test", "shop"]
+
+
+def test_a_namespace_with_nothing_in_it_is_not_a_workload_namespace():
+    cluster = FakeClusterSource(pods={"empty": []}, deployments={"also-empty": []})
+
+    assert cluster.list_workload_namespaces() == []
+
+
+def test_error_injection_reaches_workload_namespaces():
+    cluster = FakeClusterSource(error=RuntimeError("boom"))
+
+    with pytest.raises(RuntimeError):
+        cluster.list_workload_namespaces()

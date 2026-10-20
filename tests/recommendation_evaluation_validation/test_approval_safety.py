@@ -17,25 +17,19 @@ def test_approval_never_auto_applies(client: TestClient, mock_get_sample):
     # 1. Request approval
     client.post(f"/api/recommendations/{recommendation_id}/request-approval", json={"recommendationId": recommendation_id, "proposalVersion": "v1"})
     
-    # 2. Patch subprocess and kubernetes to ensure they are NOT called
+    # 2. Patch subprocess and the Kubernetes REST client to ensure they are NOT called
     with patch("subprocess.run") as mock_subprocess_run:
-        try:
-            with patch("kubernetes.config.load_kube_config"):
-                with patch("kubernetes.client.ApiClient") as mock_k8s_client:
-                    # 3. Approve
-                    approve_payload = {"expectedProposalVersion": "v1", "note": "Safety First"}
-                    res = client.post(f"/api/recommendations/{recommendation_id}/approve", json=approve_payload)
-                    assert res.status_code == 200
-                    assert res.json()["status"] == "APPROVED"
-                    
-                    # 4. Assert Kubernetes was NOT interacted with
-                    mock_k8s_client.assert_not_called()
-        except ImportError:
-            # If kubernetes isn't even installed, that's even better proof it's not used here!
-            approve_payload = {"expectedProposalVersion": "v1", "note": "Safety First"}
-            res = client.post(f"/api/recommendations/{recommendation_id}/approve", json=approve_payload)
-            assert res.status_code == 200
-            assert res.json()["status"] == "APPROVED"
-        
+        with patch("app.integrations.kubernetes.rest.RestClient") as mock_k8s_client:
+            with patch("app.integrations.kubernetes.rest.load_connection") as mock_load_connection:
+                # 3. Approve
+                approve_payload = {"expectedProposalVersion": "v1", "note": "Safety First"}
+                res = client.post(f"/api/recommendations/{recommendation_id}/approve", json=approve_payload)
+                assert res.status_code == 200
+                assert res.json()["status"] == "APPROVED"
+
+                # 4. Assert Kubernetes was NOT interacted with: no kubeconfig read, no connection opened
+                mock_k8s_client.assert_not_called()
+                mock_load_connection.assert_not_called()
+
         # Ensure subprocess was never called (e.g. no `kubectl apply`)
         mock_subprocess_run.assert_not_called()

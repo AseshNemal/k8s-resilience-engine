@@ -5,8 +5,9 @@ This file does two things, neither of which blocks a test that supplies its own 
 
 * every test runs with HOME and KUBECONFIG redirected to an empty temporary location, so the default
   lookup (``$KUBECONFIG`` or ``~/.kube/config``) finds nothing;
-* ``kubernetes.config`` loaders refuse, with an AssertionError, to read anything inside the real
-  user's kube directory, even when a test names that path explicitly.
+* the one function that reads a kubeconfig from disk (``rest.read_kubeconfig_file``) refuses, with an
+  AssertionError, to read anything inside the real user's kube directory, even when a test names that
+  path explicitly.
 
 Real-cluster tests are opt-in: mark them ``@pytest.mark.live_cluster`` and set
 ``RESILIENCE_TEST_KUBECONFIG`` to a kubeconfig for a disposable test cluster.
@@ -16,7 +17,7 @@ import os
 from pathlib import Path
 
 import pytest
-from kubernetes import config as kube_config
+from app.integrations.kubernetes import rest
 
 REAL_KUBE_DIR = (Path.home() / ".kube").resolve()
 LIVE_KUBECONFIG_ENV = "RESILIENCE_TEST_KUBECONFIG"
@@ -45,16 +46,13 @@ def _inside_real_kube_dir(raw_path: str) -> bool:
 
 
 def _guarded(original):
-    def wrapper(*args, **kwargs):
-        requested = kwargs.get("config_file") or (args[0] if args else None)
-        requested = requested or os.environ.get("KUBECONFIG") or "~/.kube/config"
-        for part in str(requested).split(os.pathsep):
-            if part and _inside_real_kube_dir(part):
-                raise AssertionError(
-                    f"a test tried to read the real kubeconfig at {part}; "
-                    "use a fake cluster source or a kubeconfig written under tmp_path"
-                )
-        return original(*args, **kwargs)
+    def wrapper(path, *args, **kwargs):
+        if _inside_real_kube_dir(str(path)):
+            raise AssertionError(
+                f"a test tried to read the real kubeconfig at {path}; "
+                "use a fake cluster source or a kubeconfig written under tmp_path"
+            )
+        return original(path, *args, **kwargs)
 
     wrapper.__wrapped__ = original
     return wrapper
@@ -67,11 +65,10 @@ def _isolate_kubernetes_environment(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("KUBECONFIG", str(sandbox / "no-kubeconfig-here"))
     monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
     live = os.environ.get(LIVE_KUBECONFIG_ENV)
-    for name in ("load_kube_config", "new_client_from_config"):
-        original = getattr(kube_config, name)
-        if hasattr(original, "__wrapped__"):
-            original = original.__wrapped__
-        monkeypatch.setattr(kube_config, name, _guarded(original))
+    original = rest.read_kubeconfig_file
+    if hasattr(original, "__wrapped__"):
+        original = original.__wrapped__
+    monkeypatch.setattr(rest, "read_kubeconfig_file", _guarded(original))
     if live:
         # Opt-in tests receive their kubeconfig explicitly; nothing else gets it.
         monkeypatch.setenv("RESILIENCE_LIVE_KUBECONFIG", live)

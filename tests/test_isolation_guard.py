@@ -3,7 +3,8 @@
 import os
 
 import pytest
-from kubernetes import config
+
+from app.integrations.kubernetes import client as kube_client, rest
 
 
 def test_default_lookup_finds_nothing():
@@ -13,9 +14,17 @@ def test_default_lookup_finds_nothing():
 
 def test_reading_the_real_users_kubeconfig_fails_loudly(real_kube_dir):
     with pytest.raises(AssertionError, match="real kubeconfig"):
-        config.load_kube_config(config_file=str(real_kube_dir / "config"))
+        rest.read_kubeconfig_file(str(real_kube_dir / "config"))
     with pytest.raises(AssertionError, match="real kubeconfig"):
-        config.new_client_from_config(config_file=str(real_kube_dir / "config"))
+        rest.load_connection([str(real_kube_dir / "config")])
+
+
+def test_the_guard_covers_what_the_application_calls_not_only_the_helper(real_kube_dir, monkeypatch):
+    """KubernetesApiSource reaches the file through load_connection, so pointing it at the real kube
+    directory must fail the test rather than quietly use the developer's cluster."""
+    monkeypatch.setattr(rest.os.path, "isfile", lambda path: True)  # pretend the real file exists
+    with pytest.raises(AssertionError, match="real kubeconfig"):
+        kube_client.KubernetesApiSource(config_file=str(real_kube_dir / "config")).list_nodes()
 
 
 def test_a_kubeconfig_supplied_by_the_test_still_works(tmp_path):
@@ -26,11 +35,7 @@ def test_a_kubeconfig_supplied_by_the_test_still_works(tmp_path):
         "users:\n- name: u\n  user:\n    token: t\n"
         "contexts:\n- name: c\n  context:\n    cluster: k\n    user: u\n"
     )
-    api_client = config.new_client_from_config(config_file=str(path))
-    try:
-        assert api_client.configuration.host == "https://127.0.0.1:1"
-    finally:
-        api_client.close()
+    assert rest.load_connection([str(path)]).server == "https://127.0.0.1:1"
 
 
 @pytest.mark.live_cluster

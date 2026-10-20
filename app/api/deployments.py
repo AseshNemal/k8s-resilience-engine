@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.engine.deployment_topology_modeling.discovery import DiscoveryResult
+from app.engine.deployment_topology_modeling.discovery_all import AllNamespacesDiscovery, discover_all
 from app.engine.deployment_topology_modeling.service import (
     analyze_resilience_drift,
     clear_cluster_snapshots,
@@ -79,6 +80,21 @@ def read_discovery(
     """The DeploymentGraph wrapped with: status (ok/empty/partial), capture time, connection fingerprint
     (not proof of cluster identity), warnings, unresolved relationships and per-service evidence."""
     return discover_live(namespace=namespace)
+
+
+@router.get(
+    "/discovery/all",
+    response_model_by_alias=True,
+    tags=[TAG_TOPOLOGY],
+    summary="[Phase 1] Live discovery of every namespace with workloads, for the Overview",
+)
+def read_discovery_all(
+    include_system: bool = Query(False, description="Also include system namespaces such as kube-system"),
+) -> AllNamespacesDiscovery:
+    """One discovery result per namespace that holds workloads, plus cluster-wide totals. System namespaces
+    are left out unless asked for and are named in ``excludedNamespaces``. Fails explicitly when the cluster
+    cannot be read; there is never a partial or substituted overview."""
+    return discover_all(include_system=include_system)
 
 
 @router.get(

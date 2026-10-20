@@ -78,8 +78,26 @@ class FakeClusterSource:
         self._maybe_fail(f"replicasets:{namespace}")
         return list(self.replicasets.get(namespace, []))
 
+    def list_workload_namespaces(self) -> list[str]:
+        self._maybe_fail("workload-namespaces")
+        populated = {ns for ns, items in self.pods.items() if items}
+        populated |= {ns for ns, items in self.deployments.items() if items}
+        return sorted(populated)
+
     def connection_fingerprint(self) -> str | None:
         return "fake-connection"
+
+
+def multi_namespace_cluster() -> FakeClusterSource:
+    """Three namespaces on two workers: an app in 'shop', a deliberately concentrated 'paymentservice'
+    in 'resilience-test', and a system namespace, 'kube-system'."""
+    cluster = two_node_shop()
+    cluster.pods["resilience-test"] = [pod(f"paymentservice-{i}", "worker-1", app="paymentservice") for i in (1, 2, 3)]
+    cluster.deployments["resilience-test"] = [deployment("paymentservice", 3)]
+    cluster.pods["kube-system"] = [pod("coredns-1", "worker-1", app="coredns"),
+                                   pod("coredns-2", "worker-2", app="coredns")]
+    cluster.deployments["kube-system"] = [deployment("coredns", 2)]
+    return cluster
 
 
 def bookinfo(reviews_versions: tuple[str, ...] = ("v2",)) -> FakeClusterSource:

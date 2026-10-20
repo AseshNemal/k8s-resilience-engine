@@ -21,6 +21,7 @@ RUNTIME_PYTHON = [
     ROOT / "app" / "engine" / "deployment_topology_modeling" / "discovery.py",
     ROOT / "app" / "engine" / "failure_impact_prediction" / "runtime_provider.py",
     ROOT / "app" / "integrations" / "kubernetes" / "client.py",
+    ROOT / "app" / "integrations" / "kubernetes" / "rest.py",
     *sorted((ROOT / "extension").glob("*.py")),
 ]
 
@@ -93,3 +94,25 @@ def test_the_research_routes_live_only_under_tests():
 
     paths = app.openapi()["paths"]
     assert not [p for p in paths if "sample" in p or "benchmark" in p or "chaos/run" in p]
+
+
+def test_nothing_in_the_product_imports_the_kubernetes_package():
+    """The image no longer ships it (requirements.txt), and an old virtualenv that still has it would hide a
+    leftover import until the extension is built, so check the source rather than the environment."""
+    import ast
+
+    offenders = []
+    for folder in ("app", "extension", "experiments", "scripts"):
+        for path in sorted((ROOT / folder).rglob("*.py")):
+            if "node_modules" in path.parts or "helper" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                names = [a.name for a in node.names] if isinstance(node, ast.Import) else \
+                    [node.module or ""] if isinstance(node, ast.ImportFrom) and node.level == 0 else []
+                offenders += [f"{path.relative_to(ROOT)}: {n}" for n in names if n.split(".")[0] in ("kubernetes", "urllib3")]
+    assert offenders == []
+
+
+def test_the_kubernetes_package_is_not_a_requirement_of_the_product_or_the_image():
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert not re.search(r"^kubernetes\b", requirements, flags=re.MULTILINE | re.IGNORECASE)
