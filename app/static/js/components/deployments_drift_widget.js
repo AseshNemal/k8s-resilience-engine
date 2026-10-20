@@ -6,7 +6,21 @@
 window.DeploymentsDriftWidget = (function () {
     "use strict";
 
-    async function loadDriftSignals() {
+    function showLiveOnly(message) {
+        renderCategoryCounters({});
+        renderSpofList([]);
+        const spofList = document.getElementById("spof-workloads-list");
+        const nodeList = document.getElementById("node-risk-rankings-list");
+        if (spofList) spofList.textContent = message;
+        if (nodeList) nodeList.textContent = "";
+    }
+
+    async function loadDriftSignals(isLive) {
+        // The drift analysis compares the YAML with a real cluster, so it is never shown next to sample data.
+        if (!isLive) {
+            showLiveOnly("Drift analysis needs the live cluster. Switch to Live Cluster (KinD) to see it.");
+            return;
+        }
         try {
             // 1. Categories Breakdown
             const catResp = await fetch("/api/deployments/drift/categories");
@@ -61,7 +75,7 @@ window.DeploymentsDriftWidget = (function () {
         const totalBadge = document.getElementById("spof-total-badge");
 
         if (bannerCount) bannerCount.textContent = spofs.length;
-        if (totalBadge) totalBadge.textContent = `${spofs.length} SPOFs`;
+        if (totalBadge) totalBadge.textContent = `${spofs.length} exposed`;
         if (!container) return;
 
         container.innerHTML = "";
@@ -98,6 +112,8 @@ window.DeploymentsDriftWidget = (function () {
         });
     }
 
+    const zonePrefix = (zone) => (zone ? "Zone: " + zone + " · " : "");
+
     function renderNodeRisks(nodeRisks) {
         const container = document.getElementById("node-risk-rankings-list");
         if (!container) return;
@@ -114,7 +130,7 @@ window.DeploymentsDriftWidget = (function () {
                 <div>
                     <strong>🖥️ ${n.node_name}</strong>
                     <div style="font-size: 11px; color: var(--color-text-muted); margin-top: 2px;">
-                        Zone: ${n.zone || "unassigned"} · ${n.pod_count || 0} pods · sole host of ${n.exposed_service_count || 0} service(s)
+                        ${zonePrefix(n.zone)}${n.pod_count || 0} pods · only node hosting ${n.exposed_service_count || 0} service(s)
                     </div>
                 </div>
                 <span class="status-badge ${n.risk_level === 'CRITICAL' ? 'status-badge--danger' : 'status-badge--success'}">
@@ -126,7 +142,7 @@ window.DeploymentsDriftWidget = (function () {
     }
 
     function init() {
-        loadDriftSignals().catch((err) => console.warn("Could not load drift signals:", err));
+        // Loaded by deployments.js once the data source is known.
     }
 
     return {

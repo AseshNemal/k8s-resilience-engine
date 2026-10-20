@@ -34,9 +34,12 @@ def test_deployments_page_renders_tab_navigation(client):
     assert 'data-target="tab-drift"' in html
     assert 'Resilience Drift & SPOFs' in html
 
-    assert 'id="tab-btn-scenarios"' in html
-    assert 'data-target="tab-scenarios"' in html
-    assert 'Chaos Runner & Markov Matrix' in html
+    # Dry-run scenarios are not shown on the dashboard (scripted, not evidence).
+    assert 'id="tab-btn-scenarios"' not in html
+
+    assert 'id="tab-btn-live-experiments"' in html
+    assert 'data-target="tab-live-experiments"' in html
+    assert 'Live Experiments' in html
 
 
 def test_deployments_page_contains_all_tab_panes(client):
@@ -48,7 +51,8 @@ def test_deployments_page_contains_all_tab_panes(client):
     assert 'id="tab-topology"' in html
     assert 'id="tab-intent"' in html
     assert 'id="tab-drift"' in html
-    assert 'id="tab-scenarios"' in html
+    assert 'id="tab-scenarios"' not in html
+    assert 'id="tab-live-experiments"' in html
 
 
 def test_deployments_page_includes_phase5_scripts(client):
@@ -62,5 +66,6 @@ def test_deployments_page_includes_phase5_scripts(client):
     assert "deployments_topology_widget.js" in html
     assert "deployments_intent_widget.js" in html
     assert "deployments_drift_widget.js" in html
-    assert "deployments_scenarios_widget.js" in html
+    assert "deployments_live_experiments_widget.js" in html
+    assert "deployments_scenarios_widget.js" not in html
     assert "deployments_modal_manager.js" in html

@@ -18,7 +18,7 @@ def test_drift_tab_markup_presence(client):
     html = response.text
 
     assert 'id="tab-drift"' in html
-    assert "Resilience Drift & Failure Exposure Signals" in html
+    assert "Resilience Drift & Failure Exposure" in html
     assert 'id="spof-banner-badge"' in html
     assert 'id="spof-banner-count"' in html
 

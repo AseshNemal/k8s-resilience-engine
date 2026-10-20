@@ -5,18 +5,18 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.5">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.5">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.5">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.5">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.5">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.10">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.10">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.10">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.10">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.10">
 {% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h2 class="page-header__title">Deployment Topology Modeling & Resilience Drift</h2>
     <p class="page-header__subtitle">
-        Inspect runtime placement, evaluate declared intent compliance, detect resilience drift, and simulate chaos disruptions.
+        Where the replicas really run, how that differs from the declared YAML, which services one node failure would take down, and what live disruption experiments showed.
     </p>
     <div class="page-header__meta">
         <span class="component-owner">Owner: <strong>Member 2</strong></span>
@@ -33,18 +33,17 @@
     </div>
 </div>
 
-{# Academic Validation Panel for Viva Evaluation Panels #}
-{% include "components/deployments_academic_panel.html" %}
+<p class="ui-note source-banner" data-role="source-banner">Loading cluster data…</p>
 
-{# Top Executive Metrics #}
+{# Headline metrics #}
 <section class="metric-grid" aria-label="Deployment metrics">
     {{ metric_card("deployment-node-count", "Total Nodes", icon_name="server", icon_color="blue") }}
     {{ metric_card("deployment-service-count", "Total Services", icon_name="topology", icon_color="teal") }}
     {{ metric_card("deployment-ready-pods", "Ready Pods", icon_name="check-circle", icon_color="green") }}
-    {{ metric_card("deployment-highest-concentration", "Highest Replica Concentration", icon_name="gauge", icon_color="red") }}
+    {{ metric_card("deployment-exposed-services", "Exposed Services (one node failure = 0 ready)", icon_name="gauge", icon_color="red") }}
 </section>
 
-{# Multi-Tab Executive Dashboard Navigation #}
+{# Tab navigation #}
 <div class="dashboard-tabs-wrapper">
     <nav class="dashboard-tabs-nav" role="tablist" aria-label="Deployment Dashboard Tabs">
         <button type="button" class="tab-nav-btn active" id="tab-btn-topology" role="tab" aria-selected="true" aria-controls="tab-topology" data-target="tab-topology">
@@ -56,8 +55,8 @@
         <button type="button" class="tab-nav-btn" id="tab-btn-drift" role="tab" aria-selected="false" aria-controls="tab-drift" data-target="tab-drift">
             <span class="tab-icon">⚠️</span> Resilience Drift & SPOFs
         </button>
-        <button type="button" class="tab-nav-btn" id="tab-btn-scenarios" role="tab" aria-selected="false" aria-controls="tab-scenarios" data-target="tab-scenarios">
-            <span class="tab-icon">⚡</span> Chaos Runner & Markov Matrix
+        <button type="button" class="tab-nav-btn" id="tab-btn-live-experiments" role="tab" aria-selected="false" aria-controls="tab-live-experiments" data-target="tab-live-experiments">
+            <span class="tab-icon">🧪</span> Live Experiments
         </button>
     </nav>
 </div>
@@ -72,13 +71,18 @@
     {# Tab 3: Resilience Drift & Failure Domain Exposure #}
     {% include "components/deployments_drift_tab.html" %}
 
-    {# Tab 4: Chaos Engineering & Disruption Scenarios #}
-    {% include "components/deployments_scenarios_tab.html" %}
+    {# Tab 4: Live KinD experiment results #}
+    {% include "components/deployments_live_experiments_tab.html" %}
 </div>
 
-{# Modals for Drill-Down and Snapshot Diffing #}
+{# Model validation against kubectl ground truth #}
+<div class="section-header" style="margin-top: var(--space-xl);">
+    <h3 class="section-header__title">How accurate is the model?</h3>
+</div>
+{% include "components/deployments_academic_panel.html" %}
+
+{# Service exposure drill-down #}
 {% include "components/deployments_modal_violation.html" %}
-{% include "components/deployments_modal_snapshot_diff.html" %}
 
 {# Raw Data Panel #}
 <div class="section-header" style="margin-top: var(--space-xl);">
@@ -89,12 +93,12 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.5"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.5"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.5"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.5"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.5"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_scenarios_widget.js') }}?v=5.5"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.5"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.5"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.10"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.10"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.10"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.10"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.10"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.10"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.10"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.10"></script>
 {% endblock %}

@@ -799,3 +799,76 @@
     font-weight: 600;
     color: var(--color-text-muted);
 }
+
+/* ---- Data-source banner ---- */
+.source-banner {
+    font-style: normal;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin: 0 0 var(--space-md) 0;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-soft);
+}
+.source-banner--live { border-color: #86efac; background: #f0fdf4; color: #166534; }
+.source-banner--sample { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+
+/* ---- "What am I looking at?" help ---- */
+.tab-help {
+    margin: 0 0 var(--space-md) 0;
+    padding: 8px 12px;
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    background: var(--color-surface-soft);
+    font-size: 13px;
+}
+.tab-help summary { cursor: pointer; font-weight: 600; }
+.tab-help ul { margin: 8px 0 0 0; padding-left: 20px; line-height: 1.6; }
+
+/* ---- Node failure simulation ---- */
+.failure-sim {
+    margin-bottom: var(--space-md);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    background: var(--color-surface-soft);
+    border: 1px solid var(--color-border);
+}
+.failure-sim--danger { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+.failure-sim--ok { background: #f0fdf4; border-color: #86efac; color: #166534; }
+.node-chip-container.is-clickable { cursor: pointer; transition: box-shadow 0.15s, opacity 0.15s; }
+.node-chip-container.is-clickable:hover { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35); }
+.node-chip-container.is-failed {
+    opacity: 0.6;
+    background: repeating-linear-gradient(45deg, rgba(220, 38, 38, 0.06), rgba(220, 38, 38, 0.06) 8px, transparent 8px, transparent 16px);
+    box-shadow: 0 0 0 2px var(--color-danger);
+}
+.pod-badge-list .pod-pill.is-down { background: #fee2e2; color: #b91c1c; border-color: #b91c1c; font-weight: 700; }
+.pod-pill.is-lost { text-decoration: line-through; }
+
+/* ---- Live experiments: expandable before/after ---- */
+.live-exp-row { cursor: pointer; }
+.live-exp-row:hover { background: var(--color-surface-soft); }
+.live-exp-row td:first-child div::before { content: "▸ "; color: var(--color-text-muted); }
+.live-exp-row.is-open td:first-child div::before { content: "▾ "; }
+.live-exp-detail td { background: var(--color-surface-soft); }
+.live-exp-detail__config { margin-bottom: var(--space-md); }
+.live-exp-detail__config h5 { margin: 4px 0; font-size: 13px; }
+.placement-pair { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+.placement-pair__arrow { align-self: center; font-size: 22px; color: var(--color-text-muted); }
+.placement-snap { flex: 1 1 320px; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px; background: #fff; }
+.placement-snap__title { font-size: 12px; margin-bottom: 6px; }
+.placement-snap__cols { display: flex; gap: 8px; flex-wrap: wrap; }
+.placement-snap__col { flex: 1 1 90px; border: 1px solid var(--color-border); border-radius: 6px; padding: 6px; min-height: 60px; }
+.placement-snap__node { font-size: 11px; font-weight: 600; margin-bottom: 4px; word-break: break-all; }
+.placement-pod { display: inline-block; font-size: 11px; padding: 1px 6px; margin: 2px; border-radius: 10px; background: #e0e7ff; color: #3730a3; }
+.placement-pod--target { background: #fef3c7; color: #92400e; font-weight: 700; }
+.placement-pod--notready { opacity: 0.6; border: 1px dashed currentColor; }
+.placement-snap__conc-up { color: #b45309; font-weight: 700; }
+.placement-snap__col--pending { border-style: dashed; border-color: #d97706; background: #fffbeb; }
+
+/* One zone (e.g. KinD without zone labels): use the full width and put nodes side by side. */
+.zone-card--wide { grid-column: 1 / -1; }
+.zone-card--wide .zone-card__body { flex-direction: row; flex-wrap: wrap; }
+.zone-card--wide .node-chip-container { flex: 1 1 280px; }

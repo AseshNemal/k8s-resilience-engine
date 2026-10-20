@@ -5,7 +5,7 @@
 window.DeploymentsTabRouter = (function () {
     "use strict";
 
-    const VALID_TABS = new Set(["topology", "intent", "drift", "scenarios"]);
+    const VALID_TABS = new Set(["topology", "intent", "drift", "live-experiments"]);
 
     function init() {
         const tabButtons = document.querySelectorAll(".tab-nav-btn");
