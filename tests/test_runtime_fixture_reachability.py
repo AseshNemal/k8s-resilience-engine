@@ -33,20 +33,10 @@ ALLOWED_FIXTURE_IMPORTERS = {
     # Member 4: get_sample_recommendation / get_sample_validation, test fixtures only
     "app.engine.recommendation_evaluation_validation.service": "Member 4: test-fixture loaders",
     # Member 3 is frozen; this module still imports fixture_provider. Reported, not changed.
-    "app.engine.failure_impact_prediction.service": "Member 3: demo/sample helpers behind the labelled fixture routes",
+    "app.engine.failure_impact_prediction.service": "Member 3: demo/sample helpers, unreachable from routes",
     "app.engine.failure_impact_prediction.validation_demo": "Member 3: synthetic validation demo, labelled as such",
 }
 
-# Route handlers that may reach a fixture reader because they are the labelled research routes named in
-# tests/support/labelled_research_routes.py. A handler that is not on this list still fails the check.
-LABELLED_RESEARCH_HANDLERS = {
-    "app.api.deployments.read_sample_deployment",
-    "app.api.deployments.read_sample_analysis",
-    "app.api.failure_impacts.read_sample_failure_impact",
-    "app.api.failure_impacts.read_demo_deployment",
-    "app.api.failure_impacts.simulate_demo_failure",
-    "app.api.failure_impacts.simulate_demo_portfolio_failure",
-}
 FIXTURE_MODULES = (
     "app.engine.workflow_dependency_modeling.fixture_repository",
     "app.shared.sample_loader",
@@ -138,8 +128,7 @@ def test_the_analysis_actually_sees_the_application(real_index):
 
 
 def test_no_route_handler_can_reach_a_fixture_reader(real_index):
-    unlabelled = {k: v for k, v in entries_reaching_sinks(real_index).items() if k not in LABELLED_RESEARCH_HANDLERS}
-    assert unlabelled == {}
+    assert entries_reaching_sinks(real_index) == {}
 
 
 def test_only_reviewed_modules_import_fixture_loaders(real_index):

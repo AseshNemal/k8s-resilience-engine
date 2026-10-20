@@ -6,10 +6,12 @@ Data sources are never mixed silently:
 """
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from app.integrations.kubernetes.client import ClusterAccessError
 from app.shared.evidence_errors import EvidenceError, unavailable
@@ -22,6 +24,7 @@ from app.engine.deployment_topology_modeling.live_state.cluster_state_parser imp
 from app.engine.deployment_topology_modeling.live_state.ownership_resolver import resolve_deployment_ownership
 from app.engine.deployment_topology_modeling.live_state.concentration_analyzer import analyze_replica_concentration
 from app.engine.deployment_topology_modeling.graph_builder import DeploymentGraphBuilder
+from app.engine.deployment_topology_modeling.manifest_parsing.manifest_parser import parse_declared_intents
 from app.engine.deployment_topology_modeling.manifest_parsing.pipeline import run_manifest_pipeline
 from app.engine.deployment_topology_modeling.drift_analysis.constants import DriftType, INTENT_DRIFT_TYPES
 from app.engine.deployment_topology_modeling.drift_analysis.drift_analyzer import DriftAnalyzer
@@ -245,16 +248,62 @@ def _associate_manifest_intents(
     return drift_manifests, service_intents
 
 
-def _load_manifest_intents(
-    manifest_path: str | None, analyzed_services: list[dict[str, Any]]
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    target = Path(manifest_path) if manifest_path else DEFAULT_MANIFEST_PATH
-    if not target.exists():
-        return {}, {}
+# Where declared intent (replicas, nodeSelector, affinity, topology spread) comes from, in this order:
+#   1. a manifest file or folder the caller names (manifest_path),
+#   2. the one the operator named with RESILIENCE_MANIFEST_PATH (set on the backend, never taken from a
+#      request, so a client cannot make the server read an arbitrary path),
+#   3. the repository's own manifests (DEFAULT_MANIFEST_PATH), which exist only in a repository checkout,
+#   4. the Deployment specs of the connected cluster itself.
+# The last one is the real source for the packaged extension, which ships no manifest folder. The
+# Kubernetes API returns a Deployment in the same schema as a manifest, so the same parser reads it. It is
+# the intent as applied to the cluster; a manifest in git can differ from it, which is why 1-3 win.
+MANIFEST_PATH_ENV = "RESILIENCE_MANIFEST_PATH"
+
+
+def _declared_target(manifest_path: str | None) -> Path | None:
+    """The manifest file or folder to read, or None when the cluster's own Deployment specs are the source."""
+    for candidate in (manifest_path, os.environ.get(MANIFEST_PATH_ENV)):
+        if candidate:
+            return Path(candidate)  # a named source is used, or reported empty; it never falls through
+    return DEFAULT_MANIFEST_PATH if DEFAULT_MANIFEST_PATH.exists() else None
+
+
+def _cluster_declared_intents(namespace: str) -> list[Any]:
+    """Declared intent read from the Deployments of the connected cluster (see the source order above)."""
+    if not discovery.NAMESPACE_PATTERN.match((namespace or "").strip()):
+        raise discovery.DiscoveryError(
+            "INVALID_NAMESPACE", "The namespace is not a valid Kubernetes namespace name.", http_status=422
+        )
     try:
-        parsed = run_manifest_pipeline(str(target))
+        items = discovery.get_cluster_source().list_objects(
+            "deployments", f"/apis/apps/v1/namespaces/{quote(namespace, safe='')}/deployments"
+        )
+    except ClusterAccessError as exc:
+        raise CodedClusterUnavailableError(discovery.classify_access_error(exc)) from None
+    # List items carry no kind or apiVersion, and status is observed state, not declared intent.
+    documents = [{"apiVersion": "apps/v1", "kind": "Deployment", **{k: v for k, v in item.items() if k != "status"}}
+                 for item in items]
+    return parse_declared_intents(documents)
+
+
+def _declared_intents(manifest_path: str | None, namespace: str) -> list[Any]:
+    target = _declared_target(manifest_path)
+    if target is None:
+        return _cluster_declared_intents(namespace)
+    if not target.exists():
+        return []
+    try:
+        return run_manifest_pipeline(str(target))
     except Exception as exc:
         raise ValueError(f"Unable to parse deployment manifest '{target}': {exc}") from exc
+
+
+def _load_manifest_intents(
+    manifest_path: str | None, analyzed_services: list[dict[str, Any]], namespace: str = "default"
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    parsed = _declared_intents(manifest_path, namespace)
+    if not parsed:
+        return {}, {}
     return _associate_manifest_intents(parsed, analyzed_services)
 
 
@@ -286,9 +335,10 @@ def _analyse(
     data_source: str,
     start_time: float,
     load_manifests: bool = True,
+    namespace: str = "default",
 ) -> TopologyAnalysis:
     manifest_map, service_intents = (
-        _load_manifest_intents(manifest_path, analyzed_services) if load_manifests else ({}, {})
+        _load_manifest_intents(manifest_path, analyzed_services, namespace) if load_manifests else ({}, {})
     )
     report, baseline_b2 = DriftAnalyzer().analyze_cluster(
         manifests_by_service=manifest_map,
@@ -310,7 +360,7 @@ def analyze_live_topology(namespace: str = "default", manifest_path: str | None 
     """Graph, exposure report and Baseline B2 computed from one live collection."""
     start_time = time.perf_counter()
     nodes, analyzed = collect_live_cluster(namespace)
-    return _analyse(nodes, analyzed, manifest_path, "live", start_time)
+    return _analyse(nodes, analyzed, manifest_path, "live", start_time, namespace=namespace)
 
 
 def get_live_deployment_graph(namespace: str = "default", manifest_path: str | None = None) -> DeploymentGraph:
@@ -374,22 +424,21 @@ def analyze_sample_topology() -> TopologyAnalysis:
 # Manifest intent
 # ---------------------------------------------------------------------------------------------
 
-def get_manifest_intent() -> list[dict[str, Any]]:
-    """Declared Deployment intent from the default manifest, else deploy/test-workloads."""
-    target = DEFAULT_MANIFEST_PATH if DEFAULT_MANIFEST_PATH.exists() else FALLBACK_MANIFEST_DIR
-    if not target.exists():
-        # The packaged extension image ships no deploy/ folder. Say so with the stable code, rather than
-        # failing inside the manifest pipeline or returning an empty list as if nothing were declared.
+def get_manifest_intent(namespace: str = "default") -> list[dict[str, Any]]:
+    """Declared Deployment intent, from the source order described above (named manifests, the repository's
+    own, else the connected cluster's Deployment specs). An empty list means nothing is declared there."""
+    intents = [i.model_dump() for i in _declared_intents(None, namespace)]
+    if not intents:
         raise unavailable(
             "DECLARED_STATE_UNAVAILABLE",
-            "No declared-state source (deployment manifests) is available.",
+            "No declared-state source (deployment manifests or cluster Deployments) is available.",
             COMPONENT,
         )
-    return [i.model_dump() for i in run_manifest_pipeline(str(target))]
+    return intents
 
 
-def get_manifest_service_detail(service_name: str) -> dict[str, Any] | None:
-    return next((i for i in get_manifest_intent() if i.get("service_name") == service_name), None)
+def get_manifest_service_detail(service_name: str, namespace: str = "default") -> dict[str, Any] | None:
+    return next((i for i in get_manifest_intent(namespace) if i.get("service_name") == service_name), None)
 
 
 # ---------------------------------------------------------------------------------------------

@@ -38,15 +38,11 @@
                     id="failure-input-mode"
                     data-role="input-mode"
                 >
-                    {# The page opens on the connected cluster. The two fixture modes run on disclosed sample
-                       inputs, only when chosen, and say so in the page note. #}
                     <option value="runtime" selected>Validated runtime</option>
                     <option value="portfolio-runtime">Validated runtime portfolio</option>
-                    <option value="demo">Contract fixtures</option>
-                    <option value="portfolio-demo">Portfolio fixtures</option>
                 </select>
             </label>
-            <div class="scenario-panel__runtime-fields" data-role="runtime-fields" hidden>
+            <div class="scenario-panel__runtime-fields" data-role="runtime-fields">
                 <label class="scenario-panel__field" for="failure-workflow-id">
                     <span data-role="workflow-id-label">Workflow ID</span>
                     <input

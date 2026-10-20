@@ -7,11 +7,9 @@
 (function () {
     "use strict";
 
-    // Live discovery is the default source. The sample baseline (Member 2's original toggle) is still one
-    // click away, and the page labels it as sample data whenever it is showing.
+    // The page reads the connected cluster only. There is no sample baseline to switch to: when the cluster
+    // cannot be read, the page says why (see the failure state below) and shows no topology.
     const LIVE_ENDPOINT = "/api/deployments/discovery";
-    const SAMPLE_ENDPOINT = "/api/deployments/sample";
-    let currentEndpoint = LIVE_ENDPOINT;
     const { fetchJson } = window.ResilienceApi || { fetchJson: (url) => fetch(url).then((r) => r.json()) };
     const { formatRatioAsPercentage, initJsonPanel, updateLastRefreshed } =
         window.ResilienceUi || {
@@ -26,7 +24,6 @@
 
     const region = document.querySelector('[data-role="page-region"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
-    const toggleSourceButton = document.querySelector('[data-role="toggle-source-button"]');
     const sourceBadge = document.querySelector('[data-role="source-badge"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
 
@@ -37,18 +34,14 @@
 
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
-        if (toggleSourceButton) toggleSourceButton.disabled = true;
 
         try {
-            const body = await fetchJson(currentEndpoint);
-            const live = currentEndpoint === LIVE_ENDPOINT;
-            // The live source returns the graph inside a status envelope (ok / empty / partial); the
-            // sample source returns the bare graph.
-            const deployment = live ? body.graph : body;
+            // The discovery envelope: the graph plus how complete it is (ok / empty / partial).
+            const body = await fetchJson(LIVE_ENDPOINT);
+            const deployment = body.graph;
             if (region) region.replaceChildren();
-            if (live && applyBadge && describeDiscovery) {
-                const described = describeDiscovery(body);
-                applyBadge(sourceBadge, described.badge);
+            if (applyBadge && describeDiscovery) {
+                applyBadge(sourceBadge, describeDiscovery(body).badge);
             }
 
             // 1. Top Executive Metrics
@@ -104,27 +97,7 @@
             }
         } finally {
             if (reloadButton) reloadButton.disabled = false;
-            if (toggleSourceButton) toggleSourceButton.disabled = false;
         }
-    }
-
-    // Toggle between the live cluster and the sample baseline. The sample is a fixed research fixture
-    // and is labelled as such; it is never shown without the person asking for it.
-    if (toggleSourceButton) {
-        toggleSourceButton.addEventListener("click", () => {
-            if (currentEndpoint === LIVE_ENDPOINT) {
-                currentEndpoint = SAMPLE_ENDPOINT;
-                if (sourceBadge) {
-                    sourceBadge.textContent = "Sample Data";
-                    sourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
-                }
-                toggleSourceButton.textContent = "Switch to Live Cluster";
-            } else {
-                currentEndpoint = LIVE_ENDPOINT;
-                toggleSourceButton.textContent = "Switch to Sample Data";
-            }
-            loadPage();
-        });
     }
 
     if (reloadButton) {

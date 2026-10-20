@@ -11,13 +11,10 @@
  */
 
 (function () {
-    const DEMO_IMPACT_ENDPOINT = "/api/failure-impacts/simulate";
-    const DEMO_DEPLOYMENT_ENDPOINT = "/api/failure-impacts/demo-deployment";
-    const PORTFOLIO_DEMO_ENDPOINT = "/api/failure-impacts/portfolio/simulate";
     const RUNTIME_IMPACT_ENDPOINT = "/api/failure-impacts/runtime";
     const PORTFOLIO_RUNTIME_ENDPOINT = "/api/failure-impacts/portfolio/runtime";
-    // The runtime modes read the topology through the discovery envelope, not the bare graph, so the page
-    // can say how complete the topology is and show an explicit failure when the cluster cannot be read.
+    // The topology is read through the discovery envelope, not the bare graph, so the page can say how
+    // complete it is and show an explicit failure when the cluster cannot be read.
     const DISCOVERY_ENDPOINT = "/api/deployments/discovery";
     const { fetchJson } = window.ResilienceApi;
     const { describeError, describeDiscovery, renderStateCard, applyBadge } = window.ResilienceConnection;
@@ -33,7 +30,6 @@
     const reloadButton = document.querySelector('[data-role="reload-button"]');
     const nodeSelector = document.querySelector('[data-role="node-selector"]');
     const inputMode = document.querySelector('[data-role="input-mode"]');
-    const runtimeFields = document.querySelector('[data-role="runtime-fields"]');
     const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
     const workflowIdLabel = document.querySelector(
         '[data-role="workflow-id-label"]'
@@ -92,21 +88,9 @@
         return Object.assign(new Error(message), { code: "INVALID_INPUT" });
     }
 
+    // "runtime" is one frozen workflow; "portfolio-runtime" is several, evaluated against one topology.
     function selectedMode() {
-        const mode = inputMode?.value;
-        if (
-            mode === "demo" ||
-            mode === "portfolio-demo" ||
-            mode === "portfolio-runtime"
-        ) {
-            return mode;
-        }
-        // Anything else, including a missing control, means the connected cluster, never a fixture.
-        return "runtime";
-    }
-
-    function isRuntimeMode(mode = selectedMode()) {
-        return mode === "runtime" || mode === "portfolio-runtime";
+        return inputMode?.value === "portfolio-runtime" ? "portfolio-runtime" : "runtime";
     }
 
     function runtimeNamespace() {
@@ -148,29 +132,13 @@
     // Where the topology (and so the list of worker nodes) comes from. Only the namespace is needed, so the
     // node list can be shown before a workflow has been named.
     function topologySource() {
-        if (!isRuntimeMode()) {
-            return { endpoint: DEMO_DEPLOYMENT_ENDPOINT, discovery: false };
-        }
         const namespace = runtimeNamespace();
-        return {
-            endpoint: `${DISCOVERY_ENDPOINT}?namespace=${encodeURIComponent(namespace)}`,
-            discovery: true,
-        };
+        return { endpoint: `${DISCOVERY_ENDPOINT}?namespace=${encodeURIComponent(namespace)}` };
     }
 
     // Builds the prediction URL for the selected mode, once the inputs it needs are valid.
     function impactRequest() {
         const mode = selectedMode();
-
-        if (mode === "demo") {
-            return (failedNode) =>
-                `${DEMO_IMPACT_ENDPOINT}?failed_node=${encodeURIComponent(failedNode)}`;
-        }
-
-        if (mode === "portfolio-demo") {
-            return (failedNode) =>
-                `${PORTFOLIO_DEMO_ENDPOINT}?failed_node=${encodeURIComponent(failedNode)}`;
-        }
 
         if (mode === "runtime") {
             const { workflowId, namespace } = runtimeSelection();
@@ -210,26 +178,20 @@
 
     function updateInputModeUi() {
         const mode = selectedMode();
-        if (runtimeFields) runtimeFields.hidden = !isRuntimeMode(mode);
         if (workflowIdLabel) {
             workflowIdLabel.textContent = mode === "portfolio-runtime"
                 ? "Workflow IDs"
                 : "Workflow ID";
         }
-        // The fixture modes run on disclosed sample inputs, so they say so. The runtime modes show their
-        // own text until the topology has been read, then describeInput() replaces it with the real status.
+        // Shown until the topology has been read; describeInput() then replaces both with the real status.
         if (inputSourceBadge) {
             inputSourceBadge.textContent = {
-                demo: "Contract Fixtures",
-                "portfolio-demo": "Portfolio Fixtures",
                 runtime: "Validated Runtime",
                 "portfolio-runtime": "Runtime Portfolio",
             }[mode];
         }
         if (inputModeNote) {
             inputModeNote.textContent = {
-                demo: "Contract-fixture mode — this runs a virtual prediction and never changes a cluster.",
-                "portfolio-demo": "Portfolio-fixture mode — evaluates the selected node across two disclosed workflows without changing a cluster.",
                 runtime: "Runtime mode — requires configured Component 1 persistence and a frozen workflow, then uses Component 2 topology; simulation remains virtual.",
                 "portfolio-runtime": "Runtime portfolio mode — enter comma-separated frozen workflow IDs and evaluate them against one Component 2 topology; simulation remains virtual.",
             }[mode];
@@ -429,15 +391,10 @@
         if (nodeSelector) nodeSelector.replaceChildren();
         try {
             const source = topologySource();
-            const body = await fetchJson(source.endpoint);
-            const graph = source.discovery ? body.graph : body;
-            populateNodeSelector(graph);
-            if (source.discovery) {
-                describeInput(body);
-            } else {
-                updateInputModeUi();
-            }
-            return graph;
+            const discovery = await fetchJson(source.endpoint);
+            populateNodeSelector(discovery.graph);
+            describeInput(discovery);
+            return discovery.graph;
         } catch (error) {
             applyBadge(inputSourceBadge, { variant: "danger", text: "Not showing live data" });
             renderStateCard(region, describeError(error), { onRetry: loadTopology });

@@ -51,6 +51,9 @@ class FakeClusterSource:
     deployments: dict[str, list[ClusterDeployment]] = field(default_factory=dict)
     services: dict[str, list[ClusterService]] = field(default_factory=dict)
     replicasets: dict[str, list[ClusterReplicaSet]] = field(default_factory=dict)
+    # Extra pod-template spec per Deployment name (nodeSelector, affinity, topologySpreadConstraints), so a
+    # test can give a Deployment declared placement intent the way a real manifest does.
+    template_specs: dict[str, dict] = field(default_factory=dict)
     error: Exception | None = None
     calls: list[str] = field(default_factory=list)
 
@@ -108,7 +111,7 @@ class FakeClusterSource:
         if kind == "pods":
             return [_pod_json(p, namespace) for p in self.pods.get(namespace, [])]
         if kind == "deployments":
-            return [_deployment_json(d) for d in self.deployments.get(namespace, [])]
+            return [_deployment_json(d, namespace, self.template_specs.get(d.name)) for d in self.deployments.get(namespace, [])]
         if kind == "services":
             declared = self.services.get(namespace)
             if declared:
@@ -158,9 +161,11 @@ def _pod_json(p: ClusterPod, namespace: str) -> dict:
             "spec": spec, "status": status}
 
 
-def _deployment_json(d: ClusterDeployment) -> dict:
-    return {"metadata": {"name": d.name, "uid": f"uid-{d.name}"},
-            "spec": {"replicas": d.declared_replicas, "template": {"metadata": {"labels": {"app": d.name}}}}}
+def _deployment_json(d: ClusterDeployment, namespace: str, template_spec: dict | None = None) -> dict:
+    return {"metadata": {"name": d.name, "namespace": namespace, "uid": f"uid-{d.name}"},
+            "spec": {"replicas": d.declared_replicas,
+                     "selector": {"matchLabels": {"app": d.name}},
+                     "template": {"metadata": {"labels": {"app": d.name}}, "spec": dict(template_spec or {})}}}
 
 
 def _service_json(name: str, selector: dict[str, str], namespace: str) -> dict:

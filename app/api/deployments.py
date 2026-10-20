@@ -21,9 +21,7 @@ from app.shared.evidence_errors import EvidenceError, unavailable
 from app.engine.deployment_topology_modeling.service import (
     ClusterUnavailableError,
     discover_live,
-    analyze_sample_topology,
     get_ground_truth_evaluation,
-    get_sample_deployment,
     get_live_deployment_graph,
     get_manifest_intent,
     get_manifest_service_detail,
@@ -71,7 +69,7 @@ class ClusterAwareRoute(APIRoute):
                     raise
                 return JSONResponse(
                     status_code=503,
-                    content={"detail": str(exc), "data_source": "live", "hint": "Use /api/deployments/sample/analysis for the sample fixture."},
+                    content={"detail": str(exc), "data_source": "live"},
                 )
 
         return route_handler
@@ -93,33 +91,6 @@ DESC_TARGET_NAMESPACE = "Target namespace"
 # =====================================================================
 # Topic 1: Topology & Live Cluster State
 # =====================================================================
-
-@router.get(
-    "/sample",
-    response_model_by_alias=True,
-    tags=[TAG_TOPOLOGY],
-    summary="[Phase 1] Retrieve baseline static sample deployment graph",
-)
-def read_sample_deployment() -> DeploymentGraph:
-    """Returns static golden reference topology model for offline testing."""
-    return get_sample_deployment()
-
-
-@router.get(
-    "/sample/analysis",
-    tags=[TAG_TOPOLOGY],
-    summary="[Phase 3] Exposure analysis and Baseline B2 computed on the sample fixture",
-)
-def read_sample_analysis() -> Dict[str, Any]:
-    """Same analysis as the live path, run on sample_data/deployment.json and labelled as sample."""
-    analysis = analyze_sample_topology()
-    return {
-        "data_source": analysis.data_source,
-        "graph": analysis.graph.model_dump(by_alias=True),
-        "exposure_report": analysis.report.model_dump(),
-        "baseline_b2": analysis.baseline_b2.model_dump(),
-    }
-
 
 @router.get(
     "/live",
@@ -288,9 +259,12 @@ def get_service_topology_detail(
     tags=[TAG_MANIFEST],
     summary="[Phase 2] Parse declared YAML intent from deployment manifests",
 )
-def read_manifest_intent() -> List[Dict[str, Any]]:
-    """Parses deploy/kubernetes/ manifests and extracts declared replicas, limits, and topology spread."""
-    return get_manifest_intent()
+def read_manifest_intent(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> List[Dict[str, Any]]:
+    """Declared replicas, limits and topology spread: from named manifests, else the connected cluster's own
+    Deployment specs (see service.py for the order)."""
+    return get_manifest_intent(namespace=namespace)
 
 
 @router.get(
@@ -298,9 +272,11 @@ def read_manifest_intent() -> List[Dict[str, Any]]:
     tags=[TAG_MANIFEST],
     summary="[Phase 2] List declared microservice deployment constraints",
 )
-def list_manifest_service_constraints() -> List[Dict[str, Any]]:
+def list_manifest_service_constraints(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> List[Dict[str, Any]]:
     """Extracts declared constraints (limits, nodeAffinity, topologySpreadConstraints) per service."""
-    intent_data = get_manifest_intent()
+    intent_data = get_manifest_intent(namespace=namespace)
     services_raw = intent_data.get("declared_services", intent_data.get("services", [])) if isinstance(intent_data, dict) else intent_data
     if isinstance(services_raw, dict):
         return [
@@ -318,9 +294,10 @@ def list_manifest_service_constraints() -> List[Dict[str, Any]]:
 )
 def get_manifest_service_detail_endpoint(
     service_name: str,
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Retrieves declared replica count, resource limits, and spread constraints for a service."""
-    detail = get_manifest_service_detail(service_name=service_name)
+    detail = get_manifest_service_detail(service_name=service_name, namespace=namespace)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Service '{service_name}' not found in manifests.")
     return detail

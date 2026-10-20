@@ -143,15 +143,28 @@ def test_partial_discovery_lists_what_could_not_be_resolved(use_cluster):
 
 
 # ---- declared state ------------------------------------------------------------------------------------
-# Member 2's per-namespace views read declared intent from the repository's own manifests when none is named.
-# The packaged extension image ships no deploy/ folder, so these tests remove them to behave like the image:
-# declared state is then reported as unavailable, never as 100% compliance.
+# Declared intent has a real source. Member 2's per-namespace views take it from named manifests when there
+# are any, and otherwise from the Deployment specs of the connected cluster itself (service.py documents the
+# order). Only a cluster that declares nothing leaves declared state unavailable, never 100% compliance.
+
+def undeclared_shop():
+    """The two-node shop with pods but no Deployments: nothing declares the intended placement."""
+    from tests.support.fake_cluster import service as kube_service
+
+    shop = two_node_shop()
+    shop.deployments = {}
+    # The Services still exist and select the pods; it is only the Deployments (the declared intent) that are gone.
+    shop.services = {"shop": [kube_service("web", {"app": "web"}), kube_service("db", {"app": "db"})]}
+    return shop
+
 
 @pytest.fixture
 def packaged_image(monkeypatch, tmp_path):
+    """The packaged extension ships no manifest folder."""
     from app.engine.deployment_topology_modeling import service
     monkeypatch.setattr(service, "DEFAULT_MANIFEST_PATH", tmp_path / "absent-default")
     monkeypatch.setattr(service, "FALLBACK_MANIFEST_DIR", tmp_path / "absent-fallback")
+    monkeypatch.delenv(service.MANIFEST_PATH_ENV, raising=False)
 
 
 @pytest.mark.parametrize("route", [
@@ -161,7 +174,7 @@ def packaged_image(monkeypatch, tmp_path):
     "/api/deployments/manifests/compliance",
 ])
 def test_declared_state_views_report_insufficient_evidence(use_cluster, packaged_image, route):
-    use_cluster(two_node_shop())
+    use_cluster(undeclared_shop())
 
     response = client.get(route, params={"namespace": "shop"})
 
@@ -170,13 +183,51 @@ def test_declared_state_views_report_insufficient_evidence(use_cluster, packaged
 
 
 def test_drift_reports_unknown_compliance_not_perfect_compliance(use_cluster, packaged_image):
-    use_cluster(two_node_shop())
+    use_cluster(undeclared_shop())
 
     payload = client.get("/api/deployments/drift", params={"namespace": "shop"}).json()
 
     assert payload["constraint_compliance_rate"] is None
     assert payload["declared_state"] == "unavailable"
     assert payload["total_services"] == 2
+
+
+def test_declared_intent_is_read_from_the_clusters_own_deployments(use_cluster, packaged_image):
+    use_cluster(two_node_shop())
+
+    declared = client.get("/api/deployments/manifests", params={"namespace": "shop"}).json()
+
+    assert {d["service_name"]: d["expected_replicas"] for d in declared} == {"web": 2, "db": 1}
+    assert client.get("/api/deployments/drift", params={"namespace": "shop"}).json()["declared_state"] == "available"
+
+
+def test_a_deployments_node_selector_is_checked_against_where_its_pods_run(use_cluster, packaged_image):
+    cluster = two_node_shop()
+    # db runs on worker-1; declare that it must run on worker-2 instead.
+    cluster.template_specs = {"db": {"nodeSelector": {"kubernetes.io/hostname": "worker-2"}}}
+    use_cluster(cluster)
+
+    payload = client.get("/api/deployments/drift", params={"namespace": "shop"}).json()
+
+    assert payload["declared_state"] == "available"
+    assert payload["services_with_placement_rules"] == 1
+    assert payload["constraint_compliance_rate"] is not None and payload["constraint_compliance_rate"] < 1.0
+
+
+def test_the_operator_named_manifest_folder_wins_over_the_cluster(use_cluster, packaged_image, monkeypatch, tmp_path):
+    from app.engine.deployment_topology_modeling import service
+    use_cluster(two_node_shop())
+    folder = tmp_path / "declared"
+    folder.mkdir()
+    (folder / "only.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web, namespace: shop}\n"
+        "spec: {replicas: 7, template: {metadata: {labels: {app: web}}, spec: {containers: []}}}\n"
+    )
+    monkeypatch.setenv(service.MANIFEST_PATH_ENV, str(folder))
+
+    declared = client.get("/api/deployments/manifests", params={"namespace": "shop"}).json()
+
+    assert [(d["service_name"], d["expected_replicas"]) for d in declared] == [("web", 7)]
 
 
 # ---- snapshots ----------------------------------------------------------------------------------------
