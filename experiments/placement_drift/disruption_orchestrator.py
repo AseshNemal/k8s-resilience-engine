@@ -48,24 +48,37 @@ class DisruptionOrchestrator:
         namespace: str = DEFAULT_CHAOS_NAMESPACE,
         execution_mode: ScenarioExecutionMode = ScenarioExecutionMode.DRY_RUN_SIMULATION,
         repository: Optional[SnapshotRepository] = None,
+        topology: Optional[Any] = None,
     ):
+        """``topology`` is a real DeploymentGraph. Given one, every scenario starts from its real nodes and
+        pods (see live_topology_scenarios.py); without one the scripted placements are used."""
         self.namespace = namespace
         self.execution_mode = execution_mode
         self.repository = repository or SnapshotRepository()
+        self.topology = topology
+
+    def _instances(self) -> List[BaseScenario]:
+        scripted = [
+            cls(namespace=self.namespace, execution_mode=self.execution_mode, repository=self.repository)
+            for cls in self.ALL_SCENARIO_CLASSES
+        ]
+        if self.topology is None:
+            return scripted
+        from experiments.placement_drift.live_topology_scenarios import LiveTopologyScenario
+
+        return [
+            LiveTopologyScenario(template, self.topology, self.namespace, self.execution_mode, self.repository)
+            for template in scripted
+        ]
 
     def run_all(self) -> List[ScenarioResult]:
         """Executes all 8 scenarios sequentially."""
         results: List[ScenarioResult] = []
-        for scenario_cls in self.ALL_SCENARIO_CLASSES:
-            instance = scenario_cls(
-                namespace=self.namespace,
-                execution_mode=self.execution_mode,
-                repository=self.repository,
-            )
+        for instance in self._instances():
             result = instance.run()
             results.append(result)
             logger.info(
-                "Completed [%s] status=%s d_rate=%.2f",
+                "Completed [%s] status=%s d_rate=%s",
                 result.scenario_id,
                 result.status.value,
                 result.d_rate,
@@ -74,12 +87,7 @@ class DisruptionOrchestrator:
 
     def run_scenario(self, scenario_id: str) -> Optional[ScenarioResult]:
         """Executes a single specified scenario by ID."""
-        for scenario_cls in self.ALL_SCENARIO_CLASSES:
-            instance = scenario_cls(
-                namespace=self.namespace,
-                execution_mode=self.execution_mode,
-                repository=self.repository,
-            )
+        for instance in self._instances():
             if instance.scenario_id == scenario_id:
                 return instance.run()
         return None
@@ -94,6 +102,7 @@ class DisruptionOrchestrator:
             "total_scenarios": float(len(results)),
             "completed_count": float(len(completed)),
             "execution_mode": self.execution_mode.value,
+            "topology_source": "live" if self.topology is not None else "scripted",
             "is_experimental_evidence": self.execution_mode == ScenarioExecutionMode.LIVE_CLUSTER,
             "mean_d_rate": round(sum(d_rates) / len(d_rates), 4) if d_rates else None,
             "max_d_rate": round(max(d_rates), 4) if d_rates else None,

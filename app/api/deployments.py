@@ -8,7 +8,7 @@ Categorized into 6 distinct research topics for Swagger documentation:
 - Topic 5: Cluster Snapshots & Cryptographic Provenance (SHA-256 Immutable State Freezing)
 - Topic 6: Academic Benchmarks & Publications (>=98% Accuracy Certificate, LaTeX Tables, Markdown Reports)
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -20,6 +20,7 @@ from app.engine.deployment_topology_modeling.discovery_all import AllNamespacesD
 from app.shared.evidence_errors import EvidenceError, unavailable
 from app.engine.deployment_topology_modeling.service import (
     ClusterUnavailableError,
+    chaos_topology,
     discover_live,
     get_ground_truth_evaluation,
     get_live_deployment_graph,
@@ -86,6 +87,11 @@ TAG_BENCHMARKS = "6. Academic Benchmarks & Publications"
 
 DESC_K8S_NAMESPACE = "Target Kubernetes namespace"
 DESC_TARGET_NAMESPACE = "Target namespace"
+DESC_CHAOS_SOURCE = (
+    "Where the scenario placements come from: 'live' (default) is the connected cluster's real nodes and "
+    "pods, disrupted by a deterministic rule on a copy, so the cluster is never changed; 'scripted' is the "
+    "made-up placements written in the scenario code, labelled as such in every result"
+)
 
 
 # =====================================================================
@@ -524,9 +530,11 @@ def get_chaos_scenario_detail(
 def run_chaos_scenario(
     scenario_id: str,
     namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
-    """Injects a specific disruption fault (e.g. node drain, pod crash) and calculates placement drift."""
-    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace)
+    """Simulates a specific disruption (e.g. node drain, pod crash) and calculates placement drift. A dry run:
+    the cluster is never changed. With source=live it starts from the connected cluster's real topology."""
+    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace, topology_source=source)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
     return result.model_dump()
@@ -543,10 +551,14 @@ def run_chaos_scenario(
 )
 def get_scenario_transition_matrix(
     scenario_id: str,
+    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
     """Builds and formats the Markov pod transition grid T[i, j] between T0 and T1 snapshots."""
     repo = SnapshotRepository()
-    orchestrator = DisruptionOrchestrator(repository=repo)
+    orchestrator = DisruptionOrchestrator(
+        namespace=namespace, repository=repo, topology=chaos_topology(source, namespace)
+    )
     result = orchestrator.run_scenario(scenario_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
@@ -664,9 +676,11 @@ def clear_snapshots_cache() -> Dict[str, Any]:
 )
 def get_chaos_benchmarks(
     namespace: str = Query("default", description=f"{DESC_TARGET_NAMESPACE} for chaos simulation"),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
-    """Executes all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions."""
-    return run_chaos_benchmark_pipeline(namespace=namespace)
+    """Simulates all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions.
+    source=live starts from the connected cluster's real topology; source=scripted uses made-up placements."""
+    return run_chaos_benchmark_pipeline(namespace=namespace, topology_source=source)
 
 
 @router.get(

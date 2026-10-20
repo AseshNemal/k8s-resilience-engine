@@ -631,15 +631,38 @@ from experiments.placement_drift.parametric_ensemble_evaluator import Parametric
 _GLOBAL_SNAPSHOT_REPO = SnapshotRepository()
 
 
-def run_chaos_benchmark_pipeline(namespace: str = "default") -> dict[str, Any]:
+def chaos_topology(topology_source: str, namespace: str) -> DeploymentGraph | None:
+    """The placements the dry-run scenarios start from.
+
+    "live": the connected cluster's real topology (raises the usual coded error when it cannot be read, so a
+    result is never quietly built on something else). "scripted": the placements written in the scenario
+    code, which are made-up nodes and pods and are labelled so in every result.
+    """
+    if topology_source == "scripted":
+        return None
+    if topology_source == "live":
+        graph = get_live_deployment_graph(namespace=namespace)
+        if not any(pod.node != "unscheduled" for svc in graph.services for pod in svc.pods):
+            raise unavailable(
+                "TOPOLOGY_HAS_NO_WORKLOADS",
+                "The connected cluster has no service with a placed pod in this namespace, so there is nothing "
+                "to disrupt in a simulation.",
+                COMPONENT,
+            )
+        return graph
+    raise ValueError(f"topology_source must be 'live' or 'scripted', got '{topology_source}'")
+
+
+def run_chaos_benchmark_pipeline(namespace: str = "default", topology_source: str = "scripted") -> dict[str, Any]:
     """Runs the 8 dry-run scenarios and returns their results and aggregate metrics."""
-    orchestrator = DisruptionOrchestrator(namespace=namespace)
+    orchestrator = DisruptionOrchestrator(namespace=namespace, topology=chaos_topology(topology_source, namespace))
     results = orchestrator.run_all()
     return DisruptionReporter.generate_json_payload(results, orchestrator.compute_aggregate_metrics(results))
 
 
-def run_single_chaos_scenario(scenario_id: str, namespace: str = "default") -> Any:
-    return DisruptionOrchestrator(namespace=namespace).run_scenario(scenario_id)
+def run_single_chaos_scenario(scenario_id: str, namespace: str = "default", topology_source: str = "scripted") -> Any:
+    orchestrator = DisruptionOrchestrator(namespace=namespace, topology=chaos_topology(topology_source, namespace))
+    return orchestrator.run_scenario(scenario_id)
 
 
 def list_cluster_snapshots() -> list[str]:
