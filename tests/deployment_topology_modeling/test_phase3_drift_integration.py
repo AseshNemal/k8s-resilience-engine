@@ -1,11 +1,17 @@
+"""End-to-end checks on the stored KinD snapshot (experiments/single-node-failure/concentrated-baseline).
+
+Expected values are read from the kubectl output in that folder:
+- pod-placement.txt: 3 paymentservice pods, all Running/Ready on resilience-research-worker
+- paymentservice-deployment.yaml: replicas 3, nodeSelector research-node=worker-1
+- worker1-failure/nodes-after-detection.txt: resilience-research-worker NotReady,
+  service-result.txt: SERVICE_UNAVAILABLE
+"""
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from app.main import app
-from app.engine.deployment_topology_modeling.service import (
-    get_live_deployment_graph,
-    analyze_resilience_drift,
-    diff_cluster_snapshots,
-)
+
+from app.engine.deployment_topology_modeling import service
+from app.engine.deployment_topology_modeling.placement_metrics import ExposureStatus
 from app.engine.deployment_topology_modeling.drift_analysis.drift_audit_trail import DriftAuditTrail
 from app.engine.deployment_topology_modeling.drift_analysis.placement_drift_report import PlacementDriftReport
 from app.engine.deployment_topology_modeling.drift_analysis.drift_models import (
@@ -13,156 +19,126 @@ from app.engine.deployment_topology_modeling.drift_analysis.drift_models import 
     ClusterExposureReport,
     BaselineB2Result,
 )
-from app.engine.deployment_topology_modeling.drift_analysis.constants import (
-    DriftType,
-    DriftSeverity,
-    ExposureLevel,
-)
+from app.engine.deployment_topology_modeling.drift_analysis.constants import DriftType, DriftSeverity
+from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import nodes_from_objects
+from tests.deployment_topology_modeling import kind_snapshot
+
+NODE = kind_snapshot.CONCENTRATED_NODE
 
 
 def test_drift_audit_trail():
     trail = DriftAuditTrail()
     trail.record_run("test-cluster", 10, 2, 0.20, 0.90)
-    v = DriftViolation(
-        drift_type=DriftType.SCALE_DRIFT,
-        severity=DriftSeverity.HIGH,
-        description="Replica count mismatch",
-        expected="3 replicas",
-        actual="1 ready replica",
-    )
-    trail.record_violation("cart", v)
+    trail.record_violation("cart", DriftViolation(
+        drift_type=DriftType.SCALE_DRIFT, severity=DriftSeverity.HIGH,
+        description="Replica count mismatch", expected=3, actual=1,
+    ))
     records = trail.get_records()
-    assert len(records) == 2
-    assert records[0]["event_type"] == "DRIFT_ANALYSIS_RUN"
-    assert records[1]["event_type"] == "VIOLATION_DETECTED"
-    assert records[1]["service_name"] == "cart"
-
-    cart_only = trail.get_records(service_name="cart")
-    assert len(cart_only) == 1
-    assert cart_only[0]["severity"] == "HIGH"
+    assert [r["event_type"] for r in records] == ["DRIFT_ANALYSIS_RUN", "VIOLATION_DETECTED"]
+    assert trail.get_records(service_name="cart")[0]["severity"] == "HIGH"
 
 
-def test_placement_drift_report_markdown():
-    exp = ClusterExposureReport(
-        timestamp="2026-10-11T00:00:00Z",
-        total_services=2,
-        exposed_service_count=1,
-        exposure_rate=0.5,
-        constraint_compliance_rate=0.5,
-        mean_concentration=0.75,
-        runtime_overhead_ms=12.5,
-        services=[],
-    )
-    b2 = BaselineB2Result(
-        service_rankings=[
-            {
-                "rank": 1,
-                "service_name": "payment",
-                "exposure_level": ExposureLevel.FULL_EXPOSURE.value,
-                "severity_score": 0.85,
-                "replica_concentration": 1.0,
-                "ready_replicas": 2,
-                "exposed_nodes": ["node-1"],
-            }
-        ],
-        most_vulnerable_service="payment",
-        most_critical_worker_node="node-1",
-        total_single_points_of_failure=1,
-    )
-    md = PlacementDriftReport.generate_markdown_summary(exp, b2)
-    assert "# Kubernetes Deployment Topology Resilience & Drift Report" in md
-    assert "**Exposed Services (Single Point of Failure):** 1 (50.0%)" in md
-    assert "payment" in md
-    assert "node-1" in md
+def test_placement_drift_report_markdown_handles_unmeasurable_rates():
+    report = ClusterExposureReport(timestamp="t", total_services=0, evaluated_services=0, exposed_service_count=0)
+    md = PlacementDriftReport.generate_markdown_summary(report, BaselineB2Result())
+    assert "not measurable" in md
 
 
-from unittest.mock import patch
+def test_live_graph_from_real_snapshot():
+    graph = service.get_live_deployment_graph()
+    assert graph.cluster.node_names == [
+        "resilience-research-worker", "resilience-research-worker2", "resilience-research-worker3",
+    ]  # control-plane excluded
+    (pay,) = graph.services
+    assert pay.name == "paymentservice"
+    assert pay.deployment_names == ["paymentservice"]
+    assert pay.declared_replicas == 3
+    assert pay.ready_replicas == 3
+    assert pay.concentrated is True
+    assert pay.replica_concentration == pytest.approx(1.0)
+    assert pay.exposed_failure_domains == [NODE]
+    assert {p.node for p in pay.pods} == {NODE}
+    assert {p.phase for p in pay.pods} == {"Running"}
+    # Declared intent (deploy/test-workloads) is associated through the resolved Deployment:
+    assert pay.declared_intent is not None
+    assert pay.declared_intent.node_selector == {"research-node": "worker-1"}
+    # replicas 3 declared / 3 ready, nodeSelector satisfied -> no intent drift.
+    assert pay.drift_detected is False
 
 
-@patch("app.engine.deployment_topology_modeling.service.get_cluster_nodes", side_effect=Exception("No cluster in test"))
-def test_service_live_deployment_graph_integration(mock_nodes):
-    graph = get_live_deployment_graph()
-    assert graph.nodes is not None
-    assert graph.services is not None
-    assert graph.validation.runtime_overhead_ms >= 0.0
-    # Every service must have drift_detected boolean
-    for svc in graph.services:
-        assert isinstance(svc.drift_detected, bool)
-        assert isinstance(svc.drift_reasons, list)
+def test_snapshot_id_is_reproducible():
+    first = service.get_live_deployment_graph().snapshot_id
+    second = service.get_live_deployment_graph().snapshot_id
+    assert first.startswith("snap-")
+    assert second == first
 
 
-@patch("app.engine.deployment_topology_modeling.service.get_cluster_nodes", side_effect=Exception("No cluster in test"))
-def test_service_analyze_resilience_drift_facade(mock_nodes):
-    cluster_report, b2 = analyze_resilience_drift()
-    assert isinstance(cluster_report, ClusterExposureReport)
-    assert isinstance(b2, BaselineB2Result)
-    assert cluster_report.total_services >= 0
-    assert 0.0 <= cluster_report.exposure_rate <= 1.0
-    assert 0.0 <= cluster_report.constraint_compliance_rate <= 1.0
+def test_exposure_report_from_real_snapshot():
+    report, b2 = service.analyze_resilience_drift()
+    assert report.total_services == 1
+    assert report.exposed_services == ["paymentservice"]
+    assert report.exposure_rate == pytest.approx(1.0)          # 1 exposed / 1 evaluated
+    assert report.services_with_placement_rules == 1           # nodeSelector
+    assert report.constraint_compliance_rate == pytest.approx(1.0)  # all pods on research-node=worker-1
+    assert b2.most_critical_worker_node == NODE
+    assert b2.exposed_services_by_node == {NODE: ["paymentservice"]}
 
 
-from fastapi import FastAPI
-from app.engine.deployment_topology_modeling.endpoints import router as engine_router
+def test_pods_on_not_ready_node_are_not_counted_as_ready(monkeypatch):
+    """After worker-1 failed, kubectl still showed the pods 1/1 Running (worker1-failure/pods.txt)
+    while the node was NotReady. The model must not count them as surviving replicas."""
+    nodes_json = kind_snapshot.node_objects()
+    for node in nodes_json:
+        if node["metadata"]["name"] == NODE:
+            for cond in node["status"]["conditions"]:
+                if cond["type"] == "Ready":
+                    cond["status"] = "Unknown"
+
+    def collect_with_failed_node(namespace="default"):
+        _, analyzed_ok = kind_snapshot.collect()
+        nodes = nodes_from_objects(nodes_json, kind_snapshot.pod_objects())
+        from app.engine.deployment_topology_modeling.live_state.concentration_analyzer import (
+            analyze_replica_concentration,
+        )
+        workloads = {s["name"]: {**s, "pods": [{**p, "ready": p["readyCondition"]} for p in s["pods"]]}
+                     for s in analyzed_ok}
+        return nodes, analyze_replica_concentration(workloads, {n.name: n.ready for n in nodes})
+
+    monkeypatch.setattr(service, "collect_live_cluster", collect_with_failed_node)
+    report, _ = service.analyze_resilience_drift()
+    (pay,) = report.services
+    assert pay.ready_replicas == 0
+    assert pay.exposure_status == ExposureStatus.UNAVAILABLE  # matches observed SERVICE_UNAVAILABLE
+    assert report.unavailable_services == ["paymentservice"]
+    assert report.exposure_rate is None                        # nothing left to evaluate
 
 
-@patch("app.engine.deployment_topology_modeling.service.get_cluster_nodes", side_effect=Exception("No cluster in test"))
-def test_engine_endpoints_drift_and_baseline(mock_nodes):
+def test_cluster_unavailable_is_an_error_not_sample_data(monkeypatch):
+    def no_cluster(namespace="default"):
+        raise service.ClusterUnavailableError("no kubeconfig")
+
+    monkeypatch.setattr(service, "collect_live_cluster", no_cluster)
+    with pytest.raises(service.ClusterUnavailableError):
+        service.get_live_deployment_graph()
+
+    from app.main import app
+    resp = TestClient(app).get("/api/deployments/live")
+    assert resp.status_code == 503
+    assert resp.json()["data_source"] == "live"
+
+
+def test_engine_endpoints_drift_and_baseline():
+    from app.engine.deployment_topology_modeling.endpoints import router as engine_router
     test_app = FastAPI()
     test_app.include_router(engine_router)
     client = TestClient(test_app)
-    
-    # Test /engine/deployment-topology/drift
-    resp_drift = client.get("/engine/deployment-topology/drift")
-    assert resp_drift.status_code == 200
-    data_drift = resp_drift.json()
-    assert "exposure_rate" in data_drift
-    assert "constraint_compliance_rate" in data_drift
-    assert "services" in data_drift
 
-    # Test /engine/deployment-topology/baseline-b2
-    resp_b2 = client.get("/engine/deployment-topology/baseline-b2")
-    assert resp_b2.status_code == 200
-    data_b2 = resp_b2.json()
-    assert "service_rankings" in data_b2
-    assert "total_single_points_of_failure" in data_b2
+    data_drift = client.get("/engine/deployment-topology/drift").json()
+    assert data_drift["exposure_rate"] == pytest.approx(1.0)
+    data_b2 = client.get("/engine/deployment-topology/baseline-b2").json()
+    assert data_b2["total_single_points_of_failure"] == 1
 
-    # Test /engine/deployment-topology/diff
-    diff_payload = {
-        "baseline": {
-            "services": [
-                {
-                    "service_name": "cart",
-                    "total_replicas": 2,
-                    "ready_replicas": 2,
-                    "replica_concentration": 0.5,
-                    "exposure_level": "RESILIENT",
-                    "severity_score": 0.0,
-                    "violations": [],
-                }
-            ]
-        },
-        "target": {
-            "services": [
-                {
-                    "service_name": "cart",
-                    "total_replicas": 2,
-                    "ready_replicas": 1,
-                    "replica_concentration": 1.0,
-                    "exposure_level": "FULL_EXPOSURE",
-                    "severity_score": 0.8,
-                    "violations": [
-                        {
-                            "drift_type": "SCALE_DRIFT",
-                            "severity": "HIGH",
-                            "description": "Replica lost",
-                        }
-                    ],
-                }
-            ]
-        },
-    }
-    resp_diff = client.post("/engine/deployment-topology/diff", json=diff_payload)
-    assert resp_diff.status_code == 200
-    data_diff = resp_diff.json()
-    assert data_diff["placement_drift_rate"] == 1.0
-    assert len(data_diff["state_transitions"]) == 1
+    report = service.analyze_resilience_drift()[0].model_dump(mode="json")
+    resp = client.post("/engine/deployment-topology/diff", json={"baseline": report, "target": report})
+    assert resp.status_code == 200
+    assert resp.json()["placement_drift_rate"] == pytest.approx(0.0)

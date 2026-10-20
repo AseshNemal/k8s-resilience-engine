@@ -1,0 +1,40 @@
+/**
+ * Phase 5 CSS Design Tokens & Glassmorphism Variables
+ * Component: Component 2 - Deployment Topology Modeling
+ */
+:root {
+    --c2-glass-bg: rgba(255, 255, 255, 0.85);
+    --c2-glass-border: rgba(226, 232, 240, 0.8);
+    --c2-glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+
+    --c2-accent-primary: #3b82f6;
+    --c2-accent-primary-hover: #2563eb;
+    --c2-accent-success: #10b981;
+    --c2-accent-warning: #f59e0b;
+    --c2-accent-danger: #ef4444;
+    --c2-accent-purple: #8b5cf6;
+
+    --c2-surface-subtle: #f8fafc;
+    --c2-text-main: #0f172a;
+    --c2-text-muted: #64748b;
+    --c2-border-light: #e2e8f0;
+
+    --c2-radius-sm: 6px;
+    --c2-radius-md: 10px;
+    --c2-radius-lg: 16px;
+
+    --c2-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --c2-glass-bg: rgba(30, 41, 59, 0.7);
+        --c2-glass-border: rgba(255, 255, 255, 0.1);
+        --c2-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+        --c2-surface-subtle: #0f172a;
+        --c2-text-main: #f8fafc;
+        --c2-text-muted: #94a3b8;
+        --c2-border-light: #334155;
+    }
+}

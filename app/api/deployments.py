@@ -9,9 +9,15 @@ Categorized into 6 distinct research topics for Swagger documentation:
 - Topic 6: Academic Benchmarks & Publications (>=98% Accuracy Certificate, LaTeX Tables, Markdown Reports)
 """
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from pydantic import ValidationError
 
 from app.engine.deployment_topology_modeling.service import (
+    ClusterUnavailableError,
+    analyze_sample_topology,
+    get_ground_truth_evaluation,
     get_sample_deployment,
     get_live_deployment_graph,
     get_manifest_intent,
@@ -44,7 +50,25 @@ from experiments.placement_drift.drift_transition_matrix import DriftTransitionM
 from experiments.placement_drift.snapshot_repository import SnapshotRepository
 
 
-router = APIRouter(prefix="/api/deployments")
+class ClusterAwareRoute(APIRoute):
+    """Answers 503 when no Kubernetes cluster is reachable, instead of returning substitute data."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def route_handler(request: Request):
+            try:
+                return await handler(request)
+            except ClusterUnavailableError as exc:
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": str(exc), "data_source": "live", "hint": "Use /api/deployments/sample/analysis for the sample fixture."},
+                )
+
+        return route_handler
+
+
+router = APIRouter(prefix="/api/deployments", route_class=ClusterAwareRoute)
 
 TAG_TOPOLOGY = "1. Topology & Live Cluster State"
 TAG_MANIFEST = "2. Declared Manifest Intent"
@@ -70,6 +94,22 @@ DESC_TARGET_NAMESPACE = "Target namespace"
 def read_sample_deployment() -> DeploymentGraph:
     """Returns static golden reference topology model for offline testing."""
     return get_sample_deployment()
+
+
+@router.get(
+    "/sample/analysis",
+    tags=[TAG_TOPOLOGY],
+    summary="[Phase 3] Exposure analysis and Baseline B2 computed on the sample fixture",
+)
+def read_sample_analysis() -> Dict[str, Any]:
+    """Same analysis as the live path, run on sample_data/deployment.json and labelled as sample."""
+    analysis = analyze_sample_topology()
+    return {
+        "data_source": analysis.data_source,
+        "graph": analysis.graph.model_dump(by_alias=True),
+        "exposure_report": analysis.report.model_dump(),
+        "baseline_b2": analysis.baseline_b2.model_dump(),
+    }
 
 
 @router.get(
@@ -151,8 +191,10 @@ def list_topology_services(
             "declared_replicas": s.declared_replicas,
             "ready_replicas": s.ready_replicas,
             "replica_concentration": s.replica_concentration,
+            "concentrated": s.concentrated,
+            "exposed_failure_domains": s.exposed_failure_domains,
             "total_pods": len(s.pods),
-            "hosting_nodes": list({p.node for p in s.pods}),
+            "hosting_nodes": s.hosting_nodes,
         }
         for s in graph.services
     ]
@@ -249,8 +291,11 @@ def get_manifest_compliance_rate(
     report, _ = analyze_resilience_drift(namespace=namespace)
     return {
         "constraint_compliance_rate": report.constraint_compliance_rate,
+        "services_with_placement_rules": report.services_with_placement_rules,
         "total_services": report.total_services,
+        "evaluated_services": report.evaluated_services,
         "exposed_service_count": report.exposed_service_count,
+        "exposure_rate": report.exposure_rate,
         "mean_concentration": report.mean_concentration,
     }
 
@@ -374,14 +419,19 @@ def get_baseline_b2(
     "/diff",
     tags=[TAG_DRIFT],
     summary="[Phase 3] Diff two cluster snapshots to calculate Placement Drift Rate (D_rate)",
+    responses={422: {"description": "Snapshots are not ClusterExposureReport payloads with exposure_status per service"}},
 )
 def diff_snapshots(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Calculates placement drift transition dynamics and Drate between baseline and target states."""
-    baseline = payload.get("baseline", {})
-    target = payload.get("target", {})
-    diff_report = diff_cluster_snapshots(baseline, target)
+    try:
+        diff_report = diff_cluster_snapshots(payload.get("baseline", {}), payload.get("target", {}))
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Snapshots must be ClusterExposureReport payloads with exposure_status per service: {exc}",
+        ) from exc
     return diff_report.model_dump()
 
 
@@ -486,6 +536,7 @@ def get_scenario_transition_matrix(
         "ascii_table": ascii_table,
         "latex_table": latex_table,
         "migration_records": [r.model_dump() for r in records],
+        "execution_mode": result.execution_mode.value,
         "d_rate": result.d_rate,
         "delta_e_rate": result.delta_e_rate,
     }
@@ -594,8 +645,17 @@ def get_chaos_benchmarks(
 )
 def get_accuracy_certificate() -> Dict[str, Any]:
     """Evaluates ground-truth accuracy metrics required by the viva evaluation panel."""
-    cert = get_academic_accuracy_certificate()
-    return cert.model_dump() if hasattr(cert, "model_dump") else dict(cert)
+    return get_academic_accuracy_certificate().model_dump()
+
+
+@router.get(
+    "/benchmarks/ground-truth",
+    tags=[TAG_BENCHMARKS],
+    summary="[Validation] Model output vs kubectl ground truth for the stored KinD snapshot",
+)
+def get_ground_truth_report() -> Dict[str, Any]:
+    """Accuracies with their sample sizes and the per-failure exposure checks."""
+    return get_ground_truth_evaluation()
 
 
 @router.get(

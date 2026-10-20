@@ -1,0 +1,61 @@
+{# Tab 3: Resilience Drift & Failure Domain Exposure #}
+<div class="tab-pane" id="tab-drift" role="tabpanel" aria-labelledby="tab-btn-drift" hidden>
+    <div class="tab-pane__header">
+        <div>
+            <h3 class="tab-pane__title">Resilience Drift & Failure Exposure Signals</h3>
+            <p class="tab-pane__desc">Real-time detection of Single Points of Failure (SPOF) and 5 core resilience detectors.</p>
+        </div>
+        <div class="spof-alert-badge" id="spof-banner-badge">
+            <span class="pulsing-dot"></span>
+            <span id="spof-banner-count">0</span> Active SPOF Exposures Detected
+        </div>
+    </div>
+
+    <!-- Category Summary Counters -->
+    <div class="drift-categories-grid" id="drift-categories-counters">
+        <div class="category-card" data-cat="scale">
+            <span class="category-card__label">Scale Drift</span>
+            <span class="category-card__count" id="count-scale-drift">0</span>
+        </div>
+        <div class="category-card" data-cat="affinity">
+            <span class="category-card__label">Affinity Violations</span>
+            <span class="category-card__count" id="count-affinity-drift">0</span>
+        </div>
+        <div class="category-card" data-cat="resource">
+            <span class="category-card__label">Resource Bounds</span>
+            <span class="category-card__count" id="count-resource-drift">0</span>
+        </div>
+        <div class="category-card" data-cat="contention">
+            <span class="category-card__label">Node Contention</span>
+            <span class="category-card__count" id="count-contention-drift">0</span>
+        </div>
+        <div class="category-card" data-cat="spread">
+            <span class="category-card__label">Spread Skew</span>
+            <span class="category-card__count" id="count-spread-drift">0</span>
+        </div>
+    </div>
+
+    <div class="drift-split-grid">
+        <!-- SPOF & Exposed Workloads -->
+        <div class="card card--glass">
+            <div class="card__header">
+                <h4 class="card__title">Single Point of Failure (SPOF) Workloads</h4>
+                <span class="card__badge badge--danger" id="spof-total-badge">SPOF</span>
+            </div>
+            <div class="spof-list" id="spof-workloads-list">
+                <!-- Populated by deployments_drift_widget.js -->
+            </div>
+        </div>
+
+        <!-- Node Failure Blast Radius Rankings -->
+        <div class="card card--glass">
+            <div class="card__header">
+                <h4 class="card__title">Worker Node Risk & Density Rankings</h4>
+                <span class="card__badge badge--warning">Blast Radius</span>
+            </div>
+            <div class="node-risk-list" id="node-risk-rankings-list">
+                <!-- Populated by deployments_drift_widget.js -->
+            </div>
+        </div>
+    </div>
+</div>

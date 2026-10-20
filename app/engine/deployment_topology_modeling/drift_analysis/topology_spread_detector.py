@@ -1,82 +1,94 @@
 from collections import Counter
 from typing import Any
+from app.engine.deployment_topology_modeling import placement_metrics as pm
+from app.engine.deployment_topology_modeling.drift_analysis import intent_access as ia
 from app.engine.deployment_topology_modeling.drift_analysis.constants import (
     DriftType,
     DriftSeverity,
+    FailureDomainType,
 )
 from app.engine.deployment_topology_modeling.drift_analysis.drift_models import DriftViolation
 from app.engine.deployment_topology_modeling.drift_analysis.base_detector import BaseDriftDetector
 
 
 class TopologySpreadDriftDetector(BaseDriftDetector):
-    """
-    Detects violations of declared Pod Topology Spread Constraints.
-    
-    Computes the actual skew across domains:
-        skew = max(pods_per_domain) - min(pods_per_domain)
-    and verifies whether it exceeds the declared maxSkew.
+    """Checks current placement against declared topologySpreadConstraints.
+
+    Follows the Kubernetes definition of skew:
+      eligible nodes  = nodes carrying the topologyKey label that also satisfy the pod's
+                        nodeSelector / required nodeAffinity (default nodeAffinityPolicy: Honor)
+      count(d)        = scheduled pods of the service on eligible nodes in domain d
+      global minimum  = min over eligible domains, or 0 if fewer domains than minDomains
+      skew            = max(count) - global minimum; violated when skew > maxSkew
+
+    Kubernetes only enforces this when a pod is scheduled; evaluating it on the current state is
+    what reveals drift after rescheduling, scaling or node loss.
+    Assumption: the constraint's labelSelector selects exactly this service's pods.
     """
 
+    def _domain_of(self, node_name: str, labels: dict[str, str], topology_key: str) -> str | None:
+        if topology_key in labels:
+            return labels[topology_key]
+        if topology_key == FailureDomainType.HOSTNAME.value:
+            return node_name
+        return None
+
+    def _pods_per_eligible_domain(
+        self,
+        declared_intent: Any,
+        topology_key: str,
+        runtime_pods: list[dict[str, Any]],
+        nodes: dict[str, dict[str, str]],
+    ) -> Counter[str]:
+        """Scheduled pods per domain, over eligible nodes only; empty domains count as 0."""
+        node_domain: dict[str, str] = {}
+        for node_name, labels in nodes.items():
+            domain = self._domain_of(node_name, labels, topology_key)
+            if domain is not None and ia.node_satisfies_required_placement(declared_intent, labels):
+                node_domain[node_name] = domain
+
+        counts: Counter[str] = Counter(dict.fromkeys(set(node_domain.values()), 0))
+        for pod in runtime_pods:
+            node_name = pm.pod_node(pod)
+            if node_name in node_domain:
+                counts[node_domain[node_name]] += 1
+        return counts
+
     @staticmethod
-    def _extract_constraints(declared_intent: Any | None) -> list[dict[str, Any]]:
-        if not declared_intent:
-            return []
-        if hasattr(declared_intent, "topology_spread_constraints"):
-            return getattr(declared_intent, "topology_spread_constraints", [])
-        if isinstance(declared_intent, dict):
-            return declared_intent.get("topology_spread_constraints", [])
-        return []
+    def _skew(counts: Counter[str], min_domains: int | None) -> int:
+        """max(count) - global minimum; the minimum is 0 when there are fewer domains than minDomains."""
+        global_min = 0 if (min_domains and len(counts) < min_domains) else min(counts.values())
+        return max(counts.values()) - global_min
 
     def _evaluate_constraint(
         self,
         service_name: str,
+        declared_intent: Any,
         constraint: dict[str, Any],
         runtime_pods: list[dict[str, Any]],
-        node_labels: dict[str, dict[str, str]],
+        nodes: dict[str, dict[str, str]],
     ) -> DriftViolation | None:
-        max_skew = constraint.get("max_skew", constraint.get("maxSkew", self.config.default_max_skew))
-        topology_key = constraint.get("topology_key", constraint.get("topologyKey", self.config.failure_domain_key))
-        when_unsatisfiable = constraint.get(
-            "when_unsatisfiable",
-            constraint.get("whenUnsatisfiable", "DoNotSchedule")
-        )
+        max_skew = constraint["max_skew"]
+        if max_skew is None:
+            return None
+        topology_key = constraint["topology_key"] or self.config.failure_domain_key
+        when_unsatisfiable = constraint["when_unsatisfiable"] or "DoNotSchedule"
 
-        domain_counts: Counter[str] = Counter()
-        for pod in runtime_pods:
-            node_name = pod.get("node_name", pod.get("node"))
-            if node_name:
-                domain_val = node_labels.get(node_name, {}).get(topology_key, node_name)
-                domain_counts[domain_val] += 1
-
-        if not domain_counts:
+        counts = self._pods_per_eligible_domain(declared_intent, topology_key, runtime_pods, nodes)
+        if not counts or sum(counts.values()) == 0:
             return None
 
-        all_known_domains = {
-            labels.get(topology_key, node_name)
-            for node_name, labels in node_labels.items()
-            if topology_key in labels or topology_key == self.config.failure_domain_key
-        }
-        if not all_known_domains:
-            all_known_domains = set(domain_counts.keys())
-
-        counts = [domain_counts.get(d, 0) for d in all_known_domains]
-        actual_skew = max(counts) - min(counts)
-
+        actual_skew = self._skew(counts, constraint["min_domains"])
         if actual_skew <= max_skew:
             return None
 
-        severity = (
-            DriftSeverity.HIGH
-            if when_unsatisfiable == "DoNotSchedule"
-            else DriftSeverity.MEDIUM
-        )
         return DriftViolation(
             drift_type=DriftType.TOPOLOGY_SPREAD_DRIFT,
-            severity=severity,
+            severity=DriftSeverity.HIGH if when_unsatisfiable == "DoNotSchedule" else DriftSeverity.MEDIUM,
             description=(
                 f"Service '{service_name}' violates topology spread constraint on '{topology_key}': "
                 f"actual skew is {actual_skew} which exceeds declared maxSkew {max_skew} "
-                f"(distribution: {dict(domain_counts)})."
+                f"(distribution: {dict(sorted(counts.items()))})."
             ),
             expected=max_skew,
             actual=actual_skew,
@@ -90,25 +102,12 @@ class TopologySpreadDriftDetector(BaseDriftDetector):
         runtime_pods: list[dict[str, Any]],
         cluster_nodes: list[dict[str, Any]],
     ) -> list[DriftViolation]:
-        if not declared_intent or len(runtime_pods) <= 1:
+        if not declared_intent:
             return []
-
-        constraints = self._extract_constraints(declared_intent)
-        if not constraints:
-            return []
-
-        node_labels: dict[str, dict[str, str]] = {
-            node.get("name", ""): node.get("labels", {})
-            for node in cluster_nodes
-            if node.get("name")
-        }
-
-        violations: list[DriftViolation] = []
-        for constraint in constraints:
-            violation = self._evaluate_constraint(
-                service_name, constraint, runtime_pods, node_labels
-            )
+        nodes = {n["name"]: ia.node_label_view(n) for n in cluster_nodes if n.get("name")}
+        violations = []
+        for constraint in ia.spread_constraints(declared_intent):
+            violation = self._evaluate_constraint(service_name, declared_intent, constraint, runtime_pods, nodes)
             if violation:
                 violations.append(violation)
-
         return violations

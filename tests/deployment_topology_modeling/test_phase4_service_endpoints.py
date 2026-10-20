@@ -315,8 +315,11 @@ def test_api_get_drift_nodes_risk(client: TestClient):
     nodes = resp.json()
     assert isinstance(nodes, list)
     assert len(nodes) >= 1
-    assert "cluster_workload_share" in nodes[0]
-    assert "risk_level" in nodes[0]
+    # Stored KinD snapshot: all 3 paymentservice pods on resilience-research-worker.
+    assert nodes[0]["node_name"] == "resilience-research-worker"
+    assert nodes[0]["exposed_services"] == ["paymentservice"]
+    assert nodes[0]["risk_level"] == "CRITICAL"
+    assert all(n["exposed_service_count"] == 0 and n["risk_level"] == "BALANCED" for n in nodes[1:])
 
 
 # =====================================================================
