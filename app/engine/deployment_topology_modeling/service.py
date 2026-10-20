@@ -122,11 +122,31 @@ def _associate_manifest_intents(
     return drift_manifests, service_intents
 
 
+def resolve_manifest_source(manifest_path: str | None = None) -> Path | None:
+    """The single manifest source for drift analysis and the Intent tab, so both always read the
+    same YAML: an explicit path, else deploy/kubernetes/boutique.yaml, else deploy/test-workloads."""
+    if manifest_path:
+        return Path(manifest_path)
+    return next((p for p in (DEFAULT_MANIFEST_PATH, FALLBACK_MANIFEST_DIR) if p.exists()), None)
+
+
+def get_manifest_source() -> dict[str, Any]:
+    """Which manifest the declared intent comes from, so the dashboard can say so."""
+    target = resolve_manifest_source()
+    if target is None:
+        return {"found": False, "path": None, "is_default": False}
+    try:
+        shown = target.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        shown = target.name
+    return {"found": True, "path": shown, "is_default": target == DEFAULT_MANIFEST_PATH}
+
+
 def _load_manifest_intents(
     manifest_path: str | None, analyzed_services: list[dict[str, Any]]
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    target = Path(manifest_path) if manifest_path else DEFAULT_MANIFEST_PATH
-    if not target.exists():
+    target = resolve_manifest_source(manifest_path)
+    if target is None or not target.exists():
         return {}, {}
     try:
         parsed = run_manifest_pipeline(str(target))
@@ -248,8 +268,10 @@ def analyze_sample_topology() -> TopologyAnalysis:
 # ---------------------------------------------------------------------------------------------
 
 def get_manifest_intent() -> list[dict[str, Any]]:
-    """Declared Deployment intent from the default manifest, else deploy/test-workloads."""
-    target = DEFAULT_MANIFEST_PATH if DEFAULT_MANIFEST_PATH.exists() else FALLBACK_MANIFEST_DIR
+    """Declared Deployment intent from the same source drift analysis uses (resolve_manifest_source)."""
+    target = resolve_manifest_source()
+    if target is None:
+        return []
     return [i.model_dump() for i in run_manifest_pipeline(str(target))]
 
 

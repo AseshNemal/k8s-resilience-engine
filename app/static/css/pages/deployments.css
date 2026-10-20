@@ -813,6 +813,10 @@
 .source-banner--live { border-color: #86efac; background: #f0fdf4; color: #166534; }
 .source-banner--sample { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
 
+/* ---- which YAML the Intent tab reads ---- */
+.manifest-source { margin: 0 0 var(--space-md) 0; }
+.manifest-source--warning { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+
 /* ---- "What am I looking at?" help ---- */
 .tab-help {
     margin: 0 0 var(--space-md) 0;

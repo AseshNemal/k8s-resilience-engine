@@ -23,6 +23,7 @@ from app.engine.deployment_topology_modeling.service import (
     get_live_deployment_graph,
     get_manifest_intent,
     get_manifest_service_detail,
+    get_manifest_source,
     analyze_resilience_drift,
     diff_cluster_snapshots,
     run_chaos_benchmark_pipeline,
@@ -243,8 +244,18 @@ def get_service_topology_detail(
     summary="[Phase 2] Parse declared YAML intent from deployment manifests",
 )
 def read_manifest_intent() -> List[Dict[str, Any]]:
-    """Parses deploy/kubernetes/ manifests and extracts declared replicas, limits, and topology spread."""
+    """Parses the manifest named by /manifests/source and extracts declared replicas, limits, and topology spread."""
     return get_manifest_intent()
+
+
+@router.get(
+    "/manifests/source",
+    tags=[TAG_MANIFEST],
+    summary="[Phase 2] Which manifest file the declared intent is read from",
+)
+def read_manifest_source() -> Dict[str, Any]:
+    """deploy/kubernetes/boutique.yaml when present, else deploy/test-workloads. Drift analysis uses the same source."""
+    return get_manifest_source()
 
 
 @router.get(

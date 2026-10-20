@@ -6,7 +6,29 @@
 window.DeploymentsIntentWidget = (function () {
     "use strict";
 
+    // Same rule as service.resolve_manifest_source: say which YAML the declared intent comes from.
+    async function showManifestSource() {
+        const note = document.querySelector("[data-role='manifest-source']");
+        if (!note) return;
+        try {
+            const resp = await fetch("/api/deployments/manifests/source");
+            if (!resp.ok) return;
+            const src = await resp.json();
+            note.classList.toggle("manifest-source--warning", !src.is_default);
+            if (!src.found) {
+                note.textContent = "No manifest found (deploy/kubernetes/boutique.yaml or deploy/test-workloads), so there is no declared intent to compare.";
+            } else if (src.is_default) {
+                note.textContent = `Declared intent from ${src.path}.`;
+            } else {
+                note.textContent = `deploy/kubernetes/boutique.yaml not found: declared intent comes from ${src.path}. Only services in the same namespace as that YAML are compared.`;
+            }
+        } catch (err) {
+            console.warn("Could not load manifest source:", err);
+        }
+    }
+
     async function loadIntentCompliance(activeServices, isLive) {
+        await showManifestSource();
         try {
             const resp = await fetch("/api/deployments/manifests");
             if (!resp.ok) return;
@@ -45,9 +67,12 @@ window.DeploymentsIntentWidget = (function () {
         if (!tbody) return;
 
         tbody.innerHTML = "";
+        // Keyed by namespace + name, like the backend, so a YAML in another namespace that reuses a
+        // service name (e.g. deploy/test-workloads in resilience-test) is never compared with it.
+        const key = (namespace, name) => `${namespace || "default"}/${name}`;
         const liveMap = {};
         (liveServices || []).forEach((s) => {
-            liveMap[s.name] = s;
+            liveMap[key(s.namespace, s.name)] = s;
         });
 
         let compliantCount = 0;
@@ -55,7 +80,7 @@ window.DeploymentsIntentWidget = (function () {
 
         intents.forEach((item) => {
             const svcName = item.service_name || "unknown";
-            const live = liveMap[svcName] || {};
+            const live = liveMap[key(item.namespace, svcName)] || {};
             const declaredRep = item.expected_replicas ?? item.declared_replicas ?? null;
 
             // Live ready replicas from snake_case or camelCase or pod list; null when not observed
