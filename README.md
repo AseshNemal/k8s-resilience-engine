@@ -1209,10 +1209,14 @@ The checklist above predates the real-data-only work and was not re-audited. As 
       so applications whose Deployments are named differently from their `app` label (Istio Bookinfo:
       `productpage-v1` with `app: productpage`) resolve completely. Pods that no Service selects are named
       in a warning. Not yet verified against a real Bookinfo cluster: the tests use a Bookinfo-shaped fake.
-- [ ] **The live recommendation pipeline is incomplete.** No producer yet turns the engine's
-      simulation into a `RecommendationReport`, a YAML proposal or a `ValidationReport`, so the
-      Recommendations page shows explicit missing-evidence states and no approval can be requested.
-      See [`docs/RECOMMENDATION_LIVE_DATA.md`](docs/RECOMMENDATION_LIVE_DATA.md).
+- [x] **Live recommendations exist.** `GET /api/recommendations/live?workflow_id=…` computes a
+      `RecommendationReport` from the connected cluster and a frozen workflow (topology-spread candidates,
+      simulated on a copy of the live graph, blast radius before and after from Component 3). `confidence` is
+      evidence coverage, not model accuracy. An approval can be requested for it and is bound to that live
+      evidence; nothing is applied.
+- [ ] **Still missing in Component 4:** a Kubernetes YAML proposal and a `ValidationReport` (predicted versus
+      observed improvement after an approved change). Candidate types other than topology spread are skipped.
+      Not yet run against a real cluster. See [`docs/RECOMMENDATION_LIVE_DATA.md`](docs/RECOMMENDATION_LIVE_DATA.md).
 - [ ] Controlled read-only validation against the kind cluster has not been run yet.
 
 ---

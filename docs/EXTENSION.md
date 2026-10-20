@@ -368,9 +368,10 @@ package.
   been reworked for real-data-only operation.)
 - Component 3 (Failure impact) runs its deterministic prediction over the connected cluster's live
   topology and an approved, frozen workflow from Component 1, and refuses (`TOPOLOGY_INCOMPLETE`,
-  `WORKFLOW_EVIDENCE_UNAVAILABLE`) when that evidence is missing. Component 4 has no live recommendation
-  source yet, so the Recommendations page says so (`RECOMMENDATION_EVIDENCE_UNAVAILABLE`) and no approval
-  can be requested; there is no recommendation apply or validation step.
+  `WORKFLOW_EVIDENCE_UNAVAILABLE`) when that evidence is missing. Component 4 computes a live
+  recommendation from that same evidence (the Recommendations page takes the frozen workflow ID, an optional
+  failed node and the namespace); without a workflow it says so (`RECOMMENDATION_EVIDENCE_UNAVAILABLE`).
+  There is no recommendation apply or validation step.
   Nothing here applies Kubernetes changes, runs chaos experiments or deploys workloads.
 - The live topology of a fresh kind cluster shows its three worker nodes and an empty (valid) result with no services.
 - Service/ownership resolution follows Kubernetes (Service selector, then pod → ReplicaSet → Deployment), so
@@ -378,8 +379,9 @@ package.
   `productpage-v1`) resolve completely. This is covered by tests on a Bookinfo-shaped fake cluster and has not
   been verified against a real Bookinfo cluster yet. A pod that a Service selects but no Deployment owns
   (a StatefulSet's pod) leaves that service `partial`, so a prediction that depends on it is refused.
-- **The live recommendation pipeline is incomplete** (see `docs/RECOMMENDATION_LIVE_DATA.md`): nothing yet
-  produces a `RecommendationReport`, YAML proposal or `ValidationReport` from live evidence.
+- **The live recommendation is partial:** a `RecommendationReport` is produced from live evidence (topology
+  spread only, simulated on a copy), but no YAML proposal or `ValidationReport` is, and it has not been run
+  against a real cluster yet.
 - An installed extension keeps running the image it was installed from. Changes only appear after
   rebuilding and running `docker extension update`.
 - kind workers are containers on one Docker host: logical failure domains, not independent machines.

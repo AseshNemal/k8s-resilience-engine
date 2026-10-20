@@ -28,6 +28,24 @@
     </div>
 </div>
 
+<div class="rec-inputs" role="group" aria-label="What to recommend for">
+    <label class="rec-inputs__field" for="rec-workflow-id">
+        <span>Frozen workflow ID</span>
+        <input class="rec-inputs__input" id="rec-workflow-id" data-role="workflow-id" type="text"
+               autocomplete="off" placeholder="ID of an approved, frozen workflow graph">
+    </label>
+    <label class="rec-inputs__field" for="rec-failed-node">
+        <span>Failed node (optional)</span>
+        <input class="rec-inputs__input" id="rec-failed-node" data-role="failed-node" type="text"
+               autocomplete="off" placeholder="Default: the node whose loss hurts most">
+    </label>
+    <label class="rec-inputs__field" for="rec-namespace">
+        <span>Namespace</span>
+        <input class="rec-inputs__input" id="rec-namespace" data-role="namespace" type="text"
+               autocomplete="off" value="default">
+    </label>
+</div>
+
 <div data-role="page-region">
     {{ loading_state("Asking for the current live recommendation…") }}
 </div>

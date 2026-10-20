@@ -24,6 +24,10 @@
     const reloadButton = document.querySelector('[data-role="reload-button"]');
     const sourceBadge = document.querySelector('[data-role="source-badge"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
+    // What to recommend for: the recommendation is computed from the connected cluster and this frozen workflow.
+    const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
+    const failedNodeInput = document.querySelector('[data-role="failed-node"]');
+    const namespaceInput = document.querySelector('[data-role="namespace"]');
 
     const APPROVAL_BASE = "/api/recommendations";
     const PROPOSAL_VERSION = "v1.0";
@@ -37,8 +41,23 @@
 
     // ---- Approval gate -------------------------------------------------------------------------------
 
+    // The filled-in inputs as a query string, or "" when none is filled in. Only the filled ones are sent, so
+    // the server (not this page) decides what a missing workflow means.
+    function inputQuery() {
+        const params = new URLSearchParams();
+        [["workflow_id", workflowIdInput], ["failed_node", failedNodeInput], ["namespace", namespaceInput]]
+            .forEach(([name, input]) => {
+                const value = input && typeof input.value === "string" ? input.value.trim() : "";
+                if (value) params.set(name, value);
+            });
+        const text = params.toString();
+        return text ? `?${text}` : "";
+    }
+
     async function callApproval(method, path, body) {
-        const response = await fetch(`${APPROVAL_BASE}/${encodeURIComponent(currentRecommendation.id)}${path}`, {
+        // Requesting an approval recomputes the recommendation on the server, so it needs the same inputs.
+        const query = path === "/request-approval" ? inputQuery() : "";
+        const response = await fetch(`${APPROVAL_BASE}/${encodeURIComponent(currentRecommendation.id)}${path}${query}`, {
             method,
             headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
             body: body ? JSON.stringify(body) : undefined,
@@ -238,7 +257,7 @@
         applyBadge(sourceBadge, { variant: "muted", text: "Loading…" });
 
         try {
-            const report = await fetchJson("/api/recommendations/live");
+            const report = await fetchJson(`/api/recommendations/live${inputQuery()}`);
             applyBadge(sourceBadge, { variant: "success", text: "Live evidence" });
             region.appendChild(template.content.cloneNode(true));
 
@@ -283,6 +302,9 @@
     if (reloadButton) {
         reloadButton.addEventListener("click", loadPage);
     }
+    [workflowIdInput, failedNodeInput, namespaceInput].forEach((input) => {
+        if (input) input.addEventListener("change", loadPage);
+    });
 
     document.addEventListener("DOMContentLoaded", loadPage);
 })();

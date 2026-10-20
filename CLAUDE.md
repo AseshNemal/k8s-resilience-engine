@@ -38,8 +38,10 @@ This is an early-stage scaffold, not a working system yet:
   which reads the connected cluster through `app/integrations/kubernetes/client.py` and returns the
   unchanged `DeploymentGraph` inside a status envelope (`/api/deployments/discovery`); failure
   prediction (`/api/failure-impacts/runtime`) needs a frozen workflow plus that topology and refuses
-  when either is missing or incomplete; recommendations/approvals have no live source yet and report
-  `RECOMMENDATION_EVIDENCE_UNAVAILABLE`. The `/sample`, demo, fixture-simulation and Jaeger-seed routes were
+  when either is missing or incomplete; recommendations are computed live (`/api/recommendations/live?workflow_id=…`,
+  `live_pipeline.py`: Member 4's generator, feasibility check and simulator over Member 3's runtime inputs, with
+  `confidence` defined as evidence coverage) and report `RECOMMENDATION_EVIDENCE_UNAVAILABLE` when no workflow is
+  named; YAML proposals and validation reports are still unbuilt. The `/sample`, demo, fixture-simulation and Jaeger-seed routes were
   removed from the product (the deployments page has no sample toggle, the failure-impact page no fixture
   modes). Member 2's scripted chaos/benchmark dry-run routes remain, labelled; see the real-data rule below.
   Declared intent comes from, in order: a manifest path the caller names, `RESILIENCE_MANIFEST_PATH` (set on

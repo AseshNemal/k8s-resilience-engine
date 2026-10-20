@@ -159,3 +159,48 @@ test("a failing approval lookup is reported on the page and does not hide the re
     assert.ok(text(env.element('[data-role="rec-candidate-list"]')).includes("Topology Spread"));
     assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("Could not load the approval state."));
 });
+
+async function openWithInputs(routes, values) {
+    const env = makeEnvironment(routes);
+    for (const [role, value] of Object.entries(values)) env.element(`[data-role="${role}"]`).value = value;
+    await env.listeners.DOMContentLoaded();
+    return env;
+}
+
+test("the filled-in workflow, failed node and namespace are sent with the request", async () => {
+    const url = "/api/recommendations/live?workflow_id=checkout&failed_node=w1&namespace=shop";
+    const env = await openWithInputs({
+        [`GET ${url}`]: { status: 200, body: liveReport },
+        "GET /api/recommendations/rec-live/approval": { status: 404, body: {} },
+    }, { "workflow-id": " checkout ", "failed-node": "w1", namespace: "shop" });
+
+    assert.equal(env.calls[0][1], url);
+    assert.equal(env.element('[data-role="source-badge"]').textContent, "Live evidence");
+});
+
+test("a blank input is not sent, so the server says what is missing", async () => {
+    const env = await openWithInputs({
+        "GET /api/recommendations/live?workflow_id=checkout": { status: 200, body: { ...liveReport, recommendations: [], selectedRecommendationId: null } },
+    }, { "workflow-id": "checkout", "failed-node": "   ", namespace: "" });
+
+    assert.equal(env.calls[0][1], "/api/recommendations/live?workflow_id=checkout");
+});
+
+test("requesting an approval sends the same inputs, because the server recomputes the recommendation", async () => {
+    const query = "?workflow_id=checkout&namespace=shop";
+    const env = await openWithInputs({
+        [`GET /api/recommendations/live${query}`]: { status: 200, body: liveReport },
+        "GET /api/recommendations/rec-live/approval": { status: 404, body: {} },
+        [`POST /api/recommendations/rec-live/request-approval${query}`]: {
+            status: 200, headers: { "X-Evidence-Provenance": "verified" },
+            body: { status: "PENDING_APPROVAL", proposalVersion: "v1.0", yamlSnapshot: null, decisionNote: null },
+        },
+    }, { "workflow-id": "checkout", namespace: "shop" });
+
+    const request = env.element('[data-role="approval-actions"]').children.find((child) => child.id === "btn-request-approval");
+    await request.listeners.click();
+
+    assert.ok(env.calls.some(([method, url]) => method === "POST" && url === `/api/recommendations/rec-live/request-approval${query}`));
+}
+);
+

@@ -1,6 +1,6 @@
 from typing import Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.engine.recommendation_evaluation_validation.approval import (
     ApprovalService,
@@ -11,7 +11,8 @@ from app.engine.recommendation_evaluation_validation.approval import (
     PreconditionError,
     has_verified_provenance,
 )
-from app.shared.evidence_errors import unavailable
+from app.engine.recommendation_evaluation_validation.live_pipeline import build_live_recommendation
+from app.shared.evidence_errors import EvidenceError, unavailable
 from app.core.config import get_settings
 from app.core.database import get_engine
 from sqlalchemy.orm import Session
@@ -39,23 +40,37 @@ def get_approval_service(db: Session = Depends(get_db)) -> ApprovalService:
     return ApprovalService(repository)
 
 
-def _no_live_recommendation() -> LiveRecommendation:
-    raise unavailable(
-        "RECOMMENDATION_EVIDENCE_UNAVAILABLE",
-        "No recommendation has been generated from live cluster evidence, so there is nothing to approve.",
-        "recommendation",
-    )
-
-
-def get_recommendation_provider() -> Callable[[], LiveRecommendation]:
+def get_recommendation_provider(
+    workflow_id: str | None = Query(None, description="Frozen workflow to recommend for (required)"),
+    failed_node: str | None = Query(None, description="Worker to protect against; default: the one whose loss "
+                                                       "would hurt most"),
+    namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+) -> Callable[[], LiveRecommendation]:
     """Supplies the function that produces the recommendation (and live evidence) an approval is bound to.
 
-    There is no live recommendation pipeline wired in yet, so the provider reports that explicitly; it
-    must never fall back to sample data. When Component 4's live pipeline is integrated it replaces this
-    dependency; tests substitute it with ``app.dependency_overrides``. The provider is called inside the
-    handler, after the request body has been validated, so a malformed request is still a 422.
+    The recommendation is computed from the connected cluster and the named frozen workflow
+    (live_pipeline.py); it never falls back to sample data. Without a workflow there is nothing to compute
+    for, which is said explicitly. The provider is called inside the handler, after the request body has
+    been validated, so a malformed request is still a 422. Tests substitute it with
+    ``app.dependency_overrides``.
     """
-    return _no_live_recommendation
+
+    def provide() -> LiveRecommendation:
+        if not workflow_id:
+            raise unavailable(
+                "RECOMMENDATION_EVIDENCE_UNAVAILABLE",
+                "Name the frozen workflow to recommend for (workflow_id). No recommendation has been generated "
+                "from live cluster evidence, so there is nothing to approve.",
+                "recommendation",
+            )
+        try:
+            return build_live_recommendation(workflow_id, failed_node, namespace)
+        except ValueError as error:  # a blank identifier
+            raise EvidenceError(
+                "INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation"
+            ) from error
+
+    return provide
 
 
 def _to_response(approval) -> ApprovalResponse:
