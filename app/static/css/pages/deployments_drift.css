@@ -7,8 +7,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.35);
+    background: #fee2e2;
+    border: 1px solid #fca5a5;
     color: #b91c1c;
     font-weight: 600;
     font-size: 0.875rem;

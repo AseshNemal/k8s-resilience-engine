@@ -72,7 +72,7 @@ window.DeploymentsScenariosWidget = (function () {
         tableHtml += `
             <div style="display: flex; gap: 1rem; margin-top: 1rem; font-size: 12px; background: var(--color-surface-soft); padding: 8px 12px; border-radius: 6px;">
                 <span>Drift Rate ($D_{rate}$): <strong>${data.d_rate == null ? "n/a" : (data.d_rate * 100).toFixed(1) + "%"}</strong></span>
-                <span>Exposure Rate Change ($\Delta E$): <strong>${data.delta_e_rate == null ? "n/a" : (data.delta_e_rate * 100).toFixed(1) + "%"}</strong></span>
+                <span>Exposure Rate Change (ΔE): <strong>${data.delta_e_rate == null ? "n/a" : (data.delta_e_rate * 100).toFixed(1) + "%"}</strong></span>
                 <span>Mode: <strong>${data.execution_mode || "DRY_RUN_SIMULATION"}</strong> (scripted placements)</span>
             </div>
         `;

@@ -9,6 +9,8 @@ from app.engine.deployment_topology_modeling.drift_analysis.constants import (
     TARGET_MAPPING_ACCURACY,
 )
 
+NOT_MEASURED = "Not measured"
+
 
 class AcademicMetricPresenter:
     """Formats mathematical and statistical modeling metrics into presentation-ready structures."""
@@ -24,7 +26,7 @@ class AcademicMetricPresenter:
         if accuracy is None:
             return {
                 "value": None,
-                "display": "Not measured",
+                "display": NOT_MEASURED,
                 "target_display": f"≥ {target * 100:.0f}%",
                 "is_passing": False,
                 "status_label": "UNMEASURED",
@@ -50,7 +52,7 @@ class AcademicMetricPresenter:
         if latency_ms is None:
             return {
                 "value_ms": None,
-                "display": "Not measured",
+                "display": NOT_MEASURED,
                 "target_display": f"< {cls.TARGET_LATENCY_MAX_MS:.0f} ms",
                 "is_passing": False,
                 "status_label": "UNMEASURED",
@@ -84,7 +86,7 @@ class AcademicMetricPresenter:
         is_sound = getattr(certificate, "is_statistically_sound", False)
 
         measured = [value for value in (svc_pod, pod_node, owner_res, conc_acc) if value is not None]
-        mean_display = f"{sum(measured) / len(measured) * 100:.1f}%" if measured else "Not measured"
+        mean_display = f"{sum(measured) / len(measured) * 100:.1f}%" if measured else NOT_MEASURED
 
         return {
             "is_statistically_sound": is_sound,
