@@ -84,12 +84,17 @@ def operation_key(root: Span) -> str | None:
     return root.operation_name
 
 
-def select_workflow_traces(traces: list[dict], operation: str) -> list[dict]:
+def select_workflow_traces(
+    traces: list[dict], operation: str, entry_service: str | None = None,
+) -> list[dict]:
     selected = []
     for trace in traces:
         spans = parse_spans([trace])
         roots = find_root_spans({trace.get("traceID", ""): spans})
-        if roots and operation_key(next(iter(roots.values()))) == operation:
+        root = next(iter(roots.values()), None)
+        if root and operation_key(root) == operation and (
+            entry_service is None or root.service_name == entry_service
+        ):
             selected.append(trace)
     return selected
 
@@ -152,20 +157,17 @@ def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWork
     root_spans = find_root_spans(spans_by_trace)
 
     # Group traces by root operation name
-    traces_by_operation: dict[str, list[str]] = defaultdict(list)
-    root_service_by_op: dict[str, str] = {}
+    traces_by_operation: dict[tuple[str, str], list[str]] = defaultdict(list)
 
     for trace_id, root in root_spans.items():
         op_name = operation_key(root)
         if not op_name:
             continue
-        traces_by_operation[op_name].append(trace_id)
-        if op_name not in root_service_by_op:
-            root_service_by_op[op_name] = root.service_name
+        traces_by_operation[(root.service_name, op_name)].append(trace_id)
 
     results: list[DiscoveredWorkflowSummary] = []
 
-    for op_name, trace_ids in traces_by_operation.items():
+    for (root_service, op_name), trace_ids in traces_by_operation.items():
         # Find all participating services for this operation
         services: set[str] = set()
         for tid in trace_ids:
@@ -178,7 +180,7 @@ def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWork
             DiscoveredWorkflowSummary(
                 workflow_id=workflow_id,
                 operation_name=op_name,
-                root_service=root_service_by_op[op_name],
+                root_service=root_service,
                 trace_count=len(trace_ids),
                 participating_services=sorted(services),
                 sample_trace_ids=trace_ids[:5],
@@ -186,5 +188,5 @@ def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWork
         )
 
     # Sort most frequent workflows first
-    results.sort(key=lambda w: w.trace_count, reverse=True)
+    results.sort(key=lambda w: (-w.trace_count, w.root_service, w.operation_name))
     return results

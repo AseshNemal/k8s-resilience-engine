@@ -140,15 +140,42 @@ def trace_has_terminal_evidence(
     return any(_matches_terminal(condition, span) for span in parse_spans([trace]))
 
 
+def evaluate_trace_success(
+    condition: SuccessCondition, trace: dict[str, Any],
+) -> tuple[ExecutionOutcomeStatus, tuple[AssertionResult, ...], tuple[str, ...]]:
+    """Evaluate trace assertions without claiming an independently registered run.
+
+    Callers must quality-check the trace before parsing it. Missing or ambiguous
+    terminal evidence stays indeterminate rather than becoming a failed run.
+    """
+    terminals = [span for span in parse_spans([trace]) if _matches_terminal(condition, span)]
+    if len(terminals) != 1:
+        reason = (
+            "Terminal service and operation were not observed; missing telemetry alone does not prove workflow failure"
+            if not terminals else "Multiple terminal spans matched the success condition"
+        )
+        return ExecutionOutcomeStatus.INDETERMINATE, (), (reason,)
+    if condition.max_duration_ms is not None and any(
+        span.get("spanID") == terminals[0].span_id and "duration" not in span
+        for span in trace.get("spans", [])
+    ):
+        return ExecutionOutcomeStatus.INDETERMINATE, (), ("Terminal duration is missing; the duration assertion cannot be evaluated",)
+    assertions = _terminal_assertions(condition, terminals[0])
+    passed = all(item.passed for item in assertions)
+    return (
+        ExecutionOutcomeStatus.SUCCEEDED if passed else ExecutionOutcomeStatus.FAILED,
+        assertions,
+        () if passed else ("One or more success assertions failed",),
+    )
+
+
 def _matched_trace_outcome(
     registration: ExecutionRegistration,
     scenario: WorkflowScenario,
     trace: dict[str, Any],
     now: datetime | None,
 ) -> ExecutionOutcome:
-    spans = parse_spans([trace])
-    condition = scenario.success_condition
-    terminals = [span for span in spans if _matches_terminal(condition, span)]
+    outcome_status, assertions, reasons = evaluate_trace_success(scenario.success_condition, trace)
     evidence_id = f"trace:{registration.expected_trace_id}"
     recorded_at = _recorded_at(now)
     snapshot = TraceEvidenceSnapshot.from_trace(
@@ -157,44 +184,16 @@ def _matched_trace_outcome(
         source_locator=registration.evidence_locator,
         captured_at=recorded_at,
     )
-    if not terminals:
-        return ExecutionOutcome(
-            registration=registration,
-            status=ExecutionOutcomeStatus.INDETERMINATE,
-            correlation_status=CorrelationStatus.MATCHED,
-            recorded_at=recorded_at,
-            matched_trace_id=registration.expected_trace_id,
-            evidence_id=evidence_id,
-            evidence_snapshot=snapshot,
-            reasons=("Terminal service and operation were not observed; missing telemetry alone does not prove workflow failure",),
-        )
-    if len(terminals) > 1:
-        return ExecutionOutcome(
-            registration=registration,
-            status=ExecutionOutcomeStatus.INDETERMINATE,
-            correlation_status=CorrelationStatus.MATCHED,
-            recorded_at=recorded_at,
-            matched_trace_id=registration.expected_trace_id,
-            evidence_id=evidence_id,
-            evidence_snapshot=snapshot,
-            reasons=("Multiple terminal spans matched the success condition",),
-        )
-    assertions = _terminal_assertions(condition, terminals[0])
-    passed = all(item.passed for item in assertions)
     return ExecutionOutcome(
         registration=registration,
-        status=(
-            ExecutionOutcomeStatus.SUCCEEDED
-            if passed
-            else ExecutionOutcomeStatus.FAILED
-        ),
+        status=outcome_status,
         correlation_status=CorrelationStatus.MATCHED,
         recorded_at=recorded_at,
         matched_trace_id=registration.expected_trace_id,
         evidence_id=evidence_id,
         evidence_snapshot=snapshot,
         assertions=assertions,
-        reasons=() if passed else ("One or more success assertions failed",),
+        reasons=reasons,
     )
 
 
