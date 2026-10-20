@@ -939,13 +939,40 @@ command on macOS and Windows).
 ## Deployment
 
 There is no deployment pipeline yet — `deploy/kubernetes/` is currently an empty placeholder
-folder, and no `Dockerfile` exists in this repo. Right now the only supported way to run the
-app is the local development server above (`uvicorn app.main:app --reload`), which is
-sufficient for research demonstrations and supervisor presentations.
+folder. The app can run either with the local development server above
+(`uvicorn app.main:app --reload`) or in Docker Desktop (a single FastAPI container with
+SQLite on a named volume, plus a local multi-node kind cluster) — see [`docs/DOCKER.md`](docs/DOCKER.md).
+It can also be installed as a Docker Desktop extension with no published port (socket-only backend,
+read-only cluster access). Quick start (details, updating, removal and troubleshooting are in
+[`docs/EXTENSION.md`](docs/EXTENSION.md)):
 
-Containerizing the app and writing real Kubernetes manifests for `deploy/kubernetes/` is
-future work — see [Development Phases](#development-phases) and the per-member "First"
-checklists earlier in this document.
+1. In Docker Desktop, open **Settings → Extensions** and untick "Allow only extensions distributed
+   through the Docker Marketplace" (the extension is installed from a local image, not published).
+2. From the repository root:
+
+   ```bash
+   docker build -f extension/Dockerfile -t k8s-resilience-engine:0.1.4 .
+   docker extension install k8s-resilience-engine:0.1.4
+   ```
+
+3. Open **Resilience Engine** in Docker Desktop's left sidebar. It works straight away with the
+   built-in sample data; no cluster is needed to look around.
+4. Optional, to see a real cluster (requires `kind` and `kubectl`):
+
+   ```bash
+   ./scripts/cluster-up.sh                  # create or reuse the local kind test cluster
+   ./scripts/extension-cluster-access.sh    # asks first, then writes a read-only, time-limited kubeconfig
+   ```
+
+   Then choose **Connect cluster** in the extension and pick `.kube/extension-readonly.kubeconfig`.
+5. After changing code or pulling `main`, rebuild with a new tag and run
+   `docker extension update k8s-resilience-engine:<new tag>`. Your data is kept.
+
+Recommendations are never applied to Kubernetes automatically; approving one only records the approval.
+
+Writing real Kubernetes manifests for `deploy/kubernetes/` is future work — see
+[Development Phases](#development-phases) and the per-member "First" checklists earlier in
+this document.
 
 ---
 

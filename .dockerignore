@@ -1,0 +1,12 @@
+.git
+.claude
+.venv
+.env
+.kube
+.pytest_cache
+.DS_Store
+**/__pycache__
+data/*.db*
+tests
+docs
+*.pdf
