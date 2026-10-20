@@ -1116,7 +1116,10 @@ Other options: `--skip-checks` builds without running the tests first, and `--ye
 | POST | `/api/recommendations` | Member 4 |
 | GET | `/api/validations` | Member 4 |
 
-The `/sample`, demo, benchmark and Jaeger-seeding routes have been removed from the application.
+The `/sample`, demo, fixture-simulation and Jaeger-seeding routes have been removed from the application.
+Member 2's scripted chaos and benchmark routes (`/api/deployments/chaos/*`, `/benchmarks/*`) remain: they
+run dry-run scenarios on their own scripted placements, are labelled as such, and are the only routes
+allowed to serve non-cluster data (`tests/support/labelled_research_routes.py`).
 The routes that serve live evidence today include `GET /api/deployments/discovery` and `/live`
 (Member 2), `GET /api/failure-impacts/runtime` (Member 3), `GET /api/recommendations/live` and the
 approval routes (Member 4), and the workflow scenario, assessment and Jaeger-evidence routes

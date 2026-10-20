@@ -22,10 +22,11 @@ non-Claude coding agents; keep it in sync with this file.
 
 This is an early-stage scaffold, not a working system yet:
 
-- Members 1–3's `app/engine/*/service.py` currently only have a `get_sample_*` function that
-  loads a fixture from `sample_data/*.json` and validates it against the matching
-  `app/shared/schemas/` model — no real algorithms (trace parsing, graph building, node-failure
-  simulation, etc.) are implemented yet for those three components.
+- Member 1's `app/engine/workflow_dependency_modeling/service.py` is still mostly a fixture loader
+  (`get_sample_*` over `sample_data/*.json`, validated against `app/shared/schemas/`).
+  Members 2 and 3 have real algorithms (merged from `main`): Member 2's manifest parsing, selector-based
+  Service → Pod → ReplicaSet → Deployment resolution, concentration and drift analysis and graph builder;
+  Member 3's node-failure prediction, portfolio evaluation and validation experiments.
 - Member 4's `app/engine/recommendation_evaluation_validation/` has real logic beyond the
   fixture: `candidate_generator.py` turns `REPLICA_CONCENTRATION` root causes into
   `TOPOLOGY_SPREAD` candidates, `feasibility_analyzer.py` checks replica/node minimums,
@@ -38,8 +39,13 @@ This is an early-stage scaffold, not a working system yet:
   unchanged `DeploymentGraph` inside a status envelope (`/api/deployments/discovery`); failure
   prediction (`/api/failure-impacts/runtime`) needs a frozen workflow plus that topology and refuses
   when either is missing or incomplete; recommendations/approvals have no live source yet and report
-  `RECOMMENDATION_EVIDENCE_UNAVAILABLE`. The earlier `/sample`, demo, benchmark, chaos-fixture and
-  Jaeger-seed routes were removed from the product.
+  `RECOMMENDATION_EVIDENCE_UNAVAILABLE`. The `/sample`, demo, fixture-simulation and Jaeger-seed routes were
+  removed from the product (the deployments page has no sample toggle, the failure-impact page no fixture
+  modes). Member 2's scripted chaos/benchmark dry-run routes remain, labelled; see the real-data rule below.
+  Declared intent comes from, in order: a manifest path the caller names, `RESILIENCE_MANIFEST_PATH` (set on
+  the backend, never from a request), the repository's own manifests, then the connected cluster's own
+  Deployment specs, which the same manifest parser reads (`service.py`, `_declared_target`). A cluster that
+  declares nothing answers `DECLARED_STATE_UNAVAILABLE`, never 100% compliance.
 - `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
   deployment, failure_impact, recommendation, validation); `sample_data/` is test-only.
   `app/integrations/kubernetes/` and `app/integrations/jaeger/` exist; `app/core/` is minimal config.
@@ -50,9 +56,11 @@ This is an early-stage scaffold, not a working system yet:
   refused, never run. The host helper (`extension/helper`, Go) likewise speaks plain `net/http`, without
   client-go; both read the same backend kubeconfig, pinned by `tests/fixtures/tls/backend-kubeconfig.yaml`.
   The extension's role grants exactly those five (`deploy/rbac/resilience-readonly.yaml`, mirrored in
-  `extension/helper/internal/rbac/rbac.go` and checked against each other by a Go test). Discovery does
-  not use services/replicasets yet: Service-selector and Pod → ReplicaSet → Deployment resolution is
-  Member 2's pending work. The rules: a graph service is a Kubernetes Service with a selector, its pods
+  `extension/helper/internal/rbac/rbac.go` and checked against each other by a Go test). Member 2's per-namespace
+  pipeline (`service.py`, `collect_live_cluster`) uses services/replicasets: the live parser and the Service
+  resolver read through `KubernetesApiSource.list_objects`, so they need no Kubernetes client package.
+  `discovery.py` (what the extension pages call) still attributes pods by `app` label == Deployment name;
+  moving it onto the selector resolver is the pending follow-up. The rules: a graph service is a Kubernetes Service with a selector, its pods
   are those whose labels contain every selector pair, and a pod's Deployment comes from owner references.
   Anything unresolvable is reported, never guessed.
 - `tests/test_sample_endpoints.py` checks that the research fixtures still validate against the
@@ -142,8 +150,10 @@ contract instead when integrating against an unfinished upstream component.
   other required evidence) cannot be read, fail with an explicit `EvidenceError` code
   (`app/shared/evidence_errors.py`), never a substituted answer. `sample_data/`, the `get_sample_*`
   loaders and `experiments/` are for automated tests and research runs only; research-only HTTP routes
-  live in `tests/support/research_routes.py` and are never mounted by `app.main`.
-  `tests/test_no_sample_runtime.py` enforces this. Unknown facts stay `None`; never default them
+  live in `tests/support/research_routes.py` and are never mounted by `app.main`. The one exception is
+  Member 2's scripted chaos/benchmark dry-run routes (`/api/deployments/chaos/*`, `/benchmarks/*`): they stay
+  mounted, labelled as dry-run, and are named in `tests/support/labelled_research_routes.py`, so a new
+  sample, demo or benchmark route still fails the guards. `tests/test_no_sample_runtime.py` enforces this. Unknown facts stay `None`; never default them
   (no `accuracy=1.0`, `restart_count=0`, `zone="default-zone"`, invented nodes or capacities).
 - Unit tests must not read the developer's kubeconfig: use `tests/support/fake_cluster.py` and the
   `use_cluster` fixture; real-cluster tests are opt-in (`@pytest.mark.live_cluster`,

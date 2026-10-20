@@ -72,14 +72,19 @@ Expected routes:
 
 The shared FastAPI/Jinja2 foundation, Pydantic schemas, sample JSON pipeline, service-backed
 endpoints, tests, and Member 4's topology-spread candidate generation (with feasibility
-checking and concentration metrics) have been created. Members 1–3 still only have empty
-`service.py` stubs — no real algorithms yet.
+checking and concentration metrics) have been created. Members 2 and 3 now have real algorithms (merged
+from `main`): Member 2's manifest parsing, selector-based Service resolution, drift analysis and graph
+builder, and Member 3's node-failure prediction and validation experiments. Member 1's service is still
+mostly a fixture loader.
 
-Latest test result (2026-10-19): 966 passed, 2 skipped, 0 failed (`python -m pytest`); 114 Node tests
-and every Go package pass. Floating-point assertions use `pytest.approx`.
+Latest test result (2026-10-21, `integration/team-sync`): 1303 passed, 2 skipped, 0 failed (`python -m pytest`);
+151 Node tests and every Go package pass. Floating-point assertions use `pytest.approx`.
 
 The extension's read-only role grants `get`/`list` on exactly nodes, pods, services, deployments and
-replicasets. Discovery does not use services/replicasets yet; the resolver is Member 2's pending work.
+replicasets. Member 2's per-namespace pipeline reads them through `KubernetesApiSource.list_objects` (no Kubernetes client
+package); `discovery.py` still attributes pods by `app` label, and moving it onto the selector resolver is
+the pending follow-up. Declared intent comes from a named manifest path, `RESILIENCE_MANIFEST_PATH`, the
+repository's manifests, or else the cluster's own Deployment specs (`service.py`, `_declared_target`).
 
 ## Real data only
 
@@ -88,8 +93,10 @@ replicasets. Discovery does not use services/replicasets yet; the resolver is Me
   other required evidence) cannot be read, fail with an explicit `EvidenceError` code
   (`app/shared/evidence_errors.py`), never a substituted answer. `sample_data/`, the `get_sample_*`
   loaders and `experiments/` are for automated tests and research runs only; research-only HTTP routes
-  live in `tests/support/research_routes.py` and are never mounted by `app.main`.
-  `tests/test_no_sample_runtime.py` enforces this. Unknown facts stay `None`; never default them
+  live in `tests/support/research_routes.py` and are never mounted by `app.main`. The one exception is
+  Member 2's scripted chaos/benchmark dry-run routes (`/api/deployments/chaos/*`, `/benchmarks/*`): they stay
+  mounted, labelled as dry-run, and are named in `tests/support/labelled_research_routes.py`, so a new
+  sample, demo or benchmark route still fails the guards. `tests/test_no_sample_runtime.py` enforces this. Unknown facts stay `None`; never default them
   (no `accuracy=1.0`, `restart_count=0`, `zone="default-zone"`, invented nodes or capacities).
 - Unit tests must not read the developer's kubeconfig: use `tests/support/fake_cluster.py` and the
   `use_cluster` fixture; real-cluster tests are opt-in (`@pytest.mark.live_cluster`,
