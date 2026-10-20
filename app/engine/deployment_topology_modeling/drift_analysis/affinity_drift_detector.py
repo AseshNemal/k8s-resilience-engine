@@ -77,29 +77,41 @@ class AffinityDriftDetector(BaseDriftDetector):
         violations: list[DriftViolation] = []
         for term, is_required in ia.pod_anti_affinity_terms(declared_intent):
             topology_key = term.get("topologyKey") or self.config.failure_domain_key
-            per_domain: Counter[str] = Counter()
-            for pod in runtime_pods:
-                node_name = pm.pod_node(pod)
-                if node_name is None:
-                    continue
-                domain = self._domain_of(node_name, nodes.get(node_name), topology_key)
-                if domain is not None:
-                    per_domain[domain] += 1
-            rule_type = "required" if is_required else "preferred"
-            for domain, count in sorted(per_domain.items()):
-                if count > 1:
-                    violations.append(DriftViolation(
-                        drift_type=DriftType.AFFINITY_DRIFT,
-                        severity=DriftSeverity.CRITICAL if is_required else DriftSeverity.MEDIUM,
-                        description=(
-                            f"Service '{service_name}' violates {rule_type} podAntiAffinity on "
-                            f"'{topology_key}': {count} pods share domain '{domain}'."
-                        ),
-                        expected=1,
-                        actual=count,
-                        affected_failure_domain=domain,
-                    ))
+            per_domain = self._pods_per_domain(runtime_pods, nodes, topology_key)
+            violations += [
+                self._anti_affinity_violation(service_name, topology_key, domain, count, is_required)
+                for domain, count in sorted(per_domain.items())
+                if count > 1
+            ]
         return violations
+
+    def _pods_per_domain(
+        self, runtime_pods: list[dict[str, Any]], nodes: dict[str, dict[str, str]], topology_key: str
+    ) -> Counter[str]:
+        per_domain: Counter[str] = Counter()
+        for pod in runtime_pods:
+            node_name = pm.pod_node(pod)
+            domain = self._domain_of(node_name, nodes.get(node_name), topology_key) if node_name else None
+            if domain is not None:
+                per_domain[domain] += 1
+        return per_domain
+
+    @staticmethod
+    def _anti_affinity_violation(
+        service_name: str, topology_key: str, domain: str, count: int, is_required: bool
+    ) -> DriftViolation:
+        rule_type = "required" if is_required else "preferred"
+        return DriftViolation(
+            drift_type=DriftType.AFFINITY_DRIFT,
+            severity=DriftSeverity.CRITICAL if is_required else DriftSeverity.MEDIUM,
+            description=(
+                f"Service '{service_name}' violates {rule_type} podAntiAffinity on "
+                f"'{topology_key}': {count} pods share domain '{domain}'."
+            ),
+            expected=1,
+            actual=count,
+            affected_failure_domain=domain,
+        )
 
     def detect(
         self,

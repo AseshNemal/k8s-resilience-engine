@@ -58,13 +58,19 @@ class AcademicMetricPresenter:
             }
         is_passing = latency_ms <= cls.TARGET_LATENCY_MAX_MS
         css_modifier = "success" if is_passing else "warning"
+        if latency_ms < 10.0:
+            status_label = "EXCELLENT"
+        elif is_passing:
+            status_label = "PASS"
+        else:
+            status_label = "HIGH"
 
         return {
             "value_ms": latency_ms,
             "display": f"{latency_ms:.2f} ms",
             "target_display": f"< {cls.TARGET_LATENCY_MAX_MS:.0f} ms",
             "is_passing": is_passing,
-            "status_label": "EXCELLENT" if latency_ms < 10.0 else ("PASS" if is_passing else "HIGH"),
+            "status_label": status_label,
             "css_class": f"badge--{css_modifier}",
         }
 

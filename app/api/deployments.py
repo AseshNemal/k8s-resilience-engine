@@ -419,6 +419,7 @@ def get_baseline_b2(
     "/diff",
     tags=[TAG_DRIFT],
     summary="[Phase 3] Diff two cluster snapshots to calculate Placement Drift Rate (D_rate)",
+    responses={422: {"description": "Snapshots are not ClusterExposureReport payloads with exposure_status per service"}},
 )
 def diff_snapshots(
     payload: Dict[str, Any],

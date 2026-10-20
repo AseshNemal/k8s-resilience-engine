@@ -88,28 +88,34 @@ def nodes_from_objects(node_objects: list[dict[str, Any]], pod_objects: list[dic
     return nodes
 
 
+def _pod_owner(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Controller ownerReference, else the first one, else an empty dict."""
+    owners = metadata.get("ownerReferences") or []
+    return next((ref for ref in owners if ref.get("controller")), owners[0] if owners else {})
+
+
+def _pod_from_object(pod: dict[str, Any], namespace: str) -> ClusterPod:
+    metadata = pod.get("metadata", {}) or {}
+    status = pod.get("status", {}) or {}
+    owner = _pod_owner(metadata)
+    labels = {str(k): str(v) for k, v in (metadata.get("labels") or {}).items()}
+    return ClusterPod(
+        name=metadata["name"],
+        node=(pod.get("spec", {}) or {}).get("nodeName"),
+        ready=_condition(pod, "Ready") is True,
+        owner_kind=owner.get("kind"),
+        owner_name=owner.get("name"),
+        app_label=labels.get("app", ""),
+        labels=labels,
+        namespace=metadata.get("namespace") or namespace,
+        restart_count=sum(cs.get("restartCount") or 0 for cs in status.get("containerStatuses") or []),
+        owner_uid=owner.get("uid"),
+        phase=status.get("phase"),
+    )
+
+
 def pods_from_objects(pod_objects: list[dict[str, Any]], namespace: str = "default") -> List[ClusterPod]:
-    pods: List[ClusterPod] = []
-    for pod in pod_objects:
-        metadata = pod.get("metadata", {}) or {}
-        status = pod.get("status", {}) or {}
-        owners = metadata.get("ownerReferences") or []
-        owner = next((ref for ref in owners if ref.get("controller")), owners[0] if owners else None)
-        labels = {str(k): str(v) for k, v in (metadata.get("labels") or {}).items()}
-        pods.append(ClusterPod(
-            name=metadata["name"],
-            node=(pod.get("spec", {}) or {}).get("nodeName"),
-            ready=_condition(pod, "Ready") is True,
-            owner_kind=owner.get("kind") if owner else None,
-            owner_name=owner.get("name") if owner else None,
-            app_label=labels.get("app", ""),
-            labels=labels,
-            namespace=metadata.get("namespace") or namespace,
-            restart_count=sum(cs.get("restartCount") or 0 for cs in status.get("containerStatuses") or []),
-            owner_uid=owner.get("uid") if owner else None,
-            phase=status.get("phase"),
-        ))
-    return pods
+    return [_pod_from_object(pod, namespace) for pod in pod_objects]
 
 
 def get_cluster_nodes() -> List[ClusterNode]:

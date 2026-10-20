@@ -33,6 +33,33 @@ class TopologySpreadDriftDetector(BaseDriftDetector):
             return node_name
         return None
 
+    def _pods_per_eligible_domain(
+        self,
+        declared_intent: Any,
+        topology_key: str,
+        runtime_pods: list[dict[str, Any]],
+        nodes: dict[str, dict[str, str]],
+    ) -> Counter[str]:
+        """Scheduled pods per domain, over eligible nodes only; empty domains count as 0."""
+        node_domain: dict[str, str] = {}
+        for node_name, labels in nodes.items():
+            domain = self._domain_of(node_name, labels, topology_key)
+            if domain is not None and ia.node_satisfies_required_placement(declared_intent, labels):
+                node_domain[node_name] = domain
+
+        counts: Counter[str] = Counter(dict.fromkeys(set(node_domain.values()), 0))
+        for pod in runtime_pods:
+            node_name = pm.pod_node(pod)
+            if node_name in node_domain:
+                counts[node_domain[node_name]] += 1
+        return counts
+
+    @staticmethod
+    def _skew(counts: Counter[str], min_domains: int | None) -> int:
+        """max(count) - global minimum; the minimum is 0 when there are fewer domains than minDomains."""
+        global_min = 0 if (min_domains and len(counts) < min_domains) else min(counts.values())
+        return max(counts.values()) - global_min
+
     def _evaluate_constraint(
         self,
         service_name: str,
@@ -47,25 +74,11 @@ class TopologySpreadDriftDetector(BaseDriftDetector):
         topology_key = constraint["topology_key"] or self.config.failure_domain_key
         when_unsatisfiable = constraint["when_unsatisfiable"] or "DoNotSchedule"
 
-        node_domain: dict[str, str] = {}
-        for node_name, labels in nodes.items():
-            domain = self._domain_of(node_name, labels, topology_key)
-            if domain is not None and ia.node_satisfies_required_placement(declared_intent, labels):
-                node_domain[node_name] = domain
-        if not node_domain:
+        counts = self._pods_per_eligible_domain(declared_intent, topology_key, runtime_pods, nodes)
+        if not counts or sum(counts.values()) == 0:
             return None
 
-        counts: Counter[str] = Counter(dict.fromkeys(set(node_domain.values()), 0))
-        for pod in runtime_pods:
-            node_name = pm.pod_node(pod)
-            if node_name in node_domain:
-                counts[node_domain[node_name]] += 1
-        if sum(counts.values()) == 0:
-            return None
-
-        min_domains = constraint["min_domains"]
-        global_min = 0 if (min_domains and len(counts) < min_domains) else min(counts.values())
-        actual_skew = max(counts.values()) - global_min
+        actual_skew = self._skew(counts, constraint["min_domains"])
         if actual_skew <= max_skew:
             return None
 
