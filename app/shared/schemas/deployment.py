@@ -20,7 +20,8 @@ class PodModel(APIModel):
     # True only when the pod's Ready condition is true and its node is not NotReady.
     ready: bool
     phase: str | None = None
-    restart_count: int = 0
+    # None means the cluster did not report container statuses; 0 is an observed zero.
+    restart_count: int | None = None
     namespace: str = "default"
     owner_kind: str | None = None
     owner_name: str | None = None
@@ -59,10 +60,13 @@ class ClusterMetadata(APIModel):
 
 
 class ValidationMetrics(APIModel):
+    # Accuracy is reported only when it has been measured against ground truth; None means
+    # "not measured". It is never defaulted to a perfect score.
     service_pod_mapping_accuracy: float | None = None
     pod_node_mapping_accuracy: float | None = None
     owner_resolution_accuracy: float | None = None
     concentration_detection_accuracy: float | None = None
+    # None means the overhead was not measured, it is not an observed zero.
     runtime_overhead_ms: float | None = None
 
 

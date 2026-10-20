@@ -4,34 +4,39 @@ Parsing is done by pure functions over Kubernetes JSON objects (the shape return
 `kubectl get ... -o json`), so the same code handles the live API, stored API snapshots
 (proposal section 9.2 fallback) and tests. Only the get_* functions talk to the cluster.
 """
+import re
 from typing import Any, List
-
-from kubernetes import client, config
-from kubernetes.config.config_exception import ConfigException
-from kubernetes.utils.quantity import parse_quantity
+from urllib.parse import quote
 
 from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterNode, ClusterPod
+from app.integrations.kubernetes.client import KubernetesApiSource
 
 CONTROL_PLANE_LABELS = ("node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master")
 TERMINAL_POD_PHASES = frozenset({"Succeeded", "Failed"})
 ZONE_LABEL = "topology.kubernetes.io/zone"
 
 
-def _load_kubernetes_config() -> None:
-    """Use in-cluster credentials when available, otherwise use the local kubeconfig."""
-    try:
-        config.load_incluster_config()
-    except ConfigException:
-        config.load_kube_config()
+# Kubernetes resource quantities: a number plus an optional binary (Ki..Ei), decimal (k..E) or
+# milli/micro/nano suffix. Replaces the kubernetes package's parse_quantity so that package is not a
+# dependency; the result is the same plain number ("500m" -> 0.5, "4Gi" -> 4294967296.0).
+_QUANTITY_SUFFIX = {
+    "n": 1e-9, "u": 1e-6, "m": 1e-3, "": 1.0,
+    "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18,
+    "Ki": 2.0 ** 10, "Mi": 2.0 ** 20, "Gi": 2.0 ** 30, "Ti": 2.0 ** 40, "Pi": 2.0 ** 50, "Ei": 2.0 ** 60,
+}
+_QUANTITY = re.compile(r"([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)([A-Za-z]*)")
 
 
-def to_json_objects(items: list[Any]) -> list[dict[str, Any]]:
-    """Converts kubernetes-client model objects to their API JSON form (camelCase keys)."""
-    return client.ApiClient().sanitize_for_serialization(items)
+def parse_quantity(value: Any) -> float:
+    """A Kubernetes quantity as a float. Raises ValueError for text that is not a quantity."""
+    match = _QUANTITY.fullmatch(str(value).strip())
+    if match is None or match.group(2) not in _QUANTITY_SUFFIX:
+        raise ValueError(f"not a Kubernetes quantity: {value!r}")
+    return float(match.group(1)) * _QUANTITY_SUFFIX[match.group(2)]
 
 
 def _quantity(value: Any) -> float:
-    return float(parse_quantity(value if value is not None else "0"))
+    return parse_quantity(value if value is not None else "0")
 
 
 def _pod_requests(pod: dict[str, Any]) -> tuple[float, float]:
@@ -118,17 +123,20 @@ def pods_from_objects(pod_objects: list[dict[str, Any]], namespace: str = "defau
     return [_pod_from_object(pod, namespace) for pod in pod_objects]
 
 
-def get_cluster_nodes() -> List[ClusterNode]:
-    """Fetch worker nodes from the live cluster (control-plane nodes are excluded)."""
-    _load_kubernetes_config()
-    v1 = client.CoreV1Api()
-    node_objects = to_json_objects(v1.list_node().items)
-    pod_objects = to_json_objects(v1.list_pod_for_all_namespaces().items)
+def get_cluster_nodes(source: KubernetesApiSource | None = None) -> List[ClusterNode]:
+    """Fetch worker nodes from the live cluster (control-plane nodes are excluded).
+
+    Reads through the integration's REST client, so a missing or unusable connection raises one of the
+    ClusterAccessError subclasses instead of falling back to anything.
+    """
+    source = source or KubernetesApiSource()
+    node_objects = source.list_objects("nodes", "/api/v1/nodes")
+    pod_objects = source.list_objects("pods", "/api/v1/pods")
     return nodes_from_objects(node_objects, pod_objects)
 
 
-def get_cluster_pods(namespace: str = "default") -> List[ClusterPod]:
+def get_cluster_pods(namespace: str = "default", source: KubernetesApiSource | None = None) -> List[ClusterPod]:
     """Fetch pods of one namespace from the live cluster."""
-    _load_kubernetes_config()
-    v1 = client.CoreV1Api()
-    return pods_from_objects(to_json_objects(v1.list_namespaced_pod(namespace=namespace).items), namespace)
+    source = source or KubernetesApiSource()
+    items = source.list_objects("pods", f"/api/v1/namespaces/{quote(namespace, safe='')}/pods")
+    return pods_from_objects(items, namespace)

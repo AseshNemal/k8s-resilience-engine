@@ -3,7 +3,7 @@
     <div class="tab-pane__header">
         <div>
             <h3 class="tab-pane__title">Placement Drift Scenarios (Dry-Run Simulation)</h3>
-            <p class="tab-pane__desc">Scripted T0/T1 placements that illustrate placement drift rate ($D_{rate}$) and pod moves ($T[i,j]$). These are not observations of a live cluster.</p>
+            <p class="tab-pane__desc">The placements start from your connected cluster's real nodes and pods; the disruption is then computed on a copy with a simple deterministic scheduling rule ("a pod that has to move goes to the worker with the fewest pods"), so the cluster is never changed. They illustrate placement drift rate ($D_{rate}$) and pod moves ($T[i,j]$) and are predictions, not observations of the real scheduler.</p>
         </div>
         <div class="scenario-actions">
             <button type="button" class="btn btn--primary" id="btn-run-all-benchmarks">

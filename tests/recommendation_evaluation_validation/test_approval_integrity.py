@@ -10,7 +10,7 @@ def test_client_cannot_override_canonical_facts(client: TestClient, mock_get_sam
     recommendation_id = "rec-integrity-1"
     
     # Configure the mock to return specific canonical facts
-    mock_get_sample.side_effect = lambda: mock_get_sample._get_mock(recommendation_id, feasible=True)
+    mock_get_sample.set(recommendation_id, feasible=True)
     
     # 1. Client tries to inject fake values in the request (e.g. via extra fields or yamlSnapshot)
     req_payload = {
@@ -29,7 +29,7 @@ def test_client_cannot_override_canonical_facts(client: TestClient, mock_get_sam
     data = get_res.json()
     
     # 3. Assert the canonical facts are still what the backend provided
-    # The recommendation_snapshot should contain the canonical data from get_sample_recommendation
+    # The recommendation_snapshot should contain the canonical data from the live recommendation source
     snapshot = data["recommendationSnapshot"]
     
     # In mock_get_sample, score is 0.0 and blast radius is 0.5

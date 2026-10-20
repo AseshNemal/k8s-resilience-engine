@@ -86,6 +86,8 @@ class BaseScenario(ABC):
 
     # A subclass that really drives and observes a cluster sets this to True.
     supports_live_cluster: bool = False
+    # "scripted" for the placements written in the scenario code; "live" when they come from a real topology.
+    topology_source: str = "scripted"
 
     @abstractmethod
     def setup_workload(self) -> None:
@@ -194,6 +196,7 @@ class BaseScenario(ABC):
                 disruption_type=self.disruption_type,
                 status=self.status,
                 execution_mode=self.execution_mode,
+                topology_source=self.topology_source,
                 baseline_snapshot_id=t0.snapshot_id,
                 target_snapshot_id=t1.snapshot_id,
                 baseline_hash=t0.sha256_hash,
@@ -227,6 +230,7 @@ class BaseScenario(ABC):
             disruption_type=self.disruption_type,
             status=self.status,
             execution_mode=self.execution_mode,
+            topology_source=self.topology_source,
             baseline_snapshot_id=f"{self.scenario_id}_T0",
             target_snapshot_id=f"{self.scenario_id}_T1",
             runtime_ms=elapsed_ms,

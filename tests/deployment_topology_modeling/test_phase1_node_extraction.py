@@ -1,9 +1,9 @@
 import pytest
-from unittest.mock import MagicMock, patch
 
 from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import (
     get_cluster_pods,
     nodes_from_objects,
+    parse_quantity,
     pods_from_objects,
 )
 from tests.deployment_topology_modeling import kind_snapshot
@@ -86,12 +86,36 @@ def test_real_kind_snapshot_pods():
     assert all(p.ready and p.phase == "Running" and p.owner_name == "paymentservice-74d644658f" for p in pods)
 
 
-@patch("app.engine.deployment_topology_modeling.live_state.cluster_state_parser.client")
-@patch("app.engine.deployment_topology_modeling.live_state.cluster_state_parser._load_kubernetes_config")
-def test_get_cluster_pods_converts_api_objects(_mock_config, mock_client):
-    api = MagicMock()
-    mock_client.CoreV1Api.return_value = api
-    mock_client.ApiClient.return_value.sanitize_for_serialization.return_value = kind_snapshot.pod_objects()
-    pods = get_cluster_pods("resilience-test")
-    api.list_namespaced_pod.assert_called_once_with(namespace="resilience-test")
+class _FakeSource:
+    """Stands in for KubernetesApiSource: records the read and returns stored API objects."""
+
+    def __init__(self, objects):
+        self.objects = objects
+        self.calls = []
+
+    def list_objects(self, resource, path):
+        self.calls.append((resource, path))
+        return self.objects
+
+
+def test_get_cluster_pods_converts_api_objects():
+    source = _FakeSource(kind_snapshot.pod_objects())
+    pods = get_cluster_pods("resilience-test", source=source)
+    # One read of the pods of that namespace only, through the integration's REST client.
+    assert source.calls == [("pods", "/api/v1/namespaces/resilience-test/pods")]
     assert len(pods) == 3
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("500m", 0.5), ("2", 2.0), ("4Gi", 4 * 1024 ** 3), ("8388608Ki", 8 * 1024 ** 3), ("1e3", 1000.0),
+    ("129M", 129e6), ("1.5", 1.5),
+])
+def test_parse_quantity_matches_the_kubernetes_forms(text, expected):
+    # Replaces the kubernetes package's parse_quantity, so the package is not a dependency.
+    assert parse_quantity(text) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("text", ["abc", "12Zi", ""])
+def test_parse_quantity_rejects_text_that_is_not_a_quantity(text):
+    with pytest.raises(ValueError):
+        parse_quantity(text)

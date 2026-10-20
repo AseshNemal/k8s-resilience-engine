@@ -78,7 +78,10 @@ class DeploymentGraphBuilder:
                     zone=self.node_zone_map.get(pod_node),
                     ready=p.get("ready", False),
                     phase=p.get("phase"),
-                    restart_count=p.get("restartCount", 0),
+                    # The selector resolver reports "restartCount" and the app-label resolver (discovery)
+                    # reports "restart_count". Neither is defaulted: a missing value stays None (unknown)
+                    # rather than becoming an observed zero.
+                    restart_count=p["restartCount"] if "restartCount" in p else p.get("restart_count"),
                     namespace=p.get("namespace", "default"),
                     owner_kind=p.get("ownerKind"),
                     owner_name=p.get("ownerName"),

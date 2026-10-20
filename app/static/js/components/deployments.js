@@ -7,7 +7,9 @@
 (function () {
     "use strict";
 
-    let currentEndpoint = "/api/deployments/sample";
+    // The page reads the connected cluster only. There is no sample baseline to switch to: when the cluster
+    // cannot be read, the page says why (see the failure state below) and shows no topology.
+    const LIVE_ENDPOINT = "/api/deployments/discovery";
     const { fetchJson } = window.ResilienceApi || { fetchJson: (url) => fetch(url).then((r) => r.json()) };
     const { formatRatioAsPercentage, initJsonPanel, updateLastRefreshed } =
         window.ResilienceUi || {
@@ -16,8 +18,12 @@
             updateLastRefreshed: () => { },
         };
 
+    // Explicit failure states (our addition): when the cluster cannot be read the page says why and offers a
+    // retry, rather than leaving the widgets empty. See app/static/js/connection-state.js.
+    const { describeError, describeDiscovery, renderStateCard, applyBadge } = window.ResilienceConnection || {};
+
+    const region = document.querySelector('[data-role="page-region"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
-    const toggleSourceButton = document.querySelector('[data-role="toggle-source-button"]');
     const sourceBadge = document.querySelector('[data-role="source-badge"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
 
@@ -28,10 +34,15 @@
 
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
-        if (toggleSourceButton) toggleSourceButton.disabled = true;
 
         try {
-            const deployment = await fetchJson(currentEndpoint);
+            // The discovery envelope: the graph plus how complete it is (ok / empty / partial).
+            const body = await fetchJson(LIVE_ENDPOINT);
+            const deployment = body.graph;
+            if (region) region.replaceChildren();
+            if (applyBadge && describeDiscovery) {
+                applyBadge(sourceBadge, describeDiscovery(body).badge);
+            }
 
             // 1. Top Executive Metrics
             const totalNodes = deployment.nodes ? deployment.nodes.length : 0;
@@ -40,17 +51,22 @@
                 ? deployment.services.reduce((acc, s) => acc + (s.readyReplicas ?? s.ready_replicas ?? (s.pods ? s.pods.filter((p) => p.ready).length : 0)), 0)
                 : 0;
 
-            let highestConcentration = 0;
-            if (deployment.services && deployment.services.length > 0) {
-                highestConcentration = Math.max(
-                    ...deployment.services.map((s) => s.replicaConcentration ?? s.replica_concentration ?? 0.0)
-                );
+            // A service whose concentration the cluster did not report is left out, not counted as 0%.
+            let highestConcentration = null;
+            const reported = (deployment.services || [])
+                .map((s) => s.replicaConcentration ?? s.replica_concentration)
+                .filter((value) => value !== null && value !== undefined);
+            if (reported.length > 0) {
+                highestConcentration = Math.max(...reported);
             }
 
             setMetric("deployment-node-count", totalNodes);
             setMetric("deployment-service-count", totalServices);
             setMetric("deployment-ready-pods", readyPods);
-            setMetric("deployment-highest-concentration", formatRatioAsPercentage(highestConcentration));
+            setMetric(
+                "deployment-highest-concentration",
+                highestConcentration === null ? "—" : formatRatioAsPercentage(highestConcentration)
+            );
 
             // 2. Delegate to Sub-Widgets
             if (window.DeploymentsTopologyWidget) {
@@ -75,32 +91,13 @@
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
             console.error("Failed to load deployment data:", error);
+            if (applyBadge && renderStateCard && describeError && region) {
+                applyBadge(sourceBadge, { variant: "danger", text: "Not showing live data" });
+                renderStateCard(region, describeError(error), { onRetry: loadPage });
+            }
         } finally {
             if (reloadButton) reloadButton.disabled = false;
-            if (toggleSourceButton) toggleSourceButton.disabled = false;
         }
-    }
-
-    // Toggle between Live KinD cluster and Sample baseline
-    if (toggleSourceButton) {
-        toggleSourceButton.addEventListener("click", () => {
-            if (currentEndpoint === "/api/deployments/sample") {
-                currentEndpoint = "/api/deployments/live";
-                if (sourceBadge) {
-                    sourceBadge.textContent = "Live Cluster (KinD)";
-                    sourceBadge.className = "status-badge status-badge--success status-badge--no-dot";
-                }
-                toggleSourceButton.textContent = "Switch to Sample Data";
-            } else {
-                currentEndpoint = "/api/deployments/sample";
-                if (sourceBadge) {
-                    sourceBadge.textContent = "Sample Data";
-                    sourceBadge.className = "status-badge status-badge--muted status-badge--no-dot";
-                }
-                toggleSourceButton.textContent = "Switch to Live Cluster (KinD)";
-            }
-            loadPage();
-        });
     }
 
     if (reloadButton) {

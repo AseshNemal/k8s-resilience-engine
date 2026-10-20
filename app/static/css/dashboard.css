@@ -181,3 +181,67 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* Overview: one collapsible card per namespace with workloads */
+.overview-namespaces {
+    display: grid;
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.ns-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+    padding: var(--space-md);
+}
+
+.ns-card__summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm) var(--space-md);
+    cursor: pointer;
+}
+
+.ns-card__counts {
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
+.ns-table {
+    width: 100%;
+    margin-top: var(--space-md);
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.ns-table th,
+.ns-table td {
+    padding: var(--space-sm);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.ns-table th {
+    color: var(--color-text-muted);
+    font-weight: 600;
+}
+
+.ns-card__empty,
+.ns-card__unresolved {
+    margin-top: var(--space-md);
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
+.ns-card__unresolved {
+    padding-left: var(--space-lg);
+}
+
+@media (max-width: 768px) {
+    .ns-table th:nth-child(3),
+    .ns-table td:nth-child(3) {
+        word-break: break-word;
+    }
+}

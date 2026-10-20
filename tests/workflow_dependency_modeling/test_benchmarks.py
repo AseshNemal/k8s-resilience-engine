@@ -8,7 +8,7 @@ from app.engine.workflow_dependency_modeling.service import (
     list_benchmark_workflows,
 )
 from app.engine.workflow_dependency_modeling.fixture_repository import get_reference
-from app.main import app
+from tests.support.research_app import app  # research-only routes are not served by app.main
 
 client = TestClient(app)
 

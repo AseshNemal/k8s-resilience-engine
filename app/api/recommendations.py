@@ -1,15 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Callable
 
-from app.engine.recommendation_evaluation_validation.service import (
-    get_sample_recommendation,
-)
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+
 from app.engine.recommendation_evaluation_validation.approval import (
     ApprovalService,
     ApprovalRepository,
+    LiveRecommendation,
     StateTransitionError,
     VersionConflictError,
     PreconditionError,
+    has_verified_provenance,
 )
+from app.engine.recommendation_evaluation_validation.live_pipeline import build_live_recommendation
+from app.shared.evidence_errors import EvidenceError, unavailable
 from app.core.config import get_settings
 from app.core.database import get_engine
 from sqlalchemy.orm import Session
@@ -37,28 +40,40 @@ def get_approval_service(db: Session = Depends(get_db)) -> ApprovalService:
     return ApprovalService(repository)
 
 
-@router.get(
-    "/sample",
-    response_model=RecommendationReport,
-    response_model_by_alias=True,
-)
-def read_sample_recommendation() -> RecommendationReport:
-    return get_sample_recommendation()
+def get_recommendation_provider(
+    workflow_id: str | None = Query(None, description="Frozen workflow to recommend for (required)"),
+    failed_node: str | None = Query(None, description="Worker to protect against; default: the one whose loss "
+                                                       "would hurt most"),
+    namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+) -> Callable[[], LiveRecommendation]:
+    """Supplies the function that produces the recommendation (and live evidence) an approval is bound to.
+
+    The recommendation is computed from the connected cluster and the named frozen workflow
+    (live_pipeline.py); it never falls back to sample data. Without a workflow there is nothing to compute
+    for, which is said explicitly. The provider is called inside the handler, after the request body has
+    been validated, so a malformed request is still a 422. Tests substitute it with
+    ``app.dependency_overrides``.
+    """
+
+    def provide() -> LiveRecommendation:
+        if not workflow_id:
+            raise unavailable(
+                "RECOMMENDATION_EVIDENCE_UNAVAILABLE",
+                "Name the frozen workflow to recommend for (workflow_id). No recommendation has been generated "
+                "from live cluster evidence, so there is nothing to approve.",
+                "recommendation",
+            )
+        try:
+            return build_live_recommendation(workflow_id, failed_node, namespace)
+        except ValueError as error:  # a blank identifier
+            raise EvidenceError(
+                "INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation"
+            ) from error
+
+    return provide
 
 
-@router.get(
-    "/{recommendation_id}/approval",
-    response_model=ApprovalResponse,
-    response_model_by_alias=True,
-)
-def get_approval(
-    recommendation_id: str,
-    service: ApprovalService = Depends(get_approval_service),
-) -> ApprovalResponse:
-    approval = service.get_approval(recommendation_id)
-    if not approval:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    # Convert dataclass ApprovalModel to pydantic ApprovalResponse
+def _to_response(approval) -> ApprovalResponse:
     return ApprovalResponse(
         id=approval.id,
         recommendation_id=approval.recommendation_id,
@@ -75,6 +90,40 @@ def get_approval(
     )
 
 
+@router.get(
+    "/live",
+    response_model=RecommendationReport,
+    response_model_by_alias=True,
+    responses={409: {"description": "No recommendation has been generated from live evidence"}},
+)
+def read_live_recommendation(
+    response: Response,
+    provider: Callable[[], LiveRecommendation] = Depends(get_recommendation_provider),
+) -> RecommendationReport:
+    """The current recommendation report and the live evidence it was computed from, or an explicit error."""
+    live = provider()
+    response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
+    response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
+    return live.report
+
+
+@router.get(
+    "/{recommendation_id}/approval",
+    response_model=ApprovalResponse,
+    response_model_by_alias=True,
+)
+def get_approval(
+    recommendation_id: str,
+    response: Response,
+    service: ApprovalService = Depends(get_approval_service),
+) -> ApprovalResponse:
+    approval = service.get_approval(recommendation_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    response.headers["X-Evidence-Provenance"] = "verified" if has_verified_provenance(approval) else "unverified"
+    return _to_response(approval)
+
+
 @router.post(
     "/{recommendation_id}/request-approval",
     response_model=ApprovalResponse,
@@ -83,26 +132,27 @@ def get_approval(
 def request_approval(
     recommendation_id: str,
     request: ApprovalRequest,
+    response: Response,
     service: ApprovalService = Depends(get_approval_service),
+    provider: Callable[[], LiveRecommendation] = Depends(get_recommendation_provider),
 ) -> ApprovalResponse:
-    # We must load the real recommendation report to extract the snapshot.
-    # In a real system, this would fetch from a database. For now, use the sample.
-    recommendation = get_sample_recommendation()
-    
+    live = provider()
     try:
         approval = service.request_approval(
             recommendation_id=recommendation_id,
             proposal_version=request.proposal_version,
-            recommendation=recommendation,
+            recommendation=live.report,
             yaml_snapshot=request.yaml_snapshot,
             requested_by="developer",
+            evidence=live.evidence,
         )
     except PreconditionError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except StateTransitionError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    return get_approval(recommendation_id, service)
+    response.headers["X-Evidence-Provenance"] = "verified" if has_verified_provenance(approval) else "unverified"
+    return _to_response(approval)
 
 
 @router.post(
@@ -129,7 +179,7 @@ def approve_recommendation(
     except VersionConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    return get_approval(recommendation_id, service)
+    return _to_response(approval)
 
 
 @router.post(
@@ -156,4 +206,4 @@ def reject_recommendation(
     except VersionConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    return get_approval(recommendation_id, service)
+    return _to_response(approval)

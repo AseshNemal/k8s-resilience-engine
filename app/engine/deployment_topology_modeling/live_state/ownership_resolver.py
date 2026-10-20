@@ -11,15 +11,11 @@ belongs to the Service, because it serves the Service's traffic; it is listed in
 `podsWithoutDeploymentOwner` so the gap stays visible.
 """
 from typing import Any
-
-from kubernetes import client
+from urllib.parse import quote
 
 from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterPod
-from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import (
-    TERMINAL_POD_PHASES,
-    _load_kubernetes_config,
-    to_json_objects,
-)
+from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import TERMINAL_POD_PHASES
+from app.integrations.kubernetes.client import KubernetesApiSource
 
 
 def _selector_matches(selector: dict[str, str], labels: dict[str, str]) -> bool:
@@ -138,16 +134,19 @@ def resolve_service_ownership(
 
 
 def resolve_deployment_ownership(
-    pods: list[ClusterPod], namespace: str = "default"
+    pods: list[ClusterPod], namespace: str = "default", source: KubernetesApiSource | None = None
 ) -> dict[str, dict[str, Any]]:
-    """Fetches Services, ReplicaSets and Deployments of the namespace and resolves ownership."""
-    _load_kubernetes_config()
-    core_v1 = client.CoreV1Api()
-    apps_v1 = client.AppsV1Api()
+    """Fetches Services, ReplicaSets and Deployments of the namespace and resolves ownership.
+
+    Reads through the integration's REST client (no Kubernetes client package), so an unusable
+    connection raises a ClusterAccessError subclass and nothing is guessed.
+    """
+    source = source or KubernetesApiSource()
+    base = f"/namespaces/{quote(namespace, safe='')}"
     return resolve_service_ownership(
         pods=pods,
-        services=to_json_objects(core_v1.list_namespaced_service(namespace=namespace).items),
-        replica_sets=to_json_objects(apps_v1.list_namespaced_replica_set(namespace=namespace).items),
-        deployments=to_json_objects(apps_v1.list_namespaced_deployment(namespace=namespace).items),
+        services=source.list_objects("services", f"/api/v1{base}/services"),
+        replica_sets=source.list_objects("replicasets", f"/apis/apps/v1{base}/replicasets"),
+        deployments=source.list_objects("deployments", f"/apis/apps/v1{base}/deployments"),
         namespace=namespace,
     )

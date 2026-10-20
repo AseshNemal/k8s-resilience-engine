@@ -2,7 +2,7 @@
  * Workflow Dependency Modeling page script.
  * Owned by: Member 1 (A.D. Perera).
  *
- * Supports both sample data and live Jaeger trace ingestion & automated discovery.
+ * Live Jaeger trace ingestion & automated discovery. No sample or synthetic workflow data is loaded.
  */
 
 (function () {
@@ -22,7 +22,6 @@
     const dataSourceBadge = document.querySelector('[data-role="data-source-badge"]');
 
     const discoverButton = document.querySelector('[data-role="discover-button"]');
-    const reloadSampleButton = document.querySelector('[data-role="reload-sample-button"]');
     const extractLiveButton = document.querySelector('[data-role="extract-live-button"]');
     const discoveredContainer = document.querySelector('[data-role="discovered-workflows-container"]');
     const discoveredSelect = document.querySelector('[data-role="discovered-workflow-select"]');
@@ -32,11 +31,8 @@
     const scenarioStatus = document.querySelector('[data-role="scenario-form-status"]');
     const scenarioList = document.querySelector('[data-role="scenario-registry-list"]');
     const refreshScenariosButton = document.querySelector('[data-role="refresh-scenarios-button"]');
-    const executionActor = document.querySelector('[data-role="execution-actor"]');
-    const executionBatchId = document.querySelector('[data-role="execution-batch-id"]');
     const executionStatus = document.querySelector('[data-role="execution-runner-status"]');
     const executionList = document.querySelector('[data-role="execution-ledger-list"]');
-    const runBenchmarkBatchButton = document.querySelector('[data-role="run-benchmark-batch-button"]');
     const refreshExecutionsButton = document.querySelector('[data-role="refresh-executions-button"]');
     const assessmentForm = document.querySelector('[data-role="assessment-form"]');
     const assessmentStatus = document.querySelector('[data-role="assessment-status"]');
@@ -857,7 +853,20 @@
 
     async function discoverGuidedWorkflows(event) {
         if (event) event.preventDefault();
-        if (!guidedForm || !guidedForm.reportValidity()) return;
+        if (!guidedForm) return;
+        if (!guidedForm.reportValidity()) {
+            // The page starts in a "Loading…" state. Returning silently here would leave it there forever, so
+            // say what is missing and put the controls back.
+            guidedWorkflows = [];
+            guidedOperation.replaceChildren();
+            const missing = document.createElement("option");
+            missing.value = "";
+            missing.textContent = "Enter the trace service address to load workflows";
+            guidedOperation.appendChild(missing);
+            updateGuidedSelectionAction();
+            setGuidedStatus("Enter the workflow trace service address (under Advanced connection settings) to load workflows.", true);
+            return;
+        }
         const button = guidedForm.querySelector('[data-role="guided-discover-button"]');
         button.disabled = true;
         guidedInspectButton.disabled = true;
@@ -1391,37 +1400,6 @@
         }
     }
 
-    async function runBenchmarkExecutions() {
-        if (!runBenchmarkBatchButton || !benchmarkSelect) return;
-        const actor = executionActor ? executionActor.value.trim() : "";
-        if (!actor) {
-            setExecutionStatus("Run registered by is required.", true);
-            return;
-        }
-        if (executionBatchId && !executionBatchId.reportValidity()) return;
-        const batchId = executionBatchId ? executionBatchId.value.trim() : "";
-        const params = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
-        const endpoint = `/api/workflows/execution-batches/benchmarks/${encodeURIComponent(benchmarkSelect.value)}${params}`;
-        runBenchmarkBatchButton.disabled = true;
-        setExecutionStatus("Correlating benchmark traces…");
-        try {
-            const outcomes = await requestScenario(endpoint, {
-                method: "POST",
-                headers: {"X-Actor": actor},
-            });
-            const succeeded = outcomes.filter((item) => item.status === "succeeded").length;
-            setExecutionStatus(
-                `Recorded ${outcomes.length} executions; ${succeeded} succeeded.`
-            );
-            if (executionBatchId) executionBatchId.value = outcomes[0]?.batchId || batchId;
-            await loadExecutionLedger();
-        } catch (error) {
-            setExecutionStatus(error.message, true);
-        } finally {
-            runBenchmarkBatchButton.disabled = false;
-        }
-    }
-
     function setAssessmentStatus(message, isError = false) {
         if (!assessmentStatus) return;
         assessmentStatus.textContent = message;
@@ -1497,10 +1475,8 @@
     async function loadDependencyAssessments() {
         if (!assessmentList) return;
         try {
-            const workflowId = benchmarkSelect ? benchmarkSelect.value : "";
-            const suffix = workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : "";
             renderDependencyAssessments(
-                await requestScenario(`/api/workflows/dependency-assessments${suffix}`)
+                await requestScenario("/api/workflows/dependency-assessments")
             );
         } catch (error) {
             assessmentList.textContent = `Dependency assessments unavailable: ${error.message}`;
@@ -1513,47 +1489,11 @@
 
     async function createAssessment(event) {
         event.preventDefault();
-        if (!assessmentForm || !assessmentForm.reportValidity() || !benchmarkSelect) return;
-        const values = new FormData(assessmentForm);
-        const actor = String(values.get("actor")).trim();
-        let interventions;
-        try {
-            interventions = JSON.parse(String(values.get("interventions")));
-            if (!Array.isArray(interventions)) throw new Error("Expected a JSON array");
-        } catch (error) {
-            setAssessmentStatus(`Intervention JSON is invalid: ${error.message}`, true);
-            return;
-        }
-        const button = assessmentForm.querySelector('[data-role="create-assessment-button"]');
-        button.disabled = true;
-        setAssessmentStatus("Evaluating baseline and intervention evidence…");
-        try {
-            const workflowId = benchmarkSelect.value;
-            const graph = await requestScenario(
-                `/api/workflows/benchmark/${encodeURIComponent(workflowId)}`
-            );
-            const payload = {
-                assessmentId: String(values.get("assessmentId")).trim(),
-                workflowId,
-                scenarioVersion: 1,
-                environmentId: String(values.get("environmentId")).trim(),
-                source: "controlled_experiment",
-                candidateGraph: graph,
-                baselineBatchIds: commaSeparatedIds(String(values.get("baselineBatchIds"))),
-                interventions,
-            };
-            const created = await requestScenario("/api/workflows/dependency-assessments", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Actor": actor },
-                body: JSON.stringify(payload),
-            });
-            setAssessmentStatus(`Created immutable assessment ${created.assessmentId}.`);
-            await loadDependencyAssessments();
-        } catch (error) {
-            setAssessmentStatus(error.message, true);
-        } finally {
-            button.disabled = false;
-        }
+        setAssessmentStatus(
+            "Creating an assessment needs a candidate graph built from live trace evidence. The synthetic " +
+            "fixture graph it used to start from is no longer part of the application.",
+            true
+        );
     }
 
     async function approveAssessment(assessmentId) {
@@ -1930,7 +1870,6 @@
     function renderWorkflowData(workflow, isLive = false) {
         liveMode = isLive;
         renderVersion += 1;
-        lastSensitivitySteps = [];
         region.innerHTML = "";
         region.appendChild(template.content.cloneNode(true));
 
@@ -1972,7 +1911,7 @@
         );
 
         if (dataSourceBadge) {
-            dataSourceBadge.textContent = isLive ? "Jaeger • origin unverified" : "SYNTHETIC FIXTURE";
+            dataSourceBadge.textContent = "Jaeger • origin unverified";
             dataSourceBadge.className = isLive
                 ? "status-badge status-badge--success"
                 : "status-badge status-badge--muted status-badge--no-dot";
@@ -1980,8 +1919,7 @@
 
         updateLastRefreshed(lastRefreshed);
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
-        if (sourcePill) sourcePill.textContent = isLive ? 'Jaeger • origin unverified' : 'Synthetic fixture';
-        initEvaluationListeners();
+        if (sourcePill) sourcePill.textContent = 'Jaeger • origin unverified';
         const note = region.querySelector('[data-role="evidence-note"]');
         note.textContent = isLive
             ? `${workflow.traceCount} matching traces from ${workflow.fetchedTraceCount} fetched (limit ${workflow.sampleLimit}). Jaeger may contain synthetic demo traces; evidence origin and execution success have not been verified. These are observed calls, with no validated dependency classification or accuracy score. Missing services may be uninstrumented.`
@@ -1999,17 +1937,43 @@
                 row.textContent = `${item.service}: observed in ${item.traceCount}/${workflow.traceCount} traces (${Math.round(item.frequency * 100)}%)`;
                 evidence.appendChild(row);
             });
-        } else {
-            handleRunEvaluation();
         }
     }
 
 
+    // The address the server was set up to use, filled into the address fields that are still empty. It is
+    // never hard-coded here: "localhost" means the container itself when the backend runs inside Docker.
+    // "&jaeger_url=..." only when an address was typed, so an empty field means "the server's own setting".
+    function jaegerQuery(address) {
+        return address ? `&jaeger_url=${encodeURIComponent(address)}` : "";
+    }
+
+    function fillJaegerDefault(address) {
+        const guided = document.getElementById("guided-jaeger-url");
+        [jaegerUrlInput, guided].forEach((input) => {
+            if (input && address && !input.value.trim()) input.value = address;
+        });
+    }
+
+    // The address fields start empty, because the right address depends on where the backend runs. Ask the server
+    // which one it uses before anything needs it; if that fails the fields stay empty and the page says so.
+    async function ensureJaegerDefault() {
+        try {
+            const res = await fetchJson("/api/workflows/jaeger/status");
+            fillJaegerDefault(res.jaegerUrl);
+        } catch (_error) {
+            // Nothing to fill in; discoverGuidedWorkflows reports the missing address.
+        }
+    }
+
     async function checkJaegerHealth() {
         if (!jaegerStatusBadge || !jaegerUrlInput) return;
         try {
-            const url = `/api/workflows/jaeger/status?jaeger_url=${encodeURIComponent(jaegerUrlInput.value.trim())}`;
+            // With an empty field no address is sent, so the server checks the one it was set up with.
+            const typed = jaegerUrlInput.value.trim();
+            const url = `/api/workflows/jaeger/status${typed ? `?jaeger_url=${encodeURIComponent(typed)}` : ""}`;
             const res = await fetchJson(url);
+            fillJaegerDefault(res.jaegerUrl);
             if (res.healthy) {
                 jaegerStatusBadge.textContent = "Trace service connected";
                 jaegerStatusBadge.className = "status-badge status-badge--success";
@@ -2028,12 +1992,12 @@
         discoverButton.disabled = true;
         discoverButton.textContent = "Discovering…";
 
-        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "http://localhost:16686";
+        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
         const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
         const lookback = lookbackSelect ? lookbackSelect.value : "1h";
 
         try {
-            const url = `/api/workflows/discover?limit=1000&service_name=${encodeURIComponent(serviceName)}&jaeger_url=${encodeURIComponent(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
+            const url = `/api/workflows/discover?limit=1000&service_name=${encodeURIComponent(serviceName)}${jaegerQuery(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
             discoveredWorkflows = await fetchJson(url);
 
             if (discoveredSelect && discoveredContainer) {
@@ -2075,12 +2039,12 @@
         extractLiveButton.disabled = true;
         extractLiveButton.textContent = "Extracting…";
 
-        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "http://localhost:16686";
+        const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
         const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
         const lookback = lookbackSelect ? lookbackSelect.value : "1h";
 
         try {
-            const url = `/api/workflows/live/evidence?service_name=${encodeURIComponent(serviceName)}&operation=${encodeURIComponent(operation)}&jaeger_url=${encodeURIComponent(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
+            const url = `/api/workflows/live/evidence?service_name=${encodeURIComponent(serviceName)}&operation=${encodeURIComponent(operation)}${jaegerQuery(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
             const workflow = await fetchJson(url);
             renderWorkflowData(workflow, true);
         } catch (error) {
@@ -2092,216 +2056,12 @@
     }
 
 
-    const benchmarkSelect = document.querySelector('[data-role="benchmark-select"]');
 
-    async function loadBenchmarkWorkflow() {
-        if (reloadSampleButton) reloadSampleButton.disabled = true;
-        const workflowId = benchmarkSelect ? benchmarkSelect.value : "checkout";
-        const endpoint = `/api/workflows/benchmark/${encodeURIComponent(workflowId)}`;
-
-        try {
-            const workflow = await fetchJson(endpoint);
-            renderWorkflowData(workflow, false);
-        } catch (error) {
-            setError(region, {
-                endpoint: endpoint,
-                message: error.message,
-                onRetry: loadBenchmarkWorkflow,
-            });
-            console.error("Failed to load benchmark workflow:", error);
-        } finally {
-            if (reloadSampleButton) reloadSampleButton.disabled = false;
-        }
-    }
-
-    const seedTracesButton = document.querySelector('[data-role="seed-traces-button"]');
-
-    async function handleSeedTraces() {
-        if (!seedTracesButton) return;
-        seedTracesButton.disabled = true;
-        seedTracesButton.textContent = "Seeding…";
-
-        try {
-            const response = await fetch("/api/workflows/jaeger/seed", { method: "POST" });
-            const data = await response.json();
-            if (response.ok) {
-                // Automatically run discovery right after seeding
-                await handleDiscoverWorkflows();
-            } else {
-                alert(`Failed to seed traces: ${data.detail || "Unknown error"}`);
-            }
-        } catch (err) {
-            alert(`Could not seed traces: ${err.message}`);
-        } finally {
-            seedTracesButton.disabled = false;
-            seedTracesButton.textContent = "Seed Synthetic Demo Traces";
-        }
-    }
 
     // ---------------------------------------------------------------------------
-    // Research Evaluation & Sensitivity Analysis Handlers
+    // Event wiring
     // ---------------------------------------------------------------------------
 
-    let lastSensitivitySteps = [];
-
-    async function handleRunEvaluation() {
-        if (liveMode) return;
-        const version = renderVersion;
-        const slider = document.querySelector('[data-role="eval-threshold-slider"]');
-        const threshold = slider ? parseFloat(slider.value) : 1.0;
-        const workflowId = benchmarkSelect ? benchmarkSelect.value : "checkout";
-
-        const btn = document.querySelector('[data-role="run-eval-btn"]');
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = "Evaluating…";
-        }
-
-        try {
-            const url = `/api/workflows/evaluation/accuracy?workflow_id=${encodeURIComponent(workflowId)}&mandatory_threshold=${threshold}`;
-            const data = await fetchJson(url);
-            if (liveMode || version !== renderVersion) return;
-
-            const precisionEl = document.querySelector('[data-role="eval-precision"]');
-            const recallEl = document.querySelector('[data-role="eval-recall"]');
-            const f1El = document.querySelector('[data-role="eval-f1"]');
-            const edgeAccEl = document.querySelector('[data-role="eval-edge-acc"]');
-
-            if (precisionEl) precisionEl.textContent = formatRatioAsPercentage(data.mandatoryServiceMetrics.precision);
-            if (recallEl) recallEl.textContent = formatRatioAsPercentage(data.mandatoryServiceMetrics.recall);
-            if (f1El) f1El.textContent = data.mandatoryServiceMetrics.f1.toFixed(2);
-            if (edgeAccEl) edgeAccEl.textContent = formatRatioAsPercentage(data.edgeMetrics.accuracy);
-        } catch (err) {
-            alert(`Evaluation failed: ${err.message}`);
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.textContent = "Compare Fixture Sets";
-            }
-        }
-    }
-
-    async function handleRunSensitivity() {
-        if (liveMode) return;
-        const version = renderVersion;
-        const { assessmentId } = evaluationInputs();
-        const btn = document.querySelector('[data-role="run-sensitivity-btn"]');
-        if (!assessmentId) {
-            alert("Enter a primary assessment ID in the Classification Validation Lab first.");
-            return;
-        }
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = "Running…";
-        }
-
-        try {
-            const thresholds = [0.5, 0.6, 0.7, 0.8, 0.9];
-            const report = await requestScenario("/api/workflows/dependency-experiments/sensitivity", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    assessmentId,
-                    cases: thresholds.map((threshold) => ({
-                        caseId: `mandatory-effect-${threshold.toFixed(2)}`,
-                        policy: {
-                            mandatoryEffectThreshold: threshold,
-                            optionalEffectTolerance: Math.min(0.1, threshold / 2),
-                        },
-                    })),
-                }),
-            });
-            if (liveMode || version !== renderVersion) return;
-            lastSensitivitySteps = report.cases;
-
-            const container = document.querySelector('[data-role="sensitivity-table-container"]');
-            const tbody = document.querySelector('[data-role="sensitivity-table-body"]');
-
-            if (container && tbody) {
-                tbody.innerHTML = "";
-                report.cases.forEach((sensitivityCase) => {
-                    const classifications = Object.values(sensitivityCase.classifications);
-                    const mandatoryCount = classifications.filter((value) => value === "mandatory").length;
-                    const optionalCount = classifications.filter((value) => value === "optional").length;
-                    const tr = document.createElement("tr");
-                    tr.innerHTML = `
-                        <td><strong>${sensitivityCase.policy.mandatoryEffectThreshold.toFixed(2)}</strong></td>
-                        <td colspan="4">${sensitivityCase.changedServices.join(", ") || "No label changes"}</td>
-                        <td><span class="contract-chip">${mandatoryCount}</span></td>
-                        <td><span class="contract-chip">${optionalCount}</span></td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-                container.style.display = "block";
-            }
-        } catch (err) {
-            alert(`Sensitivity analysis failed: ${err.message}`);
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.textContent = "Test Assessment Policies";
-            }
-        }
-    }
-
-    function handleCopyMarkdownTable() {
-        if (liveMode || !lastSensitivitySteps.length) {
-            alert("Run an assessment policy comparison before copying its results.");
-            return;
-        }
-        let markdown = `### Frozen assessment policy sensitivity\n\n`;
-        markdown += 'Classifications are recomputed from frozen cohort summaries; stored evidence is unchanged.\n\n';
-        markdown += `| Mandatory Effect Threshold | Changed Services | Mandatory Count | Optional Count |\n`;
-        markdown += `| :--- | :--- | :--- | :--- |\n`;
-
-        if (lastSensitivitySteps.length > 0) {
-            lastSensitivitySteps.forEach((sensitivityCase) => {
-                const classifications = Object.values(sensitivityCase.classifications);
-                const mandatoryCount = classifications.filter((value) => value === "mandatory").length;
-                const optionalCount = classifications.filter((value) => value === "optional").length;
-                markdown += `| **${sensitivityCase.policy.mandatoryEffectThreshold.toFixed(2)}** | ${sensitivityCase.changedServices.join(", ") || "None"} | ${mandatoryCount} | ${optionalCount} |\n`;
-            });
-        } else {
-            return;
-        }
-
-        navigator.clipboard.writeText(markdown).then(() => {
-            alert("Assessment policy sensitivity table copied.");
-        }).catch(() => {
-            prompt("Copy this Markdown table:", markdown);
-        });
-    }
-
-    function initEvaluationListeners() {
-        const slider = document.querySelector('[data-role="eval-threshold-slider"]');
-        const display = document.querySelector('[data-role="eval-threshold-display"]');
-        const evalBtn = document.querySelector('[data-role="run-eval-btn"]');
-        const sensitivityBtn = document.querySelector('[data-role="run-sensitivity-btn"]');
-        const copyBtn = document.querySelector('[data-role="copy-markdown-btn"]');
-
-        if (slider && display) {
-            slider.addEventListener("input", () => {
-                display.textContent = `${parseFloat(slider.value).toFixed(2)} (${Math.round(slider.value * 100)}%)`;
-            });
-        }
-
-        if (evalBtn) evalBtn.addEventListener("click", handleRunEvaluation);
-        if (sensitivityBtn) sensitivityBtn.addEventListener("click", handleRunSensitivity);
-        if (copyBtn) copyBtn.addEventListener("click", handleCopyMarkdownTable);
-    }
-
-    if (reloadSampleButton) {
-        reloadSampleButton.addEventListener("click", loadBenchmarkWorkflow);
-    }
-    if (benchmarkSelect) {
-        benchmarkSelect.addEventListener("change", () => {
-            loadBenchmarkWorkflow();
-            setTimeout(handleRunEvaluation, 100);
-        });
-    }
-    if (seedTracesButton) {
-        seedTracesButton.addEventListener("click", handleSeedTraces);
-    }
     if (discoverButton) {
         discoverButton.addEventListener("click", handleDiscoverWorkflows);
     }
@@ -2320,9 +2080,6 @@
     }
     if (refreshScenariosButton) {
         refreshScenariosButton.addEventListener("click", loadScenarioRegistry);
-    }
-    if (runBenchmarkBatchButton) {
-        runBenchmarkBatchButton.addEventListener("click", runBenchmarkExecutions);
     }
     if (refreshExecutionsButton) {
         refreshExecutionsButton.addEventListener("click", loadExecutionLedger);
@@ -2348,14 +2105,11 @@
         researchAudit.addEventListener("toggle", () => {
             if (!researchAudit.open || researchAuditInitialized) return;
             researchAuditInitialized = true;
-            loadBenchmarkWorkflow();
             checkJaegerHealth();
             loadScenarioRegistry();
             loadExecutionLedger();
             loadDependencyAssessments();
             loadClassificationLab();
-            initEvaluationListeners();
-            setTimeout(handleRunEvaluation, 300);
         });
     }
     stageButtons.forEach((button) => {
@@ -2368,6 +2122,6 @@
         activateWorkflowStage("define");
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
         if (sourcePill) sourcePill.textContent = "No active campaign";
-        discoverGuidedWorkflows().then(loadLatestExperiment);
+        ensureJaegerDefault().then(discoverGuidedWorkflows).then(loadLatestExperiment);
     });
 })();

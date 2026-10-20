@@ -217,12 +217,14 @@ def test_api_get_markdown_benchmark_report(client: TestClient):
     assert "# Component 2" in response.text
 
 
-def test_run_benchmarks_script_execution():
-    metrics = run_benchmarks()
+def test_run_benchmarks_script_execution(tmp_path):
+    # Written to a temporary folder: with no output_dir the script overwrites the tracked report in
+    # experiments/placement_drift (its runtime figures change on every run), which dirtied the working tree.
+    metrics = run_benchmarks(output_dir=tmp_path)
     assert metrics["total_scenarios"] == 8.0
     assert metrics["completed_count"] == 8.0
 
-    output_dir = Path(__file__).resolve().parents[2] / "experiments" / "placement_drift"
+    output_dir = tmp_path
     md_file = output_dir / "benchmark_report.md"
     json_file = output_dir / "benchmark_report.json"
 
@@ -345,7 +347,19 @@ def test_api_post_chaos_safety_validate(client: TestClient):
 # Additional Topic 5 Tests: Snapshots & Provenance
 # =====================================================================
 
-def test_api_snapshots_lifecycle(client: TestClient):
+class _StoredConnection:
+    """A connection that can vouch for snapshots taken from the stored KinD snapshot."""
+
+    def connection_fingerprint(self) -> str:
+        return "stored-kind-snapshot"
+
+
+def test_api_snapshots_lifecycle(client: TestClient, monkeypatch):
+    # Every stored snapshot records which connection took it (see service._active_connection), so this test
+    # gives the stored snapshot one. Without a connection, snapshots are refused rather than shown unverified.
+    from app.engine.deployment_topology_modeling import discovery
+    monkeypatch.setattr(discovery, "get_cluster_source", lambda: _StoredConnection())
+
     # 1. Freeze a snapshot
     freeze_resp = client.post("/api/deployments/snapshots/freeze?snapshot_id=test_freeze")
     assert freeze_resp.status_code == 200

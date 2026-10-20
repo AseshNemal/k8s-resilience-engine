@@ -11,122 +11,66 @@
     <h2 class="page-header__title">Kubernetes Workflow Resilience Overview</h2>
     <p class="page-header__subtitle">
         Understand how worker-node failures affect critical microservice workflows.
+        Everything on this page comes from the connected cluster.
     </p>
     <div class="page-header__meta">
-        <span class="status-badge status-badge--muted status-badge--no-dot">Sample Data</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Not loaded</span>
         <button type="button" class="secondary-button" data-role="reload-button">
-            Reload Sample Data
+            Refresh from cluster
         </button>
     </div>
 </div>
 
 <div data-role="overview-error-region"></div>
 
+<div class="card" data-role="discovery-summary" hidden>
+    <p data-role="discovery-headline"></p>
+    <ul data-role="discovery-notes"></ul>
+    <p class="footer-note" data-role="discovery-provenance"></p>
+</div>
+
 <section class="metric-grid" aria-label="Overview metrics">
-    <div class="metric-card">
-        <div class="metric-card__top">
-            <span class="icon-badge icon-badge--blue">{{ icon("workflow", 18) }}</span>
-        </div>
-        <div class="metric-card__body">
-            <div class="metric-card__label">Workflows Modelled</div>
-            <div class="metric-card__value" data-metric="workflows-modelled">—</div>
-            <div class="metric-card__hint">Sample workflow definitions</div>
-        </div>
-    </div>
     <div class="metric-card">
         <div class="metric-card__top">
             <span class="icon-badge icon-badge--teal">{{ icon("server", 18) }}</span>
         </div>
         <div class="metric-card__body">
-            <div class="metric-card__label">Cluster Nodes</div>
+            <div class="metric-card__label">Worker Nodes</div>
             <div class="metric-card__value" data-metric="cluster-nodes">—</div>
-            <div class="metric-card__hint">From sample DeploymentGraph</div>
+            <div class="metric-card__hint">Read from the connected cluster</div>
         </div>
     </div>
     <div class="metric-card">
         <div class="metric-card__top">
-            <span class="icon-badge icon-badge--red">{{ icon("target", 18) }}</span>
-            <span class="status-badge" data-role="blast-radius-tag"></span>
+            <span class="icon-badge icon-badge--blue">{{ icon("workflow", 18) }}</span>
         </div>
         <div class="metric-card__body">
-            <div class="metric-card__label">Highest Blast Radius</div>
-            <div class="metric-card__value" data-metric="highest-blast-radius">—</div>
-            <div class="metric-card__hint">From sample FailureImpactReport</div>
+            <div class="metric-card__label">Services Discovered</div>
+            <div class="metric-card__value" data-metric="services-discovered">—</div>
+            <div class="metric-card__hint">Across every application namespace in the cluster</div>
         </div>
     </div>
     <div class="metric-card">
         <div class="metric-card__top">
-            <span class="icon-badge icon-badge--purple">{{ icon("chat-check", 18) }}</span>
+            <span class="icon-badge icon-badge--amber">{{ icon("alert", 18) }}</span>
         </div>
         <div class="metric-card__body">
-            <div class="metric-card__label">Recommendations Generated</div>
-            <div class="metric-card__value" data-metric="recommendations-generated">—</div>
-            <div class="metric-card__hint">From sample RecommendationReport</div>
+            <div class="metric-card__label">Unresolved Items</div>
+            <div class="metric-card__value" data-metric="unresolved-items">—</div>
+            <div class="metric-card__hint">Pods or workloads whose placement could not be resolved</div>
         </div>
     </div>
 </section>
 
 <div class="section-header">
-    <h3 class="section-header__title">Current Sample Analysis</h3>
-    <span class="section-header__note">Populated from the sample APIs below</span>
+    <h3 class="section-header__title">Applications by namespace</h3>
+    <span class="section-header__note">Everything running in the connected cluster</span>
 </div>
-
-<div class="card analysis-card" data-role="analysis-card">
-    <div class="analysis-card__item">
-        <span class="icon-badge icon-badge--blue icon-badge--sm">{{ icon("workflow", 15) }}</span>
-        <div class="analysis-card__item-body">
-            <span class="analysis-card__label">Workflow</span>
-            <span class="analysis-card__value" data-metric="analysis-workflow">—</span>
-        </div>
-    </div>
-    <div class="analysis-card__item">
-        <span class="icon-badge icon-badge--red icon-badge--sm">{{ icon("node", 15) }}</span>
-        <div class="analysis-card__item-body">
-            <span class="analysis-card__label">Failed Node</span>
-            <span class="analysis-card__value" data-metric="analysis-failed-node">—</span>
-        </div>
-    </div>
-    <div class="analysis-card__item">
-        <span class="icon-badge icon-badge--red icon-badge--sm">{{ icon("target", 15) }}</span>
-        <div class="analysis-card__item-body">
-            <span class="analysis-card__label">Blast Radius</span>
-            <span class="analysis-card__value" data-metric="analysis-blast-radius">—</span>
-            <div class="progress-bar analysis-card__bar">
-                <div class="progress-bar__fill progress-bar__fill--danger" data-role="analysis-blast-radius-bar"></div>
-            </div>
-            <span class="status-badge analysis-card__tag" data-role="analysis-blast-radius-tag"></span>
-        </div>
-    </div>
-    <div class="analysis-card__item">
-        <span class="icon-badge icon-badge--amber icon-badge--sm">{{ icon("trend-down", 15) }}</span>
-        <div class="analysis-card__item-body">
-            <span class="analysis-card__label">Survivability</span>
-            <span class="analysis-card__value" data-metric="analysis-survivability">—</span>
-            <div class="progress-bar analysis-card__bar">
-                <div class="progress-bar__fill progress-bar__fill--warning" data-role="analysis-survivability-bar"></div>
-            </div>
-            <span class="status-badge analysis-card__tag" data-role="analysis-survivability-tag"></span>
-        </div>
-    </div>
-    <div class="analysis-card__item">
-        <span class="icon-badge icon-badge--purple icon-badge--sm">{{ icon("shield-check", 15) }}</span>
-        <div class="analysis-card__item-body">
-            <span class="analysis-card__label">Recommendation</span>
-            <span class="analysis-card__value" data-metric="analysis-recommended-action">—</span>
-        </div>
-    </div>
-    <div class="analysis-card__item">
-        <span class="icon-badge icon-badge--green icon-badge--sm">{{ icon("target", 15) }}</span>
-        <div class="analysis-card__item-body">
-            <span class="analysis-card__label">Predicted Blast Radius</span>
-            <span class="analysis-card__value" data-metric="analysis-predicted-blast-radius">—</span>
-            <div class="progress-bar analysis-card__bar">
-                <div class="progress-bar__fill progress-bar__fill--success" data-role="analysis-predicted-bar"></div>
-            </div>
-            <span class="status-badge analysis-card__tag" data-role="analysis-predicted-tag"></span>
-        </div>
-    </div>
-</div>
+<div class="overview-namespaces" data-role="overview-namespaces"></div>
+<p class="footer-note">
+    {{ icon("info", 15) }} Failure-impact predictions and recommendations are produced on their own pages,
+    from a frozen workflow and the live topology. They are not summarised here until they have been run.
+</p>
 
 <div class="section-header">
     <h3 class="section-header__title">System Pipeline</h3>
@@ -149,7 +93,6 @@
             <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>WorkflowGraph</strong></span>
         </div>
         <div class="pipeline-stage__footer">
-            <span class="status-badge status-badge--muted">Sample Available</span>
             <a class="pipeline-stage__link" href="/components/workflows">
                 Open Component {{ icon("external-link", 13) }}
             </a>
@@ -171,7 +114,6 @@
             <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>Topology Graph</strong></span>
         </div>
         <div class="pipeline-stage__footer">
-            <span class="status-badge status-badge--muted">Sample Available</span>
             <a class="pipeline-stage__link" href="/components/deployments">
                 Open Component {{ icon("external-link", 13) }}
             </a>
@@ -193,7 +135,6 @@
             <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>Blast Radius, Survivability</strong></span>
         </div>
         <div class="pipeline-stage__footer">
-            <span class="status-badge status-badge--muted">Sample Available</span>
             <a class="pipeline-stage__link" href="/components/failure-impacts">
                 Open Component {{ icon("external-link", 13) }}
             </a>
@@ -215,7 +156,6 @@
             <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>Validated Recommendations</strong></span>
         </div>
         <div class="pipeline-stage__footer">
-            <span class="status-badge status-badge--info">Prototype Available</span>
             <a class="pipeline-stage__link" href="/components/recommendations">
                 Open Component {{ icon("external-link", 13) }}
             </a>
@@ -223,54 +163,6 @@
     </article>
 </section>
 
-<div class="section-header">
-    <h3 class="section-header__title">System Status</h3>
-</div>
-
-<div class="card">
-    <div class="table-scroll">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th scope="col">Component</th>
-                    <th scope="col">Output</th>
-                    <th scope="col">Data Mode</th>
-                    <th scope="col">Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>Workflow Dependency Modeling</td>
-                    <td><span class="contract-chip">WorkflowGraph</span></td>
-                    <td>Sample Data</td>
-                    <td><span class="status-badge status-badge--muted">Sample Available</span></td>
-                </tr>
-                <tr>
-                    <td>Deployment Topology Modeling</td>
-                    <td><span class="contract-chip">DeploymentGraph</span></td>
-                    <td>Sample Data</td>
-                    <td><span class="status-badge status-badge--muted">Sample Available</span></td>
-                </tr>
-                <tr>
-                    <td>Failure Impact Prediction</td>
-                    <td><span class="contract-chip">FailureImpactReport</span></td>
-                    <td>Sample Data</td>
-                    <td><span class="status-badge status-badge--muted">Sample Available</span></td>
-                </tr>
-                <tr>
-                    <td>Recommendation Evaluation and Validation</td>
-                    <td><span class="contract-chip">RecommendationReport / ValidationReport</span></td>
-                    <td>Sample Data</td>
-                    <td><span class="status-badge status-badge--info">Prototype Available</span></td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<p class="footer-note">
-    {{ icon("info", 15) }} All components operate on sample data in the research environment.
-</p>
 {% endblock %}
 
 {% block page_js %}
