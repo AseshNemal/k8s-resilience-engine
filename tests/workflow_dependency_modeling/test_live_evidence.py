@@ -49,7 +49,7 @@ def test_live_evidence_uses_injected_trace_source() -> None:
     class Source:
         def fetch_workflow_traces(self, **query):
             assert query == {
-                "service_name": "gateway",
+                "service_name": "frontend",
                 "operation": "",
                 "limit": 25,
                 "lookback": "30m",
@@ -57,7 +57,7 @@ def test_live_evidence_uses_injected_trace_source() -> None:
             return [trace("1", "POST", "/orders", "order-api")]
 
     result = get_live_evidence(
-        "gateway",
+        "frontend",
         "POST /orders",
         "https://unused.invalid",
         25,

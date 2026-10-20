@@ -283,6 +283,28 @@ def test_completed_campaign_creates_explainable_assessment() -> None:
     ) == approval
 
 
+def test_reviewed_business_criticality_survives_assessment_and_approval():
+    from dataclasses import replace
+    analyses, campaigns, executions, events = _repositories()
+    campaign = replace(campaigns.get("campaign:checkout1"), criticality=.42)
+    campaigns._campaigns[campaign.campaign_id] = campaign
+    manifests.configure_experiment_manifest_repository(InMemoryExperimentManifestRepository())
+    manifest = manifests.create_experiment_manifest(campaign.campaign_id, {}, actor="test",
+        campaign_repository=campaigns, analysis_repository=analyses, now=NOW)
+    for outcome in executions.list():
+        registration = replace(outcome.registration, experiment_record_id=manifest.manifest_id,
+                               experiment_record_digest=manifest.content_digest)
+        executions._records[registration.execution_id] = replace(outcome, registration=registration)
+    assessments = InMemoryDependencyAssessmentRepository()
+    result = assess_experiment_campaign(campaign.campaign_id, actor="test", campaign_repository=campaigns,
+        analysis_repository=analyses, execution_repository_override=executions,
+        event_repository=events, repository=assessments, now=NOW)
+    approval = approve_experiment_campaign(campaign.campaign_id, actor="test", rationale="Fixture review",
+        approval_confirmed=True, campaign_repository=campaigns, repository=assessments, now=NOW)
+    assert result.candidate_graph.criticality == pytest.approx(.42)
+    assert approval.approved_graph.criticality == pytest.approx(.42)
+
+
 def test_instrumented_local_demo_cannot_approve_unverified_eligible_trials(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import campaign_assessment_service as service
 
