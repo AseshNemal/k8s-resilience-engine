@@ -1,783 +1,296 @@
-{# Workflow Dependency Modeling page. Owned by: Member 1 (A.D. Perera). #}
 {% extends "base.html" %}
-{% from "partials/metric_card.html" import metric_card %}
-{% from "partials/loading_state.html" import loading_state %}
-{% from "partials/raw_json_panel.html" import raw_json_panel %}
-
+{% set show_environment_label = false %}
+{% set show_project_metadata = false %}
+{% set source_label = "No workflow selected" %}
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=workflow-validation-report">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=workspace-1">
 {% endblock %}
-
 {% block content %}
-<div class="page-header">
-    <p class="workflow-kicker">Component 1 · Workflow dependencies</p>
-    <h2 class="page-header__title">Build a workflow from real traces</h2>
-    <p class="page-header__subtitle">Connect tracing, pick a recorded operation, and inspect its service calls.</p>
-</div>
-
-<section class="guided-analysis" aria-labelledby="guided-analysis-title">
-    <div class="guided-analysis__header">
-        <div>
-            <p class="workflow-kicker">Start here</p>
-            <h3 id="guided-analysis-title">Connect your trace source</h3>
-            <p>Choose a service and operation from recorded traces. No graph or service list to enter.</p>
-        </div>
-    </div>
-    <ol class="experiment-path" aria-label="Workflow dependency steps" hidden>
-        <li class="is-current"><span>01</span><strong>Inspect</strong><small>View recorded calls</small></li>
-        <li><span>02</span><strong>Run normally</strong><small>Check successful runs</small></li>
-        <li><span>03</span><strong>Test services</strong><small>One at a time</small></li>
-        <li><span>04</span><strong>Review</strong><small>Check results</small></li>
-        <li><span>05</span><strong>Download</strong><small>Get approved graph</small></li>
-    </ol>
-    <div class="guided-advanced">
-        <form class="guided-analysis__form" data-role="guided-analysis-form">
-            <div class="guided-field guided-field--wide">
-                <label for="guided-trace-source">Trace backend</label>
-                <select id="guided-trace-source" name="traceSourceType" data-role="guided-trace-source">
-                    <option value="jaeger" selected>Jaeger</option>
-                    <option value="zipkin">Zipkin v2</option>
-                    <option value="tempo">Grafana Tempo</option>
-                </select>
+    <div class="workflow-workspace">
+        <header class="workspace-header">
+            <div>
+                <h2>
+                    Workflow dependencies
+                </h2>
+                <p>
+                    See which services a workflow calls and how their availability affects its result.
+                </p>
             </div>
-            <div class="guided-field guided-field--wide">
-                <label for="guided-trace-endpoint">Trace query address</label>
-                <input id="guided-trace-endpoint" name="traceEndpoint" type="url"
-                       value="http://localhost:16686" aria-describedby="guided-trace-service-help" required>
-                <small id="guided-trace-service-help">Use the trace query URL, such as Jaeger :16686.</small>
-            </div>
-            <details class="guided-connection-options">
-                <summary>Authentication, environment and time window</summary>
-                <div class="guided-analysis__form">
-            <div class="guided-field guided-field--wide">
-                <label for="guided-environment">Environment label</label>
-                <input id="guided-environment" name="environmentId" value="local-test" required>
-                <small>Confirm this label for the connected environment. Evidence from different environments stays separate.</small>
-            </div>
-            <div class="guided-field">
-                <label for="guided-trace-authentication">Query authentication</label>
-                <select id="guided-trace-authentication" name="traceAuthentication">
-                    <option value="none" selected>No authentication</option>
-                    <option value="bearer_env">Bearer token from server environment</option>
-                </select>
-            </div>
-            <div class="guided-field guided-field--wide" data-role="guided-secret-field" hidden>
-                <label for="guided-trace-secret-env">Bearer-token environment variable</label>
-                <input id="guided-trace-secret-env" name="traceSecretEnv"
-                       placeholder="TRACE_QUERY_TOKEN" pattern="[A-Z][A-Z0-9_]{0,127}" disabled>
-                <small>The variable name is stored; the token itself is read by the server and is never persisted or sent to the browser.</small>
-            </div>
-            <div class="guided-field">
-                <label for="guided-lookback">Trace window</label>
-                <select id="guided-lookback" name="lookback">
-                    <option value="1h" selected>Last hour</option>
-                    <option value="6h">Last 6 hours</option>
-                    <option value="24h">Last 24 hours</option>
-                    <option value="7d">Last 7 days</option>
-                </select>
-            </div>
-                </div>
-            </details>
-            <input name="evidenceTier" value="experimental" type="hidden">
-            <div class="guided-analysis__action">
-                <button type="submit" class="experiment-button" data-role="guided-discover-button">Connect trace source</button>
-                <button type="button" class="secondary-button" data-role="resume-experiment">Open saved run</button>
-            </div>
-            <div class="guided-field guided-field--wide" data-role="guided-service-field" hidden>
-                <label for="guided-entry-service">Entry service</label>
-                <select id="guided-entry-service" name="entryService" disabled aria-describedby="guided-service-help">
-                    <option value="">Connect to load recorded services</option>
-                </select>
-                <small id="guided-service-help">Select from your tracing backend. We will find the operations recorded for it.</small>
-            </div>
-        </form>
-    </div>
-    <div class="guided-discovery" data-role="guided-discovery" hidden>
-        <div>
-            <label for="guided-operation">Recorded operation</label>
-            <select id="guided-operation" data-role="guided-operation" aria-describedby="guided-workflow-help">
-                <option value="">Choose a recorded service first</option>
-            </select>
-            <small id="guided-workflow-help">Service calls and workflow ID are derived automatically. A multi-step business workflow may span several operations.</small>
-        </div>
-        <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>Show workflow calls</button>
-    </div>
-    <output class="guided-selection-status" data-role="guided-analysis-status" aria-live="polite">Connect a trace source or resume a saved experiment.</output>
-    <div class="guided-result" data-role="guided-result" hidden></div>
-</section>
-
-<details class="workflow-method">
-<summary>How dependency labels are decided</summary>
-<section class="dependency-legend" aria-label="How to read dependency classifications">
-    <article><span class="dependency-legend__index">M</span><h3>Mandatory</h3><p>Confirmed intervention repeatedly prevents the defined business outcome.</p></article>
-    <article><span class="dependency-legend__index">S</span><h3>Supporting</h3><p>Measured degradation, without consistently blocking success. Preserved in the assessment.</p></article>
-    <article><span class="dependency-legend__index">O</span><h3>Optional</h3><p>No material success effect under tested conditions. This does not mean universally unnecessary.</p></article>
-    <article><span class="dependency-legend__index">?</span><h3>Unresolved / conditional</h3><p>Missing evidence or different results by condition. Blocks a single global dependency claim.</p></article>
-</section>
-</details>
-
-<details class="research-audit">
-<summary>
-    <span><strong>Research audit controls</strong><small>Scenarios, execution ledgers, intervention cohorts, references, and metrics</small></span>
-</summary>
-<div class="research-audit__body">
-<details class="operator-preflight-disclosure">
-    <summary>Requirements before testing dependencies</summary>
-    <div class="operator-preflight" aria-label="Requirements before starting">
-        <div class="operator-preflight__intro"><span>Before you start</span><strong>Check the inputs</strong></div>
-        <div class="operator-preflight__item"><span class="operator-preflight__number" aria-hidden="true">01</span><div><strong>Workflow is callable</strong><small>The application entry point can be exercised safely.</small></div></div>
-        <div class="operator-preflight__item"><span class="operator-preflight__number" aria-hidden="true">02</span><div><strong>Telemetry is complete or explicitly limited</strong><small>The trace source and its gaps are recorded.</small></div></div>
-        <div class="operator-preflight__item"><span class="operator-preflight__number" aria-hidden="true">03</span><div><strong>Success is measurable</strong><small>The expected result has a check the runner can perform.</small></div></div>
-    </div>
-</details>
-<details class="telemetry-onboarding">
-    <summary>Other evidence sources and telemetry diagnostics</summary>
-    <div class="guided-analysis__header">
-        <div>
-            <p class="workflow-kicker">Project onboarding</p>
-            <h4 id="telemetry-onboarding-title">What telemetry does this project have?</h4>
-            <p>Alternative sources have different evidence limits; they are not treated as causal traces.</p>
-        </div>
-    </div>
-    <form class="guided-analysis__form" data-role="telemetry-readiness-form">
-        <div class="guided-field">
-            <label for="telemetry-source-type">Evidence source</label>
-            <select id="telemetry-source-type" name="sourceType" data-role="telemetry-source-type">
-                <option value="jaeger" selected>Jaeger / OpenTelemetry</option>
-                <option value="offline_jaeger">Offline Jaeger JSON</option>
-                <option value="zipkin">Zipkin</option>
-                <option value="tempo">Grafana Tempo</option>
-                <option value="vendor_tracing">Other tracing backend</option>
-                <option value="correlated_logs">Structured correlated logs</option>
-                <option value="network_observations">Service mesh / network observations</option>
-                <option value="source_model">Source or configuration model only</option>
-                <option value="none">No telemetry</option>
-            </select>
-        </div>
-        <div class="guided-field guided-field--wide">
-            <label for="telemetry-endpoint">Query endpoint</label>
-            <input id="telemetry-endpoint" name="endpoint" type="url" value="http://localhost:16686"
-                   data-role="telemetry-endpoint" placeholder="https://tracing.example.internal">
-            <small>Required for live Jaeger, Zipkin, or Tempo. Do not embed credentials in the URL.</small>
-        </div>
-        <div class="guided-field">
-            <label for="telemetry-entry-service">Entry service</label>
-            <input id="telemetry-entry-service" name="entryService" placeholder="api-gateway">
-        </div>
-        <div class="guided-field">
-            <label for="telemetry-authentication">Query authentication</label>
-            <select id="telemetry-authentication" name="authentication">
-                <option value="none" selected>No authentication</option>
-                <option value="bearer_env">Bearer token from server environment</option>
-            </select>
-        </div>
-        <div class="guided-field">
-            <label for="telemetry-secret-env">Token environment variable</label>
-            <input id="telemetry-secret-env" name="secretEnv" placeholder="TRACE_QUERY_TOKEN" pattern="[A-Z][A-Z0-9_]{0,127}">
-        </div>
-        <div class="guided-field guided-field--wide">
-            <label for="telemetry-offline-json">Evidence JSON</label>
-            <textarea id="telemetry-offline-json" name="offlineJson" rows="3"
-                      placeholder='Optional: paste a Jaeger/Zipkin/OTLP export, correlated-log entries, network observations, or source-model edges'></textarea>
-        </div>
-        <fieldset class="telemetry-capabilities">
-            <legend>Evidence fields available</legend>
-            <label><input type="checkbox" name="hasServiceIdentities" checked> Service identities</label>
-            <label><input type="checkbox" name="hasTimestamps" checked> Timestamps</label>
-            <label><input type="checkbox" name="hasCorrelationIds" checked> Correlation IDs</label>
-            <label><input type="checkbox" name="hasParentRelationships" checked> Parent relationships</label>
-            <label><input type="checkbox" name="hasOutcomeStatus" checked> Outcome status</label>
-        </fieldset>
-        <div class="guided-analysis__action">
-            <button type="submit" class="experiment-button">Assess telemetry readiness</button>
-        </div>
-    </form>
-    <output class="guided-selection-status" data-role="telemetry-readiness-result" aria-live="polite">
-        Select the project's current evidence source.
-    </output>
-</details>
-<nav class="workflow-steps" aria-label="Workflow modeling stages">
-    <button type="button" class="workflow-step is-active" data-workflow-stage-button="define" aria-pressed="true">
-        <span>1</span><strong>Define</strong><small>Business outcome</small>
-    </button>
-    <button type="button" class="workflow-step" data-workflow-stage-button="evidence" aria-pressed="false">
-        <span>2</span><strong>Observe</strong><small>Traces &amp; executions</small>
-    </button>
-    <button type="button" class="workflow-step" data-workflow-stage-button="validate" aria-pressed="false">
-        <span>3</span><strong>Validate</strong><small>Controlled evidence</small>
-    </button>
-    <button type="button" class="workflow-step" data-workflow-stage-button="evaluate" aria-pressed="false">
-        <span>4</span><strong>Measure</strong><small>Research quality</small>
-    </button>
-</nav>
-
-<div class="workflow-stage" data-workflow-stage="evidence" hidden>
-<div class="workflow-stage__intro">
-    <p>Stage 2</p><h3>Observe real workflow executions</h3>
-    <span>Discover calls from Jaeger or use a clearly marked synthetic fixture.</span>
-</div>
-<div class="card live-config-card" style="margin-bottom: var(--space-lg);">
-    <div class="live-config-card__header">
-        <h4 style="margin: 0; font-size: 14px; font-weight: 600;">Tracing Source &amp; Live Ingestion</h4>
-        <span class="status-badge" data-role="jaeger-status-badge">Checking trace service…</span>
-    </div>
-    <div class="live-config-form" style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-top: var(--space-sm);">
-        <div class="form-group" style="flex: 1; min-width: 220px;">
-            <label for="jaeger-url-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Workflow trace service address</label>
-            <input id="jaeger-url-input" type="text" data-role="jaeger-url-input" value="http://localhost:16686" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="http://localhost:16686">
-        </div>
-        <div class="form-group" style="width: 140px;">
-            <label for="entry-service-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Entry Service</label>
-            <input id="entry-service-input" type="text" data-role="entry-service-input" value="frontend" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="frontend">
-        </div>
-        <div class="form-group" style="width: 120px;">
-            <label for="lookback-select" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Lookback</label>
-            <select id="lookback-select" data-role="lookback-select" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
-                <option value="1h" selected>Last 1h</option>
-                <option value="6h">Last 6h</option>
-                <option value="24h">Last 24h</option>
-                <option value="7d">Last 7d</option>
-            </select>
-        </div>
-        <div class="form-group" style="min-width: 180px;">
-            <label for="benchmark-select" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Synthetic Fixture Dataset</label>
-            <select id="benchmark-select" data-role="benchmark-select" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
-                <option value="checkout" selected>Checkout (synthetic)</option>
-                <option value="view_product">View Product (synthetic)</option>
-                <option value="add_to_cart">Add to Cart (synthetic)</option>
-                <option value="refund">Customer Refund (synthetic)</option>
-            </select>
-        </div>
-        <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap;">
-            <button type="button" class="primary-button" data-role="discover-button">
-                Discover Candidate Operations
+            <button type="button" class="secondary-button" data-role="new-workflow">
+                New workflow
             </button>
-            <button type="button" class="secondary-button" data-role="seed-traces-button" title="Send synthetic test spans into localhost Jaeger; these are not benchmark executions">
-                Seed Synthetic Demo Traces
-            </button>
-            <button type="button" class="secondary-button" data-role="reload-sample-button">
-                Load Synthetic Fixture
-            </button>
-        </div>
-    </div>
-    <div data-role="discovered-workflows-container" style="display: none; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px dashed var(--color-border);">
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
-            <div style="display: flex; align-items: center; gap: var(--space-sm);">
-                <label for="discovered-workflow-select" style="font-size: 13px; font-weight: 600;">Candidate Operations:</label>
-                <select id="discovered-workflow-select" data-role="discovered-workflow-select" class="form-input" style="padding: 6px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);"></select>
-            </div>
-            <button type="button" class="primary-button" data-role="extract-live-button">
-                Extract Live Dependency Graph
-            </button>
-            <button type="button" class="secondary-button" data-role="use-candidate-button">
-                Use Candidate in Scenario
-            </button>
-        </div>
-    </div>
-</div>
-</div>
-
-<div class="workflow-stage" data-workflow-stage="define">
-<div class="workflow-stage__intro">
-    <p>Stage 1</p><h3>Define what success means</h3>
-    <span>Create an immutable business contract before looking at dependency evidence.</span>
-</div>
-<section class="card scenario-registry" aria-labelledby="scenario-registry-title">
-    <div class="scenario-registry__header">
-        <div>
-            <h3 id="scenario-registry-title">Versioned Workflow Scenarios</h3>
-            <p>
-                Define the business contract before trace analysis. Saved versions are immutable
-                and updates require the latest API ETag.
-            </p>
-        </div>
-        <button type="button" class="secondary-button" data-role="refresh-scenarios-button">
-            Refresh Registry
-        </button>
-    </div>
-    <form class="scenario-form" data-role="scenario-form">
-        <div class="scenario-form__field">
-            <label for="scenario-workflow-id">Workflow ID</label>
-            <input id="scenario-workflow-id" name="workflowId" required
-                   pattern="[a-z0-9][a-z0-9_\-]{0,63}" placeholder="customer_checkout">
-        </div>
-        <div class="scenario-form__field scenario-form__field--wide">
-            <label for="scenario-description">Business description</label>
-            <input id="scenario-description" name="description" required
-                   placeholder="Customer completes checkout and receives confirmation">
-        </div>
-        <div class="scenario-form__field scenario-form__field--wide">
-            <label for="scenario-conditions">Business conditions</label>
-            <textarea id="scenario-conditions" name="conditions" rows="3" required
-                      aria-describedby="scenario-conditions-help">default: All workflow executions</textarea>
-            <small id="scenario-conditions-help">
-                One condition per line as <code>condition-id: description</code>. Use separate
-                conditions when dependencies can change by branch, such as guest and returning checkout.
-            </small>
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-criticality">Criticality (0–1)</label>
-            <input id="scenario-criticality" name="criticality" type="number" required
-                   min="0" max="1" step="0.01" value="0.80">
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-entry-service">Entry service</label>
-            <input id="scenario-entry-service" name="entryService" required placeholder="frontend">
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-source">Definition source</label>
-            <select id="scenario-source" name="source">
-                <option value="manual">Manual</option>
-                <option value="discovered">Discovery-assisted</option>
-            </select>
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-lifecycle">Lifecycle</label>
-            <select id="scenario-lifecycle" name="lifecycle">
-                <option value="draft">Draft</option>
-                <option value="active">Active</option>
-            </select>
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-protocol">Outcome protocol</label>
-            <select id="scenario-protocol" name="protocol" data-role="scenario-protocol">
-                <option value="http">HTTP</option>
-                <option value="grpc">gRPC</option>
-                <option value="span">Span status</option>
-            </select>
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-terminal-service">Terminal service</label>
-            <input id="scenario-terminal-service" name="terminalService" required
-                   placeholder="checkoutservice">
-        </div>
-        <div class="scenario-form__field scenario-form__field--wide">
-            <label for="scenario-operation">Terminal operation</label>
-            <input id="scenario-operation" name="operationName" required
-                   placeholder="POST /checkout">
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-outcomes" data-role="scenario-outcomes-label">
-                Accepted HTTP statuses
-            </label>
-            <input id="scenario-outcomes" name="outcomes" required value="200"
-                   aria-describedby="scenario-outcomes-help">
-            <small id="scenario-outcomes-help" data-role="scenario-outcomes-help">
-                Comma-separated numeric status codes.
-            </small>
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-duration">Maximum duration (ms)</label>
-            <input id="scenario-duration" name="maxDurationMs" type="number"
-                   min="1" step="1" placeholder="2000">
-        </div>
-        <div class="scenario-form__field">
-            <label for="scenario-actor">Defined by</label>
-            <input id="scenario-actor" name="actor" required placeholder="name@example.com">
-        </div>
-        <div class="scenario-form__field scenario-form__field--wide">
-            <label for="scenario-change-summary">Change summary</label>
-            <input id="scenario-change-summary" name="changeSummary" required
-                   value="Initial scenario definition">
-        </div>
-        <div class="scenario-form__actions">
-            <button type="submit" class="primary-button" data-role="save-scenario-button">
-                Save Version 1
-            </button>
-            <span data-role="scenario-form-status" aria-live="polite"></span>
-        </div>
-    </form>
-    <div class="scenario-registry__list" data-role="scenario-registry-list"
-         aria-live="polite"></div>
-</section>
-</div>
-
-<div class="workflow-stage" data-workflow-stage="evidence" hidden>
-<section class="card execution-ledger" aria-labelledby="execution-ledger-title">
-    <div class="execution-ledger__header">
-        <div>
-            <h3 id="execution-ledger-title">Execution Outcome Ledger</h3>
-            <p>
-                Run the selected synthetic fixture as a trace-correlated batch. Every execution
-                retains its scenario version, assertion result, and evidence identity.
-            </p>
-        </div>
-        <button type="button" class="secondary-button" data-role="refresh-executions-button">
-            Refresh Outcomes
-        </button>
-    </div>
-    <div class="execution-runner">
-        <div class="scenario-form__field">
-            <label for="execution-actor">Run registered by</label>
-            <input id="execution-actor" data-role="execution-actor" required
-                   value="component-1-runner">
-        </div>
-        <div class="scenario-form__field">
-            <label for="execution-batch-id">Batch ID (optional)</label>
-            <input id="execution-batch-id" data-role="execution-batch-id"
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
-                   placeholder="Generated automatically">
-        </div>
-        <button type="button" class="primary-button" data-role="run-benchmark-batch-button">
-            Run Selected Benchmark
-        </button>
-        <span data-role="execution-runner-status" aria-live="polite"></span>
-    </div>
-    <p class="execution-ledger__note">
-        Missing or duplicate trace IDs remain indeterminate; failed and timed-out invocations
-        are never removed from this ledger.
-    </p>
-    <div class="execution-ledger__list" data-role="execution-ledger-list"
-         aria-live="polite"></div>
-</section>
-</div>
-
-<div class="workflow-stage" data-workflow-stage="validate" hidden>
-<div class="workflow-stage__intro">
-    <p>Stage 3</p><h3>Validate dependency necessity</h3>
-    <span>Compare baseline and controlled-intervention cohorts. Uncertain evidence remains unresolved.</span>
-</div>
-<section class="card dependency-validation" aria-labelledby="dependency-validation-title">
-    <div class="dependency-validation__header">
-        <div>
-            <h3 id="dependency-validation-title">Dependency Evidence Assessments</h3>
-            <p>
-                Compare exact-correlated baseline and controlled-intervention batches. Weak,
-                mixed-environment, or contradictory evidence remains unresolved.
-            </p>
-        </div>
-        <button type="button" class="secondary-button" data-role="refresh-assessments-button">
-            Refresh Assessments
-        </button>
-    </div>
-    <form class="assessment-form" data-role="assessment-form">
-        <div class="scenario-form__field">
-            <label for="assessment-id">Assessment ID</label>
-            <input id="assessment-id" name="assessmentId" required
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
-                   placeholder="assessment:checkout:001">
-        </div>
-        <div class="scenario-form__field">
-            <label for="assessment-environment">Environment ID</label>
-            <input id="assessment-environment" name="environmentId" required
-                   pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"
-                   placeholder="test-cluster-a">
-        </div>
-        <div class="scenario-form__field scenario-form__field--wide">
-            <label for="assessment-baseline-batches">Baseline batch IDs</label>
-            <input id="assessment-baseline-batches" name="baselineBatchIds" required
-                   placeholder="baseline:checkout:001, baseline:checkout:002">
-            <small>Comma-separated immutable execution batch IDs.</small>
-        </div>
-        <div class="scenario-form__field">
-            <label for="assessment-actor">Assessed by</label>
-            <input id="assessment-actor" name="actor" required value="component-1-researcher">
-        </div>
-        <div class="scenario-form__field assessment-form__interventions">
-            <label for="assessment-interventions">Confirmed intervention cohorts (JSON)</label>
-            <textarea id="assessment-interventions" name="interventions" required rows="6"
-                      aria-describedby="assessment-interventions-help"
-                      placeholder='[{"targetService":"paymentservice","interventionType":"service_unavailable","batchIds":["intervention:payment:001"],"interventionConfirmed":true,"confirmationEvidence":"chaos-run:001"}]'></textarea>
-            <small id="assessment-interventions-help">
-                One cohort per candidate service. Component 1 records evidence but never injects failures.
-            </small>
-        </div>
-        <div class="scenario-form__actions">
-            <button type="submit" class="primary-button" data-role="create-assessment-button">
-                Assess Selected Benchmark
-            </button>
-            <span data-role="assessment-status" aria-live="polite"></span>
-        </div>
-    </form>
-    <div class="assessment-approval">
-        <div class="scenario-form__field">
-            <label for="assessment-approval-actor">Approval actor</label>
-            <input id="assessment-approval-actor" data-role="assessment-approval-actor"
-                   value="component-1-approver">
-        </div>
-        <div class="scenario-form__field">
-            <label for="assessment-approval-rationale">Approval rationale</label>
-            <input id="assessment-approval-rationale" data-role="assessment-approval-rationale"
-                   placeholder="Controlled evidence reviewed and accepted">
-        </div>
-    </div>
-    <p class="execution-ledger__note">
-        Approval is blocked while any service has insufficient evidence. Supporting services
-        remain in the assessment record and are excluded from the Component 3 graph projection.
-    </p>
-    <div class="dependency-validation__list" data-role="dependency-assessment-list"
-         aria-live="polite"></div>
-</section>
-<aside class="handoff-note">
-    <strong>Handoff boundary</strong>
-    <span>Only an approved graph is exposed to Component 3 for failure-impact prediction. Component 1 never models pod placement or Kubernetes topology.</span>
-</aside>
-</div>
-
-<div class="workflow-stage" data-workflow-stage="evaluate" hidden>
-<div class="workflow-stage__intro">
-    <p>Stage 4</p><h3>Measure research quality</h3>
-    <span>Compare frozen classifications with independent truth and test robustness across runs.</span>
-</div>
-<section class="card classification-lab" aria-labelledby="classification-lab-title">
-    <div class="classification-lab__header">
-        <div>
-            <span class="classification-lab__eyebrow">Evaluation protocol</span>
-            <h3 id="classification-lab-title">Classification Validation Lab</h3>
-            <p>
-                Register truth independently, evaluate a frozen assessment, and inspect
-                abstention, threshold sensitivity, and repeatability without changing evidence.
-            </p>
-        </div>
-        <button type="button" class="secondary-button" data-role="refresh-classification-lab">
-            Refresh Results
-        </button>
-    </div>
-    <div class="classification-lab__notice" role="note">
-        Synthetic references are engineering evidence only. Production claims require an
-        independently reviewed reference and controlled Jaeger experiment cohorts.
-    </div>
-    <div class="classification-lab__grid">
-        <form class="classification-lab__panel" data-role="dependency-reference-form">
-            <div class="classification-lab__panel-heading">
-                <span>01</span>
-                <div><h4>Independent reference</h4><p>Versioned labels loaded after prediction.</p></div>
-            </div>
-            <div class="classification-lab__fields">
-                <div class="scenario-form__field">
-                    <label for="reference-workflow-id">Workflow ID</label>
-                    <input id="reference-workflow-id" name="workflowId" required value="checkout">
+        </header>
+        <div class="workspace-layout">
+            <aside class="workspace-saved" aria-labelledby="saved-title">
+                <div class="workspace-section-heading">
+                    <h3 id="saved-title">
+                        Saved workflows
+                    </h3>
+                    <button type="button" class="text-button" data-role="refresh-saved">
+                        Refresh
+                    </button>
                 </div>
-                <div class="scenario-form__field">
-                    <label for="reference-scenario-version">Scenario version</label>
-                    <input id="reference-scenario-version" name="scenarioVersion" type="number" min="1" required value="1">
+                <p data-role="saved-status" role="status">
+                    Loading saved workflows…
+                </p>
+                <div data-role="saved-workflows" class="saved-workflows">
                 </div>
-                <div class="scenario-form__field">
-                    <label for="reference-expected-version">Current reference version</label>
-                    <input id="reference-expected-version" name="expectedVersion" type="number" min="0" required value="0">
-                </div>
-                <div class="scenario-form__field">
-                    <label for="reference-actor">Reviewed by</label>
-                    <input id="reference-actor" name="actor" required value="independent-reviewer">
-                </div>
-                <div class="scenario-form__field classification-lab__wide">
-                    <label for="reference-source">Reference source</label>
-                    <input id="reference-source" name="source" required value="independent_domain_review">
-                </div>
-                <div class="scenario-form__field classification-lab__wide">
-                    <label for="reference-labels">Service labels (JSON)</label>
-                    <textarea id="reference-labels" name="labels" rows="7" required
-                              aria-describedby="reference-labels-help"
-                              placeholder='[{"serviceName":"paymentservice","classification":"mandatory","justification":"Payment is required"}]'></textarea>
-                    <small id="reference-labels-help">Allowed labels: mandatory, optional, supporting. Each requires a justification.</small>
-                </div>
-                <label class="classification-lab__check" for="reference-synthetic">
-                    <input id="reference-synthetic" name="synthetic" type="checkbox" checked>
-                    Mark this reference as synthetic
-                </label>
-            </div>
-            <button type="submit" class="primary-button">Save Reference Version</button>
-            <span data-role="dependency-reference-status" aria-live="polite"></span>
-        </form>
-
-        <div class="classification-lab__panel">
-            <div class="classification-lab__panel-heading">
-                <span>02</span>
-                <div><h4>Evaluation &amp; robustness</h4><p>Operate only on immutable assessment IDs.</p></div>
-            </div>
-            <div class="classification-lab__fields">
-                <div class="scenario-form__field classification-lab__wide">
-                    <label for="evaluation-assessment-id">Primary assessment ID</label>
-                    <input id="evaluation-assessment-id" data-role="evaluation-assessment-id"
-                           placeholder="assessment:checkout:001">
-                </div>
-                <div class="scenario-form__field">
-                    <label for="classification-evaluation-id">Evaluation ID</label>
-                    <input id="classification-evaluation-id" data-role="classification-evaluation-id"
-                           placeholder="evaluation:checkout:001">
-                </div>
-                <div class="scenario-form__field">
-                    <label for="evaluation-reference-version">Reference version</label>
-                    <input id="evaluation-reference-version" data-role="evaluation-reference-version"
-                           type="number" min="1" value="1">
-                </div>
-                <div class="scenario-form__field classification-lab__wide">
-                    <label for="evaluation-actor">Evaluated by</label>
-                    <input id="evaluation-actor" data-role="classification-evaluation-actor"
-                           value="component-1-evaluator">
-                </div>
-                <div class="scenario-form__field classification-lab__wide">
-                    <label for="repeatability-assessment-ids">Repeatability assessment IDs</label>
-                    <input id="repeatability-assessment-ids" data-role="repeatability-assessment-ids"
-                           placeholder="assessment:run:001, assessment:run:002">
-                    <small>At least two runs from the same workflow, scenario, and environment.</small>
-                </div>
-            </div>
-            <div class="classification-lab__actions">
-                <button type="button" class="primary-button" data-role="run-classification-evaluation">Evaluate Classification</button>
-                <button type="button" class="secondary-button" data-role="run-policy-sensitivity">Test Policy Sensitivity</button>
-                <button type="button" class="secondary-button" data-role="run-repeatability">Check Repeatability</button>
-            </div>
-            <span data-role="classification-experiment-status" aria-live="polite"></span>
-        </div>
-    </div>
-    <div class="classification-lab__results" data-role="classification-lab-results" aria-live="polite">
-        <p class="muted">No Phase 5 classification evaluation has been recorded yet.</p>
-    </div>
-</section>
-</div>
-
-<div class="workflow-stage" data-workflow-stage="evidence" hidden>
-<div data-role="page-region">
-    {{ loading_state("Loading WorkflowGraph…") }}
-</div>
-</div>
-</div>
-</details>
-
-<template data-role="page-template">
-    <p class="card" data-role="evidence-note" aria-live="polite"></p>
-    <div class="card" data-role="live-service-evidence" hidden><h3>Observed services</h3></div>
-    <section class="metric-grid" aria-label="Workflow metrics">
-        {{ metric_card("workflow-id", "Workflow ID", icon_name="workflow", icon_color="blue") }}
-        {{ metric_card("workflow-criticality", "Criticality", hint="Higher means more business-critical", icon_name="percent", icon_color="teal") }}
-        {{ metric_card("workflow-mandatory-count", "High-frequency Candidates", icon_name="list-checks", icon_color="purple") }}
-        {{ metric_card("workflow-optional-count", "Lower-frequency Candidates", icon_name="layers", icon_color="amber") }}
-        {{ metric_card("workflow-edge-count", "Dependency Edges", icon_name="share", icon_color="green") }}
-    </section>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Dependency Graph</h3>
-        <span class="section-header__note">Observed call direction and frequency-based candidate labels</span>
-    </div>
-    <div class="card">
-        <div data-role="workflow-graph"></div>
-        <div class="graph-legend">
-            <span class="graph-legend__item">
-                <span class="graph-legend__swatch graph-legend__swatch--entry"></span> Entry service
-            </span>
-            <span class="graph-legend__item">
-                <span class="graph-legend__swatch graph-legend__swatch--mandatory"></span> High-frequency candidate
-            </span>
-            <span class="graph-legend__item">
-                <span class="graph-legend__swatch graph-legend__swatch--optional"></span> Lower-frequency candidate
-            </span>
-        </div>
-    </div>
-
-    <div class="section-header" data-role="benchmark-only">
-        <h3 class="section-header__title">Synthetic Fixture Prediction Candidates</h3>
-    </div>
-    <div class="grid-2" data-role="benchmark-only">
-        <div class="card">
-            <div class="section-header__title" style="margin-bottom: var(--space-sm);">High-frequency candidates</div>
-            <div class="service-list" data-role="workflow-mandatory-list"></div>
-        </div>
-        <div class="card">
-            <div class="section-header__title" style="margin-bottom: var(--space-sm);">Lower-frequency candidates</div>
-            <div class="service-list" data-role="workflow-optional-list"></div>
-        </div>
-    </div>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Dependency Edges</h3>
-        <span class="section-header__note">Path type is a UI classification, not a research prediction</span>
-    </div>
-    <div class="card">
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Caller Service (Source)</th>
-                        <th scope="col">Callee Service (Target)</th>
-                        <th scope="col">Evidence Candidate Label</th>
-                    </tr>
-                </thead>
-                <tbody data-role="workflow-edge-table-body"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <details class="diagnostic-disclosure" data-role="benchmark-only">
-        <summary>Engineering fixture diagnostics</summary>
-        <p>Inspect frequency-threshold behavior for the selected synthetic fixture. This is not empirical validation.</p>
-    <div class="card diagnostic-disclosure__body">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-md); margin-bottom: var(--space-md); padding-bottom: var(--space-md); border-bottom: 1px solid var(--color-border);">
-            <div style="display: flex; align-items: center; gap: var(--space-md);">
-                <label for="eval-threshold-slider" style="font-size: 13px; font-weight: 600;">High-frequency Candidate Threshold (θ):</label>
-                <input id="eval-threshold-slider" type="range" data-role="eval-threshold-slider" min="0.5" max="1.0" step="0.05" value="1.0" style="cursor: pointer;">
-                <span data-role="eval-threshold-display" style="font-weight: 700; color: var(--color-primary);">1.00 (100%)</span>
-            </div>
-            <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap;">
-                <button type="button" class="primary-button" data-role="run-eval-btn">
-                    Compare Fixture Sets
-                </button>
-                <button type="button" class="secondary-button" data-role="run-sensitivity-btn">
-                    Test Assessment Policies
-                </button>
-                <button type="button" class="secondary-button" data-role="copy-markdown-btn">
-                    Copy Fixture Table
-                </button>
-            </div>
-        </div>
-
-        <div class="metric-grid" data-role="eval-metrics-grid" style="margin-bottom: var(--space-md);">
-            <div class="metric-card">
-                <div class="metric-card__body">
-                    <div class="metric-card__label">Precision (Services)</div>
-                    <div class="metric-card__value" data-role="eval-precision">—</div>
-                    <div class="metric-card__hint">TP / (TP + FP)</div>
-                </div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-card__body">
-                    <div class="metric-card__label">Recall (Services)</div>
-                    <div class="metric-card__value" data-role="eval-recall">—</div>
-                    <div class="metric-card__hint">TP / (TP + FN)</div>
-                </div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-card__body">
-                    <div class="metric-card__label">F1-Score</div>
-                    <div class="metric-card__value" data-role="eval-f1">—</div>
-                    <div class="metric-card__hint">Harmonic Mean: 2·P·R / (P+R)</div>
-                </div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-card__body">
-                    <div class="metric-card__label">Edge Accuracy</div>
-                    <div class="metric-card__value" data-role="eval-edge-acc">—</div>
-                    <div class="metric-card__hint">Jaccard Index (Graph Overlap)</div>
-                </div>
-            </div>
-        </div>
-
-        <div data-role="sensitivity-table-container" style="display: none; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px dashed var(--color-border);">
-            <h4 style="margin: 0 0 var(--space-sm) 0; font-size: 13px; font-weight: 600;">Frozen Assessment Policy Sensitivity:</h4>
-            <div class="table-scroll">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Mandatory Effect Threshold</th>
-                            <th colspan="4">Changed Services</th>
-                            <th>Mandatory</th>
-                            <th>Optional</th>
-                        </tr>
-                    </thead>
-                    <tbody data-role="sensitivity-table-body"></tbody>
-                </table>
+            </aside>
+            <div class="workspace-main">
+                <section class="workspace-card" data-role="source-panel" aria-labelledby="source-title">
+                    <h3 id="source-title" data-role="source-title">
+                        Choose your trace source
+                    </h3>
+                    <div class="source-switch" aria-label="Trace source">
+                        <button type="button" data-source="live" aria-pressed="true">
+                            Connect tracing
+                        </button>
+                        <button type="button" data-source="upload" aria-pressed="false">
+                            Upload traces
+                        </button>
+                    </div>
+                    <div data-role="live-source">
+                        <form data-role="guided-analysis-form" class="workspace-form">
+                            <div>
+                                <label for="workflow-input-1">
+                                    Tracing backend
+                                </label>
+                                <select id="workflow-input-1" name="traceSourceType" required>
+                                    <option value="jaeger">
+                                        Jaeger
+                                    </option>
+                                    <option value="zipkin">
+                                        Zipkin
+                                    </option>
+                                    <option value="tempo">
+                                        Tempo
+                                    </option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="workflow-input-2">
+                                    Trace query URL
+                                </label>
+                                <input id="workflow-input-2" name="traceEndpoint" type="url" required autocomplete="url">
+                            </div>
+                            <div>
+                                <label for="workflow-input-3">
+                                    Environment name
+                                </label>
+                                <input id="workflow-input-3" name="environmentId" required maxlength="160" autocomplete="off">
+                            </div>
+                            <div>
+                                <label for="workflow-input-4">
+                                    Environment type
+                                </label>
+                                <select id="workflow-input-4" name="evidenceTier" required>
+                                    <option value="">
+                                        Choose an environment type
+                                    </option>
+                                    <option value="experimental">
+                                        Test environment
+                                    </option>
+                                    <option value="production">
+                                        Production
+                                    </option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="workflow-input-5">
+                                    Time window
+                                </label>
+                                <select id="workflow-input-5" name="lookback">
+                                    <option value="1h">
+                                        Last hour
+                                    </option>
+                                    <option value="6h">
+                                        Last 6 hours
+                                    </option>
+                                    <option value="12h">
+                                        Last 12 hours
+                                    </option>
+                                    <option value="24h">
+                                        Last 24 hours
+                                    </option>
+                                    <option value="48h">
+                                        Last 48 hours
+                                    </option>
+                                    <option value="168h">
+                                        Last 7 days
+                                    </option>
+                                </select>
+                            </div>
+                            <details class="full-width">
+                                <summary>
+                                    Authentication
+                                </summary>
+                                <div>
+                                    <label for="workflow-input-6">
+                                        Authentication method
+                                    </label>
+                                    <select id="workflow-input-6" name="traceAuthentication">
+                                        <option value="none">
+                                            None
+                                        </option>
+                                        <option value="bearer_env">
+                                            Bearer token from server environment
+                                        </option>
+                                    </select>
+                                </div>
+                                <div data-role="guided-secret-field" hidden>
+                                    <label for="workflow-input-7">
+                                        Token environment variable
+                                    </label>
+                                    <input aria-describedby="workflow-input-7-help" id="workflow-input-7" name="traceSecretEnv" disabled autocomplete="off">
+                                    <small id="workflow-input-7-help">
+                                        Enter the variable name configured on the server.
+                                    </small>
+                                </div>
+                            </details>
+                            <div class="workspace-actions full-width">
+                                <button type="submit" class="experiment-button" data-role="guided-discover-button">
+                                    Connect
+                                </button>
+                            </div>
+                            <div data-role="guided-service-field" class="full-width" hidden>
+                                <label for="workflow-input-8">
+                                    Entry service
+                                </label>
+                                <select id="workflow-input-8" name="entryService" disabled>
+                                    <option value="">
+                                        Connect to load services
+                                    </option>
+                                </select>
+                            </div>
+                        </form>
+                        <div data-role="guided-discovery" hidden>
+                            <div>
+                                <label for="workflow-input-9">
+                                    Recorded operation
+                                </label>
+                                <select id="workflow-input-9" data-role="guided-operation">
+                                </select>
+                            </div>
+                            <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>
+                                Open workflow
+                            </button>
+                        </div>
+                        <p data-role="guided-analysis-status" class="workspace-status" role="status" aria-live="polite" tabindex="-1">
+                            Connect to find your recorded services and operations.
+                        </p>
+                    </div>
+                    <div data-role="upload-source" hidden>
+                        <p>
+                            Upload a trace export and specify the result the workflow should produce.
+                        </p>
+                        <form data-role="offline-analysis-form" class="workspace-form">
+                            <div>
+                                <label for="workflow-input-10">
+                                    Workflow name
+                                </label>
+                                <input id="workflow-input-10" name="workflowName" required>
+                            </div>
+                            <div>
+                                <label for="workflow-input-11">
+                                    Entry service
+                                </label>
+                                <input id="workflow-input-11" name="entryService" required>
+                            </div>
+                            <div>
+                                <label for="workflow-input-12">
+                                    Root operation
+                                </label>
+                                <input id="workflow-input-12" name="operationName" required>
+                            </div>
+                            <div>
+                                <label for="workflow-input-13">
+                                    Successful result
+                                </label>
+                                <input id="workflow-input-13" name="outcome" required>
+                            </div>
+                            <div>
+                                <label for="workflow-input-14">
+                                    Expected HTTP statuses
+                                </label>
+                                <input id="workflow-input-14" name="statuses" required inputmode="numeric" placeholder="e.g. 200, 201">
+                            </div>
+                            <div>
+                                <label for="workflow-input-15">
+                                    Business importance (0–1)
+                                </label>
+                                <input id="workflow-input-15" name="criticality" type="number" min="0" max="1" step="0.01" required>
+                            </div>
+                            <div>
+                                <label for="workflow-input-16">
+                                    Export format
+                                </label>
+                                <select id="workflow-input-16" name="sourceType">
+                                    <option value="offline_jaeger">
+                                        Jaeger JSON
+                                    </option>
+                                    <option value="zipkin">
+                                        Zipkin JSON
+                                    </option>
+                                    <option value="vendor_tracing">
+                                        OpenTelemetry JSON
+                                    </option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="offline-traces">
+                                    Trace export file
+                                </label>
+                                <input id="offline-traces" name="traces" type="file" accept=".json,application/json" required>
+                            </div>
+                            <details class="full-width">
+                                <summary>
+                                    Advanced analysis settings
+                                </summary>
+                                <div>
+                                    <label for="workflow-input-18">
+                                        Mandatory candidate frequency
+                                    </label>
+                                    <input id="workflow-input-18" name="mandatoryThreshold" type="number" min="0" max="1" step="0.01" value="1" required>
+                                </div>
+                                <div>
+                                    <label for="workflow-input-19">
+                                        Minimum edge frequency
+                                    </label>
+                                    <input id="workflow-input-19" name="minEdgeFrequency" type="number" min="0" max="1" step="0.01" value="0" required>
+                                </div>
+                                <div class="checkbox-label">
+                                    <label for="workflow-input-20">
+                                        Use an existing workflow definition
+                                    </label>
+                                    <input id="workflow-input-20" name="useDefinition" type="checkbox">
+                                </div>
+                                <div>
+                                    <label for="workflow-input-21">
+                                        Workflow definition JSON
+                                    </label>
+                                    <textarea id="workflow-input-21" name="workflowDefinition" rows="7" disabled spellcheck="false">
+                                    </textarea>
+                                </div>
+                            </details>
+                            <div class="workspace-actions full-width">
+                                <button type="submit" class="experiment-button">
+                                    Analyze uploaded traces
+                                </button>
+                            </div>
+                            <p data-role="offline-analysis-status" class="workspace-status full-width" role="status" aria-live="polite" tabindex="-1">
+                            </p>
+                        </form>
+                    </div>
+                </section>
+                <section data-role="guided-result" class="guided-result workspace-card" aria-label="Selected workflow" hidden>
+                </section>
+                <section data-role="offline-analysis-result" class="workspace-card" aria-label="Trace analysis results" hidden>
+                </section>
             </div>
         </div>
     </div>
-    </details>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Raw Data</h3>
-    </div>
-    {{ raw_json_panel("workflow-raw-json", "View Raw WorkflowGraph") }}
-</template>
 {% endblock %}
-
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=workflow-validation-report-2" defer></script>
+    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=workspace-1" defer>
+    </script>
 {% endblock %}

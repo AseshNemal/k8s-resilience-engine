@@ -10,24 +10,16 @@ const context = {
     document: {querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {}},
 };
 vm.createContext(context);
-vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; globalThis.observedGraphModel = observedGraphModel; globalThis.isLocalBoutiqueDemo = isLocalBoutiqueDemo; })();'), context);
+vm.runInContext(source.replace('    if (!guidedForm) return;', 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; globalThis.observedGraphModel = observedGraphModel; globalThis.stageLabel = stageLabel; return;'), context);
 const build = (...args) => JSON.parse(JSON.stringify(context.buildSetup(...args)));
 
-test('local Docker action is offered only to the reviewed local boutique profile', () => {
-    const campaign = {workloadProfile: 'online_boutique_checkout_v0_10_1'};
-    assert.equal(context.isLocalBoutiqueDemo(campaign, 'http://localhost:8080'), true);
-    assert.equal(context.isLocalBoutiqueDemo(campaign, 'https://production.example'), false);
-    assert.equal(context.isLocalBoutiqueDemo({workloadProfile: 'reviewed_generic'}, 'http://localhost:8080'), false);
-});
-
-test('approved output distinguishes trace-observed edges from outage-validated services', () => {
-    assert.match(source, /Observed call edges/);
-    assert.match(source, /not individually outage-validated/);
-    assert.match(source, /badge\.textContent = 'Step 5: graph approved'/);
-    assert.match(source, /Download the approved graph JSON or inspect it through the workflow API/);
-    assert.match(source, /progress\.stage === "approved"/);
-    assert.match(source, /Backend-verified outage trials:/);
-    assert.match(source, /saved reviewer claim of full Docker verification is not supported by the ledger/);
+test('workflow stage labels distinguish every persisted lifecycle state', () => {
+    assert.equal(context.stageLabel('baseline_required'), 'Normal runs needed');
+    assert.equal(context.stageLabel('interventions_required'), 'Service tests needed');
+    assert.equal(context.stageLabel('ready_for_assessment'), 'Ready to review');
+    assert.equal(context.stageLabel('reviewed'), 'Awaiting approval');
+    assert.equal(context.stageLabel('approved'), 'Approved');
+    assert.equal(context.stageLabel('unknown'), 'Checking status');
 });
 
 test('keeps response markers as a list and preserves generic request data', () => {
