@@ -1,5 +1,13 @@
 *.pyc
 
+# Python test and bytecode caches
+__pycache__/
+.pytest_cache/
+
+# Local scratch files and generated Component 1 verification output
+/tmp/
+/experiments/component-1/
+
 # Markdown files are for reference only — not tracked
 *.md
 docs/*SOURCE_OF_TRUTH*
