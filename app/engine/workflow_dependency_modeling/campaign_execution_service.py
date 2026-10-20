@@ -104,7 +104,7 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
         {
             "workflowId": campaign.workflow_id,
             "description": campaign.workflow_name,
-            "criticality": 1.0,
+            "criticality": campaign.criticality if campaign.criticality is not None else 1.0,
             "entryService": campaign.entry_service,
             "successCondition": contract.condition.to_mapping(),
             "version": 1,

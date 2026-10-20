@@ -24,6 +24,7 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_repository impo
     SqlAlchemyExperimentCampaignRepository,
 )
 from app.engine.workflow_dependency_modeling.online_boutique_workload import (
+    DEFAULT_PRODUCT_ID,
     online_boutique_checkout_probe,
 )
 from app.engine.workflow_dependency_modeling.workflow_onboarding import (
@@ -148,11 +149,29 @@ def _campaign_setup(
     benchmark_profile = data.get("benchmarkProfile")
     if benchmark_profile is None:
         definition, setup_mode = _custom_probe(data, analysis)
+        local_control = data.get("localDemoControlConfirmed", False)
+        if not isinstance(local_control, bool):
+            raise ValueError("localDemoControlConfirmed must be a boolean")
+        workload_profile = f"reviewed_{setup_mode}"
+        if local_control:
+            canonical = online_boutique_checkout_probe(DEFAULT_PRODUCT_ID, _timestamp(now).year + 2)
+            if (
+                setup_mode != "imported_definition"
+                or analysis.entry_service != "frontend"
+                or analysis.operation_name != "POST /cart/checkout"
+                or analysis.trace_source.kind.value != "jaeger"
+                or analysis.trace_source.endpoint.rstrip("/") not in {
+                    "http://localhost:16686", "http://127.0.0.1:16686"
+                }
+                or definition.to_mapping() != canonical.to_mapping()
+            ):
+                raise ValueError("Local demo controls require the unchanged local Online Boutique checkout template")
+            workload_profile = ONLINE_BOUTIQUE_CHECKOUT_PROFILE
         return _CampaignSetup(
             definition=definition,
             workflow_id=analysis.workflow_id,
             workflow_name=_required_campaign_text(data, "workflowName"),
-            workload_profile=f"reviewed_{setup_mode}",
+            workload_profile=workload_profile,
             outcome=_required_campaign_text(data, "businessOutcome"),
             response_marker=None,
         )
@@ -205,7 +224,7 @@ def create_experiment_campaign(
 
     analysis = get_workflow_analysis(session_id.strip(), analysis_repository)
     excluded_traces = analysis.trace_quality.get("excludedCount")
-    if excluded_traces != 0:
+    if excluded_traces != 0 or analysis.trace_quality.get("inputInvalidCount", 0) != 0:
         raise ValueError(
             "Dependency validation requires complete trace evidence; repair "
             "instrumentation and create a new analysis session"
@@ -228,6 +247,7 @@ def create_experiment_campaign(
     campaign = ExperimentCampaign.from_mapping(
         {
             "campaignId": f"campaign:{token}",
+            **({"criticality": data["criticality"]} if "criticality" in data else {}),
             "analysisSessionId": analysis.session_id,
             "environmentId": analysis.environment_id,
             "workflowId": setup.workflow_id,

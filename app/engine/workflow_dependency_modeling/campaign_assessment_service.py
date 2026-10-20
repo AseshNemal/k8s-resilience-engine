@@ -275,7 +275,7 @@ def assess_experiment_campaign(
             "source": "controlled_workflow_campaign",
             "candidateGraph": {
                 "workflowId": campaign.workflow_id,
-                "criticality": 1.0,
+                "criticality": campaign.criticality if campaign.criticality is not None else 1.0,
                 "mandatoryServices": sorted(services),
                 "optionalServices": [],
                 "edges": _candidate_edges(analysis.edges, services),

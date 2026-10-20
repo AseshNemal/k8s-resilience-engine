@@ -206,9 +206,17 @@ class ExperimentCampaign:
     blockers: tuple[str, ...]
     created_at: datetime
     created_by: str
+    criticality: float | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExperimentCampaign":
+        criticality = data.get("criticality")
+        if "criticality" in data and (
+            isinstance(criticality, bool)
+            or not isinstance(criticality, (int, float))
+            or not 0 <= criticality <= 1
+        ):
+            raise ComponentDataError("Campaign criticality must be numeric between 0 and 1")
         services = tuple(
             sorted({str(item).strip() for item in data.get("candidateServices", [])})
         )
@@ -255,10 +263,14 @@ class ExperimentCampaign:
             blockers=tuple(str(item) for item in data.get("blockers", [])),
             created_at=_timestamp(data.get("createdAt")),
             created_by=_text(data, "createdBy"),
+            criticality=float(criticality) if criticality is not None else None,
         )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
+            # Preserve old manifest snapshots byte-for-byte in meaning. Legacy
+            # campaigns omitted this field and used an effective weight of 1.
+            **({"criticality": self.criticality} if self.criticality is not None else {}),
             "campaignId": self.campaign_id,
             "analysisSessionId": self.analysis_session_id,
             "environmentId": self.environment_id,
