@@ -1,6 +1,7 @@
 """Compare predicted failure impact with a controlled experiment outcome."""
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from app.shared.schemas.failure_impact import FailureImpactReport
 
@@ -34,6 +35,21 @@ class PredictionObservationComparison:
     services_match: bool
     workflows_match: bool
     exact_match: bool
+
+
+@dataclass(frozen=True)
+class PredictionValidationRecord:
+    """Traceable comparison record produced from controlled evidence."""
+
+    experiment_id: str
+    workflow_id: str
+    failed_node: str
+    observation_source: str
+    observed_at: datetime
+    workflow_freeze_id: str | None
+    deployment_snapshot_id: str | None
+    namespace: str | None
+    comparison: PredictionObservationComparison
 
 
 def _duplicates(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -132,8 +148,60 @@ def compare_prediction_with_observation(
     )
 
 
+def _optional_provenance(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} must be non-empty when provided")
+    return normalized
+
+
+def build_prediction_validation_record(
+    prediction: FailureImpactReport,
+    observation: ObservedFailureOutcome,
+    *,
+    observation_source: str,
+    observed_at: datetime,
+    workflow_freeze_id: str | None = None,
+    deployment_snapshot_id: str | None = None,
+    namespace: str | None = None,
+) -> PredictionValidationRecord:
+    """Build a timestamped validation record without persisting it."""
+
+    normalized_source = observation_source.strip()
+    if not normalized_source:
+        raise ValueError("observation_source must be a non-empty string")
+    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        raise ValueError("observed_at must include timezone information")
+
+    comparison = compare_prediction_with_observation(
+        prediction,
+        observation,
+    )
+    return PredictionValidationRecord(
+        experiment_id=comparison.experiment_id,
+        workflow_id=prediction.workflow_id,
+        failed_node=comparison.failed_node,
+        observation_source=normalized_source,
+        observed_at=observed_at.astimezone(timezone.utc),
+        workflow_freeze_id=_optional_provenance(
+            workflow_freeze_id,
+            "workflow_freeze_id",
+        ),
+        deployment_snapshot_id=_optional_provenance(
+            deployment_snapshot_id,
+            "deployment_snapshot_id",
+        ),
+        namespace=_optional_provenance(namespace, "namespace"),
+        comparison=comparison,
+    )
+
+
 __all__ = [
     "ObservedFailureOutcome",
     "PredictionObservationComparison",
+    "PredictionValidationRecord",
+    "build_prediction_validation_record",
     "compare_prediction_with_observation",
 ]
