@@ -144,9 +144,10 @@ Pointing the workflow probes at an Online Boutique frontend needs `WORKFLOW_TARG
 - The fresh kind cluster contains no application workloads, so live topology shows the three
   worker nodes and an empty (valid) result with no services. Online Boutique is not deployed into kind by
   this setup.
-- Generic Service/ownership resolution is incomplete: applications whose Deployment names differ from their
-  pods' `app` label (Istio Bookinfo) are reported as unresolved, not discovered. The live recommendation
-  pipeline is also incomplete (`docs/RECOMMENDATION_LIVE_DATA.md`).
+- Service/ownership resolution follows the Service selector and owner references, so applications whose
+  Deployment names differ from their pods' `app` label (Istio Bookinfo) resolve completely; this is covered
+  by tests on a fake cluster, not yet by a real Bookinfo run. The live recommendation pipeline is incomplete
+  (`docs/RECOMMENDATION_LIVE_DATA.md`).
 - kind worker nodes are containers on the same Docker host. They are **logical** worker-node failure
   domains, not independent physical machines, and share one kernel and one Docker VM. Results
   from this setup are not evidence about independent hardware failures.

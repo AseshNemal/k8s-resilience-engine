@@ -89,19 +89,26 @@ def normalize_pod(pod: dict) -> ClusterPod:
         c.get("type") == "Ready" and c.get("status") == "True" for c in (status.get("conditions") or [])
     )
     owners = meta.get("ownerReferences") or []
+    # The controller is the owner that manages the pod; fall back to the first reference, as the live-state
+    # parser does, so both paths agree on who owns a pod.
+    owner = next((o for o in owners if o.get("controller")), owners[0] if owners else {})
     statuses = status.get("containerStatuses")
     labels = meta.get("labels") or {}
     return ClusterPod(
         name=meta.get("name"),
         node=(pod.get("spec") or {}).get("nodeName") or None,
         ready=ready_condition and not terminating,
-        owner_kind=owners[0].get("kind") if owners else None,
-        owner_name=owners[0].get("name") if owners else None,
+        owner_kind=owner.get("kind"),
+        owner_name=owner.get("name"),
         app_label=labels.get("app", ""),
         labels=dict(labels),
         phase=status.get("phase"),
         terminating=terminating,
         restart_count=None if statuses is None else sum(s.get("restartCount") or 0 for s in statuses),
+        # The selector resolver only considers pods of the namespace it is resolving, and follows the
+        # controller's UID from pod to ReplicaSet to Deployment. Without these two it would see nothing.
+        namespace=meta.get("namespace") or "default",
+        owner_uid=owner.get("uid"),
     )
 
 

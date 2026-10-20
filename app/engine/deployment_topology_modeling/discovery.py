@@ -5,9 +5,10 @@ the unchanged ``DeploymentGraph`` contract wrapped in an envelope that says how 
 actually resolved. It either returns real evidence or raises ``DiscoveryError``; there is no fallback to
 sample data, and nothing is invented to fill a gap.
 
-Phase 1 limitations, stated rather than hidden:
-* pods are attributed to deployments by ``app`` label == deployment name; Service selectors and
-  EndpointSlices are not read yet, so unattributed pods are reported as unresolved, not guessed at;
+How pods are attributed, and the limits that remain, stated rather than hidden:
+* a Service owns the pods its label selector matches, and each pod's Deployment comes from its owner
+  references (pod -> ReplicaSet -> Deployment); names are never compared. Pods that no Service selects are
+  named in a warning and are not part of any service graph;
 * the namespace's existence cannot be verified (no Namespace read permission);
 * the connection fingerprint detects a change of connection, it does not prove which cluster this is.
 """
@@ -16,6 +17,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Literal, Protocol
+from urllib.parse import quote
 
 from app.engine.deployment_topology_modeling.graph_builder import DeploymentGraphBuilder
 from app.engine.deployment_topology_modeling.live_state.cluster_models import (
@@ -26,11 +28,8 @@ from app.engine.deployment_topology_modeling.live_state.cluster_models import (
 from app.engine.deployment_topology_modeling.live_state.concentration_analyzer import (
     analyze_replica_concentration,
 )
-from app.engine.deployment_topology_modeling.live_state.ownership_resolver import (
-    find_unattributed_pods,
-    related_deployments,
-    resolve_deployment_ownership_by_app_label,
-)
+from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import TERMINAL_POD_PHASES
+from app.engine.deployment_topology_modeling.live_state.ownership_resolver import resolve_service_ownership
 from app.integrations.kubernetes.client import (
     AuthFailedError,
     ClusterAccessError,
@@ -53,6 +52,8 @@ class ClusterSource(Protocol):
     def list_nodes(self) -> list[ClusterNode]: ...
     def list_pods(self, namespace: str) -> list[ClusterPod]: ...
     def list_deployments(self, namespace: str) -> list[ClusterDeployment]: ...
+    # Raw API objects of Services, ReplicaSets and Deployments, which the Service resolver reads.
+    def list_objects(self, resource: str, path: str) -> list[dict]: ...
     def connection_fingerprint(self) -> str | None: ...
 
 
@@ -141,7 +142,10 @@ def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryRe
     try:
         nodes = source.list_nodes()
         pods = source.list_pods(namespace)
-        deployments = source.list_deployments(namespace)
+        base = quote(namespace, safe="")
+        services = source.list_objects("services", f"/api/v1/namespaces/{base}/services")
+        replica_sets = source.list_objects("replicasets", f"/apis/apps/v1/namespaces/{base}/replicasets")
+        deployments = source.list_objects("deployments", f"/apis/apps/v1/namespaces/{base}/deployments")
         fingerprint = source.connection_fingerprint()
     except ClusterAccessError as error:
         logger.warning("Cluster discovery failed (%s): %s", type(error).__name__, error)
@@ -166,40 +170,71 @@ def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryRe
             message="The cluster reports no worker nodes, so no failure domains can be modelled.",
         ))
 
-    workloads = resolve_deployment_ownership_by_app_label(pods, deployments)
+    # Which pods belong to which Service is decided the way Kubernetes decides it: a Service owns the pods
+    # whose labels contain every pair of its selector, and each pod's Deployment comes from its owner
+    # references (pod -> ReplicaSet -> Deployment). Names are never compared, so an application whose
+    # Deployments are named differently from their ``app`` label (Istio Bookinfo's ``productpage-v1``)
+    # resolves completely instead of being reported as unmatched.
+    workloads = resolve_service_ownership(pods, services, replica_sets, deployments, namespace)
+    selected_pods: set[str] = set()
 
-    for name, workload in workloads.items():
+    for name in list(workloads):
+        workload = workloads[name]
+        all_pods = workload["pods"]
+        selected_pods.update(pod["name"] for pod in all_pods)
+        if not all_pods and not workload["deploymentNames"]:
+            # A Service that selects nothing (for example one that fronts something outside the cluster)
+            # has no placement to model. It is said so, not silently dropped or guessed at.
+            warnings.append(DiscoveryWarning(
+                code="SERVICE_SELECTS_NO_PODS",
+                message=f"Service '{name}' selects no pods in '{namespace}', so it has no placement to model.",
+            ))
+            del workloads[name]
+            continue
         reasons = evidence_reasons.setdefault(name, [])
-        for pod_name in workload["unscheduledPods"]:
-            unresolved.append(_unresolved("Pod", pod_name, "POD_NOT_SCHEDULED", namespace, [name]))
-            reasons.append("UNSCHEDULED_PODS")
         placed, excluded = [], []
-        for pod in workload["pods"]:
-            (placed if pod["node"] in worker_names else excluded).append(pod)
+        for pod in all_pods:
+            if pod["node"] is None:
+                unresolved.append(_unresolved("Pod", pod["name"], "POD_NOT_SCHEDULED", namespace, [name]))
+                reasons.append("UNSCHEDULED_PODS")
+            elif pod["node"] in worker_names:
+                placed.append(pod)
+            else:
+                excluded.append(pod)
         for pod in excluded:
             unresolved.append(_unresolved("Pod", pod["name"], "POD_ON_EXCLUDED_NODE", namespace, [name]))
             reasons.append("PODS_ON_EXCLUDED_NODES")
+        for pod_name in workload["podsWithoutDeploymentOwner"]:
+            # Selected by the Service but owned by a StatefulSet, a DaemonSet or nothing: the pod serves the
+            # Service's traffic, but its declared replica count is not known from a Deployment.
+            unresolved.append(_unresolved("Pod", pod_name, "POD_WITHOUT_DEPLOYMENT_OWNER", namespace, [name]))
+            reasons.append("PODS_WITHOUT_DEPLOYMENT_OWNER")
         workload["pods"] = placed
         workload["readyReplicas"] = sum(1 for p in placed if p["ready"])
-        observed = len(placed) + len(excluded) + len(workload["unscheduledPods"])
-        if workload["declaredReplicas"] > 0 and observed == 0:
-            unresolved.append(_unresolved("Deployment", name, "WORKLOAD_HAS_NO_PODS", namespace, [name]))
+        if workload["declaredReplicas"] > 0 and not all_pods:
+            unresolved.append(_unresolved("Service", name, "WORKLOAD_HAS_NO_PODS", namespace, [name]))
             reasons.append("NO_PODS_OBSERVED")
-        if workload["declaredReplicas"] == 0:
+        if workload["deploymentNames"] and workload["declaredReplicas"] == 0:
             warnings.append(DiscoveryWarning(
                 code="WORKLOAD_SCALED_TO_ZERO",
-                message=f"Deployment '{name}' is scaled to zero replicas.",
+                message=f"The workload behind Service '{name}' is scaled to zero replicas.",
             ))
 
-    for pod in find_unattributed_pods(pods, deployments):
-        related = related_deployments(pod, deployments)
-        unresolved.append(_unresolved("Pod", pod.name, "NO_MATCHING_DEPLOYMENT", namespace, related))
-        for name in related:
-            evidence_reasons.setdefault(name, []).append("UNMATCHED_RELATED_PODS")
+    # Pods that no Service selects (a Job's pod, a standalone pod) are not part of any service graph, so they
+    # cannot change the placement of one. They are named in a warning but do not make the result partial.
+    stray = sorted(p.name for p in pods if p.name not in selected_pods and p.phase not in TERMINAL_POD_PHASES)
+    if stray:
+        shown = ", ".join(stray[:5]) + (f" and {len(stray) - 5} more" if len(stray) > 5 else "")
+        warnings.append(DiscoveryWarning(
+            code="POD_SELECTED_BY_NO_SERVICE",
+            message=f"{len(stray)} pod(s) in '{namespace}' are selected by no Service and are not part of any "
+                    f"service graph: {shown}.",
+        ))
 
     service_evidence = {
         name: ServiceEvidence(complete=not reasons, reasons=sorted(set(reasons)))
         for name, reasons in evidence_reasons.items()
+        if name in workloads
     }
 
     if not pods and not deployments:

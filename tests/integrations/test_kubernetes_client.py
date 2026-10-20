@@ -533,3 +533,20 @@ def test_request_bodies_are_never_sent(tmp_path):
     api = FakeApi({"/api/v1/nodes": items()})
     api.source(tmp_path).list_nodes()
     assert api.requests[0].content == b"" and json.dumps(dict(api.requests[0].headers)).count("content-type") == 0
+
+
+def test_a_pod_keeps_its_namespace_and_the_uid_of_its_controller():
+    # The Service resolver only considers pods of the namespace it resolves and follows the controller's UID
+    # (pod -> ReplicaSet -> Deployment). Losing either one would silently empty the graph, not raise.
+    from app.integrations.kubernetes.client import normalize_pod
+
+    pod = normalize_pod({
+        "metadata": {"name": "p1", "namespace": "bookinfo", "labels": {"app": "reviews"},
+                     "ownerReferences": [{"kind": "ConfigMap", "name": "x", "uid": "u-other"},
+                                         {"kind": "ReplicaSet", "name": "reviews-v2-abc", "uid": "u-rs",
+                                          "controller": True}]},
+        "spec": {"nodeName": "w1"}, "status": {"phase": "Running"},
+    })
+
+    assert pod.namespace == "bookinfo"
+    assert (pod.owner_kind, pod.owner_name, pod.owner_uid) == ("ReplicaSet", "reviews-v2-abc", "u-rs")

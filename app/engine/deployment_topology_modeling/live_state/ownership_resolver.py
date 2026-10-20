@@ -13,10 +13,7 @@ belongs to the Service, because it serves the Service's traffic; it is listed in
 from typing import Any
 from urllib.parse import quote
 
-from app.engine.deployment_topology_modeling.live_state.cluster_models import (
-    ClusterDeployment,
-    ClusterPod,
-)
+from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterPod
 from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import TERMINAL_POD_PHASES
 from app.integrations.kubernetes.client import KubernetesApiSource
 
@@ -153,73 +150,3 @@ def resolve_deployment_ownership(
         deployments=source.list_objects("deployments", f"/apis/apps/v1{base}/deployments"),
         namespace=namespace,
     )
-
-
-# ---------------------------------------------------------------------------------------------
-# App-label attribution used by discovery.py (the extension's live discovery)
-#
-# This is the earlier, simpler rule and it is kept next to the selector-based resolver above so that
-# discovery.py keeps working unchanged: a pod belongs to the Deployment whose name equals the pod's
-# ``app`` label. Pods that match nothing are reported, never guessed at. Moving discovery over to
-# resolve_service_ownership (Service selectors) is the planned follow-up and would fix applications
-# whose Deployments are named differently from their ``app`` label, such as Istio Bookinfo.
-# ---------------------------------------------------------------------------------------------
-
-def resolve_deployment_ownership_by_app_label(
-    pods: list[ClusterPod],
-    deployments: list[ClusterDeployment],
-) -> dict[str, dict[str, Any]]:
-    """Attribute pods to deployments from already-fetched cluster data (no API calls here).
-
-    A pod with no assigned node is kept apart in ``unscheduledPods`` instead of being given a
-    placeholder node, and a terminating pod is never counted as ready.
-    """
-    deployment_map: dict[str, dict[str, Any]] = {
-        dep.name: {
-            "name": dep.name,
-            "declaredReplicas": dep.declared_replicas,
-            "readyReplicas": 0,
-            "pods": [],
-            "unscheduledPods": [],
-        }
-        for dep in deployments
-    }
-
-    for pod in pods:
-        workload = deployment_map.get(pod.app_label) if pod.app_label else None
-        if workload is None:
-            continue
-        if pod.node is None:
-            workload["unscheduledPods"].append(pod.name)
-            continue
-        is_ready = pod.ready and not pod.terminating
-        workload["pods"].append({
-            "name": pod.name,
-            "node": pod.node,
-            "ready": is_ready,
-            "restart_count": pod.restart_count,
-        })
-        if is_ready:
-            workload["readyReplicas"] += 1
-
-    return deployment_map
-
-
-def find_unattributed_pods(pods: list[ClusterPod], deployments: list[ClusterDeployment]) -> list[ClusterPod]:
-    """Pods that the ``app``-label rule did not attribute to any deployment."""
-    names = {dep.name for dep in deployments}
-    return [pod for pod in pods if not pod.app_label or pod.app_label not in names]
-
-
-def related_deployments(pod: ClusterPod, deployments: list[ClusterDeployment]) -> list[str]:
-    """Deployments an unattributed pod might belong to, judged by name only.
-
-    Deliberately conservative: a match makes that deployment's placement evidence incomplete. It is not
-    proof of ownership.
-    """
-    related = []
-    for dep in deployments:
-        prefix = f"{dep.name}-"
-        if (pod.owner_name or "").startswith(prefix) or pod.name.startswith(prefix):
-            related.append(dep.name)
-    return related

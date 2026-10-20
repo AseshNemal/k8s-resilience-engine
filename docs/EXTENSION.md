@@ -373,10 +373,11 @@ package.
   can be requested; there is no recommendation apply or validation step.
   Nothing here applies Kubernetes changes, runs chaos experiments or deploys workloads.
 - The live topology of a fresh kind cluster shows its three worker nodes and an empty (valid) result with no services.
-- **Generic Kubernetes Service/ownership resolution is incomplete.** Pods are attributed to Deployments by
-  `app` label equal to the Deployment name. Applications named otherwise (Istio Bookinfo's `productpage-v1`
-  with `app: productpage`) are reported as unresolved (`partial`), not discovered, and predictions that
-  depend on them are refused (`TOPOLOGY_INCOMPLETE`).
+- Service/ownership resolution follows Kubernetes (Service selector, then pod → ReplicaSet → Deployment), so
+  applications whose Deployments are named differently from their `app` label (Istio Bookinfo's
+  `productpage-v1`) resolve completely. This is covered by tests on a Bookinfo-shaped fake cluster and has not
+  been verified against a real Bookinfo cluster yet. A pod that a Service selects but no Deployment owns
+  (a StatefulSet's pod) leaves that service `partial`, so a prediction that depends on it is refused.
 - **The live recommendation pipeline is incomplete** (see `docs/RECOMMENDATION_LIVE_DATA.md`): nothing yet
   produces a `RecommendationReport`, YAML proposal or `ValidationReport` from live evidence.
 - An installed extension keeps running the image it was installed from. Changes only appear after

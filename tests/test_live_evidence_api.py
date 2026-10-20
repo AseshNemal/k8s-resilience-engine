@@ -133,13 +133,15 @@ def test_connected_cluster_with_no_workloads_is_a_valid_empty_state(use_cluster)
 def test_partial_discovery_lists_what_could_not_be_resolved(use_cluster):
     source = two_node_shop()
     from tests.support.fake_cluster import pod
-    source.pods["shop"].append(pod("stray-1", "worker-1", app="stray"))
+    # A pod of the web Service with no node yet: its placement cannot be listed, so the result is partial.
+    source.pods["shop"].append(pod("web-3", None, app="web", ready=False, phase="Pending"))
     use_cluster(source)
 
     payload = client.get("/api/deployments/discovery", params={"namespace": "shop"}).json()
 
     assert payload["status"] == "partial"
-    assert payload["unresolved"][0]["reason"] == "NO_MATCHING_DEPLOYMENT"
+    assert payload["unresolved"][0]["reason"] == "POD_NOT_SCHEDULED"
+    assert payload["unresolved"][0]["name"] == "web-3"
 
 
 # ---- declared state ------------------------------------------------------------------------------------

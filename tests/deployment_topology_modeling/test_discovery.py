@@ -107,28 +107,73 @@ def test_pending_pod_is_unresolved_not_placed_on_an_invented_node():
     assert placed == {"worker-1", "worker-2"}  # no "unknown-node"
 
 
-def test_pod_without_a_matching_deployment_is_reported_not_dropped():
+def test_a_pod_no_service_selects_is_named_in_a_warning_not_dropped():
     source = two_node_shop()
     source.pods["shop"].append(pod("batch-1", "worker-2", app="batch"))
 
     result = discover("shop", source=source)
 
-    assert result.status == "partial"
-    assert [(u.kind, u.name, u.reason) for u in result.unresolved] == [
-        ("Pod", "batch-1", "NO_MATCHING_DEPLOYMENT")
-    ]
-    # Unrelated by name: it does not make the other services' evidence incomplete.
+    # It is part of no service graph, so it cannot change any service's placement: the result stays ok.
+    assert result.status == "ok"
+    (warning,) = [w for w in result.warnings if w.code == "POD_SELECTED_BY_NO_SERVICE"]
+    assert "batch-1" in warning.message
     assert result.service_evidence["web"].complete is True
 
 
-def test_unmatched_pod_owned_by_a_known_deployment_makes_that_service_incomplete():
+def test_a_pod_with_a_different_label_is_not_guessed_into_a_service_by_name():
+    # Owned by a ReplicaSet that looks like web's, but its labels do not match the Service selector, so
+    # Kubernetes does not route to it. Names are never compared; it is reported, not attributed.
     source = two_node_shop()
     source.pods["shop"].append(pod("web-9", "worker-1", app="renamed-label", owner="web-5d9c"))
 
     result = discover("shop", source=source)
 
-    assert result.service_evidence["web"].complete is False
-    assert result.service_evidence["db"].complete is True
+    web = next(s for s in result.graph.services if s.name == "web")
+    assert "web-9" not in {p.name for p in web.pods}
+    assert "web-9" in next(w for w in result.warnings if w.code == "POD_SELECTED_BY_NO_SERVICE").message
+
+
+def test_a_service_whose_pods_are_named_differently_from_its_deployment_resolves_completely():
+    from tests.support.fake_cluster import bookinfo
+
+    result = discover("bookinfo", source=bookinfo())
+
+    # Deployments productpage-v1, details-v1, ratings-v1, reviews-v1: none equals its app label.
+    assert result.status == "ok"
+    assert {s.name for s in result.graph.services} == {"productpage", "details", "ratings", "reviews"}
+    assert all(e.complete for e in result.service_evidence.values())
+    assert not result.unresolved
+
+
+def test_several_deployments_behind_one_service_count_together():
+    from tests.support.fake_cluster import bookinfo
+
+    result = discover("bookinfo", source=bookinfo(reviews_versions=("v1", "v2", "v3")))
+
+    reviews = next(s for s in result.graph.services if s.name == "reviews")
+    assert reviews.declared_replicas == 3
+    assert sorted(reviews.deployment_names) == ["reviews-v1", "reviews-v2", "reviews-v3"]
+    assert result.status == "ok"
+
+
+def test_a_pod_in_another_namespace_is_never_mixed_into_a_service():
+    from tests.support.fake_cluster import multi_namespace_cluster
+
+    result = discover("shop", source=multi_namespace_cluster())
+
+    assert {p.name for s in result.graph.services for p in s.pods} == {"web-1", "web-2", "db-1"}
+
+
+def test_a_service_that_selects_no_pods_is_a_warning_not_a_service():
+    from tests.support.fake_cluster import service as kube_service
+    source = two_node_shop()
+    source.services = {"shop": [kube_service("web", {"app": "web"}), kube_service("db", {"app": "db"}),
+                                kube_service("external", {"app": "nothing-has-this"})]}
+
+    result = discover("shop", source=source)
+
+    assert "external" not in {s.name for s in result.graph.services}
+    assert "SERVICE_SELECTS_NO_PODS" in [w.code for w in result.warnings]
 
 
 def test_deployment_with_replicas_but_no_pods_is_unresolved():
@@ -137,7 +182,8 @@ def test_deployment_with_replicas_but_no_pods_is_unresolved():
 
     result = discover("shop", source=source)
 
-    assert ("Deployment", "cache", "WORKLOAD_HAS_NO_PODS") in [(u.kind, u.name, u.reason) for u in result.unresolved]
+    # Reported on the Service the Deployment sits behind, which is what a workflow refers to.
+    assert ("Service", "cache", "WORKLOAD_HAS_NO_PODS") in [(u.kind, u.name, u.reason) for u in result.unresolved]
     assert result.service_evidence["cache"].complete is False
 
 
@@ -218,7 +264,10 @@ def test_discovery_only_reads():
 
     discover("shop", source=source)
 
-    assert source.calls == ["nodes", "pods:shop", "deployments:shop"]
+    # Only reads: nodes, the namespace's pods, and the raw Services, ReplicaSets and Deployments.
+    assert source.calls == ["nodes", "pods:shop", "raw:/api/v1/namespaces/shop/services",
+                            "raw:/apis/apps/v1/namespaces/shop/replicasets",
+                            "raw:/apis/apps/v1/namespaces/shop/deployments"]
 
 
 def test_envelope_carries_provenance_without_claiming_identity():

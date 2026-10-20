@@ -58,7 +58,9 @@ def test_totals_count_workers_once_and_add_up_services_and_unresolved():
 
 def test_an_unresolved_pod_makes_the_whole_overview_partial_and_is_counted():
     source = multi_namespace_cluster()
-    source.pods["shop"].append(pod("stray-1", "worker-1", app="not-a-deployment"))
+    # A pod of the web Service that the scheduler has not placed yet: its placement is unknown, so the
+    # overview is partial. (A pod that no Service selects is only a warning.)
+    source.pods["shop"].append(pod("web-3", None, app="web", ready=False, phase="Pending"))
 
     result = discover_all(source)
 

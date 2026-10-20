@@ -1204,13 +1204,11 @@ The checklist above predates the real-data-only work and was not re-audited. As 
       topology, missing workflow evidence and missing recommendations are explicit coded errors.
 - [x] Unknown facts (zone, capacity, restart counts, accuracy) stay unknown (`null`); nothing is
       defaulted to a perfect or zero value.
-- [ ] **Generic Kubernetes Service/ownership resolution is incomplete.** Pods are attributed to
-      Deployments by `app` label equal to the Deployment name, so applications whose Deployments are
-      named differently (for example Istio Bookinfo: `productpage-v1` with `app: productpage`) are
-      reported as *unresolved*, not discovered. Pod → ReplicaSet → Deployment ownership and
-      Service-selector resolution are planned for Member 2. The read-only role already allows reading
-      Services and ReplicaSets and `tests/support/fake_cluster.py` has a Bookinfo-shaped fixture, so
-      only the resolver itself is missing.
+- [x] Kubernetes Service/ownership resolution follows Kubernetes: a Service owns the pods its selector
+      matches and each pod's Deployment comes from its owner references (pod → ReplicaSet → Deployment),
+      so applications whose Deployments are named differently from their `app` label (Istio Bookinfo:
+      `productpage-v1` with `app: productpage`) resolve completely. Pods that no Service selects are named
+      in a warning. Not yet verified against a real Bookinfo cluster: the tests use a Bookinfo-shaped fake.
 - [ ] **The live recommendation pipeline is incomplete.** No producer yet turns the engine's
       simulation into a `RecommendationReport`, a YAML proposal or a `ValidationReport`, so the
       Recommendations page shows explicit missing-evidence states and no approval can be requested.

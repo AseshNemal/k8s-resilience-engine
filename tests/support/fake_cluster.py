@@ -5,7 +5,7 @@ kubeconfig, a network, or the developer's real cluster.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.engine.deployment_topology_modeling.live_state.cluster_models import (
     ClusterDeployment,
@@ -68,7 +68,11 @@ class FakeClusterSource:
 
     def list_pods(self, namespace: str) -> list[ClusterPod]:
         self._maybe_fail(f"pods:{namespace}")
-        return list(self.pods.get(namespace, []))
+        # A real pod always knows its namespace (the client reads it from the API). The fixtures list pods by
+        # namespace instead, so the namespace is filled in here, as the real client would.
+        # ...and a terminating pod is never ready, which the real client also applies when it reads the pod.
+        return [replace(p, namespace=namespace, ready=p.ready and not p.terminating)
+                for p in self.pods.get(namespace, [])]
 
     def list_deployments(self, namespace: str) -> list[ClusterDeployment]:
         self._maybe_fail(f"deployments:{namespace}")

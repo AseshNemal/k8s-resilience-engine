@@ -59,8 +59,10 @@ This is an early-stage scaffold, not a working system yet:
   `extension/helper/internal/rbac/rbac.go` and checked against each other by a Go test). Member 2's per-namespace
   pipeline (`service.py`, `collect_live_cluster`) uses services/replicasets: the live parser and the Service
   resolver read through `KubernetesApiSource.list_objects`, so they need no Kubernetes client package.
-  `discovery.py` (what the extension pages call) still attributes pods by `app` label == Deployment name;
-  moving it onto the selector resolver is the pending follow-up. The rules: a graph service is a Kubernetes Service with a selector, its pods
+  `discovery.py` (what the extension pages call) uses the same selector resolver, so an application whose
+  Deployments are named differently from their `app` label (Istio Bookinfo's `productpage-v1`) resolves
+  completely. Pods that no Service selects are named in a `POD_SELECTED_BY_NO_SERVICE` warning and do not make
+  the result partial. The rules: a graph service is a Kubernetes Service with a selector, its pods
   are those whose labels contain every selector pair, and a pod's Deployment comes from owner references.
   Anything unresolvable is reported, never guessed.
 - `tests/test_sample_endpoints.py` checks that the research fixtures still validate against the
