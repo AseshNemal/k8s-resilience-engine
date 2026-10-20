@@ -29,7 +29,7 @@ from app.engine.deployment_topology_modeling.live_state.concentration_analyzer i
 from app.engine.deployment_topology_modeling.live_state.ownership_resolver import (
     find_unattributed_pods,
     related_deployments,
-    resolve_deployment_ownership,
+    resolve_deployment_ownership_by_app_label,
 )
 from app.integrations.kubernetes.client import (
     AuthFailedError,
@@ -122,6 +122,11 @@ def _classify(error: ClusterAccessError) -> DiscoveryError:
                           http_status=502, retryable=True)
 
 
+# Public name for callers outside this module (service.py) that read the cluster another way but must
+# report failures with the same stable codes.
+classify_access_error = _classify
+
+
 def _unresolved(kind: str, name: str, reason: str, namespace: str, affects: list[str] | None = None) -> UnresolvedItem:
     return UnresolvedItem(kind=kind, name=name, reason=reason, namespace=namespace, affects=affects or [])
 
@@ -161,7 +166,7 @@ def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryRe
             message="The cluster reports no worker nodes, so no failure domains can be modelled.",
         ))
 
-    workloads = resolve_deployment_ownership(pods, deployments)
+    workloads = resolve_deployment_ownership_by_app_label(pods, deployments)
 
     for name, workload in workloads.items():
         reasons = evidence_reasons.setdefault(name, [])

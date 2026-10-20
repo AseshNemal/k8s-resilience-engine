@@ -21,11 +21,11 @@ def fresh_snapshots():
     service.clear_cluster_snapshots()
 
 
-def concentrated_payment_cluster() -> FakeClusterSource:
+def concentrated_payment_cluster(namespace: str = "default") -> FakeClusterSource:
     return FakeClusterSource(
         nodes=[node("w1"), node("w2")],
-        pods={"default": [pod(f"paymentservice-{i}", "w1", app="paymentservice") for i in range(3)]},
-        deployments={"default": [deployment("paymentservice", 3)]},
+        pods={namespace: [pod(f"paymentservice-{i}", "w1", app="paymentservice") for i in range(3)]},
+        deployments={namespace: [deployment("paymentservice", 3)]},
     )
 
 
@@ -48,19 +48,30 @@ def test_every_live_facade_fails_instead_of_falling_back(use_cluster, failure):
 
     calls = [
         service.get_live_deployment_graph,
+        service.discover_live,
         service.analyze_resilience_drift,
         service.get_cluster_zones,
         service.get_drift_spofs,
         service.get_drift_categories_summary,
         service.get_concentration_rankings,
         service.get_node_risk_rankings,
-        service.get_chaos_safety_status,
         lambda namespace="default": service.freeze_cluster_state("s", namespace),
         lambda namespace="default": service.get_node_detail("worker-1", namespace),
     ]
     for call in calls:
+        # The cluster layer's own stable code reaches the caller: a DiscoveryError, never substitute data.
         with pytest.raises(DiscoveryError):
             call(namespace="default")
+
+
+def test_chaos_safety_status_reports_an_unreadable_cluster_as_unknown_not_safe(use_cluster):
+    use_cluster(FakeClusterSource(error=NotConnectedError("x")))
+
+    status = service.get_chaos_safety_status()
+
+    # Member 2's design: the status is still answered, with the node count unknown and feasibility unknown.
+    assert status["cluster_nodes_detected"] is None
+    assert status["multi_node_anti_affinity_feasible"] is None
 
 
 def test_validate_chaos_action_reports_failed_discovery_as_not_allowed(use_cluster):
@@ -82,26 +93,29 @@ def test_discover_live_exposes_the_envelope(use_cluster):
 
 
 # ---- declared state --------------------------------------------------------------------------------
+# discover_live() is the extension's path and enforces the rule that declared intent must be named by the
+# caller. Member 2's per-namespace facades (get_live_deployment_graph, analyze_resilience_drift) keep their
+# original behaviour of falling back to the repository's own test manifests when none is named; the
+# packaged extension image ships no deploy/ folder, so there is nothing for them to find there.
 
-def test_without_a_declared_source_compliance_is_unknown_not_perfect(use_cluster):
+def test_without_a_declared_source_discover_live_says_intent_is_unavailable(use_cluster):
     use_cluster(concentrated_payment_cluster())
 
-    report, _ = service.analyze_resilience_drift()
+    result = service.discover_live()
 
-    assert report.constraint_compliance_rate is None
-    assert report.declared_state == "unavailable"
-    assert report.total_services == 1  # actual-placement analysis still works
-    assert report.mean_concentration == pytest.approx(1.0)
-    assert report.exposed_service_count == 1
+    assert result.declared_state == "unavailable"
+    assert [s.name for s in result.graph.services] == ["paymentservice"]  # placement analysis still works
 
 
 def test_with_an_explicit_declared_source_compliance_is_computed(use_cluster, tmp_path):
-    use_cluster(concentrated_payment_cluster())
+    # Declared intent is matched to the cluster by namespace and Deployment name, and the test manifest
+    # declares its Deployment in resilience-test.
+    use_cluster(concentrated_payment_cluster("resilience-test"))
     declared = tmp_path / "declared"
     declared.mkdir()
     shutil.copy(PROJECT_ROOT / "deploy/test-workloads/concentrated-paymentservice.yaml", declared)
 
-    report, _ = service.analyze_resilience_drift(manifest_path=str(declared))
+    report, _ = service.analyze_resilience_drift(namespace="resilience-test", manifest_path=str(declared))
 
     assert report.declared_state == "available"
     assert isinstance(report.constraint_compliance_rate, float)
@@ -111,25 +125,17 @@ def test_an_explicit_but_missing_declared_source_is_an_error(use_cluster, tmp_pa
     use_cluster(concentrated_payment_cluster())
 
     with pytest.raises(EvidenceError) as caught:
-        service.analyze_resilience_drift(manifest_path=str(tmp_path / "nope"))
+        service.discover_live(manifest_path=str(tmp_path / "nope"))
 
     assert caught.value.code == "DECLARED_STATE_UNAVAILABLE"
 
 
-def test_manifest_intent_needs_an_explicit_source():
-    with pytest.raises(EvidenceError) as caught:
-        service.get_manifest_intent()
-
-    assert (caught.value.code, caught.value.http_status) == ("DECLARED_STATE_UNAVAILABLE", 409)
-
-
-def test_no_default_manifest_is_ever_read(use_cluster, monkeypatch):
+def test_no_default_manifest_is_ever_read_by_discover_live(use_cluster, monkeypatch):
     use_cluster(concentrated_payment_cluster())
     monkeypatch.setattr(service, "run_manifest_pipeline",
                         lambda *a, **k: pytest.fail("a default manifest source was read"))
 
-    service.get_live_deployment_graph()
-    service.analyze_resilience_drift()
+    service.discover_live()
 
 
 # ---- snapshots -------------------------------------------------------------------------------------

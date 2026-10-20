@@ -1,12 +1,8 @@
-from collections import Counter
 from typing import Any
+from app.engine.deployment_topology_modeling import placement_metrics as pm
 from app.engine.deployment_topology_modeling.drift_analysis.constants import (
     ExposureLevel,
-    DriftType,
-    SEVERITY_WEIGHT_FULL_EXPOSURE,
-    SEVERITY_WEIGHT_CONCENTRATION,
-    SEVERITY_WEIGHT_SCALE_MISMATCH,
-    SEVERITY_WEIGHT_RESOURCE_UNBOUNDED,
+    PLACEMENT_RULE_DRIFT_TYPES,
 )
 from app.engine.deployment_topology_modeling.drift_analysis.drift_config import DriftConfig
 from app.engine.deployment_topology_modeling.drift_analysis.drift_models import (
@@ -16,113 +12,50 @@ from app.engine.deployment_topology_modeling.drift_analysis.drift_models import 
 
 
 class FailureDomainExposureEngine:
-    r"""
-    Formal Mathematical Failure-Domain Exposure Evaluation Engine.
-    
-    Evaluates:
-        SA(s, {n}) = |P_s \ P_{s,n}|
-    across all worker nodes n in cluster N to identify single failure-domain vulnerabilities.
+    r"""Evaluates SA(s, {n}) for every worker node n (proposal section 7.4).
+
+    SA(s, {n}) = 1 if at least one ready pod of s runs on a node other than n, else 0.
+    A node n is an exposed failure domain of s exactly when SA(s, {n}) = 0.
     """
 
     def __init__(self, config: DriftConfig | None = None):
         self.config = config or DriftConfig()
 
     @staticmethod
-    def _simulate_node_failures(
-        ready_count: int, pods_per_node: Counter
-    ) -> tuple[list[str], dict[str, int]]:
-        exposed_nodes: list[str] = []
-        partial_loss_map: dict[str, int] = {}
-        for node_name, count_on_node in pods_per_node.items():
-            partial_loss_map[node_name] = count_on_node
-            if ready_count - count_on_node == 0:
-                exposed_nodes.append(node_name)
-        return exposed_nodes, partial_loss_map
-
-    def _classify_exposure_level(
-        self, ready_count: int, exposed_nodes: list[str], replica_concentration: float
-    ) -> ExposureLevel:
-        if ready_count == 1:
-            return ExposureLevel.SINGLE_REPLICA_EXPOSURE
-        if exposed_nodes:
-            return ExposureLevel.FULL_EXPOSURE
-        if replica_concentration >= self.config.concentration_threshold:
-            return ExposureLevel.PARTIAL_EXPOSURE
-        return ExposureLevel.RESILIENT
-
-    def _calculate_severity_score(
-        self,
-        exposed_nodes: list[str],
-        ready_count: int,
-        replica_concentration: float,
-        violations: list[DriftViolation],
-    ) -> float:
-        is_single_exposed = ready_count == 1 and self.config.treat_single_replica_as_exposed
-        has_full_exposure = 1.0 if (exposed_nodes or is_single_exposed) else 0.0
-        has_scale_mismatch = 1.0 if any(v.drift_type == DriftType.SCALE_DRIFT for v in violations) else 0.0
-        has_unbounded_resource = (
-            1.0 if any(v.drift_type == DriftType.RESOURCE_CONTENTION_DRIFT for v in violations) else 0.0
-        )
-
-        severity_score = (
-            SEVERITY_WEIGHT_FULL_EXPOSURE * has_full_exposure
-            + SEVERITY_WEIGHT_CONCENTRATION * replica_concentration
-            + SEVERITY_WEIGHT_SCALE_MISMATCH * has_scale_mismatch
-            + SEVERITY_WEIGHT_RESOURCE_UNBOUNDED * has_unbounded_resource
-        )
-        return round(min(max(severity_score, 0.0), 1.0), 4)
+    def _exposure_level(status: pm.ExposureStatus, ready_count: int) -> ExposureLevel:
+        if status == pm.ExposureStatus.UNAVAILABLE:
+            return ExposureLevel.UNAVAILABLE
+        if status == pm.ExposureStatus.NOT_EXPOSED:
+            return ExposureLevel.RESILIENT
+        return ExposureLevel.SINGLE_REPLICA_EXPOSURE if ready_count == 1 else ExposureLevel.FULL_EXPOSURE
 
     def evaluate_service_exposure(
         self,
         service_name: str,
         runtime_pods: list[dict[str, Any]],
         violations: list[DriftViolation] | None = None,
+        has_placement_rules: bool = False,
     ) -> ServiceExposureResult:
         violations = violations or []
-        total_replicas = len(runtime_pods)
-        ready_pods = [
-            p for p in runtime_pods
-            if p.get("is_ready", p.get("ready", False))
-        ]
-        ready_count = len(ready_pods)
+        status = pm.exposure_status(runtime_pods)
+        ready_count = pm.ready_replica_count(runtime_pods)
+        ratio = pm.concentration_ratio(runtime_pods)
 
-        if ready_count == 0:
-            return ServiceExposureResult(
-                service_name=service_name,
-                total_replicas=total_replicas,
-                ready_replicas=0,
-                replica_concentration=1.0 if total_replicas > 0 else 0.0,
-                exposure_level=ExposureLevel.FULL_EXPOSURE,
-                exposed_failure_domains=[],
-                partial_loss_domains={},
-                violations=violations,
-                severity_score=1.0,
-            )
-
-        # Map ready pods to worker nodes
-        pods_per_node = Counter(
-            p.get("node_name", p.get("node"))
-            for p in ready_pods
-            if p.get("node_name", p.get("node"))
-        )
-
-        max_node_count = max(pods_per_node.values()) if pods_per_node else 0
-        replica_concentration = max_node_count / ready_count if ready_count > 0 else 0.0
-
-        exposed_nodes, partial_loss_map = self._simulate_node_failures(ready_count, pods_per_node)
-        exposure_level = self._classify_exposure_level(ready_count, exposed_nodes, replica_concentration)
-        severity_score = self._calculate_severity_score(
-            exposed_nodes, ready_count, replica_concentration, violations
-        )
+        rules_satisfied: bool | None = None
+        if has_placement_rules:
+            rules_satisfied = not any(v.drift_type in PLACEMENT_RULE_DRIFT_TYPES for v in violations)
 
         return ServiceExposureResult(
             service_name=service_name,
-            total_replicas=total_replicas,
+            total_replicas=len(runtime_pods),
             ready_replicas=ready_count,
-            replica_concentration=round(replica_concentration, 4),
-            exposure_level=exposure_level,
-            exposed_failure_domains=exposed_nodes,
-            partial_loss_domains=partial_loss_map,
+            exposure_status=status,
+            exposure_level=self._exposure_level(status, ready_count),
+            concentrated=pm.is_concentrated(runtime_pods),
+            replica_concentration=round(ratio, 4) if ratio is not None else None,
+            exposed_failure_domains=pm.exposed_failure_domains(runtime_pods),
+            ready_replicas_per_node=dict(sorted(pm.ready_replicas_per_node(runtime_pods).items())),
+            has_placement_rules=has_placement_rules,
+            placement_rules_satisfied=rules_satisfied,
             violations=violations,
-            severity_score=severity_score,
         )

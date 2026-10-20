@@ -59,7 +59,9 @@ def test_a_graph_round_trips_through_json_with_unknowns_intact():
 
 def test_payloads_written_before_the_change_still_validate():
     old = json.loads(SAMPLE_DEPLOYMENT.read_text())
-    assert old["validation"]["service_pod_mapping_accuracy"] == 1.0  # the old fixture carries numbers
+    # A payload written before accuracy became optional carries concrete numbers. The fixture on disk no
+    # longer does (Member 2 made it null), so state the old shape here instead of relying on the file.
+    old["validation"]["service_pod_mapping_accuracy"] = 1.0
 
     graph = DeploymentGraph.model_validate(old)
 

@@ -66,8 +66,47 @@ def test_parse_missing_fields_default_gracefully():
     intent = intents[0]
     
     assert intent.service_name == "bare-service"
-    # Should fallback to safe Phase 2 defaults
+    # spec.replicas defaults to 1 in Kubernetes itself; limits have no default and stay None.
     assert intent.expected_replicas == 1
-    assert intent.resource_limits.cpu == "4.0"
+    assert intent.resource_limits.cpu is None
+    assert intent.resource_limits.memory is None
     assert len(intent.spread_constraints) == 0
     assert intent.has_node_affinity is False
+    assert intent.namespace == "default"
+
+
+def test_parse_spread_constraint_keeps_all_fields_and_flags_missing_required():
+    manifests = [{
+        "kind": "Deployment",
+        "metadata": {"name": "pay", "namespace": "shop"},
+        "spec": {"template": {"spec": {
+            "containers": [{"name": "c"}],
+            "topologySpreadConstraints": [
+                {"maxSkew": 1, "topologyKey": "kubernetes.io/hostname",
+                 "whenUnsatisfiable": "DoNotSchedule", "minDomains": 3,
+                 "labelSelector": {"matchLabels": {"app": "pay"}}},
+                {"topologyKey": "kubernetes.io/hostname"},
+            ],
+        }}},
+    }]
+    intent = parse_declared_intents(manifests)[0]
+    assert intent.namespace == "shop"
+    full, partial = intent.spread_constraints
+    assert full.min_domains == 3
+    assert full.label_selector == {"matchLabels": {"app": "pay"}}
+    # Missing required fields are not invented; they are reported.
+    assert partial.max_skew is None
+    assert len(intent.parse_warnings) == 1
+    assert "maxSkew" in intent.parse_warnings[0]
+
+
+def test_parse_declared_services():
+    from app.engine.deployment_topology_modeling.manifest_parsing.manifest_parser import parse_declared_services
+    services = parse_declared_services([
+        {"kind": "Service", "metadata": {"name": "paymentservice", "namespace": "resilience-test"},
+         "spec": {"selector": {"app": "paymentservice"}}},
+        {"kind": "Deployment", "metadata": {"name": "x"}},
+    ])
+    assert [(s.name, s.namespace, s.selector) for s in services] == [
+        ("paymentservice", "resilience-test", {"app": "paymentservice"})
+    ]

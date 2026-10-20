@@ -1,0 +1,74 @@
+{# Modal 2: Before-and-After (T0 -> T1) Snapshot Diff Modal #}
+<div class="modal-backdrop" id="modal-diff-backdrop" hidden>
+    <dialog open class="modal-dialog modal-dialog--wide card card--glass" aria-labelledby="modal-diff-title">
+        <div class="modal-header">
+            <div>
+                <span class="modal-tag">CRYPTOGRAPHIC SNAPSHOT DIFF</span>
+                <h3 class="modal-title" id="modal-diff-title">Cluster Placement Displacement Diff ($T_0 \to T_1$)</h3>
+            </div>
+            <button type="button" class="modal-close-btn" id="btn-close-diff-modal" aria-label="Close modal">✕</button>
+        </div>
+
+        <div class="modal-body" id="modal-diff-body">
+            <!-- Snapshot Selection Controls -->
+            <div class="diff-controls-row">
+                <div class="diff-select-group">
+                    <label for="select-diff-scenario" class="diff-label">Select Chaos Scenario:</label>
+                    <select id="select-diff-scenario" class="diff-select">
+                        <option value="07_node_drain_eviction">Scenario 07: Node Drain & Eviction</option>
+                        <option value="05_pod_deletion_chaos">Scenario 05: Pod Deletion Chaos</option>
+                        <option value="04_rolling_update">Scenario 04: Rolling Update Churn</option>
+                        <option value="03_scale_down_loss">Scenario 03: Scale-Down Loss</option>
+                        <option value="02_scale_up_stress">Scenario 02: Scale-Up Stress</option>
+                        <option value="01_initial_deployment">Scenario 01: Baseline Deployment</option>
+                    </select>
+                </div>
+                <button type="button" class="btn btn--primary" id="btn-execute-snapshot-diff">
+                    ⚖️ Compute Snapshot Diff
+                </button>
+            </div>
+
+            <!-- Diff Metrics Header -->
+            <div class="diff-summary-row" id="diff-metrics-banner">
+                <div class="diff-metric-chip">
+                    <span>Drift Rate ($D_{rate}$):</span>
+                    <strong id="diff-d-rate-val">n/a</strong>
+                </div>
+                <div class="diff-metric-chip">
+                    <span>Net Exposure Delta ($\Delta E$):</span>
+                    <strong id="diff-delta-e-val">n/a</strong>
+                </div>
+                <div class="diff-metric-chip">
+                    <span>T0 SHA-256:</span>
+                    <code id="diff-t0-hash">—</code>
+                </div>
+                <div class="diff-metric-chip">
+                    <span>T1 SHA-256:</span>
+                    <code id="diff-t1-hash">—</code>
+                </div>
+            </div>
+
+            <!-- Pod Placement Comparison Table -->
+            <div class="diff-table-container">
+                <table class="diff-table">
+                    <thead>
+                        <tr>
+                            <th>Pod Name</th>
+                            <th>Target Service</th>
+                            <th>T0 Baseline Node</th>
+                            <th>T1 Post-Disruption Node</th>
+                            <th>Displacement Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="diff-table-body">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn--secondary" id="btn-dismiss-diff-modal">Close</button>
+        </div>
+    </dialog>
+</div>

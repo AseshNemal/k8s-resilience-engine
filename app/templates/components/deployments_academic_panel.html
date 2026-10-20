@@ -1,0 +1,82 @@
+{# Academic Validation Panel: Shows measured accuracy only when independent ground truth is available. #}
+<section class="academic-validation-panel" id="academic-panel" aria-label="Academic Validation Certificate">
+    <div class="academic-card">
+        <div class="academic-card__header">
+            <div class="academic-card__title-group">
+                <span class="academic-badge academic-badge--primary">MODEL VALIDATION (kubectl ground truth)</span>
+                <h3 class="academic-card__title">Model Accuracy & Runtime Metrics</h3>
+            </div>
+            <div class="academic-card__status">
+                <span class="status-pill status-pill--warning" id="academic-overall-status">
+                    Accuracy not measured against ground truth
+                </span>
+            </div>
+        </div>
+
+        <div class="academic-grid">
+            <div class="academic-stat">
+                <span class="academic-stat__label">Service-to-Pod Mapping</span>
+                <div class="academic-stat__value-row">
+                    <span class="academic-stat__value" id="stat-svc-pod-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
+                </div>
+                <div class="academic-stat__bar">
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="academic-stat">
+                <span class="academic-stat__label">Pod-to-Node Placement</span>
+                <div class="academic-stat__value-row">
+                    <span class="academic-stat__value" id="stat-pod-node-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
+                </div>
+                <div class="academic-stat__bar">
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="academic-stat">
+                <span class="academic-stat__label">Owner Reference Resolution</span>
+                <div class="academic-stat__value-row">
+                    <span class="academic-stat__value" id="stat-owner-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
+                </div>
+                <div class="academic-stat__bar">
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="academic-stat">
+                <span class="academic-stat__label">Concentration Detection</span>
+                <div class="academic-stat__value-row">
+                    <span class="academic-stat__value" id="stat-conc-acc">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target ≥ 95%</span>
+                </div>
+                <div class="academic-stat__bar">
+                    <div class="academic-stat__fill" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="academic-stat">
+                <span class="academic-stat__label">Execution Latency</span>
+                <div class="academic-stat__value-row">
+                    <span class="academic-stat__value" id="stat-latency-overhead">Not measured</span>
+                    <span class="academic-stat__target">Self-chosen target &lt; 50 ms</span>
+                </div>
+                <div class="academic-stat__bar">
+                    <div class="academic-stat__fill academic-stat__fill--accent" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="academic-card__footer">
+            <span class="academic-footnote">
+                Accuracy is reported only after comparison with independent ground-truth data.
+            </span>
+            <button type="button" class="academic-copy-btn" id="btn-copy-accuracy-json" title="Copy Raw Accuracy Certificate JSON">
+                📋 Copy Certificate JSON
+            </button>
+        </div>
+    </div>
+</section>

@@ -36,11 +36,16 @@ logger = logging.getLogger(__name__)
 
 class BaseScenario(ABC):
     """
-    Abstract Base Class defining the formal 4-phase idempotent experiment lifecycle:
+    Abstract Base Class defining the 4-phase experiment lifecycle:
     1. prepare(): Captures and freezes baseline state T0.
-    2. execute(): Injects controlled disruption (or dry-run simulation).
+    2. execute_disruption(): Applies the disruption.
     3. observe(): Captures post-disruption state T1 and computes D_rate.
-    4. rollback(): Restores cluster to baseline state.
+    4. rollback(): Restores the baseline state.
+
+    The concrete scenarios are DRY-RUN fixtures: both T0 and T1 placements are written in the
+    scenario code, so their D_rate only illustrates the metric and is not an observation of the
+    Kubernetes scheduler. LIVE_CLUSTER execution is refused until a scenario observes a real
+    cluster, so a scripted result can never be labelled as live.
     """
 
     def __init__(
@@ -54,6 +59,11 @@ class BaseScenario(ABC):
         repository: Optional[SnapshotRepository] = None,
         safety_guard: Optional[SafetyGuard] = None,
     ):
+        if execution_mode == ScenarioExecutionMode.LIVE_CLUSTER and not self.supports_live_cluster:
+            raise ScenarioExecutionError(
+                f"Scenario '{scenario_id}' only contains scripted placements and cannot run against a "
+                "live cluster; use DRY_RUN_SIMULATION."
+            )
         self.scenario_id = scenario_id
         self.scenario_name = scenario_name
         self.disruption_type = disruption_type
@@ -73,6 +83,9 @@ class BaseScenario(ABC):
         self._disruption_event: Optional[DisruptionEvent] = None
         self._active_pods: List[PodPlacementRecord] = []
         self._cluster_nodes: List[Dict[str, Any]] = []
+
+    # A subclass that really drives and observes a cluster sets this to True.
+    supports_live_cluster: bool = False
 
     @abstractmethod
     def setup_workload(self) -> None:

@@ -31,9 +31,24 @@
     <div class="scenario-panel">
         <div class="scenario-panel__controls">
             <div class="section-header__title" style="margin-bottom: 4px;">Failure Scenario</div>
-            <div class="scenario-panel__runtime-fields" data-role="runtime-fields">
+            <label class="scenario-panel__field" for="failure-input-mode">
+                <span>Input source</span>
+                <select
+                    class="scenario-panel__select"
+                    id="failure-input-mode"
+                    data-role="input-mode"
+                >
+                    {# The page opens on the connected cluster. The two fixture modes run on disclosed sample
+                       inputs, only when chosen, and say so in the page note. #}
+                    <option value="runtime" selected>Validated runtime</option>
+                    <option value="portfolio-runtime">Validated runtime portfolio</option>
+                    <option value="demo">Contract fixtures</option>
+                    <option value="portfolio-demo">Portfolio fixtures</option>
+                </select>
+            </label>
+            <div class="scenario-panel__runtime-fields" data-role="runtime-fields" hidden>
                 <label class="scenario-panel__field" for="failure-workflow-id">
-                    <span>Frozen workflow ID</span>
+                    <span data-role="workflow-id-label">Workflow ID</span>
                     <input
                         class="scenario-panel__input"
                         id="failure-workflow-id"
@@ -111,6 +126,16 @@
         </div>
     </div>
 
+    <section data-role="portfolio-workflow-section" hidden>
+        <div class="section-header">
+            <h3 class="section-header__title">Portfolio Workflow Outcomes</h3>
+            <span class="section-header__note">One result for each workflow in the portfolio</span>
+        </div>
+        <div class="card">
+            <div class="workflow-outcome-list" data-role="portfolio-workflow-outcomes"></div>
+        </div>
+    </section>
+
     <div class="section-header">
         <h3 class="section-header__title">Failure Chain</h3>
         <span class="section-header__note">Derived by matching deployment pods to the failed node</span>
@@ -130,10 +155,12 @@
         </div>
     </div>
 
-    <div class="section-header">
-        <h3 class="section-header__title">Root Causes</h3>
-    </div>
-    <div class="card" data-role="impact-root-causes"></div>
+    <section data-role="root-causes-section">
+        <div class="section-header">
+            <h3 class="section-header__title">Root Causes</h3>
+        </div>
+        <div class="card" data-role="impact-root-causes"></div>
+    </section>
 
     <div class="section-header">
         <h3 class="section-header__title">Node Risk Ranking</h3>
@@ -166,7 +193,7 @@
     <div class="card">
         <ul class="future-work-list">
             <li>Interactive cross-layer graph view</li>
-            <li>Multi-workflow portfolio blast-radius calculation</li>
+            <li>Saved workflow-portfolio definitions</li>
             <li>Chaos-injection result comparison</li>
             <li>Prediction accuracy tracking against observed outcomes</li>
         </ul>

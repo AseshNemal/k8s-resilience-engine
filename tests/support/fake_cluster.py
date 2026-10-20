@@ -4,6 +4,7 @@ It implements the ClusterSource interface the discovery layer depends on, so no 
 kubeconfig, a network, or the developer's real cluster.
 """
 
+import re
 from dataclasses import dataclass, field
 
 from app.engine.deployment_topology_modeling.live_state.cluster_models import (
@@ -86,6 +87,89 @@ class FakeClusterSource:
 
     def connection_fingerprint(self) -> str | None:
         return "fake-connection"
+
+    # -- raw API objects ----------------------------------------------------------------------------
+    # Member 2's live-state parser and Service resolver read the API's JSON through
+    # KubernetesApiSource.list_objects(). These methods answer the same calls from the data above, so
+    # one fake cluster drives both discovery paths. Services and ReplicaSets that a test did not
+    # declare are derived from the convention the fixtures already follow: a Deployment ``web`` owns
+    # pods labelled ``app=web`` and is exposed by a Service ``web`` selecting ``app=web``.
+
+    def list_objects(self, resource: str, path: str) -> list[dict]:
+        self._maybe_fail(f"raw:{path}")
+        if path == "/api/v1/nodes":
+            return [_node_json(n) for n in self.nodes]
+        if path == "/api/v1/pods":
+            return [_pod_json(p, ns) for ns, items in sorted(self.pods.items()) for p in items]
+        match = re.fullmatch(r"/(?:api|apis/apps)/v1/namespaces/([^/]+)/(pods|services|replicasets|deployments)", path)
+        if match is None:
+            raise AssertionError(f"the fake cluster does not know the path {path}")
+        namespace, kind = match.groups()
+        if kind == "pods":
+            return [_pod_json(p, namespace) for p in self.pods.get(namespace, [])]
+        if kind == "deployments":
+            return [_deployment_json(d) for d in self.deployments.get(namespace, [])]
+        if kind == "services":
+            declared = self.services.get(namespace)
+            if declared:
+                return [_service_json(sv.name, sv.selector, namespace) for sv in declared]
+            return [_service_json(d.name, {"app": d.name}, namespace) for d in self.deployments.get(namespace, [])]
+        return self._replicasets_json(namespace)
+
+    def _replicasets_json(self, namespace: str) -> list[dict]:
+        declared = self.replicasets.get(namespace)
+        if declared:
+            return [_replicaset_json(r.name, r.deployment_name) for r in declared]
+        names = {d.name for d in self.deployments.get(namespace, [])}
+        owners: dict[str, str | None] = {}
+        for p in self.pods.get(namespace, []):
+            if p.owner_kind == "ReplicaSet" and p.owner_name:
+                owners.setdefault(p.owner_name, p.app_label if p.app_label in names else None)
+        return [_replicaset_json(rs, deployment) for rs, deployment in sorted(owners.items())]
+
+
+def _node_json(n: ClusterNode) -> dict:
+    labels = dict(n.labels or {})
+    if n.zone is not None:
+        labels["topology.kubernetes.io/zone"] = n.zone
+    if n.control_plane:
+        labels["node-role.kubernetes.io/control-plane"] = ""
+    allocatable = {k: v for k, v in (("cpu", n.cpu_available), ("memory", n.memory_available)) if v is not None}
+    ready = n.ready is None or n.ready  # a real node reports Ready; the fake says so unless told otherwise
+    return {
+        "metadata": {"name": n.name, "labels": labels},
+        "spec": {"unschedulable": not n.schedulable},
+        "status": {"allocatable": allocatable,
+                   "conditions": [{"type": "Ready", "status": "True" if ready else "False"}]},
+    }
+
+
+def _pod_json(p: ClusterPod, namespace: str) -> dict:
+    owners = []
+    if p.owner_name:
+        owners = [{"kind": p.owner_kind or "ReplicaSet", "name": p.owner_name,
+                   "uid": p.owner_uid or f"uid-{p.owner_name}", "controller": True}]
+    status: dict = {"phase": p.phase,
+                    "conditions": [{"type": "Ready", "status": "True" if p.ready and not p.terminating else "False"}]}
+    if p.restart_count is not None:
+        status["containerStatuses"] = [{"restartCount": p.restart_count}]
+    spec = {"nodeName": p.node} if p.node else {}
+    return {"metadata": {"name": p.name, "namespace": namespace, "labels": dict(p.labels), "ownerReferences": owners},
+            "spec": spec, "status": status}
+
+
+def _deployment_json(d: ClusterDeployment) -> dict:
+    return {"metadata": {"name": d.name, "uid": f"uid-{d.name}"},
+            "spec": {"replicas": d.declared_replicas, "template": {"metadata": {"labels": {"app": d.name}}}}}
+
+
+def _service_json(name: str, selector: dict[str, str], namespace: str) -> dict:
+    return {"metadata": {"name": name, "namespace": namespace}, "spec": {"selector": dict(selector)}}
+
+
+def _replicaset_json(name: str, deployment: str | None) -> dict:
+    owners = [{"kind": "Deployment", "name": deployment, "uid": f"uid-{deployment}", "controller": True}] if deployment else []
+    return {"metadata": {"name": name, "uid": f"uid-{name}", "ownerReferences": owners}}
 
 
 def multi_namespace_cluster() -> FakeClusterSource:

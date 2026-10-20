@@ -1,5 +1,5 @@
 """
-Drift Transition Matrix: Formalizes Markov-style pod migration tracking across failure domains.
+Drift Transition Matrix: counts pods that changed node between two snapshots.
 Component: Component 2 - Deployment Topology Modeling
 """
 from typing import Dict, List, Set, Tuple
@@ -14,8 +14,9 @@ LATEX_HLINE = r"\hline"
 
 class DriftTransitionMatrix:
     """
-    Constructs and formats a Markov-style migration transition matrix:
-        T[i, j] = count of pods migrating from node n_i to node n_j.
+    Count matrix (not a probability / Markov matrix):
+        T[i, j] = number of pods that were on node n_i at T0 and on node n_j at T1.
+    Pods are matched by name, so a pod replaced under a new name (delete, rollout) is not counted.
     """
 
     @classmethod

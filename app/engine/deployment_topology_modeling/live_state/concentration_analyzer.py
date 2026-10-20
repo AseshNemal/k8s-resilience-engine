@@ -1,46 +1,39 @@
-from collections import Counter
-from typing import Dict, List, Any
+from typing import Any, Dict, List
+from app.engine.deployment_topology_modeling import placement_metrics as pm
 
 
-def analyze_replica_concentration(workloads: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def analyze_replica_concentration(
+    workloads: Dict[str, Dict[str, Any]],
+    node_ready: Dict[str, bool | None] | None = None,
+) -> List[Dict[str, Any]]:
+    """Per-service concentration and single-node exposure (definitions in placement_metrics).
+
+    A pod counts as ready only if its Ready condition is true AND its node is not reporting
+    NotReady. After a node fails, Kubernetes keeps its pods' Ready condition true for a grace
+    period (seen in experiments/single-node-failure/.../worker1-failure/pods.txt), so the pod
+    condition alone overstates surviving replicas (proposal section 15: readiness is not
+    availability). The raw pod condition is kept as `readyCondition`.
     """
-    Analyze replica concentration and single-node failure exposure for each service.
-    Calculates the concentration ratio and identifies nodes that cause complete outage if lost.
-    """
-    analyzed_services = []
+    node_ready = node_ready or {}
+    analyzed: List[Dict[str, Any]] = []
 
     for name, data in workloads.items():
-        ready_replicas = data["readyReplicas"]
-        declared_replicas = data["declaredReplicas"]
-        pods = data["pods"]
+        pods = []
+        for p in data["pods"]:
+            node = p.get("node")
+            effective = bool(p.get("ready")) and node_ready.get(node) is not False
+            pods.append({**p, "readyCondition": bool(p.get("ready")), "ready": effective})
 
-        # Track node distribution for ready pods
-        ready_pod_nodes = [p["node"] for p in pods if p["ready"] and p["node"]]
-
-        if not ready_pod_nodes:
-            # No ready pods available
-            concentration = 0.0
-            exposed_nodes = []
-        else:
-            node_counts = Counter(ready_pod_nodes)
-            max_pods_on_single_node = max(node_counts.values())
-            
-            # Concentration ratio: max pods on one node / total ready pods
-            concentration = round(max_pods_on_single_node / len(ready_pod_nodes), 2)
-
-            # A node is exposed if losing it removes all ready pods
-            exposed_nodes = [
-                node for node, count in node_counts.items()
-                if count == len(ready_pod_nodes)
-            ]
-
-        analyzed_services.append({
+        ratio = pm.concentration_ratio(pods)
+        analyzed.append({
+            **{k: v for k, v in data.items() if k != "pods"},
             "name": name,
-            "declaredReplicas": declared_replicas,
-            "readyReplicas": ready_replicas,
-            "replicaConcentration": concentration,
-            "exposedNodes": exposed_nodes,
-            "pods": pods
+            "readyReplicas": pm.ready_replica_count(pods),
+            "replicaConcentration": round(ratio, 4) if ratio is not None else None,
+            "concentrated": pm.is_concentrated(pods),
+            "exposedNodes": pm.exposed_failure_domains(pods),
+            "exposureStatus": pm.exposure_status(pods).value,
+            "pods": pods,
         })
 
-    return analyzed_services
+    return analyzed

@@ -1,0 +1,34 @@
+{# Tab 1: Physical Topology Map View #}
+<div class="tab-pane active" id="tab-topology" role="tabpanel" aria-labelledby="tab-btn-topology">
+    <div class="tab-pane__header">
+        <div>
+            <h3 class="tab-pane__title">Physical Cluster & Failure Domain Topology</h3>
+            <p class="tab-pane__desc">Worker nodes partitioned across availability zones, with hosted microservice pod placement.</p>
+        </div>
+        <div class="tab-pane__controls">
+            <label class="control-label" for="filter-topology-zone">Filter Zone:</label>
+            <select class="topology-select" id="filter-topology-zone">
+                <option value="all">All Zones</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="zone-grid" id="deployment-zone-grid" data-role="deployment-zone-grid">
+        <!-- Rendered dynamically by deployments_topology_widget.js or SSR fallback -->
+    </div>
+
+    <div class="section-divider"></div>
+
+    <div class="section-header">
+        <h4 class="section-header__title">Replica Concentration Distribution</h4>
+        <span class="section-header__note">Workload spreading across host failure domains</span>
+    </div>
+    <div class="card card--glass">
+        <div class="concentration-panel" id="deployment-concentration-panel" data-role="deployment-concentration-panel">
+            <!-- Rendered by deployments_topology_widget.js -->
+        </div>
+        <p class="ui-note">
+            ⚠️ Replica Concentration &gt; 50% denotes concentrated placement risk susceptible to single-node failures.
+        </p>
+    </div>
+</div>

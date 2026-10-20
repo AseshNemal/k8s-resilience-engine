@@ -1,6 +1,4 @@
-DEFAULT_CPU_LIMIT = "4.0"
-DEFAULT_MEMORY_LIMIT = "8Gi"
-DEFAULT_MAX_SKEW = 1
-DEFAULT_TOPOLOGY_KEY = "kubernetes.io/hostname"
-UNSATISFIABLE_POLICY = "DoNotSchedule"
+# Missing limits remain missing; inventing values would mask unbounded containers.
+DEFAULT_CPU_LIMIT = None
+DEFAULT_MEMORY_LIMIT = None
 TARGET_KIND = "Deployment"

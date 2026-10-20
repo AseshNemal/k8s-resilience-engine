@@ -4,7 +4,7 @@ Component: Component 2 - Deployment Topology Modeling
 """
 import logging
 import time
-from typing import Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from experiments.placement_drift.base_scenario import BaseScenario
 from experiments.placement_drift.constants import (
@@ -86,25 +86,16 @@ class DisruptionOrchestrator:
 
     def compute_aggregate_metrics(
         self, results: List[ScenarioResult]
-    ) -> Dict[str, float]:
-        """Calculates aggregate benchmark summary metrics across completed scenarios."""
+    ) -> Dict[str, Any]:
+        """Aggregates completed scenarios; D_rate statistics are None when none were measurable."""
         completed = [r for r in results if r.status == ScenarioStatus.COMPLETED]
-        if not completed:
-            return {
-                "total_scenarios": float(len(results)),
-                "completed_count": 0.0,
-                "mean_d_rate": 0.0,
-                "max_d_rate": 0.0,
-                "total_runtime_ms": 0.0,
-            }
-
-        d_rates = [r.d_rate for r in completed]
-        runtimes = [r.runtime_ms for r in completed]
-
+        d_rates = [r.d_rate for r in completed if r.d_rate is not None]
         return {
             "total_scenarios": float(len(results)),
             "completed_count": float(len(completed)),
-            "mean_d_rate": round(sum(d_rates) / len(d_rates), 4),
-            "max_d_rate": round(max(d_rates), 4),
-            "total_runtime_ms": round(sum(runtimes), 2),
+            "execution_mode": self.execution_mode.value,
+            "is_experimental_evidence": self.execution_mode == ScenarioExecutionMode.LIVE_CLUSTER,
+            "mean_d_rate": round(sum(d_rates) / len(d_rates), 4) if d_rates else None,
+            "max_d_rate": round(max(d_rates), 4) if d_rates else None,
+            "total_runtime_ms": round(sum(r.runtime_ms for r in completed), 2),
         }

@@ -174,6 +174,15 @@ class KubernetesApiSource:
             raise ApiFailedError(None)
         return items
 
+    def list_objects(self, resource: str, path: str) -> list[dict]:
+        """Raw Kubernetes JSON objects at ``path``, for callers that parse them themselves.
+
+        Member 2's live-state parser works on the API's JSON, not on the normalised dataclasses below.
+        This goes through the same connection rules as every other read (verified TLS, timeout,
+        classified failures), so that parser needs no Kubernetes client package of its own.
+        """
+        return self._list(resource, path)
+
     # -- reads ------------------------------------------------------------------------------------
 
     def list_nodes(self) -> list[ClusterNode]:

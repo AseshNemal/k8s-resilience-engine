@@ -18,7 +18,7 @@ class PodPlacementRecord(BaseModel):
     pod_name: str = Field(..., description="Unique name of the pod")
     service_name: str = Field(..., description="Logical microservice owning this pod")
     node_name: str = Field(..., description="Physical worker node hosting the pod")
-    zone: str | None = Field(default="default-zone", description="Availability zone label; None when the cluster reports none")
+    zone: str | None = Field(default=None, description="Availability zone label, if the node has one")
     is_ready: bool = Field(default=True, description="Whether the pod passes readiness probes")
 
 
@@ -71,9 +71,12 @@ class ScenarioResult(BaseModel):
     target_snapshot_id: str = Field(..., description="T1 snapshot identifier")
     baseline_hash: str = Field(default="", description="T0 SHA-256 hash")
     target_hash: str = Field(default="", description="T1 SHA-256 hash")
-    d_rate: float = Field(default=0.0, ge=0.0, le=1.0, description="Placement Drift Rate (0.0 - 1.0)")
-    delta_e_rate: float = Field(default=0.0, description="Change in failure domain exposure rate")
-    drifted_services: List[str] = Field(default_factory=list, description="Services whose placement shifted")
+    d_rate: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Share of services whose exposure status changed; None if nothing was compared",
+    )
+    delta_e_rate: Optional[float] = Field(default=None, description="E_rate(T1) - E_rate(T0)")
+    drifted_services: List[str] = Field(default_factory=list, description="Services whose exposure status changed")
     transitions: List[NodeTransitionRecord] = Field(
         default_factory=list, description="State transition matrix records"
     )

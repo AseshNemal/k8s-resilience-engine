@@ -5,7 +5,7 @@ from app.shared.schemas.deployment import (
     PodModel,
     ServicePlacement,
 )
-from app.shared.schemas.workflow import WorkflowGraph
+from app.shared.schemas.workflow import WorkflowEdge, WorkflowGraph
 
 
 def get_current_component_inputs() -> tuple[WorkflowGraph, DeploymentGraph]:
@@ -126,3 +126,22 @@ def get_demo_deployment() -> DeploymentGraph:
 
     _, deployment = get_demo_inputs()
     return deployment
+
+
+def get_demo_portfolio_inputs() -> tuple[
+    tuple[WorkflowGraph, ...],
+    DeploymentGraph,
+]:
+    """Return two disclosed workflows over the Component 3 demo topology."""
+
+    checkout, deployment = get_demo_inputs()
+    storefront = WorkflowGraph(
+        workflow_id="storefront",
+        criticality=0.7,
+        mandatory_services=["frontend"],
+        optional_services=["emailservice"],
+        edges=[
+            WorkflowEdge(source="frontend", target="emailservice"),
+        ],
+    )
+    return (checkout, storefront), deployment

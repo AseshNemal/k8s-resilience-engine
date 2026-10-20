@@ -5,6 +5,7 @@ connected cluster's topology or raises; there is no offline fallback. A topology
 resolved is never treated as verified: if any service the workflow depends on has unresolved or missing
 placement, the prediction is refused with ``TOPOLOGY_INCOMPLETE`` rather than computed on a guess.
 """
+from collections.abc import Sequence
 
 import logging
 from dataclasses import dataclass, field
@@ -91,6 +92,77 @@ def _require_sufficient_evidence(workflow: WorkflowGraph, discovery: Any) -> Non
         )
 
 
+@dataclass(frozen=True)
+class WorkflowInputProvenance:
+    """Identity of one frozen Component 1 graph used in a prediction."""
+
+    workflow_id: str
+    freeze_id: str
+    assessment_id: str
+
+
+@dataclass(frozen=True)
+class RuntimePortfolioInputs:
+    """Several frozen workflows joined to one deployment snapshot."""
+
+    workflows: tuple[WorkflowGraph, ...]
+    deployment: DeploymentGraph
+    workflow_provenance: tuple[WorkflowInputProvenance, ...]
+    namespace: str
+
+
+def _load_frozen_workflow(workflow_id: str):
+    from app.engine.workflow_dependency_modeling.service import (
+        get_frozen_workflow_graph,
+    )
+
+    try:
+        return get_frozen_workflow_graph(workflow_id)
+    except LookupError as error:
+        # No approved, frozen workflow graph: an explicit 404-style evidence error, never a guess.
+        raise WorkflowEvidenceUnavailableError(str(error)) from error
+    except Exception as error:
+        logger.exception("Frozen workflow storage failed")
+        raise RuntimeInputUnavailableError(
+            "Component 1 frozen-workflow storage is unavailable", code="WORKFLOW_STORAGE_UNAVAILABLE"
+        ) from error
+
+
+def _load_deployment(namespace: str) -> DeploymentGraph:
+    """The live topology graph alone (used by the portfolio path)."""
+    from app.engine.deployment_topology_modeling.service import (
+        get_live_deployment_graph,
+    )
+
+    try:
+        return get_live_deployment_graph(namespace=namespace)
+    except Exception as error:
+        raise RuntimeInputUnavailableError(
+            "Component 2 deployment topology is unavailable"
+        ) from error
+
+
+def _discover_topology(namespace: str):
+    """Live discovery with its status, warnings and unresolved items (used by the single-workflow path).
+
+    Unlike _load_deployment this keeps the evidence about how complete the topology is, so the caller can
+    refuse to predict on a partly resolved one. An EvidenceError from the cluster layer (not connected,
+    credential rejected, ...) passes through unchanged; anything unexpected becomes TOPOLOGY_UNAVAILABLE
+    without leaking its text.
+    """
+    from app.engine.deployment_topology_modeling.service import discover_live
+
+    try:
+        return discover_live(namespace=namespace)
+    except EvidenceError:
+        raise
+    except Exception as error:
+        logger.exception("Topology discovery failed unexpectedly")
+        raise RuntimeInputUnavailableError(
+            "Component 2 deployment topology is unavailable", code="TOPOLOGY_UNAVAILABLE"
+        ) from error
+
+
 def get_runtime_component_inputs(
     workflow_id: str,
     namespace: str = "default",
@@ -109,30 +181,8 @@ def get_runtime_component_inputs(
     if not normalized_namespace:
         raise ValueError("namespace must be a non-empty string")
 
-    from app.engine.deployment_topology_modeling.service import discover_live
-    from app.engine.workflow_dependency_modeling.service import (
-        get_frozen_workflow_graph,
-    )
-
-    try:
-        frozen_workflow = get_frozen_workflow_graph(normalized_workflow_id)
-    except LookupError as error:
-        raise WorkflowEvidenceUnavailableError(str(error)) from error
-    except Exception as error:
-        logger.exception("Frozen workflow storage failed")
-        raise RuntimeInputUnavailableError(
-            "Component 1 frozen-workflow storage is unavailable", code="WORKFLOW_STORAGE_UNAVAILABLE"
-        ) from error
-
-    try:
-        discovery = discover_live(namespace=normalized_namespace)
-    except EvidenceError:
-        raise
-    except Exception as error:
-        logger.exception("Topology discovery failed unexpectedly")
-        raise RuntimeInputUnavailableError(
-            "Component 2 deployment topology is unavailable", code="TOPOLOGY_UNAVAILABLE"
-        ) from error
+    frozen_workflow = _load_frozen_workflow(normalized_workflow_id)
+    discovery = _discover_topology(normalized_namespace)
 
     workflow = frozen_workflow.graph.model_copy(deep=True)
     _require_sufficient_evidence(workflow, discovery)
@@ -150,9 +200,71 @@ def get_runtime_component_inputs(
     )
 
 
+def get_runtime_portfolio_inputs(
+    workflow_ids: Sequence[str],
+    namespace: str = "default",
+) -> RuntimePortfolioInputs:
+    """Load several frozen workflows and collect their topology only once."""
+
+    if not workflow_ids:
+        raise ValueError("At least one workflow_id is required")
+
+    normalized_workflow_ids = tuple(
+        workflow_id.strip() for workflow_id in workflow_ids
+    )
+    if any(not workflow_id for workflow_id in normalized_workflow_ids):
+        raise ValueError("workflow_ids must contain non-empty strings")
+
+    duplicate_ids = sorted(
+        {
+            workflow_id
+            for workflow_id in normalized_workflow_ids
+            if normalized_workflow_ids.count(workflow_id) > 1
+        }
+    )
+    if duplicate_ids:
+        raise ValueError(
+            "Duplicate workflow IDs: " + ", ".join(duplicate_ids)
+        )
+
+    normalized_namespace = namespace.strip()
+    if not normalized_namespace:
+        raise ValueError("namespace must be a non-empty string")
+
+    frozen_workflows = tuple(
+        _load_frozen_workflow(workflow_id)
+        for workflow_id in normalized_workflow_ids
+    )
+    deployment = _load_deployment(normalized_namespace)
+
+    return RuntimePortfolioInputs(
+        workflows=tuple(
+            frozen_workflow.graph.model_copy(deep=True)
+            for frozen_workflow in frozen_workflows
+        ),
+        deployment=deployment.model_copy(deep=True),
+        workflow_provenance=tuple(
+            WorkflowInputProvenance(
+                workflow_id=workflow_id,
+                freeze_id=frozen_workflow.freeze_id,
+                assessment_id=frozen_workflow.assessment_id,
+            )
+            for workflow_id, frozen_workflow in zip(
+                normalized_workflow_ids,
+                frozen_workflows,
+                strict=True,
+            )
+        ),
+        namespace=normalized_namespace,
+    )
+
+
 __all__ = [
     "RuntimeComponentInputs",
     "RuntimeInputUnavailableError",
+    "RuntimePortfolioInputs",
     "WorkflowEvidenceUnavailableError",
+    "WorkflowInputProvenance",
     "get_runtime_component_inputs",
+    "get_runtime_portfolio_inputs",
 ]

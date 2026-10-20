@@ -11,7 +11,13 @@
  */
 
 (function () {
+    const DEMO_IMPACT_ENDPOINT = "/api/failure-impacts/simulate";
+    const DEMO_DEPLOYMENT_ENDPOINT = "/api/failure-impacts/demo-deployment";
+    const PORTFOLIO_DEMO_ENDPOINT = "/api/failure-impacts/portfolio/simulate";
     const RUNTIME_IMPACT_ENDPOINT = "/api/failure-impacts/runtime";
+    const PORTFOLIO_RUNTIME_ENDPOINT = "/api/failure-impacts/portfolio/runtime";
+    // The runtime modes read the topology through the discovery envelope, not the bare graph, so the page
+    // can say how complete the topology is and show an explicit failure when the cluster cannot be read.
     const DISCOVERY_ENDPOINT = "/api/deployments/discovery";
     const { fetchJson } = window.ResilienceApi;
     const { describeError, describeDiscovery, renderStateCard, applyBadge } = window.ResilienceConnection;
@@ -26,7 +32,12 @@
     const template = document.querySelector('[data-role="page-template"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
     const nodeSelector = document.querySelector('[data-role="node-selector"]');
+    const inputMode = document.querySelector('[data-role="input-mode"]');
+    const runtimeFields = document.querySelector('[data-role="runtime-fields"]');
     const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
+    const workflowIdLabel = document.querySelector(
+        '[data-role="workflow-id-label"]'
+    );
     const namespaceInput = document.querySelector('[data-role="namespace"]');
     const inputModeNote = document.querySelector('[data-role="input-mode-note"]');
     const inputSourceBadge = document.querySelector(
@@ -75,29 +86,118 @@
         }
     }
 
-    function runtimeSelection() {
-        const workflowId = workflowIdInput?.value.trim() || "";
-        const namespace = namespaceInput?.value.trim() || "";
+    // A missing or invalid input is the person's to fix, so it carries a code the page can tell apart from
+    // a cluster or backend failure.
+    function invalid(message) {
+        return Object.assign(new Error(message), { code: "INVALID_INPUT" });
+    }
 
-        const invalid = (message) => Object.assign(new Error(message), { code: "INVALID_INPUT" });
-        if (!workflowId) {
-            throw invalid("Enter the frozen workflow ID.");
+    function selectedMode() {
+        const mode = inputMode?.value;
+        if (
+            mode === "demo" ||
+            mode === "portfolio-demo" ||
+            mode === "portfolio-runtime"
+        ) {
+            return mode;
         }
+        // Anything else, including a missing control, means the connected cluster, never a fixture.
+        return "runtime";
+    }
+
+    function isRuntimeMode(mode = selectedMode()) {
+        return mode === "runtime" || mode === "portfolio-runtime";
+    }
+
+    function runtimeNamespace() {
+        const namespace = namespaceInput?.value.trim() || "";
         if (!namespace) {
             throw invalid("Enter the Kubernetes namespace.");
         }
-        return { workflowId, namespace };
+        return namespace;
     }
 
-    function impactEndpoint(selection, failedNode) {
-        const params = new URLSearchParams({
-            workflow_id: selection.workflowId,
-            failed_node: failedNode,
-            namespace: selection.namespace,
-        });
-        return `${RUNTIME_IMPACT_ENDPOINT}?${params.toString()}`;
+    function runtimeSelection() {
+        const workflowId = workflowIdInput?.value.trim() || "";
+        if (!workflowId) {
+            throw invalid("Enter the frozen workflow ID.");
+        }
+        return { workflowId, namespace: runtimeNamespace() };
     }
 
+    function portfolioRuntimeSelection() {
+        const rawWorkflowIds = workflowIdInput?.value || "";
+        const workflowIds = rawWorkflowIds
+            .split(",")
+            .map((workflowId) => workflowId.trim());
+
+        if (
+            !rawWorkflowIds.trim() ||
+            workflowIds.some((workflowId) => !workflowId)
+        ) {
+            throw invalid(
+                "Enter one or more frozen workflow IDs separated by commas."
+            );
+        }
+        if (new Set(workflowIds).size !== workflowIds.length) {
+            throw invalid("Workflow IDs must not be duplicated.");
+        }
+        return { workflowIds, namespace: runtimeNamespace() };
+    }
+
+    // Where the topology (and so the list of worker nodes) comes from. Only the namespace is needed, so the
+    // node list can be shown before a workflow has been named.
+    function topologySource() {
+        if (!isRuntimeMode()) {
+            return { endpoint: DEMO_DEPLOYMENT_ENDPOINT, discovery: false };
+        }
+        const namespace = runtimeNamespace();
+        return {
+            endpoint: `${DISCOVERY_ENDPOINT}?namespace=${encodeURIComponent(namespace)}`,
+            discovery: true,
+        };
+    }
+
+    // Builds the prediction URL for the selected mode, once the inputs it needs are valid.
+    function impactRequest() {
+        const mode = selectedMode();
+
+        if (mode === "demo") {
+            return (failedNode) =>
+                `${DEMO_IMPACT_ENDPOINT}?failed_node=${encodeURIComponent(failedNode)}`;
+        }
+
+        if (mode === "portfolio-demo") {
+            return (failedNode) =>
+                `${PORTFOLIO_DEMO_ENDPOINT}?failed_node=${encodeURIComponent(failedNode)}`;
+        }
+
+        if (mode === "runtime") {
+            const { workflowId, namespace } = runtimeSelection();
+            return (failedNode) => {
+                const params = new URLSearchParams({
+                    workflow_id: workflowId,
+                    failed_node: failedNode,
+                    namespace,
+                });
+                return `${RUNTIME_IMPACT_ENDPOINT}?${params.toString()}`;
+            };
+        }
+
+        const { workflowIds, namespace } = portfolioRuntimeSelection();
+        return (failedNode) => {
+            const params = new URLSearchParams({
+                failed_node: failedNode,
+                namespace,
+            });
+            workflowIds.forEach((workflowId) => {
+                params.append("workflow_id", workflowId);
+            });
+            return `${PORTFOLIO_RUNTIME_ENDPOINT}?${params.toString()}`;
+        };
+    }
+
+    // Badge and note for a runtime mode, taken from how complete the discovered topology is.
     function describeInput(discovery) {
         const described = describeDiscovery(discovery);
         applyBadge(inputSourceBadge, described.badge);
@@ -105,6 +205,34 @@
             inputModeNote.textContent =
                 `${described.headline} ${described.provenance} ` +
                 "The result below is a prediction for a virtual failure, not an observation.";
+        }
+    }
+
+    function updateInputModeUi() {
+        const mode = selectedMode();
+        if (runtimeFields) runtimeFields.hidden = !isRuntimeMode(mode);
+        if (workflowIdLabel) {
+            workflowIdLabel.textContent = mode === "portfolio-runtime"
+                ? "Workflow IDs"
+                : "Workflow ID";
+        }
+        // The fixture modes run on disclosed sample inputs, so they say so. The runtime modes show their
+        // own text until the topology has been read, then describeInput() replaces it with the real status.
+        if (inputSourceBadge) {
+            inputSourceBadge.textContent = {
+                demo: "Contract Fixtures",
+                "portfolio-demo": "Portfolio Fixtures",
+                runtime: "Validated Runtime",
+                "portfolio-runtime": "Runtime Portfolio",
+            }[mode];
+        }
+        if (inputModeNote) {
+            inputModeNote.textContent = {
+                demo: "Contract-fixture mode — this runs a virtual prediction and never changes a cluster.",
+                "portfolio-demo": "Portfolio-fixture mode — evaluates the selected node across two disclosed workflows without changing a cluster.",
+                runtime: "Runtime mode — requires configured Component 1 persistence and a frozen workflow, then uses Component 2 topology; simulation remains virtual.",
+                "portfolio-runtime": "Runtime portfolio mode — enter comma-separated frozen workflow IDs and evaluate them against one Component 2 topology; simulation remains virtual.",
+            }[mode];
         }
     }
 
@@ -158,8 +286,15 @@
         });
     }
 
-    function renderRootCauses(container, rootCauses) {
+    function renderRootCauses(root, rootCauses) {
+        const section = root.querySelector('[data-role="root-causes-section"]');
+        const container = root.querySelector('[data-role="impact-root-causes"]');
+        if (!section || !container) return;
+
+        const hasRootCauseContract = Array.isArray(rootCauses);
+        section.hidden = !hasRootCauseContract;
         container.innerHTML = "";
+        if (!hasRootCauseContract) return;
 
         if (!rootCauses.length) {
             const empty = document.createElement("p");
@@ -209,6 +344,52 @@
         });
     }
 
+    function renderPortfolioOutcomes(root, workflowImpacts) {
+        const section = root.querySelector(
+            '[data-role="portfolio-workflow-section"]'
+        );
+        const container = root.querySelector(
+            '[data-role="portfolio-workflow-outcomes"]'
+        );
+        if (!section || !container) return;
+
+        const hasPortfolio = Array.isArray(workflowImpacts);
+        section.hidden = !hasPortfolio;
+        container.innerHTML = "";
+        if (!hasPortfolio) return;
+
+        workflowImpacts.forEach((impact) => {
+            const item = document.createElement("div");
+            item.className = "workflow-outcome";
+
+            const identity = document.createElement("div");
+            identity.className = "workflow-outcome__identity";
+
+            const name = document.createElement("strong");
+            name.textContent = impact.workflowId;
+
+            const badge = document.createElement("span");
+            badge.className = impact.survives
+                ? "status-badge status-badge--success"
+                : "status-badge status-badge--danger";
+            badge.textContent = impact.survives ? "Survived" : "Failed";
+            identity.append(name, badge);
+
+            const explanation = document.createElement("span");
+            explanation.className = "workflow-outcome__explanation muted";
+            if (impact.failedMandatoryServices.length) {
+                explanation.textContent = `Mandatory failures: ${impact.failedMandatoryServices.join(", ")}`;
+            } else if (impact.failedServices.length) {
+                explanation.textContent = `Optional unavailable services: ${impact.failedServices.join(", ")}`;
+            } else {
+                explanation.textContent = "All required services survived.";
+            }
+
+            item.append(identity, explanation);
+            container.appendChild(item);
+        });
+    }
+
     function renderNodeRanking(tbody, ranking) {
         tbody.innerHTML = "";
 
@@ -237,23 +418,26 @@
     }
 
     function setBusy(busy) {
-        [reloadButton, nodeSelector, workflowIdInput, namespaceInput].forEach((control) => {
+        [reloadButton, nodeSelector, inputMode, workflowIdInput, namespaceInput].forEach((control) => {
             if (control) control.disabled = busy;
         });
     }
 
-    // Reads the connected cluster's topology and fills the node selector. Never keeps a previous
+    // Reads the topology for the selected mode and fills the node selector. Never keeps a previous
     // cluster's nodes: a failed read empties the selector and shows the failure.
     async function loadTopology() {
-        const namespace = namespaceInput?.value.trim() || "default";
         if (nodeSelector) nodeSelector.replaceChildren();
         try {
-            const discovery = await fetchJson(
-                `${DISCOVERY_ENDPOINT}?namespace=${encodeURIComponent(namespace)}`
-            );
-            populateNodeSelector(discovery.graph);
-            describeInput(discovery);
-            return discovery.graph;
+            const source = topologySource();
+            const body = await fetchJson(source.endpoint);
+            const graph = source.discovery ? body.graph : body;
+            populateNodeSelector(graph);
+            if (source.discovery) {
+                describeInput(body);
+            } else {
+                updateInputModeUi();
+            }
+            return graph;
         } catch (error) {
             applyBadge(inputSourceBadge, { variant: "danger", text: "Not showing live data" });
             renderStateCard(region, describeError(error), { onRetry: loadTopology });
@@ -266,7 +450,7 @@
         const previousNode = nodeSelector?.value;
 
         try {
-            const selection = runtimeSelection();
+            const impactEndpoint = impactRequest();
             const deployment = await loadTopology();
             if (!deployment) return;
             if (previousNode && deployment.nodes.some((node) => node.name === previousNode)) {
@@ -277,7 +461,7 @@
             if (!failedNode) {
                 throw new Error("The discovered topology contains no worker nodes.");
             }
-            const impact = await fetchJson(impactEndpoint(selection, failedNode));
+            const impact = await fetchJson(impactEndpoint(failedNode));
 
             region.innerHTML = "";
             region.appendChild(template.content.cloneNode(true));
@@ -335,9 +519,10 @@
                 impact.failedWorkflows
             );
             renderRootCauses(
-                region.querySelector('[data-role="impact-root-causes"]'),
+                region,
                 impact.rootCauses
             );
+            renderPortfolioOutcomes(region, impact.workflowImpacts);
             renderNodeRanking(
                 region.querySelector('[data-role="impact-node-ranking-body"]'),
                 impact.nodeRiskRanking
@@ -361,6 +546,17 @@
         namespaceInput.addEventListener("change", loadTopology);
     }
 
-    // On open: read the topology so a node can be chosen. No prediction runs until a workflow is named.
-    document.addEventListener("DOMContentLoaded", loadTopology);
+    if (inputMode) {
+        inputMode.addEventListener("change", () => {
+            updateInputModeUi();
+            loadTopology();
+        });
+    }
+
+    // On open: read the topology so a node can be chosen. No prediction runs until Run is pressed with
+    // valid inputs (a workflow ID for the runtime modes).
+    document.addEventListener("DOMContentLoaded", () => {
+        updateInputModeUi();
+        loadTopology();
+    });
 })();

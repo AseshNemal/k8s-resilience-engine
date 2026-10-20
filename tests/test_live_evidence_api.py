@@ -143,6 +143,16 @@ def test_partial_discovery_lists_what_could_not_be_resolved(use_cluster):
 
 
 # ---- declared state ------------------------------------------------------------------------------------
+# Member 2's per-namespace views read declared intent from the repository's own manifests when none is named.
+# The packaged extension image ships no deploy/ folder, so these tests remove them to behave like the image:
+# declared state is then reported as unavailable, never as 100% compliance.
+
+@pytest.fixture
+def packaged_image(monkeypatch, tmp_path):
+    from app.engine.deployment_topology_modeling import service
+    monkeypatch.setattr(service, "DEFAULT_MANIFEST_PATH", tmp_path / "absent-default")
+    monkeypatch.setattr(service, "FALLBACK_MANIFEST_DIR", tmp_path / "absent-fallback")
+
 
 @pytest.mark.parametrize("route", [
     "/api/deployments/manifests",
@@ -150,7 +160,7 @@ def test_partial_discovery_lists_what_could_not_be_resolved(use_cluster):
     "/api/deployments/manifests/services/web",
     "/api/deployments/manifests/compliance",
 ])
-def test_declared_state_views_report_insufficient_evidence(use_cluster, route):
+def test_declared_state_views_report_insufficient_evidence(use_cluster, packaged_image, route):
     use_cluster(two_node_shop())
 
     response = client.get(route, params={"namespace": "shop"})
@@ -159,7 +169,7 @@ def test_declared_state_views_report_insufficient_evidence(use_cluster, route):
     assert body(response)["code"] == "DECLARED_STATE_UNAVAILABLE"
 
 
-def test_drift_reports_unknown_compliance_not_perfect_compliance(use_cluster):
+def test_drift_reports_unknown_compliance_not_perfect_compliance(use_cluster, packaged_image):
     use_cluster(two_node_shop())
 
     payload = client.get("/api/deployments/drift", params={"namespace": "shop"}).json()
@@ -220,15 +230,30 @@ REMOVED_ROUTES = [
 ]
 
 
-@pytest.mark.parametrize(("method", "path"), REMOVED_ROUTES)
+def _is_labelled_research_route(method, path):
+    """Member-owned fixture and dry-run routes that stay mounted (tests/support/labelled_research_routes.py)."""
+    import re
+    from tests.support import labelled_research_routes as research
+
+    generic = re.sub(r"/(07_node_drain_eviction)\b", "/{scenario_id}", path)
+    return (method, generic) in research.ROUTES
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [r for r in REMOVED_ROUTES if not _is_labelled_research_route(*r)],
+)
 def test_removed_routes_are_not_served(method, path):
     assert client.request(method, path).status_code in (404, 405)
 
 
 def test_openapi_advertises_no_sample_demo_or_benchmark_paths():
     paths = client.get("/openapi.json").json()["paths"]
+    from tests.support import labelled_research_routes as research
+
     offenders = [p for p in paths if any(word in p for word in ("sample", "demo", "benchmark", "simulate", "chaos/run", "chaos/matrix", "chaos/scenarios", "/seed"))]
-    assert offenders == []
+    # The named, labelled research routes are allowed; anything else with such a name is not.
+    assert [p for p in offenders if p not in research.PATHS] == []
     assert not [p for p in paths if p.startswith("/api/validations")]
 
 

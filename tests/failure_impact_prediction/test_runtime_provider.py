@@ -8,10 +8,14 @@ from app.engine.deployment_topology_modeling.discovery import (
     DiscoveryWarning,
     UnresolvedItem,
 )
-from app.engine.failure_impact_prediction.fixture_provider import get_demo_inputs
+from app.engine.failure_impact_prediction.fixture_provider import (
+    get_demo_inputs,
+    get_demo_portfolio_inputs,
+)
 from app.engine.failure_impact_prediction.runtime_provider import (
     RuntimeInputUnavailableError,
     get_runtime_component_inputs,
+    get_runtime_portfolio_inputs,
 )
 from app.engine.workflow_dependency_modeling import service as workflow_service
 from app.shared.evidence_errors import EvidenceError
@@ -188,3 +192,76 @@ def test_partial_evidence_about_unrelated_pods_does_not_block_but_stays_visible(
     assert inputs.topology_status == "partial"
     assert [u.name for u in inputs.topology_unresolved] == ["batch-1"]
     assert [w.code for w in inputs.topology_warnings] == ["NAMESPACE_EXISTENCE_UNVERIFIED"]
+
+
+def test_runtime_portfolio_loads_each_workflow_and_topology_once(monkeypatch) -> None:
+    workflows, deployment = get_demo_portfolio_inputs()
+    workflows_by_id = {
+        workflow.workflow_id: workflow for workflow in workflows
+    }
+    workflow_calls: list[str] = []
+    deployment_calls: list[str] = []
+
+    def frozen_workflow(workflow_id: str) -> SimpleNamespace:
+        workflow_calls.append(workflow_id)
+        return SimpleNamespace(
+            graph=workflows_by_id[workflow_id],
+            freeze_id=f"freeze-{workflow_id}-v1",
+            assessment_id=f"assessment-{workflow_id}-v1",
+        )
+
+    def live_deployment(namespace: str):
+        deployment_calls.append(namespace)
+        return deployment
+
+    monkeypatch.setattr(
+        workflow_service,
+        "get_frozen_workflow_graph",
+        frozen_workflow,
+    )
+    monkeypatch.setattr(
+        deployment_service,
+        "get_live_deployment_graph",
+        live_deployment,
+    )
+
+    inputs = get_runtime_portfolio_inputs(
+        [" checkout ", " storefront "],
+        " research ",
+    )
+
+    assert workflow_calls == ["checkout", "storefront"]
+    assert deployment_calls == ["research"]
+    assert [workflow.workflow_id for workflow in inputs.workflows] == [
+        "checkout",
+        "storefront",
+    ]
+    assert inputs.workflows[0] is not workflows[0]
+    assert inputs.deployment == deployment
+    assert inputs.deployment is not deployment
+    assert [
+        provenance.freeze_id
+        for provenance in inputs.workflow_provenance
+    ] == ["freeze-checkout-v1", "freeze-storefront-v1"]
+    assert inputs.namespace == "research"
+
+
+@pytest.mark.parametrize(
+    ("workflow_ids", "message"),
+    [
+        ([], "At least one workflow_id"),
+        (["checkout", "   "], "non-empty strings"),
+        (["checkout", " checkout "], "Duplicate workflow IDs"),
+    ],
+)
+def test_runtime_portfolio_rejects_invalid_workflow_selection(
+    workflow_ids: list[str],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        get_runtime_portfolio_inputs(workflow_ids)
+
+
+def test_runtime_portfolio_rejects_blank_namespace() -> None:
+    with pytest.raises(ValueError, match="namespace"):
+        get_runtime_portfolio_inputs(["checkout"], "   ")

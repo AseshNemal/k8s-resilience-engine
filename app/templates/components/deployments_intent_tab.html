@@ -1,0 +1,31 @@
+{# Tab 2: Declared Manifest Intent vs Live Cluster State #}
+<div class="tab-pane" id="tab-intent" role="tabpanel" aria-labelledby="tab-btn-intent" hidden>
+    <div class="tab-pane__header">
+        <div>
+            <h3 class="tab-pane__title">Declared Manifest Intent vs Live Placement Compliance</h3>
+            <p class="tab-pane__desc">Side-by-side reconciliation between developer YAML specifications and active cluster state.</p>
+        </div>
+        <div class="compliance-metric-pill" id="compliance-overall-pill">
+            Compliance Rate: <strong id="compliance-rate-val">100.0%</strong>
+        </div>
+    </div>
+
+    <div class="intent-table-container card card--glass">
+        <table class="intent-table" id="intent-comparison-table">
+            <thead>
+                <tr>
+                    <th>Microservice</th>
+                    <th>Declared Replicas (YAML)</th>
+                    <th>Live Ready Replicas</th>
+                    <th>CPU / Mem Limits</th>
+                    <th>Anti-Affinity</th>
+                    <th>Topology Spread</th>
+                    <th>Compliance Status</th>
+                </tr>
+            </thead>
+            <tbody id="intent-table-body">
+                <!-- Populated by deployments_intent_widget.js -->
+            </tbody>
+        </table>
+    </div>
+</div>

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import labelled_research_routes as research
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # Modules on the live request path: routers, pages, the app entry points, discovery and the
@@ -45,8 +47,10 @@ PYTHON_NAMES = [p.relative_to(ROOT).as_posix() for p in RUNTIME_PYTHON]
 FRONTEND_NAMES = [p.relative_to(ROOT).as_posix() for p in FRONTEND_FILES]
 
 
-def offenses(text: str, pattern: re.Pattern) -> list[str]:
-    return sorted({m.group(0) for m in pattern.finditer(text)})
+def offenses(text: str, pattern: re.Pattern, allowed: set[str] = frozenset()) -> list[str]:
+    """What the pattern finds, minus the few names a labelled research route may still use (see
+    tests/support/labelled_research_routes.py). A name that is not on that list still fails."""
+    return sorted({m.group(0) for m in pattern.finditer(text)} - set(allowed))
 
 
 def code_only(source: str) -> str:
@@ -57,12 +61,14 @@ def code_only(source: str) -> str:
 
 @pytest.mark.parametrize("path", RUNTIME_PYTHON, ids=PYTHON_NAMES)
 def test_runtime_python_does_not_touch_fixtures_or_ambient_kubeconfig(path):
-    assert offenses(code_only(path.read_text(encoding="utf-8")), PYTHON_FORBIDDEN) == []
+    allowed = research.PYTHON_ALLOWED.get(path.relative_to(ROOT).as_posix(), set())
+    assert offenses(code_only(path.read_text(encoding="utf-8")), PYTHON_FORBIDDEN, allowed) == []
 
 
 @pytest.mark.parametrize("path", FRONTEND_FILES, ids=FRONTEND_NAMES)
 def test_pages_and_scripts_do_not_reference_sample_endpoints_or_labels(path):
-    assert offenses(path.read_text(encoding="utf-8"), FRONTEND_FORBIDDEN) == []
+    allowed = research.FRONTEND_ALLOWED.get(path.relative_to(ROOT).as_posix(), set())
+    assert offenses(path.read_text(encoding="utf-8"), FRONTEND_FORBIDDEN, allowed) == []
 
 
 @pytest.mark.parametrize("dockerfile", ["Dockerfile", "extension/Dockerfile"])
@@ -88,12 +94,29 @@ def test_the_scanner_would_catch_what_it_guards_against():
     assert not offenses("const live = await fetchJson('/api/deployments/discovery');", FRONTEND_FORBIDDEN)
 
 
-def test_the_research_routes_live_only_under_tests():
-    # They are importable for the research tests, but app.main must never include them.
+def test_only_the_named_research_routes_serve_sample_or_dry_run_data():
+    """A new sample, benchmark or chaos-run route fails here until it is added to the allow-list, which is
+    where it is also required to label itself."""
     from app.main import app
 
     paths = app.openapi()["paths"]
-    assert not [p for p in paths if "sample" in p or "benchmark" in p or "chaos/run" in p]
+    suspicious = [p for p in paths if "sample" in p or "benchmark" in p or "chaos/run" in p or "demo" in p]
+    assert [p for p in suspicious if p not in research.PATHS] == []
+
+
+def test_every_labelled_research_route_says_what_it_is():
+    from app.main import app
+
+    paths = app.openapi()["paths"]
+    unlabelled = []
+    for method, path in sorted(research.ROUTES):
+        operation = paths.get(path, {}).get(method.lower())
+        if operation is None:
+            continue  # a route that was retired needs no label
+        text = f"{operation.get('summary', '')} {operation.get('description', '')}".lower()
+        if not any(word in text for word in research.LABEL_WORDS):
+            unlabelled.append((method, path))
+    assert unlabelled == []
 
 
 def test_nothing_in_the_product_imports_the_kubernetes_package():
