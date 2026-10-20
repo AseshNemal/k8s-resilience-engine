@@ -7,12 +7,10 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"sort"
+	"path/filepath"
 	"time"
 
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
-
+	"resilience-engine/helper/internal/kube"
 	"resilience-engine/helper/internal/kubeconfig"
 )
 
@@ -26,59 +24,69 @@ type Loader interface {
 	Contexts() (contexts []Context, current string, err error)
 	// Client returns a client for one context and the cluster's address and CA, which the helper
 	// needs to build the backend's credential. Callers must only ask for supported contexts.
-	Client(name string) (kubernetes.Interface, kubeconfig.Cluster, error)
+	Client(name string) (kube.Client, kubeconfig.Cluster, error)
 }
 
 // Kubeconfig loads contexts from the standard locations ($KUBECONFIG, then ~/.kube/config), on every
 // operating system.
 type Kubeconfig struct {
-	Rules   *clientcmd.ClientConfigLoadingRules
-	Timeout time.Duration
+	// ExplicitPath, when set, is the only file read and it must exist.
+	ExplicitPath string
+	// Precedence lists the files to merge, first one winning. Files that do not exist are skipped.
+	Precedence []string
+	Timeout    time.Duration
 }
 
+// New reads $KUBECONFIG (a list, separated as the operating system separates paths) or, when it is
+// unset, ~/.kube/config.
 func New() *Kubeconfig {
-	return &Kubeconfig{Rules: clientcmd.NewDefaultClientConfigLoadingRules(), Timeout: 8 * time.Second}
+	return &Kubeconfig{Precedence: defaultPaths(), Timeout: 8 * time.Second}
+}
+
+func defaultPaths() []string {
+	if env := os.Getenv("KUBECONFIG"); env != "" {
+		return filepath.SplitList(env)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return []string{filepath.Join(home, ".kube", "config")}
+	}
+	return nil
+}
+
+func (k *Kubeconfig) load() (*kube.Kubeconfig, error) {
+	return kube.LoadKubeconfig(k.ExplicitPath, k.Precedence)
 }
 
 func (k *Kubeconfig) Contexts() ([]Context, string, error) {
-	raw, err := k.Rules.Load()
+	loaded, err := k.load()
 	if err != nil {
 		return nil, "", errors.New("could not read your kubeconfig")
 	}
-	names := make([]string, 0, len(raw.Contexts))
-	for n := range raw.Contexts {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := loaded.ContextNames()
 	out := make([]Context, 0, len(names))
-	for _, n := range names {
-		c := Context{Name: n}
-		if cl := raw.Clusters[raw.Contexts[n].Cluster]; cl != nil {
-			c.Server = cl.Server
-		}
-		out = append(out, c)
+	for _, name := range names {
+		out = append(out, Context{Name: name, Server: loaded.Server(name)})
 	}
-	return out, raw.CurrentContext, nil
+	return out, loaded.CurrentContext(), nil
 }
 
-func (k *Kubeconfig) Client(name string) (kubernetes.Interface, kubeconfig.Cluster, error) {
-	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		k.Rules, &clientcmd.ConfigOverrides{CurrentContext: name}).ClientConfig()
+func (k *Kubeconfig) Client(name string) (kube.Client, kubeconfig.Cluster, error) {
+	loaded, err := k.load()
 	if err != nil {
-		return nil, kubeconfig.Cluster{}, errors.New("could not use that kubeconfig context")
+		return nil, kubeconfig.Cluster{}, errors.New("could not read your kubeconfig")
+	}
+	cfg, err := loaded.Config(name)
+	if err != nil {
+		// These messages name the unsupported setting (for example a credential plugin). They never
+		// contain a credential, a path or file content.
+		return nil, kubeconfig.Cluster{}, errors.New("could not use that kubeconfig context: " + err.Error())
 	}
 	cfg.Timeout = k.Timeout
-	cs, err := kubernetes.NewForConfig(cfg)
+	client, err := kube.NewClient(cfg)
 	if err != nil {
-		return nil, kubeconfig.Cluster{}, errors.New("could not create a cluster client")
+		return nil, kubeconfig.Cluster{}, errors.New("could not create a cluster client: " + err.Error())
 	}
-	ca := cfg.CAData
-	if len(ca) == 0 && cfg.CAFile != "" {
-		if ca, err = os.ReadFile(cfg.CAFile); err != nil {
-			return nil, kubeconfig.Cluster{}, errors.New("could not read the cluster's certificate authority")
-		}
-	}
-	return cs, kubeconfig.Cluster{Server: cfg.Host, CAData: ca}, nil
+	return client, kubeconfig.Cluster{Server: cfg.Server, CAData: cfg.CAData}, nil
 }
 
 // HostPort returns host:port of a server URL for display, or "" if it cannot be parsed. Paths and

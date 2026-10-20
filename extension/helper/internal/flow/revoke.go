@@ -22,7 +22,7 @@ func Revoke(ctx context.Context, d Deps, name string) Result {
 	if err != nil {
 		return fail(cmd, StateError, err.Error())
 	}
-	if _, err := cs.Discovery().ServerVersion(); err != nil {
+	if _, err := cs.ServerVersion(ctx); err != nil {
 		return fail(cmd, StateClusterUnreachable, "the cluster is not reachable")
 	}
 	report, err := rbac.Inspect(ctx, cs)
@@ -54,6 +54,7 @@ func Revoke(ctx context.Context, d Deps, name string) Result {
 
 	// Disconnect the backend whether or not the cluster side had anything left to remove.
 	r := Result{OK: true, Command: cmd, State: StateDisconnected, Context: c.Name, Changes: describe(dels)}
+	r = d.stopBackground(ctx, r)
 	kept := ""
 	if len(plan.Keep) > 0 {
 		kept = " Kept: " + strings.Join(plan.Keep, "; ") + "."

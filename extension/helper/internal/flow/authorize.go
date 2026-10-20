@@ -31,7 +31,7 @@ func Authorize(ctx context.Context, d Deps, name string) Result {
 	if err != nil {
 		return fail(cmd, StateError, err.Error())
 	}
-	ver, err := cs.Discovery().ServerVersion()
+	ver, err := cs.ServerVersion(ctx)
 	if err != nil {
 		return fail(cmd, StateClusterUnreachable, "the cluster is not reachable; is Docker Desktop running and the kind cluster started?")
 	}
@@ -50,7 +50,7 @@ func Authorize(ctx context.Context, d Deps, name string) Result {
 	}
 	plan := rbac.Plan(report)
 
-	decision, err := d.Prompter.Confirm(ctx, authorizeDialog(c, ver.GitVersion, plan))
+	decision, err := d.Prompter.Confirm(ctx, authorizeDialog(c, ver, plan, d.Agent != nil && d.Agent.Supported()))
 	switch {
 	case errors.Is(err, approve.ErrNoApprovalChannel), errors.Is(err, approve.ErrUnsupportedPlatform):
 		return fail(cmd, StateApprovalUnavailable, "no approval dialog is available on this system; use the manual connection instead")
@@ -70,6 +70,10 @@ func Authorize(ctx context.Context, d Deps, name string) Result {
 	}
 	r := issueAndInstall(ctx, d, cmd, c.Name, cs, cluster, backend)
 	r.Changes = describe(plan)
+	if r.OK {
+		// The person already approved the job in the dialog above, so this is its only consent.
+		r = d.startBackground(ctx, r)
+	}
 	return r
 }
 

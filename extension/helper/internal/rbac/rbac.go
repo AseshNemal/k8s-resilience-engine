@@ -22,11 +22,7 @@ import (
 	"sort"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	"resilience-engine/helper/internal/kube"
 )
 
 const (
@@ -103,19 +99,19 @@ type Report struct {
 
 func labels() map[string]string { return map[string]string{ManagedByKey: ManagedByValue} }
 
-func desiredRules() []rbacv1.PolicyRule {
-	return []rbacv1.PolicyRule{
+func desiredRules() []kube.PolicyRule {
+	return []kube.PolicyRule{
 		{APIGroups: []string{""}, Resources: []string{"nodes", "pods", "services"}, Verbs: []string{"get", "list"}},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets"}, Verbs: []string{"get", "list"}},
 	}
 }
 
-func desiredSubject() rbacv1.Subject {
-	return rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: Name, Namespace: Namespace}
+func desiredSubject() kube.Subject {
+	return kube.Subject{Kind: kube.ServiceAccountKind, Name: Name, Namespace: Namespace}
 }
 
-func desiredRoleRef() rbacv1.RoleRef {
-	return rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: Name}
+func desiredRoleRef() kube.RoleRef {
+	return kube.RoleRef{APIGroup: kube.RBACGroup, Kind: "ClusterRole", Name: Name}
 }
 
 // Permissions describes in plain words what the credential can do, for the approval dialog.
@@ -128,10 +124,10 @@ func Permissions() []string {
 }
 
 // normalizeRules makes rule comparison independent of ordering inside each rule.
-func normalizeRules(in []rbacv1.PolicyRule) []rbacv1.PolicyRule {
-	out := make([]rbacv1.PolicyRule, 0, len(in))
+func normalizeRules(in []kube.PolicyRule) []kube.PolicyRule {
+	out := make([]kube.PolicyRule, 0, len(in))
 	for _, r := range in {
-		c := rbacv1.PolicyRule{
+		c := kube.PolicyRule{
 			APIGroups:       sortedCopy(r.APIGroups),
 			Resources:       sortedCopy(r.Resources),
 			Verbs:           sortedCopy(r.Verbs),
@@ -165,24 +161,24 @@ func labelState(have map[string]string) (State, string) {
 }
 
 // Inspect reads the four objects and any other bindings of the service account. It never writes.
-func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
+func Inspect(ctx context.Context, cs kube.Client) (Report, error) {
 	var r Report
 
-	ns, err := cs.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{})
+	ns, err := cs.Get(ctx, kube.Namespaces, "", Namespace)
 	r.add(KindNamespace, Namespace, err, func() string { return ns.Labels[ManagedByKey] }, func() (State, string) { return labelState(ns.Labels) })
-	if err != nil && !apierrors.IsNotFound(err) {
+	if err != nil && !kube.IsNotFound(err) {
 		return r, wrap(err)
 	}
 
-	sa, err := cs.CoreV1().ServiceAccounts(Namespace).Get(ctx, Name, metav1.GetOptions{})
+	sa, err := cs.Get(ctx, kube.ServiceAccounts, Namespace, Name)
 	r.add(KindServiceAccount, Name, err, func() string { return sa.Labels[ManagedByKey] }, func() (State, string) { return labelState(sa.Labels) })
-	if err != nil && !apierrors.IsNotFound(err) {
+	if err != nil && !kube.IsNotFound(err) {
 		return r, wrap(err)
 	}
 
-	cr, err := cs.RbacV1().ClusterRoles().Get(ctx, Name, metav1.GetOptions{})
+	cr, err := cs.Get(ctx, kube.ClusterRoles, "", Name)
 	r.add(KindClusterRole, Name, err, func() string { return cr.Labels[ManagedByKey] }, func() (State, string) {
-		if cr.AggregationRule != nil {
+		if cr.AggregationRule {
 			return Drifted, "has an aggregation rule, so it can gain permissions from other roles"
 		}
 		if !reflect.DeepEqual(normalizeRules(cr.Rules), normalizeRules(desiredRules())) {
@@ -190,14 +186,14 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 		}
 		return labelState(cr.Labels)
 	})
-	if err != nil && !apierrors.IsNotFound(err) {
+	if err != nil && !kube.IsNotFound(err) {
 		return r, wrap(err)
 	}
 	if err == nil {
 		r.markOutdated(cr)
 	}
 
-	crb, err := cs.RbacV1().ClusterRoleBindings().Get(ctx, Name, metav1.GetOptions{})
+	crb, err := cs.Get(ctx, kube.ClusterRoleBindings, "", Name)
 	r.add(KindClusterRoleBinding, Name, err, func() string { return crb.Labels[ManagedByKey] }, func() (State, string) {
 		if crb.RoleRef != desiredRoleRef() {
 			return Drifted, "binds a different role"
@@ -207,7 +203,7 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 		}
 		return labelState(crb.Labels)
 	})
-	if err != nil && !apierrors.IsNotFound(err) {
+	if err != nil && !kube.IsNotFound(err) {
 		return r, wrap(err)
 	}
 
@@ -221,7 +217,7 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (Report, error) {
 
 // ruleTriples flattens rules into "group/resource/verb". ok is false when a rule restricts by resource
 // name or non-resource URL, which this comparison does not model.
-func ruleTriples(rules []rbacv1.PolicyRule) (set map[string]bool, ok bool) {
+func ruleTriples(rules []kube.PolicyRule) (set map[string]bool, ok bool) {
 	set = map[string]bool{}
 	for _, rule := range rules {
 		if len(rule.ResourceNames) > 0 || len(rule.NonResourceURLs) > 0 {
@@ -240,10 +236,10 @@ func ruleTriples(rules []rbacv1.PolicyRule) (set map[string]bool, ok bool) {
 
 // markOutdated tells a role that is merely narrower than the approved set (every grant it has is
 // still wanted) from one that was changed or widened. Only the first is a normal upgrade.
-func (r *Report) markOutdated(cr *rbacv1.ClusterRole) {
+func (r *Report) markOutdated(cr *kube.Object) {
 	have, okHave := ruleTriples(cr.Rules)
 	want, _ := ruleTriples(desiredRules())
-	if cr.AggregationRule != nil || !okHave || len(have) == 0 {
+	if cr.AggregationRule || !okHave || len(have) == 0 {
 		return
 	}
 	for triple := range have {
@@ -296,7 +292,7 @@ func (r Report) NeedsMoreAccess() bool {
 
 func (r *Report) add(kind Kind, name string, err error, owner func() string, classify func() (State, string)) {
 	if err != nil {
-		if apierrors.IsNotFound(err) {
+		if kube.IsNotFound(err) {
 			r.Objects = append(r.Objects, ObjectState{Kind: kind, Name: name, State: Absent})
 		}
 		return
@@ -306,30 +302,30 @@ func (r *Report) add(kind Kind, name string, err error, owner func() string, cla
 }
 
 // extraGrants finds bindings, other than the extension's own, that name its service account.
-func extraGrants(ctx context.Context, cs kubernetes.Interface) ([]ExtraGrant, error) {
+func extraGrants(ctx context.Context, cs kube.Client) ([]ExtraGrant, error) {
 	var out []ExtraGrant
-	hit := func(subjects []rbacv1.Subject) bool {
+	hit := func(subjects []kube.Subject) bool {
 		for _, s := range subjects {
-			if s.Kind == rbacv1.ServiceAccountKind && s.Name == Name && s.Namespace == Namespace {
+			if s.Kind == kube.ServiceAccountKind && s.Name == Name && s.Namespace == Namespace {
 				return true
 			}
 		}
 		return false
 	}
-	crbs, err := cs.RbacV1().ClusterRoleBindings().List(ctx, metav1.ListOptions{})
+	crbs, err := cs.List(ctx, kube.ClusterRoleBindings, "")
 	if err != nil {
 		return nil, err
 	}
-	for _, b := range crbs.Items {
+	for _, b := range crbs {
 		if b.Name != Name && hit(b.Subjects) {
 			out = append(out, ExtraGrant{Kind: "ClusterRoleBinding", Name: b.Name})
 		}
 	}
-	rbs, err := cs.RbacV1().RoleBindings(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	rbs, err := cs.List(ctx, kube.RoleBindings, "") // every namespace
 	if err != nil {
 		return nil, err
 	}
-	for _, b := range rbs.Items {
+	for _, b := range rbs {
 		if hit(b.Subjects) {
 			out = append(out, ExtraGrant{Kind: "RoleBinding", Namespace: b.Namespace, Name: b.Name})
 		}
@@ -408,14 +404,14 @@ func Plan(r Report) []Change {
 }
 
 func wrap(err error) error {
-	if apierrors.IsForbidden(err) {
-		return fmt.Errorf("%w: %s", ErrForbidden, apierrors.ReasonForError(err))
+	if kube.IsForbidden(err) {
+		return fmt.Errorf("%w: %s", ErrForbidden, kube.ReasonForError(err))
 	}
 	return err
 }
 
 // Apply performs a Plan. It refuses to run when another binding over-grants the service account.
-func Apply(ctx context.Context, cs kubernetes.Interface, r Report) error {
+func Apply(ctx context.Context, cs kube.Client, r Report) error {
 	if len(r.ExtraGrants) > 0 {
 		return ErrOverGranted
 	}
@@ -447,80 +443,68 @@ func Apply(ctx context.Context, cs kubernetes.Interface, r Report) error {
 	return nil
 }
 
-func ensureNamespace(ctx context.Context, cs kubernetes.Interface, st State) error {
-	api := cs.CoreV1().Namespaces()
+func ensureNamespace(ctx context.Context, cs kube.Client, st State) error {
 	if st == Absent {
-		_, err := api.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: Namespace, Labels: labels()}}, metav1.CreateOptions{})
-		return err
+		return cs.Create(ctx, kube.Namespaces, &kube.Object{Name: Namespace, Labels: labels()})
 	}
-	cur, err := api.Get(ctx, Namespace, metav1.GetOptions{})
+	cur, err := cs.Get(ctx, kube.Namespaces, "", Namespace)
 	if err != nil {
 		return err
 	}
 	cur.Labels = mergeLabels(cur.Labels)
-	_, err = api.Update(ctx, cur, metav1.UpdateOptions{})
-	return err
+	return cs.Update(ctx, kube.Namespaces, cur)
 }
 
-func ensureServiceAccount(ctx context.Context, cs kubernetes.Interface, st State) error {
-	api := cs.CoreV1().ServiceAccounts(Namespace)
+func ensureServiceAccount(ctx context.Context, cs kube.Client, st State) error {
 	if st == Absent {
-		_, err := api.Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: Name, Namespace: Namespace, Labels: labels()}}, metav1.CreateOptions{})
-		return err
+		return cs.Create(ctx, kube.ServiceAccounts, &kube.Object{Name: Name, Namespace: Namespace, Labels: labels()})
 	}
-	cur, err := api.Get(ctx, Name, metav1.GetOptions{})
+	cur, err := cs.Get(ctx, kube.ServiceAccounts, Namespace, Name)
 	if err != nil {
 		return err
 	}
 	cur.Labels = mergeLabels(cur.Labels)
-	_, err = api.Update(ctx, cur, metav1.UpdateOptions{})
-	return err
+	return cs.Update(ctx, kube.ServiceAccounts, cur)
 }
 
-func ensureClusterRole(ctx context.Context, cs kubernetes.Interface, st State) error {
-	api := cs.RbacV1().ClusterRoles()
+func ensureClusterRole(ctx context.Context, cs kube.Client, st State) error {
 	if st == Absent {
-		_, err := api.Create(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: Name, Labels: labels()}, Rules: desiredRules()}, metav1.CreateOptions{})
-		return err
+		return cs.Create(ctx, kube.ClusterRoles, &kube.Object{Name: Name, Labels: labels(), Rules: desiredRules()})
 	}
-	cur, err := api.Get(ctx, Name, metav1.GetOptions{})
+	cur, err := cs.Get(ctx, kube.ClusterRoles, "", Name)
 	if err != nil {
 		return err
 	}
 	cur.Labels = mergeLabels(cur.Labels)
 	cur.Rules = desiredRules()
-	cur.AggregationRule = nil
-	_, err = api.Update(ctx, cur, metav1.UpdateOptions{})
-	return err
+	cur.AggregationRule = false
+	return cs.Update(ctx, kube.ClusterRoles, cur)
 }
 
-func ensureBinding(ctx context.Context, cs kubernetes.Interface, st State) error {
-	api := cs.RbacV1().ClusterRoleBindings()
-	desired := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: Name, Labels: labels()},
-		RoleRef:    desiredRoleRef(),
-		Subjects:   []rbacv1.Subject{desiredSubject()},
+func ensureBinding(ctx context.Context, cs kube.Client, st State) error {
+	desired := &kube.Object{
+		Name:     Name,
+		Labels:   labels(),
+		RoleRef:  desiredRoleRef(),
+		Subjects: []kube.Subject{desiredSubject()},
 	}
 	if st == Absent {
-		_, err := api.Create(ctx, desired, metav1.CreateOptions{})
-		return err
+		return cs.Create(ctx, kube.ClusterRoleBindings, desired)
 	}
-	cur, err := api.Get(ctx, Name, metav1.GetOptions{})
+	cur, err := cs.Get(ctx, kube.ClusterRoleBindings, "", Name)
 	if err != nil {
 		return err
 	}
 	if cur.RoleRef != desiredRoleRef() {
 		// roleRef is immutable in Kubernetes: a binding to a different role must be replaced.
-		if err := api.Delete(ctx, Name, metav1.DeleteOptions{}); err != nil {
+		if err := cs.Delete(ctx, kube.ClusterRoleBindings, "", Name); err != nil {
 			return err
 		}
-		_, err := api.Create(ctx, desired, metav1.CreateOptions{})
-		return err
+		return cs.Create(ctx, kube.ClusterRoleBindings, desired)
 	}
 	cur.Labels = mergeLabels(cur.Labels)
 	cur.Subjects = desired.Subjects
-	_, err = api.Update(ctx, cur, metav1.UpdateOptions{})
-	return err
+	return cs.Update(ctx, kube.ClusterRoleBindings, cur)
 }
 
 func mergeLabels(have map[string]string) map[string]string {
@@ -546,7 +530,7 @@ type RevokePlan struct {
 //     holds nothing else. A namespace created by the old setup script has no label and is kept. If the
 //     contents cannot be listed, the namespace is kept. Deleting a namespace deletes everything in it,
 //     so doubt always means keep.
-func PlanRevoke(ctx context.Context, cs kubernetes.Interface, r Report) RevokePlan {
+func PlanRevoke(ctx context.Context, cs kube.Client, r Report) RevokePlan {
 	var plan RevokePlan
 	have := map[Kind]ObjectState{}
 	for _, o := range r.Objects {
@@ -585,7 +569,7 @@ func PlanRevoke(ctx context.Context, cs kubernetes.Interface, r Report) RevokePl
 
 // namespaceHolds lists reasons the namespace must not be deleted. Anything that cannot be listed
 // counts as a reason, so a permission error never leads to a deletion.
-func namespaceHolds(ctx context.Context, cs kubernetes.Interface) []string {
+func namespaceHolds(ctx context.Context, cs kube.Client) []string {
 	var reasons []string
 	note := func(what string, n int, err error) {
 		switch {
@@ -595,100 +579,49 @@ func namespaceHolds(ctx context.Context, cs kubernetes.Interface) []string {
 			reasons = append(reasons, fmt.Sprintf("it contains %d %s", n, what))
 		}
 	}
-	opts := metav1.ListOptions{}
-	core, apps, batch, net, rb := cs.CoreV1(), cs.AppsV1(), cs.BatchV1(), cs.NetworkingV1(), cs.RbacV1()
+	// count lists one kind in the namespace, ignoring the objects Kubernetes or this extension create
+	// themselves. A kind that cannot be listed counts as a reason to keep the namespace.
+	count := func(r kube.Resource, what string, own ...string) {
+		items, err := cs.List(ctx, r, Namespace)
+		if err != nil {
+			note(strings.TrimPrefix(what, "other "), 0, err) // "service accounts could not be listed"
+			return
+		}
+		n := 0
+	next:
+		for _, item := range items {
+			for _, name := range own {
+				if item.Name == name {
+					continue next
+				}
+			}
+			n++
+		}
+		note(what, n, nil)
+	}
 
-	sas, err := core.ServiceAccounts(Namespace).List(ctx, opts)
-	if err == nil {
-		n := 0
-		for _, sa := range sas.Items {
-			if sa.Name != "default" && sa.Name != Name {
-				n++
-			}
-		}
-		note("other service accounts", n, nil)
-	} else {
-		note("service accounts", 0, err)
-	}
-	if l, err := core.Pods(Namespace).List(ctx, opts); err != nil {
-		note("pods", 0, err)
-	} else {
-		note("pods", len(l.Items), nil)
-	}
-	if l, err := core.Services(Namespace).List(ctx, opts); err != nil {
-		note("services", 0, err)
-	} else {
-		note("services", len(l.Items), nil)
-	}
-	if l, err := core.Secrets(Namespace).List(ctx, opts); err != nil {
-		note("secrets", 0, err)
-	} else {
-		note("secrets", len(l.Items), nil)
-	}
-	if l, err := core.ConfigMaps(Namespace).List(ctx, opts); err != nil {
-		note("config maps", 0, err)
-	} else {
-		n := 0
-		for _, cm := range l.Items {
-			if cm.Name != "kube-root-ca.crt" { // Kubernetes puts this in every namespace itself
-				n++
-			}
-		}
-		note("config maps", n, nil)
-	}
-	if l, err := core.PersistentVolumeClaims(Namespace).List(ctx, opts); err != nil {
-		note("persistent volume claims", 0, err)
-	} else {
-		note("persistent volume claims", len(l.Items), nil)
-	}
-	if l, err := apps.Deployments(Namespace).List(ctx, opts); err != nil {
-		note("deployments", 0, err)
-	} else {
-		note("deployments", len(l.Items), nil)
-	}
-	if l, err := apps.StatefulSets(Namespace).List(ctx, opts); err != nil {
-		note("stateful sets", 0, err)
-	} else {
-		note("stateful sets", len(l.Items), nil)
-	}
-	if l, err := apps.DaemonSets(Namespace).List(ctx, opts); err != nil {
-		note("daemon sets", 0, err)
-	} else {
-		note("daemon sets", len(l.Items), nil)
-	}
-	if l, err := batch.Jobs(Namespace).List(ctx, opts); err != nil {
-		note("jobs", 0, err)
-	} else {
-		note("jobs", len(l.Items), nil)
-	}
-	if l, err := batch.CronJobs(Namespace).List(ctx, opts); err != nil {
-		note("cron jobs", 0, err)
-	} else {
-		note("cron jobs", len(l.Items), nil)
-	}
-	if l, err := net.Ingresses(Namespace).List(ctx, opts); err != nil {
-		note("ingresses", 0, err)
-	} else {
-		note("ingresses", len(l.Items), nil)
-	}
-	if l, err := rb.Roles(Namespace).List(ctx, opts); err != nil {
-		note("roles", 0, err)
-	} else {
-		note("roles", len(l.Items), nil)
-	}
-	if l, err := rb.RoleBindings(Namespace).List(ctx, opts); err != nil {
-		note("role bindings", 0, err)
-	} else {
-		note("role bindings", len(l.Items), nil)
-	}
+	count(kube.ServiceAccounts, "other service accounts", "default", Name)
+	count(kube.Pods, "pods")
+	count(kube.Services, "services")
+	count(kube.Secrets, "secrets")
+	count(kube.ConfigMaps, "config maps", "kube-root-ca.crt") // Kubernetes puts this in every namespace itself
+	count(kube.PersistentVolumeClaims, "persistent volume claims")
+	count(kube.Deployments, "deployments")
+	count(kube.StatefulSets, "stateful sets")
+	count(kube.DaemonSets, "daemon sets")
+	count(kube.Jobs, "jobs")
+	count(kube.CronJobs, "cron jobs")
+	count(kube.Ingresses, "ingresses")
+	count(kube.Roles, "roles")
+	count(kube.RoleBindings, "role bindings")
 	return reasons
 }
 
 // Revoke deletes exactly the objects in plan.Delete. Every token already issued stops working once
 // its service account is gone. Objects already gone are fine, so it is safe to repeat.
-func Revoke(ctx context.Context, cs kubernetes.Interface, plan RevokePlan) error {
+func Revoke(ctx context.Context, cs kube.Client, plan RevokePlan) error {
 	ignore := func(e error) error {
-		if e == nil || apierrors.IsNotFound(e) {
+		if e == nil || kube.IsNotFound(e) {
 			return nil
 		}
 		return wrap(e)
@@ -697,13 +630,13 @@ func Revoke(ctx context.Context, cs kubernetes.Interface, plan RevokePlan) error
 		var err error
 		switch c.Kind {
 		case KindClusterRoleBinding:
-			err = cs.RbacV1().ClusterRoleBindings().Delete(ctx, c.Name, metav1.DeleteOptions{})
+			err = cs.Delete(ctx, kube.ClusterRoleBindings, "", c.Name)
 		case KindClusterRole:
-			err = cs.RbacV1().ClusterRoles().Delete(ctx, c.Name, metav1.DeleteOptions{})
+			err = cs.Delete(ctx, kube.ClusterRoles, "", c.Name)
 		case KindServiceAccount:
-			err = cs.CoreV1().ServiceAccounts(Namespace).Delete(ctx, c.Name, metav1.DeleteOptions{})
+			err = cs.Delete(ctx, kube.ServiceAccounts, Namespace, c.Name)
 		case KindNamespace:
-			err = cs.CoreV1().Namespaces().Delete(ctx, c.Name, metav1.DeleteOptions{})
+			err = cs.Delete(ctx, kube.Namespaces, "", c.Name)
 		}
 		if e := ignore(err); e != nil {
 			return e

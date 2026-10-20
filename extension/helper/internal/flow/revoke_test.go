@@ -5,10 +5,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"resilience-engine/helper/internal/approve"
+	"resilience-engine/helper/internal/kube"
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/transport"
 )
@@ -73,10 +71,10 @@ func TestRevokeWhenTheClusterSideIsAlreadyGoneStillDisconnectsWithoutAskingAgain
 
 func TestRevokeKeepsANamespaceThatHoldsOtherThings(t *testing.T) {
 	cs := approvedCluster(t)
-	cs.CoreV1().ServiceAccounts(rbac.Namespace).Create(bg, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "neighbour", Namespace: rbac.Namespace}}, metav1.CreateOptions{})
+	cs.Put(kube.ServiceAccounts, kube.Object{Name: "neighbour", Namespace: rbac.Namespace})
 	Revoke(bg, deps(newLoader(cs), answer(approve.Approved), managedBackend()), ctxName)
-	if _, err := cs.CoreV1().Namespaces().Get(bg, rbac.Namespace, metav1.GetOptions{}); err != nil {
-		t.Fatalf("the namespace must be kept: %v", err)
+	if _, ok := cs.Lookup(kube.Namespaces, "", rbac.Namespace); !ok {
+		t.Fatal("the namespace must be kept")
 	}
 }
 
@@ -139,7 +137,7 @@ func TestRevokeOnAnOldScriptClusterKeepsTheUnlabelledNamespaceAndSaysSoBeforeAnd
 	if !strings.Contains(r.Message, "Kept:") || !strings.Contains(r.Message, "Namespace resilience-engine kept") {
 		t.Fatalf("the result must repeat what was kept: %q", r.Message)
 	}
-	if _, err := cs.CoreV1().Namespaces().Get(bg, rbac.Namespace, metav1.GetOptions{}); err != nil {
+	if _, ok := cs.Lookup(kube.Namespaces, "", rbac.Namespace); !ok {
 		t.Fatal("the namespace must survive")
 	}
 	if rep, _ := rbac.Inspect(bg, cs); rep.Overall() == rbac.OverallApproved || rep.Overall() == rbac.OverallApprovedOld {
@@ -149,34 +147,32 @@ func TestRevokeOnAnOldScriptClusterKeepsTheUnlabelledNamespaceAndSaysSoBeforeAnd
 
 func TestRevokeNeverDeletesANamespaceHoldingAWorkloadEvenWhenLabelled(t *testing.T) {
 	cs := approvedCluster(t)
-	cs.CoreV1().Pods(rbac.Namespace).Create(bg, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "users-app", Namespace: rbac.Namespace}}, metav1.CreateOptions{})
-	cs.CoreV1().Secrets(rbac.Namespace).Create(bg, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "db-password", Namespace: rbac.Namespace}}, metav1.CreateOptions{})
+	cs.Put(kube.Pods, kube.Object{Name: "users-app", Namespace: rbac.Namespace})
+	cs.Put(kube.Secrets, kube.Object{Name: "db-password", Namespace: rbac.Namespace})
 	p := answer(approve.Approved)
 	Revoke(bg, deps(newLoader(cs), p, managedBackend()), ctxName)
 
 	if !strings.Contains(p.requests[0].Body, "contains 1 pods") || !strings.Contains(p.requests[0].Body, "contains 1 secrets") {
 		t.Fatalf("the dialog must say why the namespace is kept:\n%s", p.requests[0].Body)
 	}
-	if _, err := cs.CoreV1().Pods(rbac.Namespace).Get(bg, "users-app", metav1.GetOptions{}); err != nil {
+	if _, ok := cs.Lookup(kube.Pods, rbac.Namespace, "users-app"); !ok {
 		t.Fatal("a user's pod was deleted along with a namespace")
 	}
-	if _, err := cs.CoreV1().Secrets(rbac.Namespace).Get(bg, "db-password", metav1.GetOptions{}); err != nil {
+	if _, ok := cs.Lookup(kube.Secrets, rbac.Namespace, "db-password"); !ok {
 		t.Fatal("a user's secret was deleted along with a namespace")
 	}
 }
 
 func TestRevokeKeepsAnythingAnotherToolOwns(t *testing.T) {
 	cs := approvedCluster(t)
-	cr, _ := cs.RbacV1().ClusterRoles().Get(bg, rbac.Name, metav1.GetOptions{})
-	cr.Labels = map[string]string{rbac.ManagedByKey: "helm"}
-	cs.RbacV1().ClusterRoles().Update(bg, cr, metav1.UpdateOptions{})
+	edit(t, cs, kube.ClusterRoles, "", rbac.Name, func(cr *kube.Object) { cr.Labels = map[string]string{rbac.ManagedByKey: "helm"} })
 	p := answer(approve.Approved)
 	Revoke(bg, deps(newLoader(cs), p, managedBackend()), ctxName)
 
 	if !strings.Contains(p.requests[0].Body, `managed by "helm"`) {
 		t.Fatalf("the dialog must name the other owner:\n%s", p.requests[0].Body)
 	}
-	if _, err := cs.RbacV1().ClusterRoles().Get(bg, rbac.Name, metav1.GetOptions{}); err != nil {
+	if _, ok := cs.Lookup(kube.ClusterRoles, "", rbac.Name); !ok {
 		t.Fatal("helm's ClusterRole was deleted")
 	}
 }

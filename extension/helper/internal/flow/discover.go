@@ -40,13 +40,13 @@ func probe(ctx context.Context, d Deps, c clusters.Context, info *ContextInfo) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	yes, no := true, false
-	ver, err := cs.Discovery().ServerVersion()
+	version, err := cs.ServerVersion(ctx)
 	if err != nil {
 		info.Reachable = &no
 		info.Reason = "the cluster is not reachable"
 		return
 	}
-	info.Reachable, info.Version = &yes, ver.GitVersion
+	info.Reachable, info.Version = &yes, version
 
 	report, err := rbac.Inspect(ctx, cs)
 	switch {

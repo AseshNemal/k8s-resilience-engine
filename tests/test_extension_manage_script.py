@@ -1,13 +1,18 @@
 """scripts/extension-manage.sh drives the Docker extension without needing Docker in the test.
 
 A stand-in `docker` on PATH records every call, so the tests check what the script would really run.
+The launcher is bash and starts scripts/extension_manage.py, so this is the end-to-end check of both on
+macOS and Linux. tests/test_extension_manage_py.py covers the same program in-process on every OS.
 """
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="drives the bash launcher with a bash stand-in for docker")
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "extension-manage.sh"
@@ -201,6 +206,47 @@ def test_uninstall_removes_the_extension_and_mentions_the_cluster_access(fake_do
     assert result.returncode == 0, result.stderr
     assert only(calls, f"docker extension uninstall {IMAGE}")
     assert "extension-cluster-access.sh --revoke" in result.stdout
+
+
+def install_fake_helper(fake_docker, exit_code=0):
+    """Put a stand-in for the host helper where Docker Desktop keeps it, logging into the docker log."""
+    helper = (fake_docker.parent / "Library/Containers/com.docker.docker/Data/extensions" / IMAGE / "host" / "resilience-helper")
+    helper.parent.mkdir(parents=True)
+    helper.write_text(f'#!/usr/bin/env bash\necho "helper $*" >> "$FAKE_DOCKER_LOG"\nexit {exit_code}\n')
+    helper.chmod(0o755)
+
+
+def test_uninstall_removes_the_background_renewal_job_before_the_extension_and_its_helper_go(fake_docker):
+    install_fake_helper(fake_docker)
+    result, calls = run(fake_docker, "uninstall", "--yes", installed="0.1.8")
+
+    assert result.returncode == 0, result.stderr
+    kinds = [c.split(" ")[0] + " " + c.split(" ")[1] for c in calls if c.startswith(("helper", "docker extension uninstall"))]
+    assert kinds == ["helper agent-disable", "docker extension"], calls
+
+
+def test_a_helper_that_fails_never_blocks_the_uninstall(fake_docker):
+    install_fake_helper(fake_docker, exit_code=1)
+    result, calls = run(fake_docker, "uninstall", "--yes", installed="0.1.8")
+
+    assert result.returncode == 0, result.stderr
+    assert only(calls, f"docker extension uninstall {IMAGE}")
+
+
+def test_uninstall_without_a_helper_on_disk_just_uninstalls(fake_docker):
+    result, calls = run(fake_docker, "uninstall", "--yes", installed="0.1.8")
+
+    assert result.returncode == 0, result.stderr
+    assert not only(calls, "helper")
+
+
+def test_a_dry_run_uninstall_removes_nothing(fake_docker):
+    install_fake_helper(fake_docker)
+    result, calls = run(fake_docker, "uninstall", "--dry-run", installed="0.1.8")
+
+    assert result.returncode == 0, result.stderr
+    assert not only(calls, "helper") and not only(calls, "docker extension uninstall")
+    assert "agent-disable" in result.stdout
 
 
 def test_uninstall_when_not_installed_changes_nothing(fake_docker):

@@ -1,17 +1,17 @@
 package flow
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"resilience-engine/helper/internal/approve"
+	"resilience-engine/helper/internal/kube"
+	"resilience-engine/helper/internal/kube/kubetest"
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/transport"
-
-	rbacv1 "k8s.io/api/rbac/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 )
 
 // neverPrompt fails the test if a dialog is shown: renewal must be silent.
@@ -80,7 +80,7 @@ func TestRenewUsesTheRealGrantedExpiryNotAnAssumedEightHours(t *testing.T) {
 
 // ---------------------------------------------------------------- never recreate revoked access
 
-func assertNoTokenNoWrite(t *testing.T, cs *fake.Clientset, b *fakeBackend, p *fakePrompter) {
+func assertNoTokenNoWrite(t *testing.T, cs *kubetest.Fake, b *fakeBackend, p *fakePrompter) {
 	t.Helper()
 	writes, tokens := clusterWrites(cs)
 	if len(writes) != 0 || tokens != 0 {
@@ -109,7 +109,9 @@ func TestRevokedAccessIsReportedAndNeverSilentlyRecreated(t *testing.T) {
 
 func TestPartiallyRemovedAccessIsAlsoNotRecreated(t *testing.T) {
 	cs := approvedCluster(t)
-	cs.RbacV1().ClusterRoleBindings().Delete(bg, rbac.Name, metav1.DeleteOptions{})
+	if err := cs.Delete(bg, kube.ClusterRoleBindings, "", rbac.Name); err != nil {
+		t.Fatal(err)
+	}
 	cs.ClearActions()
 	p, b := neverPrompt(t), managedBackend()
 	r := Renew(bg, deps(newLoader(cs), p, b), ctxName)
@@ -134,14 +136,12 @@ func TestTamperedAccessIsRefusedSoNoOverPrivilegedTokenIsEverIssued(t *testing.T
 
 func TestARoleApprovedBeforeTheNewReadsIsRefusedWithAnExplanationNotAnAccusation(t *testing.T) {
 	cs := approvedCluster(t)
-	cr, _ := cs.RbacV1().ClusterRoles().Get(bg, rbac.Name, metav1.GetOptions{})
-	cr.Rules = []rbacv1.PolicyRule{
-		{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
-		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
-	}
-	if _, err := cs.RbacV1().ClusterRoles().Update(bg, cr, metav1.UpdateOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	edit(t, cs, kube.ClusterRoles, "", rbac.Name, func(cr *kube.Object) {
+		cr.Rules = []kube.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
+			{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
+		}
+	})
 	cs.ClearActions()
 	p, b := neverPrompt(t), managedBackend()
 	r := Renew(bg, deps(newLoader(cs), p, b), ctxName)
@@ -169,12 +169,7 @@ func TestAnExtraBindingThatGrantsMoreIsRefused(t *testing.T) {
 
 func TestTheServiceAccountVanishingBetweenCheckAndTokenIsReportedAsRevoked(t *testing.T) {
 	cs := approvedCluster(t)
-	cs.PrependReactor("create", "serviceaccounts", func(a k8stestingAction) (bool, runtimeObject, error) {
-		if a.GetSubresource() == "token" {
-			return true, nil, notFound("serviceaccounts", rbac.Name)
-		}
-		return false, nil, nil
-	})
+	cs.Fail("token", "serviceaccounts", notFound("serviceaccounts", rbac.Name))
 	b := managedBackend()
 	r := Renew(bg, deps(newLoader(cs), neverPrompt(t), b), ctxName)
 
@@ -185,12 +180,7 @@ func TestTheServiceAccountVanishingBetweenCheckAndTokenIsReportedAsRevoked(t *te
 
 func TestWhenTheUsersKubeconfigCannotIssueTokensTheAnswerIsRBACDenied(t *testing.T) {
 	cs := approvedCluster(t)
-	cs.PrependReactor("create", "serviceaccounts", func(a k8stestingAction) (bool, runtimeObject, error) {
-		if a.GetSubresource() == "token" {
-			return true, nil, forbiddenErr("serviceaccounts/token")
-		}
-		return false, nil, nil
-	})
+	cs.Fail("token", "serviceaccounts", forbiddenErr("serviceaccounts/token"))
 	r := Renew(bg, deps(newLoader(cs), neverPrompt(t), managedBackend()), ctxName)
 	if r.State != StateRBACDenied {
 		t.Fatalf("result = %+v", r)
@@ -248,9 +238,7 @@ func TestRenewReportsABackendThatIsNotRunningYet(t *testing.T) {
 
 func TestRenewReportsAClusterThatHasNotComeBackAfterADockerRestart(t *testing.T) {
 	cs := approvedCluster(t)
-	cs.PrependReactor("get", "version", func(a k8stestingAction) (bool, runtimeObject, error) {
-		return true, nil, errString("connection refused")
-	})
+	cs.FailVersion(errString("connection refused"))
 	b := managedBackend()
 	r := Renew(bg, deps(newLoader(cs), neverPrompt(t), b), ctxName)
 
@@ -281,4 +269,123 @@ func TestRenewOutputNeverContainsCredentialMaterial(t *testing.T) {
 	widenRole(t, cs)
 	all = append(all, Renew(bg, deps(newLoader(cs), neverPrompt(t), managedBackend()), ctxName))
 	noLeak(t, all...)
+}
+
+// ---------------------------------------------------------------- slow is not down
+
+func TestRenewReportsASlowDockerAsTooSlowNotAsTheBackendBeingDown(t *testing.T) {
+	b := managedBackend()
+	b.statusErr = fmt.Errorf("%w: %w", transport.ErrUnavailable, context.DeadlineExceeded)
+	r := Renew(bg, deps(newLoader(approvedCluster(t)), neverPrompt(t), b), ctxName)
+
+	if r.OK || r.State != StateTooSlow {
+		t.Fatalf("result = %+v", r)
+	}
+	if !strings.Contains(r.Message, "slow") {
+		t.Fatalf("the message should say what is slow: %q", r.Message)
+	}
+}
+
+func TestAnyFailureAfterTheDeadlineIsReportedAsTooSlow(t *testing.T) {
+	expired, cancel := context.WithDeadline(bg, time.Now().Add(-time.Second))
+	defer cancel()
+	for _, state := range []State{StateBackendUnavailable, StateClusterUnreachable, StateError} {
+		got := Slow(expired, fail("renew", state, "x"))
+		if got.State != StateTooSlow {
+			t.Fatalf("%s became %s", state, got.State)
+		}
+	}
+}
+
+func TestSlowLeavesRealAnswersAndSuccessAlone(t *testing.T) {
+	expired, cancel := context.WithDeadline(bg, time.Now().Add(-time.Second))
+	defer cancel()
+	for _, r := range []Result{
+		{OK: true, State: StateConnected},
+		fail("renew", StateAuthorizationGone, "removed"),
+		fail("renew", StateDrifted, "changed"),
+	} {
+		if got := Slow(expired, r); got.State != r.State {
+			t.Fatalf("%s must stay %s, got %s", r.State, r.State, got.State)
+		}
+	}
+	if got := Slow(bg, fail("renew", StateError, "x")); got.State != StateError {
+		t.Fatalf("with time left a failure stays itself, got %s", got.State)
+	}
+}
+
+// ---------------------------------------------------------------- unattended renewal
+
+func backendIn(state string) *fakeBackend {
+	b := managedBackend()
+	b.status.State = state
+	return b
+}
+
+func TestRenewManagedDoesNothingWhileTheTokenIsNotDue(t *testing.T) {
+	cs, b, p := approvedCluster(t), backendIn("ok"), neverPrompt(t)
+	r := RenewManaged(bg, deps(newLoader(cs), p, b))
+
+	if !r.OK || r.State != StateCurrent {
+		t.Fatalf("result = %+v", r)
+	}
+	if _, tokens := clusterWrites(cs); tokens != 0 || len(b.installs) != 0 {
+		t.Fatalf("a token that is not due must not be replaced: tokens=%d installs=%d", tokens, len(b.installs))
+	}
+	assertSilent(t, p)
+}
+
+func TestRenewManagedRenewsWhenDueOrExpiredWithoutBeingTold(t *testing.T) {
+	for _, state := range []string{"renew-soon", "expired"} {
+		cs, b, p := approvedCluster(t), backendIn(state), neverPrompt(t)
+		r := RenewManaged(bg, deps(newLoader(cs), p, b))
+
+		if !r.OK || r.State != StateConnected || r.Context != ctxName {
+			t.Fatalf("%s: result = %+v", state, r)
+		}
+		writes, tokens := clusterWrites(cs)
+		if len(writes) != 0 || tokens != 1 || !receivedToken(b) {
+			t.Fatalf("%s: writes=%v tokens=%d installs=%d", state, writes, tokens, len(b.installs))
+		}
+		assertSilent(t, p)
+		noLeak(t, r)
+	}
+}
+
+func TestRenewManagedLeavesAnythingNotManagedAlone(t *testing.T) {
+	for name, st := range map[string]transport.Status{
+		"nothing connected": {Connected: false},
+		"added by hand":     {Connected: true, Managed: false, State: "expired"},
+	} {
+		cs, b := approvedCluster(t), newBackend()
+		b.status = st
+		r := RenewManaged(bg, deps(newLoader(cs), neverPrompt(t), b))
+		if !r.OK || r.State != StateIdle {
+			t.Fatalf("%s: result = %+v", name, r)
+		}
+		if _, tokens := clusterWrites(cs); tokens != 0 || len(b.installs) != 0 {
+			t.Fatalf("%s: nothing may be issued or installed", name)
+		}
+	}
+}
+
+func TestRenewManagedStopsAtRemovedOrChangedAccessAndNeverRecreatesIt(t *testing.T) {
+	cs := approvedCluster(t)
+	removeAccess(t, cs)
+	r := RenewManaged(bg, deps(newLoader(cs), neverPrompt(t), backendIn("expired")))
+
+	if r.OK || r.State != StateAuthorizationGone {
+		t.Fatalf("result = %+v", r)
+	}
+	if writes, tokens := clusterWrites(cs); len(writes) != 0 || tokens != 0 {
+		t.Fatalf("removed access must stay removed: writes=%v tokens=%d", writes, tokens)
+	}
+}
+
+func TestRenewManagedReportsASlowDockerAsTooSlow(t *testing.T) {
+	b := managedBackend()
+	b.statusErr = fmt.Errorf("%w: %w", transport.ErrUnavailable, context.DeadlineExceeded)
+	if r := RenewManaged(bg, deps(newLoader(approvedCluster(t)), neverPrompt(t), b)); r.State != StateTooSlow {
+		t.Fatalf("result = %+v", r)
+	}
 }

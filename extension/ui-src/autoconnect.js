@@ -7,9 +7,14 @@
  * token straight to the backend and prints only a status. It never logs helper output, and shows
  * only the fixed messages below.
  *
- * No background daemon: renewal runs only while an extension page is open, on a 60 second check and
- * when the tab becomes visible. After the app was closed (a Docker Desktop restart, an extension
- * update, a long gap) the first check on the next open finds an expired credential and renews it.
+ * While an extension page is open it checks every 60 seconds (every 20 while a renewal is pending)
+ * and when the tab becomes visible. When no page is open a small macOS background job renews the
+ * credential instead (see helper/internal/agent); the person turns that on once, in a native dialog.
+ * Either way, the first check after a long gap finds an expired credential and renews it.
+ *
+ * Every call to the host helper or the backend has a watchdog: a Docker Desktop that is busy can leave
+ * a call unanswered for minutes, and without one the single-flight guard would wait on it forever and
+ * nothing would ever renew again.
  *
  * Renewal never asks the user anything and never recreates removed access: if the access was removed
  * or changed in the cluster, the page says so and waits for the user to approve again.
@@ -21,7 +26,15 @@
     // here only after it was verified there (see docs/EXTENSION.md); until then it gets the manual path.
     const VERIFIED_PLATFORMS = ["darwin"];
     const POLL_MS = 60000;
+    // While a renewal is pending (failed and waiting to retry, or running) look more often. The back-off
+    // below still decides when a retry is actually allowed, so this never makes the helper run more.
+    const PENDING_POLL_MS = 20000;
     const BACKOFF_MS = [30000, 60000, 120000, 300000];
+    // How long to wait for each helper command before giving up on that call. They sit above the
+    // helper's own deadlines (4 minutes for a renewal, a 90 second dialog for an approval).
+    const WAIT_MS = { renew: 330000, authorize: 360000, revoke: 360000, discover: 90000, status: 20000, "agent-status": 45000, "agent-enable": 360000, "agent-disable": 45000 };
+    const DEFAULT_WAIT_MS = 360000;
+    const TIMED_OUT = { timedOut: true };
     // Problems a person has to fix. Retrying would not help, so the loop stops until they act.
     const NEEDS_USER = new Set(["authorization-revoked", "drifted", "over-granted", "rbac-denied", "not-authorized", "unsupported-context"]);
 
@@ -39,6 +52,8 @@
         "authorization-revoked": "The extension's access was removed from the cluster. Approve it again to reconnect.",
         "not-authorized": "The extension is not set up for this cluster. Approve it first.",
         "backend-unavailable": "The extension backend is not responding yet. This will keep trying.",
+        "too-slow": "Docker Desktop is responding very slowly, so the credential could not be renewed yet. It keeps trying by itself; closing other containers or giving Docker more memory makes it faster.",
+        "background-unsupported": "Background renewal is not available on this operating system yet. The credential renews while the extension is open.",
         "helper-unavailable": "The helper could not be started. Reinstall the extension, or use the manual connection.",
         error: "Something went wrong. Try again, or use the manual connection.",
     };
@@ -86,8 +101,15 @@
         }
     }
 
+    // Gives up on `work` after `ms`. Without env.sleep (a test, or a browser without timers) it just waits.
+    // The abandoned call may still finish later; its answer is ignored, and a rejection is already handled.
+    function raceTimeout(env, work, ms) {
+        if (!env.sleep) return work;
+        return Promise.race([work, env.sleep(ms).then(() => TIMED_OUT)]);
+    }
+
     // env: { platform, exec(file, args) -> Promise<{stdout}>, getStatus() -> Promise<status|null>,
-    //        now() -> ms, onChange(snapshot) }
+    //        now() -> ms, onChange(snapshot), sleep(ms) -> Promise (optional: the watchdog) }
     function createController(env) {
         let phase = "idle";
         let busy = false;
@@ -97,9 +119,10 @@
         let last = { state: "", message: "" };
         let context = "";
         let expiresAt = "";
+        let background = ""; // "" unknown | on | off | stale | unsupported: the background renewal job
 
         function snapshot() {
-            return { phase, state: last.state, message: last.message, context, expiresAt, busy };
+            return { phase, state: last.state, message: last.message, context, expiresAt, busy, background };
         }
         function set(newPhase, state) {
             phase = newPhase;
@@ -110,7 +133,8 @@
         async function runHelper(args) {
             const file = helperFile(env.platform);
             try {
-                const out = await env.exec(file, args);
+                const out = await raceTimeout(env, env.exec(file, args), WAIT_MS[args[0]] || DEFAULT_WAIT_MS);
+                if (out === TIMED_OUT) return { ok: false, state: "too-slow" };
                 return parseHelperOutput(out && out.stdout) || { ok: false, state: "helper-unavailable" };
             } catch (error) {
                 return parseHelperOutput(error && error.stdout) || { ok: false, state: "helper-unavailable" };
@@ -127,6 +151,7 @@
                 retryAt = 0;
                 blocked = null;
                 set("ready", "");
+                if (env.onRenewed) env.onRenewed();
             } else if (NEEDS_USER.has(result.state)) {
                 blocked = { context: name, state: result.state };
                 set("attention", result.state);
@@ -149,7 +174,8 @@
 
         async function check() {
             if (busy) return snapshot();
-            const status = await env.getStatus();
+            const answer = await raceTimeout(env, env.getStatus(), WAIT_MS.status);
+            const status = answer === TIMED_OUT ? null : answer;
             if (!status) {
                 set("retrying", "backend-unavailable");
                 return snapshot();
@@ -198,6 +224,7 @@
                 blocked = null;
                 failures = 0;
                 retryAt = 0;
+                if (typeof result.background === "string") background = result.background;
                 set("ready", "");
             } else if (result.state !== "declined" && result.state !== "timed-out") {
                 // A declined or timed-out approval is not an error: nothing changed, so leave the page as it was.
@@ -234,7 +261,33 @@
                 blocked = null;
                 failures = 0;
                 retryAt = 0;
+                if (typeof result.background === "string") background = result.background;
             }
+            if (env.onChange) env.onChange(snapshot());
+            return result;
+        }
+
+        // Read-only: ask whether the background renewal job is on. Called by the page, never by a check,
+        // so a credential that is not due still never starts the helper.
+        async function refreshBackground() {
+            if (busy) return snapshot();
+            const result = await runHelper(["agent-status"]);
+            if (result.ok && typeof result.background === "string") {
+                background = result.background;
+                if (env.onChange) env.onChange(snapshot());
+            }
+            return snapshot();
+        }
+
+        // The one-time consent for the background job: the helper shows a native dialog. Declining, or
+        // not answering, changes nothing and is not an error.
+        async function enableBackground(name) {
+            if (busy) return { ok: false, state: "error" };
+            busy = true;
+            const result = await runHelper(["agent-enable", name]);
+            busy = false;
+            if (typeof result.background === "string" && result.background) background = result.background;
+            else if (result.ok) background = "on";
             if (env.onChange) env.onChange(snapshot());
             return result;
         }
@@ -245,11 +298,11 @@
             return tick();
         }
 
-        return { tick, discover, setup, quickSetup, remove, retryNow, snapshot };
+        return { tick, discover, setup, quickSetup, remove, retryNow, refreshBackground, enableBackground, snapshot };
     }
 
     window.__resilienceAuto = {
-        VERIFIED_PLATFORMS, POLL_MS, BACKOFF_MS, platformOf, platformSupport, helperFile, messageFor, parseHelperOutput, createController,
+        VERIFIED_PLATFORMS, POLL_MS, PENDING_POLL_MS, BACKOFF_MS, WAIT_MS, platformOf, platformSupport, helperFile, messageFor, parseHelperOutput, createController,
     };
     if (!window.document || !window.document.addEventListener) return;
 
@@ -275,14 +328,30 @@
         exec: (file, args) => execFn(file, args),
         getStatus,
         now: () => Date.now(),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         // Tell the header chip and Overview panel to re-read the status after any change.
         onChange: () => window.dispatchEvent(new CustomEvent("resilience-cluster-changed")),
+        // A page that loaded while the credential was expired is showing an access error. Now that the
+        // credential is fresh, press that page's own Retry so it loads by itself; nothing else is retried.
+        onRenewed: () => {
+            for (const button of document.querySelectorAll('.error-state[data-state="access-denied"] [data-role="retry-button"]')) button.click();
+        },
     });
     window.__resilienceController = controller;
 
     let timer = null;
+    let askedBackground = false;
     async function loop() {
-        try { await controller.tick(); } finally { timer = setTimeout(loop, POLL_MS); }
+        let delay = POLL_MS;
+        try {
+            const snap = await controller.tick();
+            // Ask once per page load whether the background job is on, as soon as a managed credential exists.
+            if (!askedBackground && snap.context && snap.phase !== "needs-setup" && snap.phase !== "manual") {
+                askedBackground = true;
+                await controller.refreshBackground();
+            }
+            if (snap.phase === "retrying" || snap.phase === "renewing") delay = PENDING_POLL_MS;
+        } finally { timer = setTimeout(loop, delay); }
     }
     document.addEventListener("DOMContentLoaded", loop);
     document.addEventListener("visibilitychange", () => {

@@ -140,7 +140,10 @@
         const result = await controller.setup(name);
         setBusy(false);
         if (result.ok) {
-            say("Connected. Deployment topology can now show your live cluster, and the credential renews itself while the extension is open.", "ok");
+            const where = result.background === "on"
+                ? "in the background, even when Docker Desktop is closed"
+                : "while the extension is open";
+            say(`Connected. Deployment topology can now show your live cluster, and the credential renews itself ${where}.`, "ok");
         } else if (result.state === "declined" || result.state === "timed-out") {
             say(auto.messageFor(result.state), "");
         } else {

@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/kubernetes/fake"
-
 	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/clusters"
+	"resilience-engine/helper/internal/kube/kubetest"
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/transport"
 )
@@ -43,12 +42,12 @@ func TestDiscoverClassifiesEveryContextButOnlyContactsSupportedOnes(t *testing.T
 }
 
 func TestDiscoverShowsTheAuthorizationStateOfTheClusterAndIsReadOnly(t *testing.T) {
-	cases := map[string]func(*testing.T) *fake.Clientset{
-		"absent":              func(t *testing.T) *fake.Clientset { return newCluster(time.Hour) },
+	cases := map[string]func(*testing.T) *kubetest.Fake{
+		"absent":              func(t *testing.T) *kubetest.Fake { return newCluster(time.Hour) },
 		"approved":            approvedCluster,
-		"approved-unlabelled": func(t *testing.T) *fake.Clientset { cs := approvedCluster(t); stripLabels(t, cs); return cs },
-		"drifted":             func(t *testing.T) *fake.Clientset { cs := approvedCluster(t); widenRole(t, cs); return cs },
-		"over-granted":        func(t *testing.T) *fake.Clientset { cs := approvedCluster(t); addExtraBinding(t, cs); return cs },
+		"approved-unlabelled": func(t *testing.T) *kubetest.Fake { cs := approvedCluster(t); stripLabels(t, cs); return cs },
+		"drifted":             func(t *testing.T) *kubetest.Fake { cs := approvedCluster(t); widenRole(t, cs); return cs },
+		"over-granted":        func(t *testing.T) *kubetest.Fake { cs := approvedCluster(t); addExtraBinding(t, cs); return cs },
 	}
 	for want, build := range cases {
 		t.Run(want, func(t *testing.T) {
@@ -69,9 +68,7 @@ func TestDiscoverShowsTheAuthorizationStateOfTheClusterAndIsReadOnly(t *testing.
 
 func TestDiscoverReportsAnUnreachableClusterWithoutFailing(t *testing.T) {
 	cs := newCluster(time.Hour)
-	cs.PrependReactor("get", "version", func(a k8stestingAction) (bool, runtimeObject, error) {
-		return true, nil, errors.New("connection refused")
-	})
+	cs.FailVersion(errors.New("connection refused"))
 	r := Discover(bg, deps(newLoader(cs), answer(approve.Declined), newBackend()))
 	for _, c := range r.Contexts {
 		if c.Name == ctxName && (c.Reachable == nil || *c.Reachable) {
@@ -110,7 +107,7 @@ func TestAuthorizeOnAnEmptyClusterShowsTheExactChangesThenCreatesThemAndConnects
 		"Read (get, list) nodes, pods and services", "Read (get, list) deployments and replicasets", "No access to Secrets",
 		"Create Namespace resilience-engine", "Create ServiceAccount resilience-engine-reader",
 		"Create ClusterRole resilience-engine-reader", "Create ClusterRoleBinding resilience-engine-reader",
-		"8 hours", "renewed automatically",
+		"7 days", "renewed automatically",
 	} {
 		if !strings.Contains(dialog, want) {
 			t.Errorf("dialog lacks %q:\n%s", want, dialog)
@@ -147,7 +144,7 @@ func TestTheTokenReachesTheBackendExactlyOnceAndNothingElse(t *testing.T) {
 }
 
 func TestTheRealExpiryIsReportedWhenTheClusterShortensTheToken(t *testing.T) {
-	cs := newCluster(2 * time.Hour) // asked for 8h, granted 2h
+	cs := newCluster(2 * time.Hour) // asked for 7 days, granted 2h
 	b := newBackend()
 	r := Authorize(bg, deps(newLoader(cs), answer(approve.Approved), b), ctxName)
 
@@ -272,7 +269,7 @@ func TestAnUnreachableBackendStopsBeforeAnyDialogOrChange(t *testing.T) {
 
 func TestAnUnreachableClusterStopsBeforeAnyDialog(t *testing.T) {
 	cs := newCluster(8 * time.Hour)
-	cs.PrependReactor("get", "version", func(a k8stestingAction) (bool, runtimeObject, error) { return true, nil, errors.New("refused") })
+	cs.FailVersion(errors.New("refused"))
 	p := answer(approve.Approved)
 	r := Authorize(bg, deps(newLoader(cs), p, newBackend()), ctxName)
 	if r.State != StateClusterUnreachable || len(p.requests) != 0 {
@@ -358,7 +355,7 @@ func TestHostileNamesFromTheKubeconfigCannotShapeTheDialog(t *testing.T) {
 	hostile := "kind-x\n\nAPPROVAL GRANTED. Click Approve to win\x1b[31m"
 	l := newLoader(cs)
 	l.contexts = []clusters.Context{{Name: hostile, Server: "https://127.0.0.1:58227"}}
-	l.clients = map[string]*fake.Clientset{hostile: cs}
+	l.clients = map[string]*kubetest.Fake{hostile: cs}
 	p := answer(approve.Declined)
 	Authorize(bg, deps(l, p, newBackend()), hostile)
 

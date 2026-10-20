@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"resilience-engine/helper/internal/secret"
@@ -77,6 +78,21 @@ func payload(req InstallRequest) (secret.Bytes, error) {
 	return secret.NewBytes(body), nil
 }
 
+// unavailable builds an ErrUnavailable. When the cause was a timeout it keeps that cause, so a caller
+// can tell a Docker that is slow (a busy Docker Desktop VM) from one that is not there, and retry
+// patiently instead of reporting the extension as down.
+func unavailable(what string, cause error) error {
+	if isTimeout(cause) {
+		return fmt.Errorf("%w: %s: %w", ErrUnavailable, what, context.DeadlineExceeded)
+	}
+	return fmt.Errorf("%w: %s", ErrUnavailable, what)
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())
+}
+
 // Pick returns the first candidate whose Status call works, with that status.
 func Pick(ctx context.Context, candidates []Backend) (Backend, Status, error) {
 	var last error
@@ -86,9 +102,12 @@ func Pick(ctx context.Context, candidates []Backend) (Backend, Status, error) {
 			return c, st, nil
 		}
 		last = fmt.Errorf("%s: %w", c.Name(), err)
+		if ctx.Err() != nil {
+			break // out of time: another candidate would only start already late
+		}
 	}
 	if last == nil {
 		last = ErrUnavailable
 	}
-	return nil, Status{}, fmt.Errorf("%w (%v)", ErrUnavailable, last)
+	return nil, Status{}, fmt.Errorf("%w (%w)", ErrUnavailable, last)
 }

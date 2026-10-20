@@ -15,13 +15,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 const secretToken = "tok-secret-from-the-users-kubeconfig"
 
-// testCA makes a real self-signed certificate: client-go rejects a CA that is not valid PEM, just as
+// testCA makes a real self-signed certificate: the helper rejects a CA that is not valid PEM, just as
 // it would a corrupted kind CA.
 func testCA(t *testing.T) []byte {
 	t.Helper()
@@ -37,8 +35,9 @@ func testCA(t *testing.T) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-// kubeconfigFile writes a kubeconfig like a developer's: a kind cluster with an embedded CA, a remote
-// cluster, and a context whose credential is an exec plugin that would run a program if invoked.
+// kubeconfigFile writes a kubeconfig like a developer's: a kind cluster with an embedded CA, a cluster
+// whose CA is a file, a remote cluster, and a context whose credential is an exec plugin that would run
+// a program if invoked.
 func kubeconfigFile(t *testing.T, marker string) (*Kubeconfig, []byte, []byte) {
 	t.Helper()
 	dir := t.TempDir()
@@ -55,6 +54,8 @@ clusters:
   cluster: {server: "https://127.0.0.1:58227", certificate-authority-data: ` + base64.StdEncoding.EncodeToString(embedded) + `}
 - name: remote
   cluster: {server: "https://prod.example.com:6443", certificate-authority: ` + caFile + `}
+- name: file-ca
+  cluster: {server: "https://127.0.0.1:58228", certificate-authority: ` + caFile + `}
 users:
 - name: kind-user
   user: {token: ` + secretToken + `}
@@ -70,12 +71,14 @@ contexts:
   context: {cluster: kind-resilience-research, user: kind-user}
 - name: remote
   context: {cluster: remote, user: plugin-user}
+- name: file-ca
+  context: {cluster: file-ca, user: kind-user}
 `
 	path := filepath.Join(dir, "config")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return &Kubeconfig{Rules: &clientcmd.ClientConfigLoadingRules{ExplicitPath: path}, Timeout: time.Second}, embedded, fromFile
+	return &Kubeconfig{ExplicitPath: path, Timeout: time.Second}, embedded, fromFile
 }
 
 func TestContextsListNamesAndServersOnlyAndNeverACredential(t *testing.T) {
@@ -85,10 +88,14 @@ func TestContextsListNamesAndServersOnlyAndNeverACredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current != "kind-resilience-research" || len(list) != 2 {
+	if current != "kind-resilience-research" || len(list) != 3 {
 		t.Fatalf("current %q list %+v", current, list)
 	}
-	want := []Context{{Name: "kind-resilience-research", Server: "https://127.0.0.1:58227"}, {Name: "remote", Server: "https://prod.example.com:6443"}}
+	want := []Context{
+		{Name: "file-ca", Server: "https://127.0.0.1:58228"},
+		{Name: "kind-resilience-research", Server: "https://127.0.0.1:58227"},
+		{Name: "remote", Server: "https://prod.example.com:6443"},
+	}
 	if !reflect.DeepEqual(list, want) {
 		t.Fatalf("list = %+v", list)
 	}
@@ -121,20 +128,50 @@ func TestClientForAKindContextReturnsItsServerAndEmbeddedCA(t *testing.T) {
 
 func TestACAGivenAsAFilePathIsReadForTheBackendCredential(t *testing.T) {
 	k, _, fromFile := kubeconfigFile(t, filepath.Join(t.TempDir(), "x"))
-	_, cluster, err := k.Client("remote")
+	_, cluster, err := k.Client("file-ca")
 	if err != nil || string(cluster.CAData) != string(fromFile) {
 		t.Fatalf("cluster %+v err %v", cluster, err)
 	}
 }
 
-func TestBuildingAClientDoesNotRunACredentialPluginUntilARequestIsMade(t *testing.T) {
+func TestAContextWithACredentialPluginIsRefusedAndThePluginIsNeverRun(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "plugin-ran")
 	k, _, _ := kubeconfigFile(t, marker)
-	if _, _, err := k.Client("remote"); err != nil {
-		t.Fatal(err)
+	cs, _, err := k.Client("remote")
+	if err == nil || cs != nil {
+		t.Fatalf("a context that authenticates through a plugin must be refused, got client %v err %v", cs, err)
 	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("constructing a client ran the exec plugin; callers must only ask for supported contexts, and even then no request is made until used")
+	if !strings.Contains(err.Error(), "credential plugin") {
+		t.Fatalf("the reason should name the plugin: %v", err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("the exec plugin ran; the helper must never run a program named in a kubeconfig")
+	}
+}
+
+func TestMergingSeveralKubeconfigFilesIsHowTheEnvironmentVariableWorks(t *testing.T) {
+	dir := t.TempDir()
+	one := filepath.Join(dir, "one")
+	two := filepath.Join(dir, "two")
+	os.WriteFile(one, []byte("current-context: a\nclusters: [{name: ca, cluster: {server: \"https://127.0.0.1:1\"}}]\ncontexts: [{name: a, context: {cluster: ca, user: u}}]\n"), 0o600)
+	os.WriteFile(two, []byte("clusters: [{name: cb, cluster: {server: \"https://127.0.0.1:2\"}}]\ncontexts: [{name: b, context: {cluster: cb, user: u}}]\n"), 0o600)
+	list, current, err := (&Kubeconfig{Precedence: []string{filepath.Join(dir, "absent"), one, two}}).Contexts()
+	if err != nil || current != "a" || len(list) != 2 || list[1].Server != "https://127.0.0.1:2" {
+		t.Fatalf("list %+v current %q err %v", list, current, err)
+	}
+}
+
+func TestTheDefaultLocationsFollowTheEnvironmentVariableThenTheHomeDirectory(t *testing.T) {
+	first, second := filepath.Join("x", "one"), filepath.Join("y", "two")
+	t.Setenv("KUBECONFIG", first+string(os.PathListSeparator)+second)
+	if got := defaultPaths(); len(got) != 2 || got[0] != first || got[1] != second {
+		t.Fatalf("paths = %v", got)
+	}
+	t.Setenv("KUBECONFIG", "")
+	t.Setenv("HOME", "/home/someone")
+	t.Setenv("USERPROFILE", "/home/someone")
+	if got := defaultPaths(); len(got) != 1 || got[0] != filepath.Join("/home/someone", ".kube", "config") {
+		t.Fatalf("paths = %v", got)
 	}
 }
 
@@ -151,7 +188,7 @@ func TestAMissingOrBrokenKubeconfigIsAGenericError(t *testing.T) {
 	bad := filepath.Join(dir, "bad")
 	os.WriteFile(bad, []byte("not: [valid kubeconfig"), 0o600)
 	for _, path := range []string{filepath.Join(dir, "missing"), bad} {
-		k := &Kubeconfig{Rules: &clientcmd.ClientConfigLoadingRules{ExplicitPath: path}}
+		k := &Kubeconfig{ExplicitPath: path}
 		if _, _, err := k.Contexts(); err == nil {
 			t.Errorf("%s: want an error", path)
 		}

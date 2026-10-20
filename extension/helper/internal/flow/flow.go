@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/client-go/kubernetes"
-
+	"resilience-engine/helper/internal/agent"
 	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/clusters"
+	"resilience-engine/helper/internal/kube"
 	"resilience-engine/helper/internal/kubeconfig"
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/token"
@@ -27,29 +27,33 @@ import (
 )
 
 // State is the machine-readable outcome the extension UI turns into a message.
-type kubeClient = kubernetes.Interface
+type kubeClient = kube.Client
 
 const minute = time.Minute
 
 type State string
 
 const (
-	StateConnected           State = "connected"
-	StateDisconnected        State = "disconnected"
-	StateNotConnected        State = "not-connected"
-	StateDeclined            State = "declined"
-	StateTimedOut            State = "timed-out"
-	StateApprovalUnavailable State = "approval-unavailable"
-	StateUnsupportedContext  State = "unsupported-context"
-	StateClusterUnreachable  State = "cluster-unreachable"
-	StateRBACDenied          State = "rbac-denied"
-	StateOverGranted         State = "over-granted"
-	StateDrifted             State = "drifted"
-	StateAuthorizationGone   State = "authorization-revoked"
-	StateNotAuthorized       State = "not-authorized"
-	StateBackendUnavailable  State = "backend-unavailable"
-	StateBackendRejected     State = "backend-rejected"
-	StateError               State = "error"
+	StateConnected             State = "connected"
+	StateDisconnected          State = "disconnected"
+	StateNotConnected          State = "not-connected"
+	StateDeclined              State = "declined"
+	StateTimedOut              State = "timed-out"
+	StateApprovalUnavailable   State = "approval-unavailable"
+	StateUnsupportedContext    State = "unsupported-context"
+	StateClusterUnreachable    State = "cluster-unreachable"
+	StateRBACDenied            State = "rbac-denied"
+	StateOverGranted           State = "over-granted"
+	StateDrifted               State = "drifted"
+	StateAuthorizationGone     State = "authorization-revoked"
+	StateNotAuthorized         State = "not-authorized"
+	StateBackendUnavailable    State = "backend-unavailable"
+	StateBackendRejected       State = "backend-rejected"
+	StateTooSlow               State = "too-slow"
+	StateBackgroundUnsupported State = "background-unsupported"
+	StateCurrent               State = "current" // a managed credential that is not due for renewal yet
+	StateIdle                  State = "idle"    // nothing the helper manages, so nothing to do
+	StateError                 State = "error"
 )
 
 type ContextInfo struct {
@@ -76,6 +80,8 @@ type Result struct {
 	Changes   []string          `json:"changes,omitempty"`
 	Contexts  []ContextInfo     `json:"contexts,omitempty"`
 	Backend   *transport.Status `json:"backend,omitempty"`
+	// Background is the state of the background renewal job: on, off, stale or unsupported.
+	Background string `json:"background,omitempty"`
 }
 
 type Deps struct {
@@ -83,6 +89,8 @@ type Deps struct {
 	Prompter approve.Prompter
 	Backends func() []transport.Backend
 	Now      func() time.Time
+	// Agent is the background renewal job. Nil means this build has none.
+	Agent agent.Controller
 }
 
 func (d Deps) now() time.Time {
@@ -154,7 +162,31 @@ func backendFailure(cmd string, err error) Result {
 	if errors.As(err, &rej) {
 		return fail(cmd, StateBackendRejected, rej.Message)
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fail(cmd, StateTooSlow, slowMessage)
+	}
 	return fail(cmd, StateBackendUnavailable, "the Resilience Engine extension backend is not reachable; is the extension running?")
+}
+
+// backgroundParagraph is shown wherever the person is asked to allow the background job, so the same
+// facts are disclosed every time: what it is, how often it runs, and what it can never do.
+const backgroundParagraph = "To keep it renewed when Docker Desktop is closed or this Mac was asleep, a small background job (a macOS LaunchAgent in your user account, in ~/Library/LaunchAgents) checks every 15 minutes and renews the token when it is nearly due. It only issues read-only tokens: it never changes the cluster, never asks you anything and never recreates removed access. Removing the access removes the job."
+
+const slowMessage = "Docker Desktop is responding very slowly, so this ran out of time; it will try again by itself. Closing other containers or giving Docker more memory makes it faster."
+
+// Slow turns a failure that happened because the deadline ran out into StateTooSlow. A slow Docker
+// or a cluster still starting looks like "unreachable" at whichever step the clock stopped, and
+// saying so would send the person looking for a fault that is not there. Real answers (the access
+// was removed, was changed, a binding is too wide) and successes are never rewritten.
+func Slow(ctx context.Context, r Result) Result {
+	if r.OK || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return r
+	}
+	switch r.State {
+	case StateBackendUnavailable, StateClusterUnreachable, StateError:
+		r.State, r.Message = StateTooSlow, slowMessage
+	}
+	return r
 }
 
 func iso(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -177,7 +209,7 @@ func describe(changes []rbac.Change) []string {
 
 // authorizeDialog is composed only from facts the helper read itself, and every value that came from
 // the user's kubeconfig is sanitised, so nothing the extension UI sends can appear in it.
-func authorizeDialog(c clusters.Context, version string, plan []rbac.Change) approve.Request {
+func authorizeDialog(c clusters.Context, version string, plan []rbac.Change, background bool) approve.Request {
 	name := approve.Sanitize(c.Name, 80)
 	server := approve.Sanitize(clusters.HostPort(c.Server), 60)
 	var b strings.Builder
@@ -193,7 +225,10 @@ func authorizeDialog(c clusters.Context, version string, plan []rbac.Change) app
 		b.WriteString("\nThis approval will change the cluster:\n")
 		b.WriteString(bullet(describe(plan)))
 	}
-	fmt.Fprintf(&b, "\nA read-only token (up to %d hours) is then issued and renewed automatically while the extension is open. You can remove this access at any time.", int(token.RequestedLifetime.Hours()))
+	fmt.Fprintf(&b, "\nA read-only token (valid for up to %d days) is then issued and renewed automatically. You can remove this access at any time.", int(token.RequestedLifetime.Hours()/24))
+	if background {
+		b.WriteString("\n\n" + backgroundParagraph)
+	}
 	return approve.Request{Title: "Resilience Engine: approve read-only access?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
 }
 

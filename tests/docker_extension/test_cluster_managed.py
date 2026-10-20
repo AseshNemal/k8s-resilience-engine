@@ -92,6 +92,18 @@ def test_a_shorter_lived_token_renews_at_half_its_actual_lifetime_not_an_assumed
     assert managed_put(client, fresh_token(hours_left=0.9, lifetime_hours=2)).json()["state"] == "renew-soon"
 
 
+def test_a_seven_day_token_renews_two_days_before_it_expires(client):
+    # A long-lived token leaves a wide safety margin: a Mac that sleeps or a closed Docker Desktop for a
+    # day or two must not be able to let it lapse before the next renewal attempt.
+    body = managed_put(client, fresh_token(hours_left=3 * 24, lifetime_hours=7 * 24)).json()
+    assert body["state"] == "ok"
+    expires = datetime.fromisoformat(body["expiresAt"].replace("Z", "+00:00"))
+    renew_at = datetime.fromisoformat(body["renewAt"].replace("Z", "+00:00"))
+    assert expires - renew_at == timedelta(days=2)
+
+    assert managed_put(client, fresh_token(hours_left=1.9 * 24, lifetime_hours=7 * 24)).json()["state"] == "renew-soon"
+
+
 def test_an_expired_token_is_expired(client):
     body = managed_put(client, fresh_token(hours_left=-1)).json()
 
@@ -99,10 +111,10 @@ def test_an_expired_token_is_expired(client):
     assert "renewAt" not in body
 
 
-@pytest.mark.parametrize("hours_left, expected", [(6, "ok"), (2, "renew-soon")])
+@pytest.mark.parametrize("hours_left, expected", [(72, "ok"), (24, "renew-soon")])
 def test_without_a_readable_exp_claim_the_expiry_reported_by_kubernetes_is_used(client, hours_left, expected):
     # An opaque token has no exp or iat. The expiry the helper got from Kubernetes is used, and with no
-    # known lifetime the default 4 hour lead applies: 6 hours left is fine, 2 hours left is due.
+    # known lifetime the default 2 day lead applies: 3 days left is fine, 1 day left is due.
     reported = (datetime.now(timezone.utc) + timedelta(hours=hours_left)).isoformat().replace("+00:00", "Z")
     response = client.put(
         "/_extension/cluster",

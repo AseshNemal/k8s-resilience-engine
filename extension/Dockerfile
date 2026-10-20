@@ -6,16 +6,20 @@
 FROM python:3.13-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/home/app
 WORKDIR /app
 
-# Runtime dependencies only: requirements.txt without test-only packages, plus the PostgreSQL
-# driver pinned in requirements-postgres.txt (the application still supports PostgreSQL).
-COPY requirements.txt requirements-postgres.txt ./
-RUN grep -viE '^(pytest|iniconfig|pluggy|pygments)==' requirements.txt > /tmp/runtime.txt \
-    && grep '^psycopg2-binary==' requirements-postgres.txt >> /tmp/runtime.txt \
+# Runtime dependencies only: requirements.txt without what the extension never uses.
+#  * test-only packages (pytest, iniconfig, pluggy, pygments);
+#  * uvloop and httptools, optional uvicorn speed-ups (it falls back to asyncio and h11);
+#  * watchfiles (only for `uvicorn --reload`) and websockets (the app serves no WebSocket route);
+#  * the PostgreSQL driver: compose.yaml fixes DATABASE_URL to SQLite on the data volume.
+# The pip download cache is a build cache mount, so repeat builds skip the downloads and the cache
+# never becomes part of an image layer.
+COPY requirements.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    grep -viE '^(pytest|iniconfig|pluggy|pygments|uvloop|httptools|watchfiles|websockets)==' requirements.txt > /tmp/runtime.txt \
     && pip install --only-binary :all: -r /tmp/runtime.txt \
     && pip check \
     && rm /tmp/runtime.txt \
@@ -30,11 +34,6 @@ COPY experiments ./experiments
 # declared deployment intent must come from an explicitly selected source, not a folder in the image.
 COPY extension/__init__.py extension/asgi.py extension/cluster_connection.py extension/cluster_ingest.py extension/error_envelope.py extension/healthcheck.py ./extension/
 
-# --- Render the existing dashboard pages to static files (build time only) ------------------
-FROM runtime AS render
-COPY extension/build_ui.py ./extension/build_ui.py
-RUN python -m extension.build_ui /out
-
 # --- Host helper: one static Go binary per operating system, for this image's own architecture ---
 # Docker Desktop copies the binary for the user's operating system onto their computer. metadata.json
 # has no architecture field, so each image carries the binaries for its own architecture (an arm64
@@ -43,15 +42,28 @@ RUN python -m extension.build_ui /out
 FROM --platform=$BUILDPLATFORM golang:1.26 AS helper
 WORKDIR /src
 COPY extension/helper/go.mod extension/helper/go.sum ./
-RUN go mod download
+# Module and compiler caches are build cache mounts: repeat builds neither download nor recompile the
+# standard library for each target, and the caches stay out of the image.
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY extension/helper ./
 ARG TARGETARCH
 ENV CGO_ENABLED=0
 # -p 2 keeps the compiler's memory use low enough for a small Docker Desktop VM.
-RUN for os in darwin linux windows; do \
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    for os in darwin linux windows; do \
         ext=""; [ "$os" = "windows" ] && ext=".exe"; \
         GOOS="$os" GOARCH="$TARGETARCH" go build -p 2 -trimpath -ldflags "-s -w" -o "/out/$os/resilience-helper$ext" . || exit 1; \
     done
+
+# --- Render the existing dashboard pages to static files (build time only) ------------------
+# This stage is defined after the helper stage on purpose: BuildKit builds independent stages at the
+# same time, and the Go compile plus this Python import of the whole application together exhaust a
+# small Docker Desktop VM (4 GB), which turned a one-second step into minutes of swapping. Binding the
+# helper's output below makes this stage wait for the helper without copying anything into the layer.
+FROM runtime AS render
+COPY extension/build_ui.py ./extension/build_ui.py
+RUN --mount=type=bind,from=helper,source=/out,target=/tmp/helper-done true
+RUN python -m extension.build_ui /out
 
 # --- Final extension image ------------------------------------------------------------------
 FROM runtime

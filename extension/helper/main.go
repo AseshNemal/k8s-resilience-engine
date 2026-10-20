@@ -10,6 +10,8 @@
 //	resilience-helper status
 //	resilience-helper authorize <context>
 //	resilience-helper renew <context>
+//	resilience-helper renew-managed
+//	resilience-helper agent-status | agent-enable <context> | agent-disable
 //	resilience-helper revoke <context>
 //	resilience-helper version
 package main
@@ -20,9 +22,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
+	"resilience-engine/helper/internal/agent"
 	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/execx"
@@ -31,6 +35,14 @@ import (
 )
 
 const version = "0.1.0"
+
+// Deadlines. Docker Desktop on a busy machine can need 30 seconds for a single `docker exec`, and one
+// renewal makes several Docker and cluster calls, so a short limit turns "slow" into "never renews".
+// Nothing waits on these: they only decide when a hung call is given up on and retried later.
+const (
+	renewTimeout  = 4 * time.Minute
+	statusTimeout = time.Minute
+)
 
 func realDeps() flow.Deps {
 	home, _ := os.UserHomeDir()
@@ -44,6 +56,23 @@ func realDeps() flow.Deps {
 		Clusters: clusters.New(),
 		Prompter: approve.Default(),
 		Backends: func() []transport.Backend { return transport.Defaults(runtime.GOOS, home, docker) },
+		Agent:    realAgent(home),
+	}
+}
+
+// realAgent is the background renewal job for this user. It points at this very binary, resolved
+// through any symlink, so the job keeps working wherever Docker Desktop keeps its host binaries.
+func realAgent(home string) agent.Controller {
+	exe, err := os.Executable()
+	if err == nil {
+		if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+			exe = resolved
+		}
+	}
+	return &agent.LaunchAgent{
+		GOOS: runtime.GOOS, Home: home, UID: os.Getuid(), Exe: exe,
+		Env:    map[string]string{"KUBECONFIG": os.Getenv("KUBECONFIG")},
+		Runner: execx.Real{},
 	}
 }
 
@@ -64,7 +93,7 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		return usage(stderr)
 	}
 	command, rest := args[0], args[1:]
-	needsContext := command == "authorize" || command == "renew" || command == "revoke"
+	needsContext := command == "authorize" || command == "renew" || command == "revoke" || command == "agent-enable"
 	switch {
 	case needsContext && len(rest) != 1:
 		return usage(stderr)
@@ -80,13 +109,21 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 	case "discover":
 		timeout, do = 60*time.Second, flow.Discover
 	case "status":
-		timeout, do = 30*time.Second, flow.Status
+		timeout, do = statusTimeout, flow.Status
 	case "authorize":
 		timeout, do = 5*time.Minute, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Authorize(ctx, d, rest[0]) }
 	case "renew":
-		timeout, do = 90*time.Second, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Renew(ctx, d, rest[0]) }
+		timeout, do = renewTimeout, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Renew(ctx, d, rest[0]) }
+	case "renew-managed":
+		timeout, do = renewTimeout, flow.RenewManaged
 	case "revoke":
 		timeout, do = 5*time.Minute, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Revoke(ctx, d, rest[0]) }
+	case "agent-enable":
+		timeout, do = 5*time.Minute, func(ctx context.Context, d flow.Deps) flow.Result { return flow.EnableBackground(ctx, d, rest[0]) }
+	case "agent-status":
+		timeout, do = 30*time.Second, flow.BackgroundStatus
+	case "agent-disable":
+		timeout, do = 30*time.Second, flow.DisableBackground
 	case "version":
 		emit(stdout, map[string]any{"ok": true, "version": version, "platform": runtime.GOOS + "/" + runtime.GOARCH})
 		return 0
@@ -99,7 +136,7 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 	// Exit 0 whenever a result was produced, success or not: the JSON carries ok and state. Docker
 	// Desktop's exec may discard the output of a process that exits non-zero, and "you declined" must
 	// stay distinguishable from "the helper crashed". Non-zero is reserved for misuse (2) and panics (1).
-	emit(stdout, do(ctx, deps()))
+	emit(stdout, flow.Slow(ctx, do(ctx, deps())))
 	return 0
 }
 
@@ -108,6 +145,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | agent-status | agent-enable <context> | agent-disable | revoke <context> | version\n")
 	return 2
 }

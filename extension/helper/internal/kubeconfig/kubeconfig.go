@@ -7,13 +7,13 @@
 package kubeconfig
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 
-	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"go.yaml.in/yaml/v3"
 
 	"resilience-engine/helper/internal/secret"
 )
@@ -64,19 +64,72 @@ func Build(c Cluster, token secret.String) (doc secret.Bytes, backendServer stri
 	}
 
 	backendServer = fmt.Sprintf("https://%s:%s", HostGateway, u.Port())
-	cfg := clientcmdapi.NewConfig()
-	cfg.Clusters["cluster"] = &clientcmdapi.Cluster{
-		Server:                   backendServer,
-		CertificateAuthorityData: c.CAData,
-		TLSServerName:            TLSServerName,
-	}
-	cfg.AuthInfos["user"] = &clientcmdapi.AuthInfo{Token: token.Reveal()}
-	cfg.Contexts["context"] = &clientcmdapi.Context{Cluster: "cluster", AuthInfo: "user"}
-	cfg.CurrentContext = "context"
-
-	out, err := clientcmd.Write(*cfg)
+	rendered, err := document{
+		APIVersion: "v1",
+		Kind:       "Config",
+		Clusters: []namedCluster{{Name: "cluster", Cluster: clusterEntry{
+			CertificateAuthorityData: base64.StdEncoding.EncodeToString(c.CAData),
+			Server:                   backendServer,
+			TLSServerName:            TLSServerName,
+		}}},
+		Contexts:       []namedContext{{Name: "context", Context: contextEntry{Cluster: "cluster", User: "user"}}},
+		CurrentContext: "context",
+		Preferences:    map[string]any{},
+		Users:          []namedUser{{Name: "user", User: userEntry{Token: token.Reveal()}}},
+	}.render()
 	if err != nil {
 		return secret.Bytes{}, "", errors.New("could not build the credential")
 	}
-	return secret.NewBytes(out), backendServer, nil
+	return rendered, backendServer, nil
+}
+
+// The document is exactly the shape kubectl writes for a one-cluster, one-user, token-only kubeconfig.
+// There is deliberately no field for insecure-skip-tls-verify, a proxy, or a credential plugin.
+type document struct {
+	APIVersion     string         `yaml:"apiVersion"`
+	Clusters       []namedCluster `yaml:"clusters"`
+	Contexts       []namedContext `yaml:"contexts"`
+	CurrentContext string         `yaml:"current-context"`
+	Kind           string         `yaml:"kind"`
+	Preferences    map[string]any `yaml:"preferences"`
+	Users          []namedUser    `yaml:"users"`
+}
+
+type namedCluster struct {
+	Cluster clusterEntry `yaml:"cluster"`
+	Name    string       `yaml:"name"`
+}
+
+type clusterEntry struct {
+	CertificateAuthorityData string `yaml:"certificate-authority-data"`
+	Server                   string `yaml:"server"`
+	TLSServerName            string `yaml:"tls-server-name"`
+}
+
+type namedContext struct {
+	Context contextEntry `yaml:"context"`
+	Name    string       `yaml:"name"`
+}
+
+type contextEntry struct {
+	Cluster string `yaml:"cluster"`
+	User    string `yaml:"user"`
+}
+
+type namedUser struct {
+	Name string    `yaml:"name"`
+	User userEntry `yaml:"user"`
+}
+
+type userEntry struct {
+	Token string `yaml:"token"`
+}
+
+// render serialises the document. The error never carries the token.
+func (d document) render() (secret.Bytes, error) {
+	out, err := yaml.Marshal(d)
+	if err != nil {
+		return secret.Bytes{}, errors.New("could not serialise the credential")
+	}
+	return secret.NewBytes(out), nil
 }

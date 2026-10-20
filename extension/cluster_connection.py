@@ -16,8 +16,9 @@ from urllib.parse import urlsplit
 
 import yaml
 from fastapi import APIRouter, HTTPException
-from kubernetes import client, config
 from pydantic import BaseModel, field_validator
+
+from app.integrations.kubernetes import rest
 
 KUBECONFIG_PATH = Path(os.environ.get("KUBECONFIG", "/data/kube/config"))
 MAX_KUBECONFIG_BYTES = 64 * 1024
@@ -43,7 +44,7 @@ FORBIDDEN_WRITES = [
 # A credential installed by the host helper ("managed") is renewed automatically. The renewal policy
 # lives here, in one place, and is computed from the token's real expiry claim: renew once
 # min(RENEW_BEFORE, half of the token's actual lifetime) remains.
-RENEW_BEFORE = timedelta(hours=4)
+RENEW_BEFORE = timedelta(days=2)
 MANAGED_SERVER_HOST = "host.docker.internal"
 CONTEXT_NAME = re.compile(r"^[A-Za-z0-9._@:/-]{1,128}$")
 
@@ -148,31 +149,37 @@ def _normalise(text: str) -> dict:
     }
 
 
-def _allowed(authz: client.AuthorizationV1Api, verb: str, resource: str, group: str) -> bool:
-    review = client.V1SelfSubjectAccessReview(
-        spec=client.V1SelfSubjectAccessReviewSpec(
-            resource_attributes=client.V1ResourceAttributes(verb=verb, resource=resource, group=group)
-        )
-    )
-    result = authz.create_self_subject_access_review(review, _request_timeout=REQUEST_TIMEOUT_SECONDS)
-    return bool(result.status and result.status.allowed)
+SELF_SUBJECT_ACCESS_REVIEWS = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"
+
+
+def _allowed(http: rest.RestClient, verb: str, resource: str, group: str) -> bool:
+    review = {
+        "apiVersion": "authorization.k8s.io/v1",
+        "kind": "SelfSubjectAccessReview",
+        "spec": {"resourceAttributes": {"verb": verb, "resource": resource, "group": group}},
+    }
+    result = http.post_json(SELF_SUBJECT_ACCESS_REVIEWS, review)
+    status = result.get("status") if isinstance(result, dict) else None
+    return isinstance(status, dict) and status.get("allowed") is True
 
 
 def _verify_read_only(document: dict) -> None:
     """Ask the cluster what this credential may do. Rejects write access and missing read access."""
-    api_client = config.new_client_from_config_dict(document)
-    authz = client.AuthorizationV1Api(api_client)
     try:
-        writable = [f"{verb} {resource}" for verb, resource, group in FORBIDDEN_WRITES if _allowed(authz, verb, resource, group)]
-        readable = all(_allowed(authz, verb, resource, group) for verb, resource, group in REQUIRED_READS)
-    except client.ApiException as err:
+        http = rest.RestClient(rest.connection_from_documents([(document, None)]), REQUEST_TIMEOUT_SECONDS)
+    except rest.KubeconfigError as err:
+        raise _bad(f"The kubeconfig cannot be used: {err}.")
+    try:
+        writable = [f"{verb} {resource}" for verb, resource, group in FORBIDDEN_WRITES if _allowed(http, verb, resource, group)]
+        readable = all(_allowed(http, verb, resource, group) for verb, resource, group in REQUIRED_READS)
+    except rest.HttpStatusError as err:
         if err.status in (401, 403):
             raise _bad("The cluster rejected the credential. It may have expired.", 401)
         raise _bad(f"The cluster returned HTTP {err.status} while checking the credential.", 502)
-    except Exception as err:
-        raise _bad(f"Could not reach the cluster API server ({type(err).__name__}).", 502)
+    except rest.TransportFailure as err:
+        raise _bad(f"Could not reach the cluster API server ({err.name}).", 502)
     finally:
-        api_client.close()
+        http.close()
 
     if writable:
         raise _bad(

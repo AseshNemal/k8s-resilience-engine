@@ -146,8 +146,14 @@ body.sidebar-collapsed .sidebar__link-label { display: inline; }
 .cluster-chip:hover { background: var(--dd-hover); text-decoration: none; }
 .cluster-chip__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dd-text-2); flex: none; }
 .cluster-chip[data-state="connected"] .cluster-chip__dot { background: var(--dd-success); }
-.cluster-chip[data-state="expired"] .cluster-chip__dot { background: var(--dd-danger); }
-.cluster-chip[data-state="expired"] { border-color: var(--dd-danger); }
+.cluster-chip[data-state="expired"] .cluster-chip__dot,
+.cluster-chip[data-state="attention"] .cluster-chip__dot { background: var(--dd-danger); }
+.cluster-chip[data-state="expired"],
+.cluster-chip[data-state="attention"] { border-color: var(--dd-danger); }
+/* Renewing is routine, not a fault: a neutral pulse instead of red. */
+.cluster-chip[data-state="renewing"] .cluster-chip__dot { background: var(--dd-text-2); animation: chip-pulse 1.6s ease-in-out infinite; }
+@keyframes chip-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .cluster-chip[data-state="renewing"] .cluster-chip__dot { animation: none; } }
 body[data-page="connect"] .cluster-chip { display: none; }
 
 .page { padding: 20px; max-width: 1200px; }
@@ -338,7 +344,8 @@ textarea.form-input { width: 100%; resize: vertical; }
 .cluster-panel__text { flex: 1 1 320px; min-width: 0; }
 .cluster-panel__title { font-weight: 500; }
 .cluster-panel__detail { color: var(--dd-text-2); font-size: 13px; margin-top: 2px; }
-.cluster-panel[data-state="expired"] { border-color: var(--dd-danger); }
+.cluster-panel[data-state="expired"],
+.cluster-panel[data-state="attention"] { border-color: var(--dd-danger); }
 
 .analysis-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px 24px; }
 .analysis-card__label { font-size: 12px; color: var(--dd-text-2); text-transform: none; letter-spacing: 0.01em; font-weight: 400; }
@@ -496,6 +503,7 @@ textarea.form-input { width: 100%; resize: vertical; }
 .connect__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dd-text-2); flex: none; margin-top: 6px; }
 .connect__status[data-state="connected"] .connect__dot { background: var(--dd-success); }
 .connect__status[data-state="expired"] .connect__dot { background: var(--dd-danger); }
+.connect__status[data-state="renewing"] .connect__dot { background: var(--dd-text-2); }
 .connect__title { font-size: 16px; font-weight: 500; margin: 0; }
 .connect__summary { margin: 2px 0 0; color: var(--dd-text-2); font-size: 13px; }
 .connect__status > :nth-child(2) { flex: 1; min-width: 0; }

@@ -44,6 +44,7 @@ type dockerFake struct {
 	execOut    string
 	execExit   int
 	execErr    error
+	psErr      error
 	calls      []recorded
 }
 
@@ -51,7 +52,7 @@ func (d *dockerFake) Run(_ context.Context, name string, args []string, stdin []
 	d.calls = append(d.calls, recorded{name, args, stdin})
 	switch args[0] {
 	case "ps":
-		return execx.Result{Stdout: []byte(strings.Join(d.containers, "\n")), ExitCode: d.psExit}, nil
+		return execx.Result{Stdout: []byte(strings.Join(d.containers, "\n")), ExitCode: d.psExit}, d.psErr
 	case "exec":
 		return execx.Result{Stdout: []byte(d.execOut), ExitCode: d.execExit}, d.execErr
 	}
@@ -361,5 +362,53 @@ func TestPickReportsUnavailableWhenNoneWork(t *testing.T) {
 	}
 	if _, _, err := Pick(ctx, nil); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("no candidates: %v", err)
+	}
+}
+
+// A Docker that is merely slow (a busy Docker Desktop VM) must not look like a Docker that is down:
+// the caller keeps the cause so it can say "too slow" and retry, instead of "not running".
+func TestASlowDockerKeepsTheDeadlineAsTheCause(t *testing.T) {
+	for name, d := range map[string]*dockerFake{
+		"ps":   {psErr: context.DeadlineExceeded},
+		"exec": {containers: []string{containerA}, execErr: context.DeadlineExceeded},
+	} {
+		_, err := newExec(d).Status(ctx)
+		if !errors.Is(err, ErrUnavailable) || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%s: err must be unavailable AND a deadline, got %v", name, err)
+		}
+	}
+}
+
+func TestADockerThatFailsForAnotherReasonIsNotCalledSlow(t *testing.T) {
+	d := &dockerFake{containers: []string{containerA}, execErr: errors.New("boom")}
+	if _, err := newExec(d).Status(ctx); errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a plain failure must not be reported as a timeout: %v", err)
+	}
+}
+
+func TestASocketThatNeverAnswersKeepsTheDeadlineAsTheCause(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	l, err := net.Listen("unix", filepath.Join(dir, "s.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close() // accepts and then says nothing
+		}
+	}()
+	s := &Socket{Dir: dir, File: "s.sock", Timeout: 150 * time.Millisecond}
+	_, err = s.Status(ctx)
+	if !errors.Is(err, ErrUnavailable) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err must be unavailable AND a deadline, got %v", err)
 	}
 }

@@ -11,18 +11,17 @@ import (
 	"fmt"
 	"time"
 
-	authv1 "k8s.io/api/authentication/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-
+	"resilience-engine/helper/internal/kube"
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/secret"
 )
 
 const (
 	// RequestedLifetime is what is asked for. Renewal timing is derived from what is returned.
-	RequestedLifetime = 8 * time.Hour
+	// A week, not a day: the credential must outlive a long weekend with the laptop shut, so that the
+	// next renewal attempt always finds a token that is still valid to renew from. It is read-only
+	// and the person can remove the access at any time, which is what bounds the risk.
+	RequestedLifetime = 7 * 24 * time.Hour
 	// MinimumLifetime guards against a cluster clamping the token to something unusable.
 	MinimumLifetime = 10 * time.Minute
 )
@@ -45,32 +44,29 @@ type Issued struct {
 func (i Issued) Lifetime() time.Duration { return i.ExpiresAt.Sub(i.IssuedAt) }
 
 // Issue requests a token for the extension's service account. now is the request time.
-func Issue(ctx context.Context, cs kubernetes.Interface, requested time.Duration, now time.Time) (Issued, error) {
+func Issue(ctx context.Context, cs kube.Client, requested time.Duration, now time.Time) (Issued, error) {
 	if requested <= 0 {
 		return Issued{}, errors.New("requested token lifetime must be positive")
 	}
-	seconds := int64(requested.Seconds())
-	req := &authv1.TokenRequest{Spec: authv1.TokenRequestSpec{ExpirationSeconds: &seconds}}
-
-	resp, err := cs.CoreV1().ServiceAccounts(rbac.Namespace).CreateToken(ctx, rbac.Name, req, metav1.CreateOptions{})
+	resp, err := cs.CreateToken(ctx, rbac.Namespace, rbac.Name, int64(requested.Seconds()))
 	switch {
-	case apierrors.IsForbidden(err):
+	case kube.IsForbidden(err):
 		return Issued{}, ErrForbidden
-	case apierrors.IsNotFound(err):
+	case kube.IsNotFound(err):
 		return Issued{}, ErrServiceAccountMissing
 	case err != nil:
 		return Issued{}, fmt.Errorf("could not issue a token: %w", err)
 	}
 
-	if resp.Status.Token == "" {
+	if resp.Value == "" {
 		return Issued{}, errors.New("the cluster returned an empty token")
 	}
-	expires := resp.Status.ExpirationTimestamp.Time
+	expires := resp.ExpiresAt
 	if expires.IsZero() {
 		return Issued{}, ErrNoExpiry
 	}
 	if expires.Sub(now) < MinimumLifetime {
 		return Issued{}, fmt.Errorf("%w (%s)", ErrTooShortLived, expires.Sub(now).Round(time.Second))
 	}
-	return Issued{Token: secret.NewString(resp.Status.Token), IssuedAt: now, ExpiresAt: expires}, nil
+	return Issued{Token: secret.NewString(resp.Value), IssuedAt: now, ExpiresAt: expires}, nil
 }

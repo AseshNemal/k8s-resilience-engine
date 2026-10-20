@@ -8,21 +8,11 @@ import (
 	"testing"
 	"time"
 
-	authv1 "k8s.io/api/authentication/v1"
-	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/version"
-	fakediscovery "k8s.io/client-go/discovery/fake"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
-
+	"resilience-engine/helper/internal/agent"
 	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/clusters"
+	"resilience-engine/helper/internal/kube"
+	"resilience-engine/helper/internal/kube/kubetest"
 	"resilience-engine/helper/internal/kubeconfig"
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/transport"
@@ -41,23 +31,14 @@ var (
 
 // ---------------------------------------------------------------- a fake cluster
 
-func newCluster(grant time.Duration) *fake.Clientset {
-	cs := fake.NewClientset()
-	cs.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{GitVersion: "v1.37.0"}
-	cs.PrependReactor("create", "serviceaccounts", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		if a.GetSubresource() != "token" {
-			return false, nil, nil
-		}
-		return true, &authv1.TokenRequest{Status: authv1.TokenRequestStatus{
-			Token:               tokenValue,
-			ExpirationTimestamp: metav1.NewTime(t0.Add(grant)),
-		}}, nil
-	})
+func newCluster(grant time.Duration) *kubetest.Fake {
+	cs := kubetest.New()
+	cs.GrantTokens(tokenValue, t0, grant)
 	return cs
 }
 
 // approvedCluster is a cluster where the extension's access already exists exactly as approved.
-func approvedCluster(t *testing.T) *fake.Clientset {
+func approvedCluster(t *testing.T) *kubetest.Fake {
 	t.Helper()
 	cs := newCluster(8 * time.Hour)
 	r, err := rbac.Inspect(bg, cs)
@@ -71,77 +52,62 @@ func approvedCluster(t *testing.T) *fake.Clientset {
 	return cs
 }
 
+// edit changes one stored object the way another administrator would, then forgets the action.
+func edit(t *testing.T, cs *kubetest.Fake, r kube.Resource, namespace, name string, change func(*kube.Object)) {
+	t.Helper()
+	o, ok := cs.Lookup(r, namespace, name)
+	if !ok {
+		t.Fatalf("%s %s/%s is not in the cluster", r.Plural, namespace, name)
+	}
+	change(&o)
+	cs.Put(r, o)
+}
+
 // stripLabels makes the access look as the old setup script left it: right content, no label.
-func stripLabels(t *testing.T, cs *fake.Clientset) {
+func stripLabels(t *testing.T, cs *kubetest.Fake) {
 	t.Helper()
-	ns, _ := cs.CoreV1().Namespaces().Get(bg, rbac.Namespace, metav1.GetOptions{})
-	ns.Labels = nil
-	cs.CoreV1().Namespaces().Update(bg, ns, metav1.UpdateOptions{})
-	sa, _ := cs.CoreV1().ServiceAccounts(rbac.Namespace).Get(bg, rbac.Name, metav1.GetOptions{})
-	sa.Labels = nil
-	cs.CoreV1().ServiceAccounts(rbac.Namespace).Update(bg, sa, metav1.UpdateOptions{})
-	cr, _ := cs.RbacV1().ClusterRoles().Get(bg, rbac.Name, metav1.GetOptions{})
-	cr.Labels = nil
-	cs.RbacV1().ClusterRoles().Update(bg, cr, metav1.UpdateOptions{})
-	crb, _ := cs.RbacV1().ClusterRoleBindings().Get(bg, rbac.Name, metav1.GetOptions{})
-	crb.Labels = nil
-	cs.RbacV1().ClusterRoleBindings().Update(bg, crb, metav1.UpdateOptions{})
+	clear := func(o *kube.Object) { o.Labels = nil }
+	edit(t, cs, kube.Namespaces, "", rbac.Namespace, clear)
+	edit(t, cs, kube.ServiceAccounts, rbac.Namespace, rbac.Name, clear)
+	edit(t, cs, kube.ClusterRoles, "", rbac.Name, clear)
+	edit(t, cs, kube.ClusterRoleBindings, "", rbac.Name, clear)
 	cs.ClearActions()
 }
 
-func widenRole(t *testing.T, cs *fake.Clientset) {
+func widenRole(t *testing.T, cs *kubetest.Fake) {
 	t.Helper()
-	cr, _ := cs.RbacV1().ClusterRoles().Get(bg, rbac.Name, metav1.GetOptions{})
-	cr.Rules = append(cr.Rules, rbacv1.PolicyRule{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get", "list"}})
-	if _, err := cs.RbacV1().ClusterRoles().Update(bg, cr, metav1.UpdateOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	cs.ClearActions()
-}
-
-func addExtraBinding(t *testing.T, cs *fake.Clientset) {
-	t.Helper()
-	_, err := cs.RbacV1().ClusterRoleBindings().Create(bg, &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "grant-admin"},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: rbac.Name, Namespace: rbac.Namespace}},
-	}, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cs.ClearActions()
-}
-
-func forbid(cs *fake.Clientset, verb, resource string) {
-	cs.PrependReactor(verb, resource, func(a k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: resource}, "x", nil)
+	edit(t, cs, kube.ClusterRoles, "", rbac.Name, func(cr *kube.Object) {
+		cr.Rules = append(cr.Rules, kube.PolicyRule{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get", "list"}})
 	})
+	cs.ClearActions()
+}
+
+func addExtraBinding(t *testing.T, cs *kubetest.Fake) {
+	t.Helper()
+	cs.Put(kube.ClusterRoleBindings, kube.Object{
+		Name:     "grant-admin",
+		RoleRef:  kube.RoleRef{APIGroup: kube.RBACGroup, Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []kube.Subject{{Kind: kube.ServiceAccountKind, Name: rbac.Name, Namespace: rbac.Namespace}},
+	})
+	cs.ClearActions()
+}
+
+func forbid(cs *kubetest.Fake, verb, resource string) {
+	cs.Fail(verb, resource, forbiddenErr(resource))
 }
 
 // clusterWrites lists every write made to the cluster. A token request counts separately.
-func clusterWrites(cs *fake.Clientset) (writes []string, tokenRequests int) {
-	for _, a := range cs.Actions() {
-		switch a.GetVerb() {
-		case "create", "update", "patch", "delete", "delete-collection":
-			if a.GetResource().Resource == "serviceaccounts" && a.GetSubresource() == "token" {
-				tokenRequests++
-				continue
-			}
-			writes = append(writes, a.GetVerb()+" "+a.GetResource().Resource)
-		}
-	}
-	return
-}
+func clusterWrites(cs *kubetest.Fake) (writes []string, tokenRequests int) { return cs.Writes() }
 
 // ---------------------------------------------------------------- a fake kubeconfig
 
 type fakeLoader struct {
 	contexts []clusters.Context
-	clients  map[string]*fake.Clientset
+	clients  map[string]*kubetest.Fake
 	called   map[string]int
 }
 
-func newLoader(cs *fake.Clientset) *fakeLoader {
+func newLoader(cs *kubetest.Fake) *fakeLoader {
 	return &fakeLoader{
 		contexts: []clusters.Context{
 			{Name: ctxName, Server: "https://127.0.0.1:58227"},
@@ -149,14 +115,14 @@ func newLoader(cs *fake.Clientset) *fakeLoader {
 			{Name: "prod-cluster", Server: "https://prod.example.com:6443"},
 			{Name: "minikube", Server: "https://127.0.0.1:8443"},
 		},
-		clients: map[string]*fake.Clientset{ctxName: cs},
+		clients: map[string]*kubetest.Fake{ctxName: cs},
 		called:  map[string]int{},
 	}
 }
 
 func (l *fakeLoader) Contexts() ([]clusters.Context, string, error) { return l.contexts, ctxName, nil }
 
-func (l *fakeLoader) Client(name string) (kubernetes.Interface, kubeconfig.Cluster, error) {
+func (l *fakeLoader) Client(name string) (kube.Client, kubeconfig.Cluster, error) {
 	l.called[name]++
 	cs, ok := l.clients[name]
 	if !ok {
@@ -260,19 +226,12 @@ func receivedToken(b *fakeBackend) bool {
 	return false
 }
 
-var _ = corev1.Namespace{}
-
-type (
-	k8stestingAction = k8stesting.Action
-	runtimeObject    = runtime.Object
-)
-
 func notFound(resource, name string) error {
-	return apierrors.NewNotFound(schema.GroupResource{Resource: resource}, name)
+	return kube.NewAPIError(404, "NotFound", resource+` "`+name+`" not found`)
 }
 
 func forbiddenErr(resource string) error {
-	return apierrors.NewForbidden(schema.GroupResource{Resource: resource}, "x", nil)
+	return kube.NewAPIError(403, "Forbidden", resource+" is forbidden")
 }
 
 type errString string
@@ -280,7 +239,7 @@ type errString string
 func (e errString) Error() string { return string(e) }
 
 // removeAccess deletes the extension's access the way a cluster administrator would.
-func removeAccess(t *testing.T, cs *fake.Clientset) {
+func removeAccess(t *testing.T, cs *kubetest.Fake) {
 	t.Helper()
 	r, err := rbac.Inspect(bg, cs)
 	if err != nil {
@@ -291,3 +250,39 @@ func removeAccess(t *testing.T, cs *fake.Clientset) {
 	}
 	cs.ClearActions()
 }
+
+// ---------------------------------------------------------------- a fake background job
+
+type fakeAgent struct {
+	supported  bool
+	state      agent.State
+	installErr error
+	installs   int
+	uninstalls int
+}
+
+func (a *fakeAgent) Supported() bool { return a.supported }
+func (a *fakeAgent) Install(context.Context) error {
+	if a.installErr != nil {
+		return a.installErr
+	}
+	a.installs++
+	a.state = agent.On
+	return nil
+}
+func (a *fakeAgent) Uninstall(context.Context) error {
+	a.uninstalls++
+	a.state = agent.Off
+	return nil
+}
+func (a *fakeAgent) Status(context.Context) (agent.State, error) {
+	if !a.supported {
+		return agent.Unsupported, nil
+	}
+	return a.state, nil
+}
+
+func macAgent() *fakeAgent { return &fakeAgent{supported: true, state: agent.Off} }
+
+// withAgent adds a background job to test dependencies.
+func withAgent(d Deps, a agent.Controller) Deps { d.Agent = a; return d }

@@ -18,7 +18,8 @@ const CTX = "kind-resilience-research";
 const TOKEN = "eyJ-TOKEN-THE-PAGE-MUST-NEVER-SEE";
 
 // A fake helper and backend, and a controllable clock.
-function world({ statuses, helper }) {
+function world({ statuses, helper, sleep }) {
+    const renewed = [];
     const calls = [];
     const clock = { ms: 1_000_000 };
     const changes = [];
@@ -33,14 +34,16 @@ function world({ statuses, helper }) {
         },
         exec: async (file, args) => {
             calls.push({ file, args });
-            const reply = typeof helper === "function" ? helper(args, calls.length) : helper;
+            const reply = await (typeof helper === "function" ? helper(args, calls.length) : helper);
             if (reply instanceof Error) throw reply;
             if (reply && reply.reject) { const e = new Error("exit 1"); e.stdout = reply.reject; throw e; }
             return { stdout: reply };
         },
         onChange: (s) => changes.push(s),
     };
-    return { env, calls, clock, changes, controller: A.createController(env) };
+    if (sleep) env.sleep = sleep;
+    env.onRenewed = () => renewed.push(1);
+    return { renewed, env, calls, clock, changes, controller: A.createController(env) };
 }
 
 const managed = (state, extra = {}) => ({ connected: true, managed: true, context: CTX, state, expiresAt: "2026-10-19T20:00:00Z", ...extra });
@@ -309,7 +312,7 @@ test("the page shows only its own fixed messages, never the helper's text", asyn
 });
 
 test("every state has a fixed, human message, and an unknown state falls back to a generic one", () => {
-    for (const state of ["declined", "timed-out", "approval-unavailable", "cluster-unreachable", "rbac-denied", "over-granted", "drifted", "authorization-revoked", "helper-unavailable"]) {
+    for (const state of ["declined", "timed-out", "approval-unavailable", "cluster-unreachable", "rbac-denied", "over-granted", "drifted", "authorization-revoked", "helper-unavailable", "too-slow", "background-unsupported"]) {
         assert.ok(A.messageFor(state).length > 20, state);
     }
     assert.equal(A.messageFor("some-new-state"), A.messageFor("error"));
@@ -318,6 +321,122 @@ test("every state has a fixed, human message, and an unknown state falls back to
 
 test("the controller exposes no way to read a credential", () => {
     const c = A.createController({ platform: "darwin", now: () => 0, getStatus: async () => null, exec: async () => ({ stdout: "" }) });
-    assert.deepEqual(plain(Object.keys(c).sort()), ["discover", "quickSetup", "remove", "retryNow", "setup", "snapshot", "tick"]);
+    assert.deepEqual(plain(Object.keys(c).sort()), ["discover", "enableBackground", "quickSetup", "refreshBackground", "remove", "retryNow", "setup", "snapshot", "tick"]);
     assert.ok(!JSON.stringify(c.snapshot()).toLowerCase().includes("token"));
+});
+
+
+// ------------------------------------------------------------------ a slow Docker never wedges the loop
+
+const never = () => new Promise(() => {}); // a call that never answers
+const instantly = () => Promise.resolve(); // a watchdog timer that has already run out
+
+test("a helper call that never answers is given up on, so the loop can try again instead of hanging forever", async () => {
+    const w = world({ statuses: [managed("renew-soon")], helper: never, sleep: instantly });
+    const s = await w.controller.tick(); // must resolve, not hang
+    assert.equal(s.phase, "retrying");
+    assert.equal(s.state, "too-slow");
+    assert.match(s.message, /slow/i);
+});
+
+test("after a hung call the next check is allowed to run: the single-flight guard is released", async () => {
+    const w = world({ statuses: [managed("renew-soon")], helper: never, sleep: instantly });
+    await w.controller.tick();
+    w.clock.ms += 31_000;
+    await w.controller.tick();
+    assert.equal(w.calls.length, 2, "a hung renewal must not block every later renewal");
+});
+
+test("a status request that never answers is reported as the backend not answering, and the check ends", async () => {
+    const w = world({ statuses: [never], helper: ok, sleep: instantly });
+    const s = await w.controller.tick();
+    assert.equal(s.phase, "retrying");
+    assert.equal(s.state, "backend-unavailable");
+    assert.equal(w.calls.length, 0);
+});
+
+test("a slow answer is not mistaken for a hang: a call that finishes in time is used", async () => {
+    const w = world({ statuses: [managed("renew-soon")], helper: ok, sleep: never }); // the watchdog never fires
+    assert.equal((await w.controller.tick()).phase, "ready");
+});
+
+test("the helper saying it ran out of time is retried with back-off, never treated as something the person must fix", async () => {
+    const w = world({ statuses: [managed("renew-soon")], helper: fail("too-slow") });
+    const s = await w.controller.tick();
+    assert.equal(s.phase, "retrying");
+    assert.equal(s.state, "too-slow");
+    await w.controller.tick();
+    assert.equal(w.calls.length, 1, "still inside the back-off");
+});
+
+test("each helper command has its own wait, long enough for the helper's own deadline", () => {
+    const wait = A.WAIT_MS;
+    assert.ok(wait.renew >= 5 * 60 * 1000, "the helper itself allows 4 minutes for a renewal");
+    assert.ok(wait.authorize > wait.renew || wait.authorize >= 5 * 60 * 1000, "setup includes a dialog the person must answer");
+    assert.ok(wait.status >= 20 * 1000);
+});
+
+// ------------------------------------------------------------------ the background renewal job
+
+const agentReply = (background, extra = {}) => JSON.stringify({ ok: true, command: "agent-status", state: "idle", background, ...extra });
+
+test("the background job state is unknown until it is asked for, and asking is read-only", async () => {
+    const w = world({ statuses: [managed("ok")], helper: agentReply("off") });
+    assert.equal(w.controller.snapshot().background, "");
+    await w.controller.refreshBackground();
+    assert.equal(w.controller.snapshot().background, "off");
+    assert.deepEqual(plain(w.calls), [{ file: "resilience-helper", args: ["agent-status"] }]);
+});
+
+test("a helper that cannot answer leaves the job state unknown rather than guessing", async () => {
+    const w = world({ statuses: [managed("ok")], helper: new Error("no helper") });
+    await w.controller.refreshBackground();
+    assert.equal(w.controller.snapshot().background, "");
+});
+
+test("turning the job on asks the helper for exactly that cluster and records the answer", async () => {
+    const w = world({ statuses: [managed("ok")], helper: JSON.stringify({ ok: true, command: "agent-enable", state: "connected", background: "on" }) });
+    const r = await w.controller.enableBackground(CTX);
+    assert.equal(r.ok, true);
+    assert.deepEqual(plain(w.calls[0]), { file: "resilience-helper", args: ["agent-enable", CTX] });
+    assert.equal(w.controller.snapshot().background, "on");
+});
+
+test("declining the job's dialog changes nothing and is not an error", async () => {
+    const w = world({ statuses: [managed("ok")], helper: JSON.stringify({ ok: false, command: "agent-enable", state: "declined" }) });
+    await w.controller.refreshBackground();
+    const before = w.controller.snapshot();
+    await w.controller.enableBackground(CTX);
+    const after = w.controller.snapshot();
+    assert.equal(after.background, before.background);
+    assert.notEqual(after.phase, "attention");
+});
+
+test("a successful setup that also installed the job is remembered", async () => {
+    const w = world({ statuses: [{ connected: false }], helper: JSON.stringify({ ok: true, command: "authorize", state: "connected", context: CTX, background: "on" }) });
+    await w.controller.setup(CTX);
+    assert.equal(w.controller.snapshot().background, "on");
+});
+
+test("the job is only ever turned on by an explicit call, never by a check", async () => {
+    const w = world({ statuses: [managed("expired", { expired: true })], helper: ok });
+    for (let i = 0; i < 3; i++) { await w.controller.tick(); w.clock.ms += 400_000; }
+    assert.ok(w.calls.every((c) => c.args[0] === "renew"), "checks may only ever renew");
+});
+
+
+// ------------------------------------------------------------------ pages recover by themselves
+
+test("a successful renewal tells the page, so a page stuck on an access error can load again without a click", async () => {
+    const w = world({ statuses: [managed("expired", { expired: true })], helper: ok });
+    await w.controller.tick();
+    assert.equal(w.renewed.length, 1);
+});
+
+test("the page is told nothing when no renewal happened or it failed", async () => {
+    const notDue = world({ statuses: [managed("ok")], helper: ok });
+    await notDue.controller.tick();
+    const failed = world({ statuses: [managed("renew-soon")], helper: fail("too-slow") });
+    await failed.controller.tick();
+    assert.equal(notDue.renewed.length + failed.renewed.length, 0);
 });

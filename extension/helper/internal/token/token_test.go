@@ -8,13 +8,8 @@ import (
 	"testing"
 	"time"
 
-	authv1 "k8s.io/api/authentication/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
+	"resilience-engine/helper/internal/kube"
+	"resilience-engine/helper/internal/kube/kubetest"
 )
 
 var (
@@ -26,35 +21,32 @@ const tokenValue = "eyJ-super-secret-token-value"
 
 // serve makes the fake API answer TokenRequests with a token that expires after `grant`, whatever
 // was asked for, and records the request so a test can check what was asked.
-func serve(cs *fake.Clientset, grant time.Duration, asked *int64) {
-	cs.PrependReactor("create", "serviceaccounts", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		if a.GetSubresource() != "token" {
-			return false, nil, nil
+func serve(cs *kubetest.Fake, grant time.Duration, asked *int64) {
+	cs.IssueTokens(func(namespace, serviceAccount string, seconds int64) (kube.Token, error) {
+		if namespace != "resilience-engine" || serviceAccount != "resilience-engine-reader" {
+			return kube.Token{}, kube.NewAPIError(404, "NotFound", "serviceaccounts not found")
 		}
-		req := a.(k8stesting.CreateAction).GetObject().(*authv1.TokenRequest)
-		if asked != nil && req.Spec.ExpirationSeconds != nil {
-			*asked = *req.Spec.ExpirationSeconds
+		if asked != nil {
+			*asked = seconds
 		}
-		return true, &authv1.TokenRequest{Status: authv1.TokenRequestStatus{
-			Token:               tokenValue,
-			ExpirationTimestamp: metav1.NewTime(now.Add(grant)),
-		}}, nil
+		return kube.Token{Value: tokenValue, ExpiresAt: now.Add(grant)}, nil
 	})
 }
 
-func TestAsksForEightHoursAndReportsWhatKubernetesGranted(t *testing.T) {
-	cs := fake.NewClientset()
+func TestAsksForSevenDaysAndReportsWhatKubernetesGranted(t *testing.T) {
+	const week = 7 * 24 * time.Hour
+	cs := kubetest.New()
 	var asked int64
-	serve(cs, 8*time.Hour, &asked)
+	serve(cs, week, &asked)
 
 	got, err := Issue(ctx, cs, RequestedLifetime, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asked != int64((8 * time.Hour).Seconds()) {
+	if asked != int64(week.Seconds()) {
 		t.Fatalf("asked for %d seconds", asked)
 	}
-	if got.ExpiresAt != now.Add(8*time.Hour) || got.Lifetime() != 8*time.Hour {
+	if got.ExpiresAt != now.Add(week) || got.Lifetime() != week {
 		t.Fatalf("expiry %v lifetime %v", got.ExpiresAt, got.Lifetime())
 	}
 	if got.Token.Reveal() != tokenValue {
@@ -63,8 +55,8 @@ func TestAsksForEightHoursAndReportsWhatKubernetesGranted(t *testing.T) {
 }
 
 func TestTheRealExpiryIsUsedWhenTheClusterShortensTheToken(t *testing.T) {
-	cs := fake.NewClientset()
-	serve(cs, 2*time.Hour, nil) // asked for 8h, cluster clamps to 2h
+	cs := kubetest.New()
+	serve(cs, 2*time.Hour, nil) // asked for 7 days, cluster clamps to 2h
 
 	got, err := Issue(ctx, cs, RequestedLifetime, now)
 	if err != nil {
@@ -76,7 +68,7 @@ func TestTheRealExpiryIsUsedWhenTheClusterShortensTheToken(t *testing.T) {
 }
 
 func TestATokenThatExpiresTooSoonIsRefused(t *testing.T) {
-	cs := fake.NewClientset()
+	cs := kubetest.New()
 	serve(cs, 2*time.Minute, nil)
 	if _, err := Issue(ctx, cs, RequestedLifetime, now); !errors.Is(err, ErrTooShortLived) {
 		t.Fatalf("err = %v", err)
@@ -84,20 +76,16 @@ func TestATokenThatExpiresTooSoonIsRefused(t *testing.T) {
 }
 
 func TestAMissingExpiryIsRefusedNotGuessed(t *testing.T) {
-	cs := fake.NewClientset()
-	cs.PrependReactor("create", "serviceaccounts", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		return true, &authv1.TokenRequest{Status: authv1.TokenRequestStatus{Token: tokenValue}}, nil
-	})
+	cs := kubetest.New()
+	cs.IssueTokens(func(string, string, int64) (kube.Token, error) { return kube.Token{Value: tokenValue}, nil })
 	if _, err := Issue(ctx, cs, RequestedLifetime, now); !errors.Is(err, ErrNoExpiry) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestAnEmptyTokenIsRefused(t *testing.T) {
-	cs := fake.NewClientset()
-	cs.PrependReactor("create", "serviceaccounts", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		return true, &authv1.TokenRequest{Status: authv1.TokenRequestStatus{ExpirationTimestamp: metav1.NewTime(now.Add(time.Hour))}}, nil
-	})
+	cs := kubetest.New()
+	cs.IssueTokens(func(string, string, int64) (kube.Token, error) { return kube.Token{ExpiresAt: now.Add(time.Hour)}, nil })
 	if _, err := Issue(ctx, cs, RequestedLifetime, now); err == nil {
 		t.Fatal("an empty token must be an error")
 	}
@@ -108,14 +96,12 @@ func TestForbiddenAndMissingServiceAccountAreDistinctErrors(t *testing.T) {
 		err  error
 		want error
 	}{
-		"forbidden": {apierrors.NewForbidden(schema.GroupResource{Resource: "serviceaccounts/token"}, "x", nil), ErrForbidden},
-		"not found": {apierrors.NewNotFound(schema.GroupResource{Resource: "serviceaccounts"}, "x"), ErrServiceAccountMissing},
+		"forbidden": {kube.NewAPIError(403, "Forbidden", "x"), ErrForbidden},
+		"not found": {kube.NewAPIError(404, "NotFound", "x"), ErrServiceAccountMissing},
 	} {
 		t.Run(name, func(t *testing.T) {
-			cs := fake.NewClientset()
-			cs.PrependReactor("create", "serviceaccounts", func(a k8stesting.Action) (bool, runtime.Object, error) {
-				return true, nil, tc.err
-			})
+			cs := kubetest.New()
+			cs.IssueTokens(func(string, string, int64) (kube.Token, error) { return kube.Token{}, tc.err })
 			if _, err := Issue(ctx, cs, RequestedLifetime, now); !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
@@ -124,7 +110,7 @@ func TestForbiddenAndMissingServiceAccountAreDistinctErrors(t *testing.T) {
 }
 
 func TestANonPositiveRequestIsRejectedBeforeAskingTheCluster(t *testing.T) {
-	cs := fake.NewClientset()
+	cs := kubetest.New()
 	if _, err := Issue(ctx, cs, 0, now); err == nil {
 		t.Fatal("want an error")
 	}
@@ -134,7 +120,7 @@ func TestANonPositiveRequestIsRejectedBeforeAskingTheCluster(t *testing.T) {
 }
 
 func TestTheTokenNeverAppearsInFormattedOutputOrErrors(t *testing.T) {
-	cs := fake.NewClientset()
+	cs := kubetest.New()
 	serve(cs, 8*time.Hour, nil)
 	got, _ := Issue(ctx, cs, RequestedLifetime, now)
 
@@ -143,7 +129,7 @@ func TestTheTokenNeverAppearsInFormattedOutputOrErrors(t *testing.T) {
 			t.Fatalf("%s leaked: %s", verb, out)
 		}
 	}
-	cs2 := fake.NewClientset()
+	cs2 := kubetest.New()
 	serve(cs2, time.Minute, nil)
 	_, err := Issue(ctx, cs2, RequestedLifetime, now)
 	if err == nil || strings.Contains(err.Error(), tokenValue) {

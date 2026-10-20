@@ -30,7 +30,13 @@ const (
 type Socket struct {
 	Dir  string // directory that contains the socket
 	File string // socket file name inside Dir
+	// Timeout bounds one request. Zero means defaultSocketTimeout.
+	Timeout time.Duration
 }
+
+// defaultSocketTimeout is short on purpose: a socket that does not answer is not worth waiting for
+// when DockerExec can carry the same request.
+const defaultSocketTimeout = 15 * time.Second
 
 // NewSocket returns the mirrored-socket transport for a platform, or ErrUnverifiedPlatform.
 func NewSocket(goos, home string) (*Socket, error) {
@@ -78,11 +84,18 @@ func (s *Socket) client() (*http.Client, func(), error) {
 		}
 	}
 	return &http.Client{
-		Timeout: 15 * time.Second,
+		Timeout: s.timeout(),
 		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", dial)
 		}},
 	}, cleanup, nil
+}
+
+func (s *Socket) timeout() time.Duration {
+	if s.Timeout > 0 {
+		return s.Timeout
+	}
+	return defaultSocketTimeout
 }
 
 func (s *Socket) do(ctx context.Context, method string, body secret.Bytes) (Status, error) {
@@ -105,7 +118,7 @@ func (s *Socket) do(ctx context.Context, method string, body secret.Bytes) (Stat
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Status{}, fmt.Errorf("%w: could not reach the backend socket", ErrUnavailable)
+		return Status{}, unavailable("could not reach the backend socket", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

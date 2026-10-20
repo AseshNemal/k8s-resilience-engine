@@ -26,22 +26,23 @@ test("a past expiry says expired, and a missing or invalid one yields nothing", 
     assert.equal(formatExpiry("not a date", NOW), null);
 });
 
-test("not connected: says the results are sample data and offers to connect", () => {
+test("not connected: says pages show an error instead of data and offers to connect", () => {
     const info = describeCluster({ connected: false }, NOW);
     assert.equal(info.state, "none");
     assert.equal(info.chip, "Not connected");
-    assert.match(info.detail, /sample data/);
+    assert.match(info.detail, /error instead of data/);
+    assert.doesNotMatch(info.detail, /sample/i);
     assert.equal(info.action, "Connect cluster");
 });
 
-test("connected: read-only, names the server, and never claims the overview is live", () => {
+test("connected: read-only, names the server, and says pages read the connected cluster", () => {
     const info = describeCluster({ connected: true, server: "host.docker.internal:58227", expiresAt: "2026-10-25T12:00:00Z", expired: false }, NOW);
     assert.equal(info.state, "connected");
     assert.equal(info.chip, "Connected · read-only");
     assert.match(info.title, /host\.docker\.internal:58227/);
     assert.match(info.detail, /expires Oct 25, 2026 \(in 7 days\)/);
-    assert.match(info.detail, /Overview and the research pages show sample data/);
-    assert.match(info.detail, /Deployment topology can show your live cluster/);
+    assert.match(info.detail, /Overview and Deployment topology show your connected cluster/);
+    assert.doesNotMatch(info.detail, /sample/i);
 });
 
 test("connected without an expiry still reads correctly", () => {
@@ -50,11 +51,54 @@ test("connected without an expiry still reads correctly", () => {
     assert.match(info.detail, /^Read-only access\./);
 });
 
-test("an expired credential is flagged and offers renewal", () => {
-    const info = describeCluster({ connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: true }, NOW);
-    assert.equal(info.state, "expired");
-    assert.equal(info.chip, "Credential expired");
-    assert.equal(info.action, "Renew credential");
+const MANAGED_EXPIRED = { connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: true, context: "kind-x" };
+const MANAGED_LIVE = { connected: true, server: "h:1", expiresAt: "2026-10-25T12:00:00Z", expired: false, managed: true, context: "kind-x" };
+
+test("an expired helper-managed credential is shown as renewing by itself, with no button to press", () => {
+    const info = describeCluster(MANAGED_EXPIRED, NOW, true, { phase: "renewing", background: "on" });
+    assert.equal(info.state, "renewing");
+    assert.equal(info.chip, "Renewing…");
+    assert.equal(info.action, null, "renewal is automatic, so there is nothing to click");
+    assert.match(info.title, /renewing the credential automatically/i);
+    assert.doesNotMatch(info.detail, /expire/i, "no expiry text for a credential that renews itself");
+    assert.doesNotMatch(info.detail, /sample/i);
+});
+
+test("while a renewal keeps failing, the reason is shown but there is still nothing to click", () => {
+    const info = describeCluster(MANAGED_EXPIRED, NOW, true, { phase: "retrying", state: "too-slow", message: "Docker Desktop is responding very slowly.", background: "on" });
+    assert.equal(info.state, "renewing");
+    assert.match(info.detail, /Docker Desktop is responding very slowly/);
+    assert.equal(info.action, null);
+});
+
+test("only a problem a person can fix asks for their attention, and then it points at the connection page", () => {
+    const info = describeCluster(MANAGED_EXPIRED, NOW, true, { phase: "attention", state: "authorization-revoked", message: "The extension's access was removed from the cluster." });
+    assert.equal(info.state, "attention");
+    assert.match(info.detail, /access was removed/);
+    assert.equal(info.action, "Manage connection");
+});
+
+test("a managed credential that has expired and has no background job offers to turn it on once", () => {
+    const info = describeCluster(MANAGED_EXPIRED, NOW, true, { phase: "renewing", background: "off" });
+    assert.equal(info.action, "Turn on background renewal");
+    assert.equal(describeCluster(MANAGED_EXPIRED, NOW, true, { phase: "renewing", background: "stale" }).action, "Turn on background renewal");
+    assert.equal(describeCluster(MANAGED_EXPIRED, NOW, true, { phase: "renewing", background: "" }).action, null, "unknown is not off: never nag on a guess");
+    assert.equal(describeCluster(MANAGED_EXPIRED, NOW, true, { phase: "renewing", background: "unsupported" }).action, null);
+});
+
+test("a live managed credential shows no expiry and says it renews itself", () => {
+    const info = describeCluster(MANAGED_LIVE, NOW, true, { phase: "ready", background: "on" });
+    assert.equal(info.state, "connected");
+    assert.doesNotMatch(info.detail, /expires/);
+    assert.match(info.detail, /renews itself/);
+    assert.match(info.detail, /background/i);
+    assert.equal(info.action, "Manage connection");
+});
+
+test("a live managed credential without the background job explains the gap and offers to close it", () => {
+    const info = describeCluster(MANAGED_LIVE, NOW, true, { phase: "ready", background: "off" });
+    assert.match(info.detail, /Docker Desktop is closed/);
+    assert.equal(info.action, "Turn on background renewal");
 });
 
 test("an expired hand-added credential cannot renew itself, so it offers automatic setup", () => {
@@ -71,11 +115,6 @@ test("an expired hand-added credential without automatic setup offers a replacem
     const info = describeCluster(status, NOW, false);
     assert.equal(info.action, "Replace credential");
     assert.doesNotMatch(info.detail, /renews itself/);
-});
-
-test("an expired helper-managed credential still says renew: the extension retries it on its own", () => {
-    const status = { connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: true };
-    assert.equal(describeCluster(status, NOW, true).action, "Renew credential");
 });
 
 test("a live hand-added credential warns it will not renew and offers automatic setup", () => {

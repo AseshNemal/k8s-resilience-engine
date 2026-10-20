@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""Build, install, update, inspect and clean up the Resilience Engine Docker Desktop extension.
+
+  extension-manage install   [--version X.Y.Z]   build the image and install the extension
+  extension-manage update    [--version X.Y.Z]   build a new version and replace the installed one
+  extension-manage uninstall                     remove the extension (asks first)
+  extension-manage status                        installed version, state and local image tags
+  extension-manage check                         run the test suites that guard the extension
+  extension-manage clean                         delete old local image tags (asks first)
+
+  Options: --version X.Y.Z  tag to build (default: the next patch version, never one that already exists)
+           --skip-checks    do not run the test suites before building
+           --dry-run        print every command instead of running it
+           --yes            do not ask for confirmation
+
+Run it as scripts/extension-manage.sh (macOS, Linux) or scripts\\extension-manage.cmd (Windows); both
+start this file. It only needs Python 3.9 or newer and the Docker CLI, plus Go and Node to run `check`.
+
+This only manages the Docker extension and its image. It never touches your Kubernetes cluster or its
+access objects: approving cluster access happens in the extension's own dialog, and
+scripts/extension-cluster-access.sh --revoke removes it. An update keeps the extension's data volume.
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+if sys.version_info < (3, 9):  # pragma: no cover - only reachable on an unsupported interpreter
+    sys.exit("ERROR: Python 3.9 or newer is required to run the extension manager.")
+
+IMAGE = "k8s-resilience-engine"
+EXTENSION_ID = "k8s-resilience-engine"
+DOCKERFILE = "extension/Dockerfile"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+COMMANDS = ("install", "update", "uninstall", "status", "check", "clean")
+
+# A build that runs the Go compiler and imports the whole Python app needs room. The image build is
+# arranged to avoid peaks, but a Docker VM below this still swaps badly. The default can be changed
+# with RESILIENCE_MIN_DOCKER_MEMORY_GB; it only ever produces a warning.
+DEFAULT_MIN_DOCKER_MEMORY_GB = 3.0
+DOCKER_ANSWER_SECONDS = 30  # a healthy daemon answers `docker info` in well under a second
+DOCKER_READ_SECONDS = 120
+
+VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VersionKey = tuple
+
+
+class Exit(Exception):
+    """Stop the program with this exit code (raised instead of calling sys.exit deep inside)."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass
+class Captured:
+    """The result of reading from a command: code is None when the command did not answer in time."""
+
+    code: int | None
+    out: str
+
+
+class SystemShell:
+    """Runs real programs. Tests substitute a recording stand-in with the same three methods."""
+
+    def which(self, name: str) -> str | None:
+        return shutil.which(name)
+
+    def capture(self, argv: list[str], cwd: Path, timeout: float) -> Captured:
+        try:
+            done = subprocess.run(
+                argv, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return Captured(None, "")
+        except OSError:
+            return Captured(127, "")
+        return Captured(done.returncode, done.stdout)
+
+    def run(self, argv: list[str], cwd: Path) -> int:
+        try:
+            return subprocess.run(argv, cwd=str(cwd)).returncode
+        except OSError as error:
+            print(f"ERROR: could not start {argv[0]}: {error.strerror or error}", file=sys.stderr)
+            return 127
+
+
+@dataclass
+class Options:
+    command: str = ""
+    version: str = ""
+    skip_checks: bool = False
+    dry_run: bool = False
+    assume_yes: bool = False
+
+
+@dataclass
+class Manager:
+    options: Options
+    shell: SystemShell = field(default_factory=SystemShell)
+    root: Path = REPO_ROOT
+    stdin: object = None
+    environ: dict = field(default_factory=lambda: dict(os.environ))
+
+    # -- output and control ----------------------------------------------------------------------
+
+    def die(self, message: str, code: int = 1) -> None:
+        print(f"ERROR: {message}", file=sys.stderr)
+        raise Exit(code)
+
+    def run(self, argv: list[str], *, cwd: Path | None = None, tolerate: bool = False) -> int:
+        """Print a command, then run it unless this is a dry run. A failure stops the program."""
+        where = cwd or self.root
+        suffix = f"   (in {where.relative_to(self.root).as_posix()})" if where != self.root else ""
+        print("+ " + " ".join(argv) + suffix, flush=True)
+        if self.options.dry_run:
+            return 0
+        code = self.shell.run(argv, where)
+        if code != 0 and not tolerate:
+            raise Exit(code)
+        return code
+
+    def dry_run_notice(self) -> bool:
+        """After the real commands: in a dry run nothing happened, so say that instead of reporting success."""
+        if not self.options.dry_run:
+            return False
+        print()
+        print("Dry run: nothing was changed.")
+        return True
+
+    def confirm(self) -> None:
+        if self.options.assume_yes or self.options.dry_run:
+            return
+        print("Proceed? [y/N] ", end="", flush=True)
+        stream = self.stdin if self.stdin is not None else sys.stdin
+        answer = stream.readline().strip()
+        if answer not in ("y", "Y", "yes", "YES"):
+            print("Aborted; nothing was changed.")
+            raise Exit(1)
+
+    # -- reading Docker's state (always real, even in a dry run: these never change anything) ---
+
+    def docker_read(self, args: list[str], timeout: float = DOCKER_READ_SECONDS) -> Captured:
+        return self.shell.capture(["docker", *args], self.root, timeout)
+
+    def our_extension(self) -> dict | None:
+        """The `docker extension ls` entry for this extension, or None when it is not installed."""
+        text = self.docker_read(["extension", "ls", "--format", "json"]).out.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+            entries = parsed if isinstance(parsed, list) else [parsed]
+        except ValueError:  # older Docker prints one JSON object per line
+            entries = []
+            for line in text.splitlines():
+                try:
+                    entries.append(json.loads(line))
+                except ValueError:
+                    continue
+        for entry in entries:
+            if isinstance(entry, dict) and str(entry.get("image", "")).startswith(f"{IMAGE}:"):
+                return entry
+        return None
+
+    def installed_version(self) -> str:
+        entry = self.our_extension()
+        if not entry:
+            return ""
+        version = str(entry["image"]).split(":", 1)[1]
+        return version if re.fullmatch(r"[0-9][0-9.]*", version) else ""
+
+    def installed_state(self) -> str:
+        entry = self.our_extension() or {}
+        vm = entry.get("vm")
+        return str(vm.get("status", "")) if isinstance(vm, dict) else ""
+
+    def local_tags(self) -> list[str]:
+        """Plain X.Y.Z tags only, oldest to newest. Tags such as 0.1.5-qs belong to someone's experiment."""
+        out = self.docker_read(["images", IMAGE, "--format", "{{.Tag}}"]).out
+        tags = {line.strip() for line in out.splitlines() if VERSION_PATTERN.match(line.strip())}
+        return sorted(tags, key=version_key)
+
+    def next_version(self) -> str:
+        """The next version nobody has used: above both the installed version and every local tag.
+
+        Docker keeps running the old image when a tag is reused, so a reused tag would look like a
+        successful update that did nothing.
+        """
+        known = [v for v in [self.installed_version(), *self.local_tags()] if v]
+        return bump_patch(max(known, key=version_key)) if known else "0.1.0"
+
+    # -- preflight ---------------------------------------------------------------------------------
+
+    def preflight_docker(self) -> None:
+        """Fail fast and clearly when Docker does not answer; warn when its VM is short of memory."""
+        answer = self.docker_read(["info", "--format", "{{.MemTotal}}"], DOCKER_ANSWER_SECONDS)
+        if answer.code is None:
+            self.die(
+                f"Docker did not answer within {DOCKER_ANSWER_SECONDS} seconds. Its virtual machine may be out of "
+                "memory: close other applications or restart Docker Desktop, then try again."
+            )
+        if answer.code != 0:
+            self.die("Docker is not running. Start Docker Desktop and try again.")
+        try:
+            have_gb = int(answer.out.strip()) / (1024 ** 3)
+        except ValueError:
+            return  # unknown stays unknown: no warning rather than a guess
+        want_gb = float(self.environ.get("RESILIENCE_MIN_DOCKER_MEMORY_GB", DEFAULT_MIN_DOCKER_MEMORY_GB))
+        if have_gb < want_gb:
+            print(
+                f"WARNING: Docker has {have_gb:.1f} GB of memory and building the extension works best with at "
+                f"least {want_gb:g} GB. Raise it in Docker Desktop (Settings > Resources) or close other "
+                "applications first; the build may be slow.",
+                file=sys.stderr,
+            )
+
+    def python_for_tests(self) -> str:
+        for candidate in (self.root / ".venv" / "bin" / "python", self.root / ".venv" / "Scripts" / "python.exe"):
+            if candidate.is_file():
+                return str(candidate)
+        return sys.executable or "python3"
+
+    def missing_check_tools(self) -> list[str]:
+        needed = {"go": "Go (https://go.dev/dl/)", "node": "Node.js (https://nodejs.org/)"}
+        return [label for tool, label in needed.items() if not self.shell.which(tool)]
+
+    # -- commands -----------------------------------------------------------------------------------
+
+    def cmd_check(self) -> None:
+        missing = self.missing_check_tools()
+        if missing:
+            summary = "The test suites that guard the extension need " + " and ".join(missing) + " on your PATH."
+            if self.options.dry_run:
+                print(f"Note: {summary} A real run would stop here.", file=sys.stderr)
+            else:
+                self.die(f"{summary} Install them, or add --skip-checks to build without running the tests.")
+        self.run([self.python_for_tests(), "-m", "pytest", "-q"])
+        self.run(["go", "test", "./...", "-count=1"], cwd=self.root / "extension" / "helper")
+        node_tests = sorted(
+            Path(p).relative_to(self.root).as_posix()
+            for p in glob.glob(str(self.root / "extension" / "ui-src" / "*.test.mjs"))
+        )
+        self.run(["node", "--test", *node_tests, "tests/frontend/connection-state.test.mjs", "tests/frontend/api.test.mjs"])
+
+    def build_image(self, version: str) -> None:
+        if not self.options.skip_checks:
+            self.cmd_check()
+        self.run(["docker", "build", "-f", DOCKERFILE, "-t", f"{IMAGE}:{version}", "."])
+
+    def cmd_install(self) -> None:
+        current = self.installed_version()
+        if current:
+            self.die(f"The extension is already installed (version {current}). Use 'update' instead.")
+        version = self.options.version or self.next_version()
+        self.build_image(version)
+        self.run(["docker", "extension", "install", "-f", f"{IMAGE}:{version}"])
+        if self.dry_run_notice():
+            return
+        print()
+        print(f"Installed {IMAGE}:{version}. Open Resilience Engine in Docker Desktop, choose Connect cluster, and")
+        print("use Set up access to approve read-only access to your kind cluster.")
+
+    def cmd_update(self) -> None:
+        current = self.installed_version()
+        if not current:
+            self.die("The extension is not installed. Use 'install' first.")
+        version = self.options.version or self.next_version()
+        if version == current or version in self.local_tags():
+            self.die(f"Version {version} already exists locally. Docker would keep running the old image, so pick a new version.")
+        self.build_image(version)
+        self.run(["docker", "extension", "update", "-f", f"{IMAGE}:{version}"])
+        if self.dry_run_notice():
+            return
+        print()
+        print(f"Updated {current} -> {version}. Reopen the extension in Docker Desktop. Your data volume was kept.")
+        print("If the role in the cluster changed, the Connect cluster page asks you to approve it once.")
+
+    def helper_path(self) -> Path | None:
+        """Where Docker Desktop on macOS keeps the host helper, if it is there."""
+        home = self.environ.get("HOME")
+        if not home:
+            return None
+        path = Path(home) / "Library/Containers/com.docker.docker/Data/extensions" / EXTENSION_ID / "host" / "resilience-helper"
+        return path if path.is_file() else None
+
+    def cmd_uninstall(self) -> None:
+        current = self.installed_version()
+        if not current:
+            print("The extension is not installed; nothing to uninstall.")
+            return
+        print(f"This will remove the Resilience Engine extension (version {current}) from Docker Desktop.")
+        self.confirm()
+        # The background renewal job (a macOS LaunchAgent) runs the helper binary, which goes away with the
+        # extension, so remove the job first. A failure here must not stop the uninstall.
+        helper = self.helper_path()
+        if helper is not None:
+            self.run([str(helper), "agent-disable"], tolerate=True)
+        self.run(["docker", "extension", "uninstall", EXTENSION_ID])
+        if self.dry_run_notice():
+            return
+        print()
+        print("Your cluster access was not touched. To remove it from the cluster too, run:")
+        print("  ./scripts/extension-cluster-access.sh --revoke")
+
+    def cmd_status(self) -> None:
+        current = self.installed_version()
+        if current:
+            state = self.installed_state()
+            print(f"Extension : installed, version {current}" + (f" ({state})" if state else ""))
+        else:
+            print("Extension : not installed")
+        print(f"Local image tags for {IMAGE}:")
+        tags = self.local_tags()
+        if not tags:
+            print("  (none)")
+        for tag in tags:
+            print(f"  {tag}")
+
+    def cmd_clean(self) -> None:
+        keep = self.installed_version()
+        if not keep:
+            tags = self.local_tags()
+            keep = tags[-1] if tags else ""
+        old = [tag for tag in self.local_tags() if tag != keep]
+        if not old:
+            print("Nothing to clean.")
+            return
+        print(f"Keeping {IMAGE}:{keep or 'none'}. These local images will be deleted:")
+        for tag in old:
+            print(f"  {IMAGE}:{tag}")
+        self.confirm()
+        for tag in old:
+            if self.run(["docker", "image", "rm", f"{IMAGE}:{tag}"], tolerate=True) != 0:
+                print(f"  skipped {IMAGE}:{tag} (it may be in use)")
+
+
+def version_key(version: str) -> VersionKey:
+    return tuple(int(part) for part in version.split("."))
+
+
+def bump_patch(version: str) -> str:
+    major, minor, patch = version.split(".")[:3]
+    return f"{major}.{minor}.{int(patch) + 1}"
+
+
+def usage(stream) -> None:
+    print("Usage: scripts/extension-manage.sh <command> [options]", file=stream)
+    print("       scripts\\extension-manage.cmd <command> [options]   (Windows)", file=stream)
+    print(file=stream)
+    print((__doc__ or "").strip("\n"), file=stream)
+
+
+def parse(argv: list[str]) -> Options:
+    options = Options()
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg in ("-h", "--help", "help"):
+            usage(sys.stdout)
+            raise Exit(0)
+        if arg == "--version":
+            value = argv[index + 1] if index + 1 < len(argv) else ""
+            if not value:
+                print("ERROR: --version needs a value such as 0.2.0", file=sys.stderr)
+                raise Exit(2)
+            options.version = value
+            index += 2
+            continue
+        if arg == "--skip-checks":
+            options.skip_checks = True
+        elif arg == "--dry-run":
+            options.dry_run = True
+        elif arg in ("--yes", "-y"):
+            options.assume_yes = True
+        elif arg.startswith("-"):
+            print(f"Unknown option: {arg}\n", file=sys.stderr)
+            usage(sys.stderr)
+            raise Exit(2)
+        else:
+            if options.command:
+                print(f"ERROR: Only one command at a time (got '{options.command}' and '{arg}').", file=sys.stderr)
+                raise Exit(2)
+            options.command = arg
+        index += 1
+
+    if not options.command:
+        usage(sys.stderr)
+        raise Exit(2)
+    if options.command not in COMMANDS:
+        print(f"Unknown command: {options.command}\n", file=sys.stderr)
+        usage(sys.stderr)
+        raise Exit(2)
+    if options.version and not VERSION_PATTERN.match(options.version):
+        print(f"ERROR: --version must look like X.Y.Z (for example 0.2.0), got '{options.version}'.", file=sys.stderr)
+        raise Exit(2)
+    return options
+
+
+def main(argv: list[str] | None = None, *, shell: SystemShell | None = None, root: Path = REPO_ROOT,
+         stdin=None, environ: dict | None = None) -> int:
+    try:
+        manager = Manager(parse(sys.argv[1:] if argv is None else list(argv)), shell or SystemShell(), root, stdin,
+                          dict(os.environ) if environ is None else environ)
+        if manager.options.command != "check":
+            if not manager.shell.which("docker"):
+                manager.die("'docker' is not installed or not on PATH.")
+            manager.preflight_docker()
+        getattr(manager, f"cmd_{manager.options.command}")()
+    except Exit as stop:
+        return stop.code
+    except KeyboardInterrupt:
+        print("\nInterrupted; stopping.", file=sys.stderr)
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

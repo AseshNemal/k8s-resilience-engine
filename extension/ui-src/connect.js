@@ -47,12 +47,17 @@
     function render(s) {
         const connected = Boolean(s.connected);
         const expired = connected && Boolean(s.expired);
-        status.dataset.state = !connected ? "none" : expired ? "expired" : "connected";
-        title.textContent = !connected ? "Not connected" : expired ? "Credential expired" : "Connected · read-only";
+        // A credential the helper installed renews itself, so it is never shown as expired or with an
+        // expiry date: an expired one is simply being renewed.
+        const managed = connected && Boolean(s.managed);
+        status.dataset.state = !connected ? "none" : expired ? (managed ? "renewing" : "expired") : "connected";
+        title.textContent = !connected ? "Not connected" : expired ? (managed ? "Renewing automatically" : "Credential expired") : "Connected · read-only";
         summary.textContent = !connected
-            ? "Choose a read-only kubeconfig to read your cluster. Until then the app uses sample data."
+            ? "Choose a read-only kubeconfig to read your cluster. Until then pages report that no cluster is connected."
             : expired
-                ? "Renew the credential to keep reading your cluster."
+                ? (managed
+                    ? "The credential is being renewed automatically. No action is needed; pages show data again as soon as that finishes."
+                    : "Replace the credential to keep reading your cluster.")
                 : "The app can list nodes, pods, services, deployments and replicasets. It cannot change your cluster.";
         details.hidden = !connected;
         disconnect.hidden = !connected;
@@ -60,7 +65,7 @@
         if (connected) {
             q("connect-server").textContent = s.server;
             q("connect-credential").textContent = s.credential;
-            q("connect-expiry").textContent = expiryText(s.expiresAt);
+            q("connect-expiry").textContent = managed ? "Renews itself automatically" : expiryText(s.expiresAt);
         }
     }
 

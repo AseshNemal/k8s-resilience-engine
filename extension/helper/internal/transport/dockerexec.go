@@ -80,7 +80,7 @@ func (d DockerExec) container(ctx context.Context, docker string) (string, error
 		"--filter", "status=running",
 	}, nil)
 	if err != nil || res.ExitCode != 0 {
-		return "", fmt.Errorf("%w: could not ask Docker for the backend container", ErrUnavailable)
+		return "", unavailable("could not ask Docker for the backend container", err)
 	}
 	var ids []string
 	for _, line := range strings.Fields(string(res.Stdout)) {
@@ -116,7 +116,7 @@ func (d DockerExec) run(ctx context.Context, args []string, stdin secret.Bytes) 
 	}
 	res, err := d.Runner.Run(ctx, docker, argv, in)
 	if err != nil {
-		return Status{}, fmt.Errorf("%w: could not run the backend command", ErrUnavailable)
+		return Status{}, unavailable("could not run the backend command", err)
 	}
 	var out struct {
 		OK    bool   `json:"ok"`
