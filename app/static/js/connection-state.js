@@ -137,6 +137,71 @@
         };
     }
 
+    function plural(count, word) {
+        return `${count} ${word}${count === 1 ? "" : "s"}`;
+    }
+
+    const NAMESPACE_BADGES = {
+        ok: { variant: "success", text: "Complete" },
+        empty: { variant: "info", text: "No workloads" },
+        partial: { variant: "warning", text: "Partial" },
+    };
+
+    /**
+     * Describe the all-namespaces overview envelope (status ok / empty / partial). Every figure is copied
+     * from the response; a namespace or service that was not returned is never invented here.
+     */
+    function describeOverview(result) {
+        const namespaces = result.namespaces || [];
+        const totals = result.totals || {};
+        const excluded = result.excludedNamespaces || [];
+
+        const rows = namespaces.map((entry) => ({
+            namespace: entry.namespace,
+            status: entry.status,
+            badge: NAMESPACE_BADGES[entry.status] || NAMESPACE_BADGES.partial,
+            unresolved: (entry.unresolved || []).length,
+            unresolvedNotes: (entry.unresolved || []).map((item) => `${item.kind} ${item.name}: ${item.reason}`),
+            services: ((entry.graph || {}).services || []).map((service) => ({
+                name: service.name,
+                replicas: `${service.readyReplicas}/${service.declaredReplicas} ready`,
+                nodes: [...new Set((service.pods || []).map((pod) => pod.node))].sort(),
+            })),
+        }));
+
+        const notes = [];
+        if (excluded.length) notes.push(`System namespaces not shown: ${excluded.join(", ")}.`);
+
+        let state = result.status;
+        let badge;
+        let headline;
+        if (result.status === "ok") {
+            badge = { variant: "success", text: "Live cluster · evidence complete" };
+            headline = `${plural(totals.services, "service")} in ${plural(rows.length, "namespace")} on ${plural(totals.workerNodes, "worker node")}.`;
+        } else if (result.status === "empty") {
+            badge = { variant: "info", text: "Connected · no workloads found" };
+            headline = `The cluster is connected (${plural(totals.workerNodes, "worker node")}), but no workloads were found in any application namespace.`;
+        } else {
+            state = "partial";
+            badge = { variant: "warning", text: "Live cluster · partial evidence" };
+            headline = "Some namespaces could not be fully resolved. Treat results as incomplete.";
+        }
+
+        const cluster = result.cluster || {};
+        const fingerprint = cluster.connectionFingerprint ? cluster.connectionFingerprint.slice(0, 8) : "unknown";
+        return {
+            state,
+            badge,
+            headline,
+            notes,
+            totals: { workerNodes: totals.workerNodes, services: totals.services, unresolved: totals.unresolved },
+            rows,
+            excluded,
+            capturedAt: result.capturedAt,
+            provenance: `Captured ${result.capturedAt}. Connection fingerprint ${fingerprint}… detects a changed connection; it is not proof of which cluster this is.`,
+        };
+    }
+
     function element(doc, tag, text, attributes = {}) {
         const node = doc.createElement(tag);
         if (text !== undefined) node.textContent = text; // never parsed as HTML
@@ -184,5 +249,5 @@
         element.textContent = badge.text;
     }
 
-    window.ResilienceConnection = { describeError, describeDiscovery, renderStateCard, applyBadge };
+    window.ResilienceConnection = { describeError, describeDiscovery, describeOverview, renderStateCard, applyBadge };
 })();

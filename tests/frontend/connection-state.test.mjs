@@ -184,3 +184,108 @@ test("retry is offered only when it can help and a handler is given", () => {
 test("no state helper contains sample or demo wording", () => {
     assert.doesNotMatch(source, /sample data|demo data|Live Cluster \(KinD\)/i);
 });
+
+// ---- Overview across every namespace -------------------------------------------------------------
+
+// Values built inside the vm context have their own Object/Array prototypes; compare plain copies.
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+function overview(overrides = {}) {
+    const service = (name, ready, declared, nodes) => ({
+        name,
+        declaredReplicas: declared,
+        readyReplicas: ready,
+        pods: nodes.map((node, i) => ({ name: `${name}-${i}`, node, ready: true })),
+    });
+    return {
+        status: "ok",
+        cluster: { connectionFingerprint: "abcdef1234567890", identityVerified: false },
+        capturedAt: "2026-10-19T10:00:00Z",
+        excludedNamespaces: ["kube-system"],
+        totals: { workerNodes: 3, services: 3, unresolved: 0 },
+        namespaces: [
+            { namespace: "bookinfo", status: "ok", unresolved: [], graph: { nodes: [], services: [
+                service("productpage", 1, 1, ["worker2"]), service("reviews", 2, 2, ["worker3", "worker"]),
+            ] } },
+            { namespace: "resilience-test", status: "ok", unresolved: [], graph: { nodes: [], services: [
+                service("paymentservice", 3, 3, ["worker", "worker", "worker"]),
+            ] } },
+        ],
+        ...overrides,
+    };
+}
+
+test("overview: a complete cluster is reported as live evidence with its totals and one row per namespace", () => {
+    const described = api.describeOverview(overview());
+
+    assert.equal(described.state, "ok");
+    assert.equal(described.badge.variant, "success");
+    assert.deepEqual(plain(described.totals), { workerNodes: 3, services: 3, unresolved: 0 });
+    assert.deepEqual(plain(described.rows.map((row) => row.namespace)), ["bookinfo", "resilience-test"]);
+    assert.match(described.headline, /3 services in 2 namespaces on 3 worker nodes/);
+});
+
+test("overview: each service row shows ready over declared replicas and the distinct nodes it runs on", () => {
+    const [bookinfo, payment] = api.describeOverview(overview()).rows;
+
+    assert.deepEqual(plain(bookinfo.services.map((s) => [s.name, s.replicas, s.nodes])), [
+        ["productpage", "1/1 ready", ["worker2"]],
+        ["reviews", "2/2 ready", ["worker", "worker3"]],
+    ]);
+    assert.deepEqual(plain(payment.services[0].nodes), ["worker"]);
+});
+
+test("overview: unresolved items make the page partial and are counted per namespace, never hidden", () => {
+    const data = overview({ status: "partial", totals: { workerNodes: 3, services: 3, unresolved: 2 } });
+    data.namespaces[0].status = "partial";
+    data.namespaces[0].unresolved = [
+        { kind: "Pod", name: "p1", reason: "NO_MATCHING_DEPLOYMENT" },
+        { kind: "Pod", name: "p2", reason: "POD_NOT_SCHEDULED" },
+    ];
+
+    const described = api.describeOverview(data);
+
+    assert.equal(described.state, "partial");
+    assert.equal(described.badge.variant, "warning");
+    assert.match(described.headline, /incomplete/i);
+    assert.equal(described.rows[0].unresolved, 2);
+    assert.equal(described.rows[0].badge.variant, "warning");
+    assert.deepEqual(plain(described.rows[0].unresolvedNotes), [
+        "Pod p1: NO_MATCHING_DEPLOYMENT", "Pod p2: POD_NOT_SCHEDULED",
+    ]);
+});
+
+test("overview: a connected cluster with no workloads is an explicit empty state that still reports workers", () => {
+    const described = api.describeOverview(overview({
+        status: "empty", namespaces: [], totals: { workerNodes: 3, services: 0, unresolved: 0 },
+    }));
+
+    assert.equal(described.state, "empty");
+    assert.equal(described.badge.variant, "info");
+    assert.match(described.headline, /no workloads/i);
+    assert.equal(described.rows.length, 0);
+    assert.equal(described.totals.workerNodes, 3);
+});
+
+test("overview: excluded system namespaces are named so nothing is hidden silently", () => {
+    const described = api.describeOverview(overview());
+
+    assert.ok(described.notes.some((note) => /kube-system/.test(note) && /not shown/i.test(note)));
+    assert.equal(api.describeOverview(overview({ excludedNamespaces: [] })).notes.length, 0);
+});
+
+test("overview: provenance says when it was captured and that the fingerprint is not proof of identity", () => {
+    const described = api.describeOverview(overview());
+
+    assert.match(described.provenance, /2026-10-19T10:00:00Z/);
+    assert.match(described.provenance, /abcdef12/);
+    assert.match(described.provenance, /not proof/i);
+});
+
+test("overview: a namespace result never gets a service or figure it was not given", () => {
+    const data = overview();
+    data.namespaces[0].graph.services = [];
+    const [first] = api.describeOverview(data).rows;
+
+    assert.deepEqual(plain(first.services), []);
+});

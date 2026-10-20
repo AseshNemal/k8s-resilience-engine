@@ -15,8 +15,6 @@
     </p>
     <div class="page-header__meta">
         <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Not loaded</span>
-        <label for="overview-namespace">Namespace</label>
-        <input id="overview-namespace" type="text" value="default" data-role="namespace" autocomplete="off">
         <button type="button" class="secondary-button" data-role="reload-button">
             Refresh from cluster
         </button>
@@ -49,7 +47,7 @@
         <div class="metric-card__body">
             <div class="metric-card__label">Services Discovered</div>
             <div class="metric-card__value" data-metric="services-discovered">—</div>
-            <div class="metric-card__hint">Deployments with placed pods in the namespace</div>
+            <div class="metric-card__hint">Across every application namespace in the cluster</div>
         </div>
     </div>
     <div class="metric-card">
@@ -64,6 +62,11 @@
     </div>
 </section>
 
+<div class="section-header">
+    <h3 class="section-header__title">Applications by namespace</h3>
+    <span class="section-header__note">Everything running in the connected cluster</span>
+</div>
+<div class="overview-namespaces" data-role="overview-namespaces"></div>
 <p class="footer-note">
     {{ icon("info", 15) }} Failure-impact predictions and recommendations are produced on their own pages,
     from a frozen workflow and the live topology. They are not summarised here until they have been run.
