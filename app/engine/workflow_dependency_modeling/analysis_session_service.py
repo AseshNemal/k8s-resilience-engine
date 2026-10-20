@@ -164,8 +164,13 @@ def start_workflow_analysis(
         create_trace_source(trace_source),
     )
     timestamp = _timestamp(now)
-    trace_quality = evidence.get("traceQuality", {})
-    evidence_eligible = trace_quality.get("excludedCount") == 0
+    trace_quality = dict(evidence.get("traceQuality", {}))
+    if "inputTraceQuality" in evidence:
+        trace_quality["inputInvalidCount"] = evidence["inputTraceQuality"].get("invalidCount", 0)
+    evidence_eligible = (
+        trace_quality.get("excludedCount") == 0
+        and trace_quality.get("inputInvalidCount", 0) == 0
+    )
     limitations = [
         "Observed calls show participation, not dependency necessity.",
         "No controlled intervention evidence has been collected.",

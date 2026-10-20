@@ -7,6 +7,7 @@ from app.engine.workflow_dependency_modeling.evaluator import (
     run_sensitivity_analysis,
 )
 from app.engine.workflow_dependency_modeling.service import (
+    analyze_workflow_evidence,
     assess_telemetry_readiness,
     approve_experiment_campaign,
     assess_experiment_campaign,
@@ -111,12 +112,24 @@ from app.engine.workflow_dependency_modeling.scenario_repository import (
 from app.engine.workflow_dependency_modeling.scenario_service import parse_scenario_etag
 from app.integrations.jaeger.client import DEFAULT_JAEGER_URL, JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
+from app.engine.workflow_dependency_modeling.analysis_models import (
+    WorkflowAnalysisRequest, WorkflowAnalysisResult,
+)
 
 
 router = APIRouter(
     prefix="/api/workflows",
     tags=["Workflow Dependency Modeling"],
 )
+
+
+@router.post("/analyze", response_model=WorkflowAnalysisResult, response_model_by_alias=True)
+def analyze_uploaded_workflow(payload: WorkflowAnalysisRequest) -> WorkflowAnalysisResult:
+    """Analyze caller-supplied workflow and traces without loading sample answers."""
+    try:
+        return analyze_workflow_evidence(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 NOT_FOUND_RESPONSE = {404: {"description": "Requested workflow evidence was not found"}}
 JAEGER_UNAVAILABLE_RESPONSE = {503: {"description": "Jaeger service is unavailable"}}

@@ -103,6 +103,7 @@ from app.engine.workflow_dependency_modeling.interaction_extractor import (
     extract_interactions,
 )
 from app.engine.workflow_dependency_modeling.models import SuccessCondition, WorkflowScenario
+from app.engine.workflow_dependency_modeling.offline_analysis import analyze_workflow_evidence
 from app.engine.workflow_dependency_modeling.scenario_service import (
     configure_scenario_repository,
     create_scenario,
@@ -141,6 +142,8 @@ if TYPE_CHECKING:
 def _as_scenario(value: WorkflowScenario | Mapping[str, Any]) -> WorkflowScenario:
     if isinstance(value, WorkflowScenario):
         return value
+    if not isinstance(value, Mapping):
+        raise ValueError("workflowDefinition must be an object")
     return WorkflowScenario.from_mapping(value)
 
 
@@ -196,6 +199,11 @@ def discover_live_workflows(
             limit=limit,
             lookback=lookback,
         )
+    quality = validate_trace_quality(traces)
+    safe_traces = [
+        trace for trace, result in zip(traces, quality.results)
+        if result.quality.value != "INVALID"
+    ]
     return [
         {
             "workflowId": summary.workflow_id,
@@ -206,7 +214,8 @@ def discover_live_workflows(
             "sampleTraceIds": summary.sample_trace_ids,
             "status": "candidate",
         }
-        for summary in discover_root_workflows(traces)
+        for summary in discover_root_workflows(safe_traces)
+        if summary.root_service == service_name
     ]
 
 
@@ -226,7 +235,6 @@ def get_live_workflow(
     """
     traces = JaegerClient(base_url=jaeger_url).fetch_traces(
         service_name=service_name,
-        operation=operation,
         limit=limit,
         lookback=lookback,
     )
@@ -235,7 +243,15 @@ def get_live_workflow(
             f"No traces found in Jaeger at {jaeger_url} for service '{service_name}'"
             + (f" and operation '{operation}'" if operation else "")
         )
-    operation_name = operation or "live_workflow"
+    quality = validate_trace_quality(traces)
+    traces = eligible_traces(traces, quality)
+    operations = [item for item in discover_root_workflows(traces) if item.root_service == service_name]
+    if operation is None and len(operations) != 1:
+        raise ValueError("Select one recorded operation for the requested entry service")
+    operation_name = operation or operations[0].operation_name
+    traces = select_workflow_traces(traces, operation_name, service_name)
+    if not traces:
+        raise ValueError("No eligible traces match the requested entry service and operation")
     scenario = WorkflowScenario(
         workflow_id=slugify_operation(operation_name),
         description="Candidate operation discovered from live trace evidence.",
@@ -294,17 +310,25 @@ def get_live_evidence(
             limit=limit,
             lookback=lookback,
         )
-    selected = select_workflow_traces(traces, operation)
+    input_quality = validate_trace_quality(traces)
+    # Only parse structurally safe evidence; partial traces remain visible in
+    # this observation view and are explicitly reported by traceQuality.
+    safe_traces = [
+        trace for trace, result in zip(traces, input_quality.results)
+        if result.quality.value != "INVALID"
+    ]
+    selected = select_workflow_traces(safe_traces, operation, service_name)
     if not selected:
         raise ValueError(
             "No matching traces in this window. Refresh discovery or widen the lookback."
         )
     spans = parse_spans(selected)
     quality = validate_trace_quality(selected)
-    services = sorted({span.service_name for span in spans})
+    interactions = extract_interactions(spans)
+    services = sorted({service for item in interactions for service in item.observed_services})
     evidence = []
     for name in services:
-        count = len({span.trace_id for span in spans if span.service_name == name})
+        count = sum(name in item.observed_services for item in interactions)
         evidence.append(
             {
                 "service": name,
@@ -312,7 +336,6 @@ def get_live_evidence(
                 "frequency": count / len(selected),
             }
         )
-    interactions = extract_interactions(spans)
     edges = aggregate_edges(interactions)
     linked_edges = aggregate_linked_edges(interactions)
     return {
@@ -330,6 +353,7 @@ def get_live_evidence(
         "evaluationStatus": "not_evaluated",
         "source": "live_unverified",
         "traceQuality": quality.to_mapping(),
+        "inputTraceQuality": input_quality.to_mapping(),
         "edges": [{"source": edge.source, "target": edge.target} for edge in edges],
         "edgeEvidence": [
             {
@@ -409,6 +433,7 @@ def get_sample_workflow() -> WorkflowGraph:
 
 
 __all__ = [
+    "analyze_workflow_evidence",
     "assess_telemetry_readiness",
     "assess_experiment_campaign",
     "approve_experiment_campaign",
