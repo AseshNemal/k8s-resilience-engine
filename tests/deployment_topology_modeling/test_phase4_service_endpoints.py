@@ -217,12 +217,14 @@ def test_api_get_markdown_benchmark_report(client: TestClient):
     assert "# Component 2" in response.text
 
 
-def test_run_benchmarks_script_execution():
-    metrics = run_benchmarks()
+def test_run_benchmarks_script_execution(tmp_path):
+    # Written to a temporary folder: with no output_dir the script overwrites the tracked report in
+    # experiments/placement_drift (its runtime figures change on every run), which dirtied the working tree.
+    metrics = run_benchmarks(output_dir=tmp_path)
     assert metrics["total_scenarios"] == 8.0
     assert metrics["completed_count"] == 8.0
 
-    output_dir = Path(__file__).resolve().parents[2] / "experiments" / "placement_drift"
+    output_dir = tmp_path
     md_file = output_dir / "benchmark_report.md"
     json_file = output_dir / "benchmark_report.json"
 
