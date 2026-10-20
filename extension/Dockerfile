@@ -84,3 +84,11 @@ COPY --from=helper --chmod=0755 /out/windows/resilience-helper.exe /windows/resi
 COPY --chmod=0755 extension/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# Which commit and branch this image was built from. scripts/extension_manage.py passes it ("<commit>" or
+# "<commit>-dirty" when the build included uncommitted changes); a plain `docker build` leaves "unknown".
+# It is last in the file so a new commit id only rewrites this metadata, never an expensive layer.
+ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=unknown
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.ref.name="${GIT_BRANCH}"

@@ -27,8 +27,12 @@ class FakeShell:
     """Answers reads from a table, records everything that would have run, never starts a process."""
 
     def __init__(self, tools=("docker", "go", "node"), installed=None, tags=(), memory=8 * GIB,
-                 info=None, run_codes=None):
-        self.tools = set(tools)
+                 info=None, run_codes=None, git=None, stamps=None, branches=None):
+        """``git`` is (commit count, short commit, has uncommitted changes[, branch]) or None for "no git here".
+        ``stamps`` and ``branches`` map an image tag to the commit stamp and branch recorded on it."""
+        self.tools = set(tools) | ({"git"} if git else set())
+        self.stamps = stamps or {}
+        self.branches = branches or {}
         self.ran = []  # (argv, cwd)
         self.reads = []
         self.run_codes = run_codes or {}
@@ -41,12 +45,24 @@ class FakeShell:
             "extension ls": em.Captured(0, json.dumps(extensions)),
             "images": em.Captured(0, "\n".join(tags)),
         }
+        if git:
+            count, commit, dirty, *rest = git
+            self.branch = rest[0] if rest else "main"
+            self.answers["rev-list"] = em.Captured(0, f"{count}\n")
+            self.answers["rev-parse"] = em.Captured(0, f"{commit}\n")
+            self.answers["status"] = em.Captured(0, " M app/main.py\n" if dirty else "")
 
     def which(self, name):
         return f"/fake/{name}" if name in self.tools else None
 
     def capture(self, argv, cwd, timeout):
         self.reads.append((argv, timeout))
+        if argv[:2] == ["docker", "image"]:  # docker image inspect --format <label template> <image:tag>
+            tag = argv[-1].split(":", 1)[1]
+            wanted = self.branches if em.BRANCH_LABEL in " ".join(argv) else self.stamps
+            return em.Captured(0, wanted.get(tag, ""))
+        if argv[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            return em.Captured(0, self.branch + "\n")
         key = argv[1] if argv[1] != "extension" else "extension ls"
         return self.answers[key]
 
@@ -295,6 +311,248 @@ def test_builds_and_installs_run_from_the_repository_root():
     run(shell, "install", "--skip-checks", "--yes", "--version", "1.2.3")
 
     assert {cwd for _, cwd in shell.ran} == {REPO}
+
+
+# -- the version follows git ------------------------------------------------------------------------
+
+def built(shell):
+    """The one `docker build` command, split into words."""
+    (command,) = shell.commands("docker build")
+    return command.split()
+
+
+def test_a_clean_checkout_builds_the_version_its_commit_count_names():
+    shell = FakeShell(installed="0.1.200", tags=["0.1.200"], git=(214, "16c62a1", False))
+
+    assert run(shell, "update", "--skip-checks", "--yes") == 0
+
+    words = built(shell)
+    assert f"{IMAGE}:0.1.214" in words
+    assert words[words.index("--build-arg") + 1] == "GIT_COMMIT=16c62a1"
+    assert shell.commands("docker extension update") == [f"docker extension update -f {IMAGE}:0.1.214"]
+
+
+def test_pulling_commits_moves_the_version_forward_by_itself():
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(220, "9f3a1b2", False))
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    assert f"{IMAGE}:0.1.220" in built(shell)
+
+
+def test_uncommitted_changes_get_the_next_unused_version_and_say_so_on_the_image():
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(214, "16c62a1", True))
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    words = built(shell)
+    assert f"{IMAGE}:0.1.215" in words
+    assert words[words.index("--build-arg") + 1] == "GIT_COMMIT=16c62a1-dirty"
+
+
+def test_every_local_edit_gets_a_fresh_version_so_docker_really_replaces_the_image():
+    shell = FakeShell(installed="0.1.215", tags=["0.1.214", "0.1.215"], git=(214, "16c62a1", True))
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    assert f"{IMAGE}:0.1.216" in built(shell)
+
+
+def test_committing_after_local_builds_falls_back_when_the_count_number_is_already_taken():
+    # Two local builds used 0.1.215 and 0.1.216; committing makes the count 215, which is taken.
+    shell = FakeShell(installed="0.1.216", tags=["0.1.214", "0.1.215", "0.1.216"], git=(215, "b7d41e0", False))
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    assert f"{IMAGE}:0.1.217" in built(shell)
+
+
+def test_switching_to_a_branch_with_fewer_commits_may_install_a_lower_version():
+    shell = FakeShell(installed="0.1.220", tags=["0.1.220"], git=(214, "16c62a1", False))
+
+    assert run(shell, "update", "--skip-checks", "--yes") == 0
+
+    assert f"{IMAGE}:0.1.214" in built(shell)
+
+
+def test_the_same_commit_is_not_installed_twice(capsys):
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(214, "16c62a1", False),
+                      stamps={"0.1.214": "16c62a1"})
+
+    assert run(shell, "update", "--skip-checks", "--yes") == 0
+
+    assert "already installed" in capsys.readouterr().out
+    assert shell.commands("docker build") == []
+
+
+def test_an_installed_build_with_uncommitted_changes_is_replaced_once_they_are_committed():
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(214, "16c62a1", False),
+                      stamps={"0.1.214": "16c62a1-dirty"})
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    assert shell.commands("docker build")  # same number, different contents: a new tag is built
+
+
+def test_the_same_number_with_different_contents_is_not_mistaken_for_up_to_date():
+    # Same commit count, but the installed image came from another commit (another branch or a teammate's
+    # work): the number alone says nothing, so it is rebuilt under the next unused tag.
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(214, "16c62a1", False),
+                      stamps={"0.1.214": "aaaaaaa"})
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    assert f"{IMAGE}:0.1.215" in built(shell)
+
+
+def test_the_build_records_the_branch_next_to_the_commit():
+    shell = FakeShell(git=(214, "16c62a1", False, "integration/team-sync"))
+
+    run(shell, "install", "--skip-checks", "--yes")
+
+    words = built(shell)
+    assert "GIT_COMMIT=16c62a1" in words
+    assert "GIT_BRANCH=integration/team-sync" in words
+
+
+def test_a_detached_checkout_is_recorded_as_detached_not_as_head():
+    shell = FakeShell(git=(214, "16c62a1", False, "HEAD"))
+
+    run(shell, "install", "--skip-checks", "--yes")
+
+    assert "GIT_BRANCH=detached" in built(shell)
+
+
+def test_status_names_the_branch_so_two_builds_with_the_same_number_can_be_told_apart(capsys):
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(214, "16c62a1", False, "feature/x"),
+                      stamps={"0.1.214": "aaaaaaa"}, branches={"0.1.214": "integration/team-sync"})
+
+    run(shell, "status")
+
+    out = capsys.readouterr().out
+    assert "Built from: commit aaaaaaa on integration/team-sync" in out
+    assert "This folder: commit 16c62a1 on feature/x" in out
+    assert "run 'update'" in out
+
+
+def removed(shell):
+    return shell.commands("docker image rm")
+
+
+def test_an_update_keeps_the_new_and_the_previous_image_and_removes_the_older_ones(capsys):
+    shell = FakeShell(installed="0.1.9", tags=["0.1.5", "0.1.7", "0.1.8", "0.1.9"])
+
+    assert run(shell, "update", "--skip-checks", "--yes") == 0
+
+    assert removed(shell) == [f"docker image rm {IMAGE}:0.1.5", f"docker image rm {IMAGE}:0.1.7",
+                              f"docker image rm {IMAGE}:0.1.8"]
+    assert "keeping 0.1.9, 0.1.10" in capsys.readouterr().out
+
+
+def test_keep_all_leaves_every_image_alone():
+    shell = FakeShell(installed="0.1.9", tags=["0.1.5", "0.1.7", "0.1.9"])
+
+    run(shell, "update", "--skip-checks", "--yes", "--keep-all")
+
+    assert removed(shell) == []
+
+
+def test_a_failed_update_deletes_nothing():
+    shell = FakeShell(installed="0.1.9", tags=["0.1.5", "0.1.7", "0.1.9"],
+                      run_codes={"docker extension update": 1})
+
+    assert run(shell, "update", "--skip-checks", "--yes") != 0
+
+    assert removed(shell) == []
+
+
+def test_a_failed_build_deletes_nothing():
+    shell = FakeShell(installed="0.1.9", tags=["0.1.5", "0.1.9"], run_codes={"docker build": 1})
+
+    assert run(shell, "update", "--skip-checks", "--yes") != 0
+
+    assert removed(shell) == []
+
+
+def test_an_install_deletes_nothing():
+    shell = FakeShell(tags=["0.1.1", "0.1.2"])
+
+    run(shell, "install", "--skip-checks", "--yes")
+
+    assert removed(shell) == []
+
+
+def test_images_that_are_in_use_are_skipped_with_a_note_and_the_update_still_succeeds(capsys):
+    shell = FakeShell(installed="0.1.9", tags=["0.1.5", "0.1.9"], run_codes={"docker image rm": 1})
+
+    assert run(shell, "update", "--skip-checks", "--yes") == 0
+
+    assert f"skipped {IMAGE}:0.1.5" in capsys.readouterr().out
+
+
+def test_experiment_tags_with_a_suffix_are_never_removed():
+    shell = FakeShell(installed="0.1.9", tags=["0.1.5-qs", "0.1.9"])
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    assert removed(shell) == []
+
+
+def test_a_dry_run_shows_what_would_be_removed_and_removes_nothing(capsys):
+    shell = FakeShell(installed="0.1.9", tags=["0.1.5", "0.1.9"])
+
+    run(shell, "update", "--skip-checks", "--dry-run")
+
+    assert f"+ docker image rm {IMAGE}:0.1.5" in capsys.readouterr().out
+    assert shell.commands("docker image rm") == []
+
+
+def test_an_explicit_version_still_wins_and_is_still_stamped():
+    shell = FakeShell(git=(214, "16c62a1", False))
+
+    run(shell, "install", "--skip-checks", "--yes", "--version", "2.0.0")
+
+    words = built(shell)
+    assert f"{IMAGE}:2.0.0" in words
+    assert "GIT_COMMIT=16c62a1" in words
+
+
+def test_without_git_the_version_counts_locally_and_nothing_is_stamped():
+    shell = FakeShell(installed="0.1.9", tags=["0.1.9"])
+
+    run(shell, "update", "--skip-checks", "--yes")
+
+    assert shell.commands("docker build") == [f"docker build -f extension/Dockerfile -t {IMAGE}:0.1.10 ."]
+
+
+def test_status_says_what_the_installed_build_came_from_and_whether_it_matches_this_folder(capsys):
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(214, "16c62a1", False),
+                      stamps={"0.1.214": "16c62a1"})
+
+    run(shell, "status")
+
+    out = capsys.readouterr().out
+    assert "Built from: commit 16c62a1" in out
+    assert "The installed extension matches this folder." in out
+
+
+def test_status_shows_when_the_folder_has_moved_on(capsys):
+    shell = FakeShell(installed="0.1.214", tags=["0.1.214"], git=(220, "9f3a1b2", True),
+                      stamps={"0.1.214": "16c62a1"})
+
+    run(shell, "status")
+
+    out = capsys.readouterr().out
+    assert "commit 9f3a1b2 on main plus uncommitted changes" in out
+    assert "run 'update'" in out
+
+
+def test_an_image_without_a_stamp_is_reported_as_unknown_not_guessed(capsys):
+    shell = FakeShell(installed="0.1.5", tags=["0.1.5"])
+
+    run(shell, "status")
+
+    assert "Built from: unknown" in capsys.readouterr().out
 
 
 # -- confirmation, dry runs and usage ---------------------------------------------------------------

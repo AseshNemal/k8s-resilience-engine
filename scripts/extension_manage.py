@@ -3,12 +3,16 @@
 
   extension-manage install   [--version X.Y.Z]   build the image and install the extension
   extension-manage update    [--version X.Y.Z]   build a new version and replace the installed one
+                                                 (older local images are deleted, keeping the previous one)
   extension-manage uninstall                     remove the extension (asks first)
   extension-manage status                        installed version, state and local image tags
   extension-manage check                         run the test suites that guard the extension
   extension-manage clean                         delete old local image tags (asks first)
 
-  Options: --version X.Y.Z  tag to build (default: the next patch version, never one that already exists)
+  Options: --version X.Y.Z  tag to build (default: 0.1.<number of commits>, so it follows git; with
+           uncommitted changes, or when that tag is taken, the next version nobody has used)
+           --keep-all       after an update, keep every old local image (default: keep the new one and
+                            the previous one for a rollback, delete the rest)
            --skip-checks    do not run the test suites before building
            --dry-run        print every command instead of running it
            --yes            do not ask for confirmation
@@ -48,6 +52,17 @@ COMMANDS = ("install", "update", "uninstall", "status", "check", "clean")
 DEFAULT_MIN_DOCKER_MEMORY_GB = 3.0
 DOCKER_ANSWER_SECONDS = 30  # a healthy daemon answers `docker info` in well under a second
 DOCKER_READ_SECONDS = 120
+
+# The version follows git: BASE_VERSION.<number of commits>, so every machine on the same commit builds the
+# same version and a `git pull` moves it forward by itself. The tag stays a plain X.Y.Z because Docker Desktop
+# shows it as the extension's version and VERSION_PATTERN below is what recognises our tags.
+BASE_VERSION = "0.1"
+# Which commit an image was built from, stored as image metadata (the tag cannot carry it).
+COMMIT_LABEL = "org.opencontainers.image.revision"
+# ...and on which branch. Two branches can reach the same version number with different code, so the number
+# is only trustworthy together with the commit and the branch it was built from.
+BRANCH_LABEL = "org.opencontainers.image.ref.name"
+GIT_READ_SECONDS = 15
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 VersionKey = tuple
@@ -96,10 +111,35 @@ class SystemShell:
 
 
 @dataclass
+class GitState:
+    """Where this folder is in git: how many commits, which one, and whether it has uncommitted changes."""
+
+    count: int
+    commit: str
+    dirty: bool
+    branch: str = "unknown"
+
+    @property
+    def stamp(self) -> str:
+        """What is recorded on the image. The build includes uncommitted changes, so it says so."""
+        return self.commit + ("-dirty" if self.dirty else "")
+
+
+def describe_stamp(stamp: str, branch: str = "") -> str:
+    if not stamp or stamp in ("unknown", "<no value>"):
+        return "unknown (built before commit stamps, or without git)"
+    where = f" on {branch}" if branch and branch not in ("unknown", "<no value>") else ""
+    if stamp.endswith("-dirty"):
+        return f"commit {stamp[:-6]}{where} plus uncommitted changes"
+    return f"commit {stamp}{where}"
+
+
+@dataclass
 class Options:
     command: str = ""
     version: str = ""
     skip_checks: bool = False
+    keep_all: bool = False
     dry_run: bool = False
     assume_yes: bool = False
 
@@ -200,6 +240,54 @@ class Manager:
         known = [v for v in [self.installed_version(), *self.local_tags()] if v]
         return bump_patch(max(known, key=version_key)) if known else "0.1.0"
 
+    def git_state(self) -> GitState | None:
+        """None when git is missing or this folder is not a repository: versions then count locally."""
+        if not self.shell.which("git"):
+            return None
+
+        def read(args: list[str]) -> str | None:
+            answer = self.shell.capture(["git", *args], self.root, GIT_READ_SECONDS)
+            return answer.out.strip() if answer.code == 0 else None
+
+        count, commit, changes = read(["rev-list", "--count", "HEAD"]), read(["rev-parse", "--short=7", "HEAD"]), read(["status", "--porcelain"])
+        if count is None or not count.isdigit() or not commit or changes is None:
+            return None
+        # "HEAD" is what git prints when no branch is checked out (a detached checkout).
+        branch = read(["rev-parse", "--abbrev-ref", "HEAD"]) or "unknown"
+        return GitState(int(count), commit, bool(changes), "detached" if branch == "HEAD" else branch)
+
+    def choose_version(self) -> tuple[str, GitState | None]:
+        """The version to build, and the git state it was taken from.
+
+        A clean checkout gets BASE_VERSION.<commit count> when nobody has used it here yet, so the number
+        says which code it is and agrees on every machine. Anything else (uncommitted changes, a number
+        already taken, no git) gets the next number nobody has used, because Docker keeps running the old
+        image when a tag is reused. The image's commit stamp says what is really inside either way.
+        """
+        git = self.git_state()
+        if self.options.version:
+            return self.options.version, git
+        if git is None:
+            return self.next_version(), None
+        known = {v for v in [self.installed_version(), *self.local_tags()] if v}
+        preferred = f"{BASE_VERSION}.{git.count}"
+        if not git.dirty and preferred not in known:
+            return preferred, git
+        return self.next_version(), git
+
+    def image_label(self, version: str, label: str) -> str:
+        template = '{{ index .Config.Labels "' + label + '" }}'
+        answer = self.docker_read(["image", "inspect", "--format", template, f"{IMAGE}:{version}"])
+        return answer.out.strip() if answer.code == 0 else ""
+
+    def image_stamp(self, version: str) -> str:
+        """The commit stamp recorded on a local image, or "" when it has none."""
+        return self.image_label(version, COMMIT_LABEL)
+
+    def image_branch(self, version: str) -> str:
+        """The branch recorded on a local image, or "" when it has none."""
+        return self.image_label(version, BRANCH_LABEL)
+
     # -- preflight ---------------------------------------------------------------------------------
 
     def preflight_docker(self) -> None:
@@ -253,17 +341,18 @@ class Manager:
         )
         self.run(["node", "--test", *node_tests, "tests/frontend/connection-state.test.mjs", "tests/frontend/api.test.mjs"])
 
-    def build_image(self, version: str) -> None:
+    def build_image(self, version: str, git: GitState | None = None) -> None:
         if not self.options.skip_checks:
             self.cmd_check()
-        self.run(["docker", "build", "-f", DOCKERFILE, "-t", f"{IMAGE}:{version}", "."])
+        stamp = ["--build-arg", f"GIT_COMMIT={git.stamp}", "--build-arg", f"GIT_BRANCH={git.branch}"] if git else []
+        self.run(["docker", "build", "-f", DOCKERFILE, *stamp, "-t", f"{IMAGE}:{version}", "."])
 
     def cmd_install(self) -> None:
         current = self.installed_version()
         if current:
             self.die(f"The extension is already installed (version {current}). Use 'update' instead.")
-        version = self.options.version or self.next_version()
-        self.build_image(version)
+        version, git = self.choose_version()
+        self.build_image(version, git)
         self.run(["docker", "extension", "install", "-f", f"{IMAGE}:{version}"])
         if self.dry_run_notice():
             return
@@ -271,15 +360,40 @@ class Manager:
         print(f"Installed {IMAGE}:{version}. Open Resilience Engine in Docker Desktop, choose Connect cluster, and")
         print("use Set up access to approve read-only access to your kind cluster.")
 
+    def prune_old_versions(self, keep: set[str]) -> None:
+        """Delete this extension's older plain X.Y.Z images, keeping the ones in ``keep``.
+
+        Called only after the update itself succeeded, so a failed build or a version that does not start
+        never costs you the images you could roll back to. Tags with a suffix (0.1.5-qs) are someone's
+        experiment and are never touched, and Docker refuses to remove an image that is in use.
+        """
+        if self.options.keep_all:
+            return
+        old = [tag for tag in self.local_tags() if tag not in keep]
+        if not old:
+            return
+        print(f"Removing {len(old)} older local image(s); keeping {', '.join(sorted(keep, key=version_key))} "
+              "(use --keep-all to keep every image).")
+        for tag in old:
+            if self.run(["docker", "image", "rm", f"{IMAGE}:{tag}"], tolerate=True) != 0:
+                print(f"  skipped {IMAGE}:{tag} (it may be in use)")
+
     def cmd_update(self) -> None:
         current = self.installed_version()
         if not current:
             self.die("The extension is not installed. Use 'install' first.")
-        version = self.options.version or self.next_version()
+        version, git = self.choose_version()
+        if (not self.options.version and git is not None and not git.dirty
+                and current == f"{BASE_VERSION}.{git.count}" and self.image_stamp(current) == git.stamp):
+            print(f"Version {current} was built from this commit ({git.commit}) and is already installed.")
+            print("Nothing to update. Pull new commits or change something first.")
+            return
         if version == current or version in self.local_tags():
             self.die(f"Version {version} already exists locally. Docker would keep running the old image, so pick a new version.")
-        self.build_image(version)
+        self.build_image(version, git)
         self.run(["docker", "extension", "update", "-f", f"{IMAGE}:{version}"])
+        # The new version and the one it replaced stay (a rollback is one command); everything older goes.
+        self.prune_old_versions({version, current})
         if self.dry_run_notice():
             return
         print()
@@ -318,6 +432,15 @@ class Manager:
         if current:
             state = self.installed_state()
             print(f"Extension : installed, version {current}" + (f" ({state})" if state else ""))
+            installed_stamp = self.image_stamp(current)
+            print(f"Built from: {describe_stamp(installed_stamp, self.image_branch(current))}")
+            git = self.git_state()
+            if git is not None:
+                print(f"This folder: {describe_stamp(git.stamp, git.branch)}")
+                if installed_stamp == git.stamp and not git.dirty:
+                    print("            The installed extension matches this folder.")
+                else:
+                    print("            It differs from the installed extension: run 'update' to install this folder.")
         else:
             print("Extension : not installed")
         print(f"Local image tags for {IMAGE}:")
@@ -381,6 +504,8 @@ def parse(argv: list[str]) -> Options:
             options.skip_checks = True
         elif arg == "--dry-run":
             options.dry_run = True
+        elif arg == "--keep-all":
+            options.keep_all = True
         elif arg in ("--yes", "-y"):
             options.assume_yes = True
         elif arg.startswith("-"):

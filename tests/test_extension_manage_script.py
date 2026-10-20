@@ -154,7 +154,9 @@ def test_dry_run_prints_the_commands_and_runs_none_of_them(fake_docker):
                         installed="0.1.8")
 
     assert result.returncode == 0, result.stderr
-    assert f"docker build -f extension/Dockerfile -t {IMAGE}:1.2.3 ." in result.stdout
+    # The commit stamp (--build-arg GIT_COMMIT=...) appears when this checkout is a git repository.
+    assert "docker build -f extension/Dockerfile" in result.stdout
+    assert f"-t {IMAGE}:1.2.3 ." in result.stdout
     assert f"docker extension update -f {IMAGE}:1.2.3" in result.stdout
     assert only(calls, "docker build") == [] and only(calls, "docker extension update") == []
 
