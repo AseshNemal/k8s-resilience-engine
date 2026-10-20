@@ -14,7 +14,7 @@ PAGE_CASES = [
     ("/", "Overview", "dashboard.css", "components/dashboard.js"),
     (
         "/components/workflows",
-        "Workflow Dependency Modeling",
+        "Workflow dependencies",
         "pages/workflows.css",
         "components/workflows.js",
     ),
@@ -65,64 +65,29 @@ def test_dashboard_links_to_all_component_pages() -> None:
     assert 'href="/components/recommendations"' in body
 
 
-def test_workflow_page_uses_candidate_not_validated_necessity_language() -> None:
+def test_workflow_page_starts_with_user_inputs_and_saved_workflows() -> None:
     response = client.get("/components/workflows")
     assert response.status_code == 200
-    assert "High-frequency Candidates" in response.text
+    body = response.text
+    assert 'data-role="guided-analysis-form"' in body
+    assert 'data-role="saved-workflows"' in body
+    assert 'data-role="offline-analysis-form"' in body
+    assert "Research Environment" not in body
+    assert "Research audit controls" not in body
+    assert "PP1" not in body
+    assert "Synthetic Fixture Dataset" not in body
+    assert 'value="http://localhost' not in body
+    assert 'value="local-test"' not in body
 
 
-def test_workflow_page_explains_component_contract_and_stages() -> None:
-    response = client.get("/components/workflows")
-    assert response.status_code == 200
-    assert "Build a workflow from real traces" in response.text
-    assert "Choose a service and operation from recorded traces" in response.text
-    assert "Get approved graph" in response.text
-    assert 'data-workflow-stage-button="define"' in response.text
-    assert 'data-workflow-stage-button="evidence"' in response.text
-    assert 'data-workflow-stage-button="validate"' in response.text
-    assert 'data-workflow-stage-button="evaluate"' in response.text
-    assert 'data-workflow-stage="evidence" hidden' in response.text
-    assert "Future Work" not in response.text
-    assert "Lower-frequency Candidates" in response.text
-    assert "Mandatory Services" not in response.text
-
-
-def test_workflow_page_defaults_to_guided_analysis_not_internal_artifacts() -> None:
-    response = client.get("/components/workflows")
-    assert response.status_code == 200
-    assert 'data-role="guided-analysis-form"' in response.text
-    assert 'data-role="guided-discover-button"' in response.text
-    assert 'data-role="guided-inspect-button"' in response.text
-    assert "Build a workflow from real traces" in response.text
-    assert "Recorded operation" in response.text
-    assert "Trace backend" in response.text
-    assert "Connect trace source" in response.text
-    assert "Trace query address" in response.text
-    assert "How dependency labels are decided" in response.text
-    assert "Synthetic Fixture Dataset" in response.text
-    assert "Connect a trace source or resume a saved experiment." in response.text
-    assert "Research audit controls" in response.text
-    assert '<details class="research-audit">' in response.text
-
-
-def test_workflow_client_exposes_operator_gated_campaign_lifecycle() -> None:
+def test_workflow_workspace_keeps_research_tools_out_of_the_user_flow() -> None:
     script = (
         REPOSITORY_ROOT / "app" / "static" / "js" / "components" / "workflows.js"
     ).read_text(encoding="utf-8")
-    assert "Run local demo test · stop, test, restore" in script
-    assert "Record service unavailable" in script
-    assert "Classify dependencies" in script
-    assert "Approve WorkflowGraph" in script
     assert "/approval" in script
     assert "loadCampaignDecision" in script
-    assert "Campaign active" in script
-    assert "No active campaign" in script
-    assert 'benchmarkProfile: "online_boutique_checkout_v0_10_1"' not in script
-    assert "I reviewed this execution definition and success contract" in script
-    assert "Request options (JSON object)" in script
-    assert "supportsGuidedExperiment" in script
-    assert "updateGuidedSelectionAction" in script
-    assert "The description documents your intent." in script
-    assert "No workflow executions run automatically" in script
-    assert "conditionEvidenceDetails" in script
-    assert "guidedResult.replaceChildren()" in script
+    assert "local-demo" not in script
+    assert "online_boutique" not in script
+    assert "Component 3" not in script
+    assert "seed-traces" not in script
+    assert "benchmarkProfile" not in script

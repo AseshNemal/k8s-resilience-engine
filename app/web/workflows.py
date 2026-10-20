@@ -18,7 +18,8 @@ def workflows_page(request: Request):
         request=request,
         name="components/workflows.html",
         context={
-            "page_title": "Workflow Dependency Modeling",
+            "page_title": "Workflow dependencies",
+            "show_environment_label": False,
             "active_page": "workflows",
         },
     )
