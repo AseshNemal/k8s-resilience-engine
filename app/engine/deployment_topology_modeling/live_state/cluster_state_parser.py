@@ -4,6 +4,7 @@ Parsing is done by pure functions over Kubernetes JSON objects (the shape return
 `kubectl get ... -o json`), so the same code handles the live API, stored API snapshots
 (proposal section 9.2 fallback) and tests. Only the get_* functions talk to the cluster.
 """
+import os
 from typing import Any, List
 
 from kubernetes import client, config
@@ -15,10 +16,16 @@ from app.engine.deployment_topology_modeling.live_state.cluster_models import Cl
 CONTROL_PLANE_LABELS = ("node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master")
 TERMINAL_POD_PHASES = frozenset({"Succeeded", "Failed"})
 ZONE_LABEL = "topology.kubernetes.io/zone"
+KUBE_CONTEXT_ENV = "K8S_RESILIENCE_CONTEXT"
 
 
 def _load_kubernetes_config() -> None:
-    """Use in-cluster credentials when available, otherwise use the local kubeconfig."""
+    """Use the kubeconfig context named in $K8S_RESILIENCE_CONTEXT when set (so experiments never
+    depend on the user's current context); otherwise in-cluster credentials, then the kubeconfig."""
+    context = os.environ.get(KUBE_CONTEXT_ENV)
+    if context:
+        config.load_kube_config(context=context)
+        return
     try:
         config.load_incluster_config()
     except ConfigException:
