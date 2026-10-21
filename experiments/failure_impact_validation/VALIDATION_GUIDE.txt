@@ -1,0 +1,254 @@
+Failure-impact validation experiments
+
+This folder contains the research-only workflow for comparing Component 3's
+predicted service and workflow failures with outcomes observed during a
+controlled worker-node failure experiment.
+
+The scripts do not inject failures, modify Kubernetes resources, or mount HTTP
+routes in the application. `capture-prediction` performs one read-only request
+to the running backend. `record-evidence` performs no network request.
+
+## Required experiment order
+
+Use this order for every run:
+
+1. Confirm the backend is using the intended frozen workflow and live topology.
+2. Capture the prediction while the cluster is still in its pre-failure state.
+3. Perform the separately authorized controlled failure experiment.
+4. Probe every expected service and workflow.
+5. Record the observed results.
+6. Run validation.
+
+Do not capture the prediction after failure injection. By then, rescheduling or
+loss of cluster objects may have changed the topology, so it would no longer be
+the prediction baseline for that experiment.
+
+## Prerequisites
+
+- Run commands from the repository root.
+- Start the backend with `uvicorn app.main:app --reload`.
+- Connect the application to the intended cluster.
+- Use a real frozen workflow ID, worker-node name, and namespace.
+- Decide the complete service and workflow probe set before the experiment.
+- Obtain developer approval before any cluster-changing experiment action.
+
+The scripts refuse missing, malformed, incomplete, or mismatched evidence. They
+also refuse to overwrite existing artifacts.
+
+## 1. Enter the real experiment identifiers
+
+The following PowerShell prompts prevent example paths and identifiers from
+being mistaken for real values:
+
+```powershell
+$runId = Read-Host "Unique experiment ID"
+$workflowId = Read-Host "Frozen workflow ID"
+$failedNode = Read-Host "Worker node selected for the experiment"
+$namespace = Read-Host "Kubernetes namespace"
+$serviceName = Read-Host "Expected service to probe"
+$workflowProbe = Read-Host "Expected workflow to execute"
+
+$captureRoot = Join-Path (Resolve-Path ".\experiments\failure_impact_validation").Path "captures"
+$runDirectory = Join-Path $captureRoot $runId
+New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
+
+$predictionPath = Join-Path $runDirectory "prediction.json"
+$evidencePath = Join-Path $runDirectory "evidence.json"
+$validationPath = Join-Path $runDirectory "validation.json"
+```
+
+Use a new `$runId` for every repetition. Do not reuse an existing artifact
+directory for a different experiment.
+
+## 2. Capture the pre-failure prediction
+
+Run this before the controlled failure begins:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\capture_validation_inputs.py `
+  capture-prediction `
+  --workflow-id $workflowId `
+  --failed-node $failedNode `
+  --namespace $namespace `
+  --output $predictionPath
+```
+
+The command calls:
+
+```text
+GET /api/failure-impacts/runtime
+```
+
+It validates that the returned `workflowId` and `failedNode` match the requested
+experiment before saving the prediction.
+
+## 3. Conduct and observe the controlled experiment
+
+Carry out the approved experiment through the team's controlled procedure. The
+validation scripts intentionally provide no command that changes the cluster.
+
+After the selected node failure, probe every service and workflow declared in
+the experiment plan. Record only directly observed outcomes.
+
+Accepted service result tokens are:
+
+```text
+SERVICE_AVAILABLE
+SERVICE_UNAVAILABLE
+```
+
+Accepted workflow result tokens are:
+
+```text
+WORKFLOW_SUCCEEDED
+WORKFLOW_FAILED
+```
+
+Unknown or unexecuted probes must not be marked as successful. An incomplete
+probe set is rejected instead of being converted into a result.
+
+## 4. Record post-failure evidence
+
+Enter the real observed tokens:
+
+```powershell
+$serviceResult = Read-Host "SERVICE_AVAILABLE or SERVICE_UNAVAILABLE"
+$workflowResult = Read-Host "WORKFLOW_SUCCEEDED or WORKFLOW_FAILED"
+$observationSource = Read-Host "How the probes were captured"
+$observedAt = [DateTimeOffset]::Now.ToString("o")
+```
+
+Then save the evidence manifest:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\capture_validation_inputs.py `
+  record-evidence `
+  --experiment-id $runId `
+  --failed-node $failedNode `
+  --namespace $namespace `
+  --observation-source $observationSource `
+  --observed-at $observedAt `
+  --expected-service $serviceName `
+  --service-result "$serviceName=$serviceResult" `
+  --expected-workflow $workflowProbe `
+  --workflow-result "$workflowProbe=$workflowResult" `
+  --output $evidencePath
+```
+
+For multiple services or workflows, repeat both the corresponding
+`--expected-*` and `--*-result` arguments. Every expected identifier must have
+exactly one result.
+
+When available, also supply `--workflow-freeze-id` and
+`--deployment-snapshot-id` so the experiment can be traced to its exact upstream
+inputs.
+
+## 5. Validate one experiment
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_validation.py `
+  --prediction $predictionPath `
+  --evidence $evidencePath `
+  --batch-id $runId `
+  --output $validationPath
+```
+
+The command prints the JSON result and writes the same UTF-8 JSON to
+`$validationPath`.
+
+## 6. Validate repeated experiments
+
+Create a batch manifest after completing two or more independent runs. Paths in
+the manifest are resolved relative to the manifest file:
+
+```json
+{
+  "batchId": "worker-failure-repeatability",
+  "experiments": [
+    {
+      "prediction": "captures/run-01/prediction.json",
+      "evidence": "captures/run-01/evidence.json"
+    },
+    {
+      "prediction": "captures/run-02/prediction.json",
+      "evidence": "captures/run-02/evidence.json"
+    }
+  ]
+}
+```
+
+The identifiers and paths above illustrate the file structure only. Replace
+them with the identifiers produced by the real experiments.
+
+Run the batch:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_validation.py `
+  --batch-manifest .\experiments\failure_impact_validation\batch.json `
+  --output .\experiments\failure_impact_validation\batch-validation.json
+```
+
+## Reported metrics
+
+The validation artifact reports service-level and workflow-level classification
+counts and metrics:
+
+- True positives: failures predicted and observed.
+- False positives: failures predicted but not observed.
+- False negatives: failures observed but not predicted.
+- Precision: the proportion of predicted failures that were observed.
+- Recall: the proportion of observed failures that were predicted.
+- F1 score: the harmonic mean of precision and recall.
+- Exact-match rate: the proportion of experiment runs where both the service
+  failure set and workflow failure set matched exactly.
+
+An undefined metric is exported as `null`; it is never replaced with a perfect
+score. For example, recall is undefined when no positive failure was observed.
+
+## Common errors
+
+`Could not read ...`
+
+: The path does not exist. Check it with `Test-Path $predictionPath` or
+  `Test-Path $evidencePath`. Text such as `C:\full\path\to\...` is an example,
+  not an existing file.
+
+`Captured experiment is incomplete ...`
+
+: At least one expected service or workflow has no observation. Run the missing
+  probe and record its real result.
+
+`Prediction and observation must refer to the same failed node`
+
+: The prediction and evidence came from different experiment scenarios. Do not
+  combine them.
+
+`refusing to overwrite ...`
+
+: The output already exists. Preserve it and use a new experiment ID or output
+  path.
+
+HTTP `404`, `409`, `422`, `502`, or `503`
+
+: The backend could not produce a live prediction. Resolve the frozen workflow,
+  topology, node, cluster, or upstream evidence problem before conducting the
+  experiment. Do not substitute sample data.
+
+Expected input failures return exit code `2` with a concise `error:` message.
+
+## Automated checks
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest `
+  tests\failure_impact_prediction\test_validation_input_capture.py `
+  tests\failure_impact_prediction\test_validation_runner.py `
+  tests\failure_impact_prediction\test_validation_batch_runner.py `
+  -v --basetemp .pytest-tmp-validation-guide
+```
+
+These tests use controlled in-memory data. Passing tests verify the workflow
+implementation; they are not evidence that a real cluster experiment succeeded.
