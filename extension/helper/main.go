@@ -22,11 +22,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"time"
 
-	"resilience-engine/helper/internal/agent"
 	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/execx"
@@ -57,22 +55,6 @@ func realDeps() flow.Deps {
 		Prompter: approve.Default(),
 		Backends: func() []transport.Backend { return transport.Defaults(runtime.GOOS, home, docker) },
 		Agent:    realAgent(home),
-	}
-}
-
-// realAgent is the background renewal job for this user. It points at this very binary, resolved
-// through any symlink, so the job keeps working wherever Docker Desktop keeps its host binaries.
-func realAgent(home string) agent.Controller {
-	exe, err := os.Executable()
-	if err == nil {
-		if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
-			exe = resolved
-		}
-	}
-	return &agent.LaunchAgent{
-		GOOS: runtime.GOOS, Home: home, UID: os.Getuid(), Exe: exe,
-		Env:    map[string]string{"KUBECONFIG": os.Getenv("KUBECONFIG")},
-		Runner: execx.Real{},
 	}
 }
 

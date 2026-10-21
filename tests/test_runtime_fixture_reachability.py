@@ -10,6 +10,7 @@ empirical probe at the bottom backs the static analysis by calling every GET rou
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -190,6 +191,8 @@ def test_calling_every_get_route_never_opens_a_fixture_file(tmp_path):
         "HOME": str(tmp_path),
         "DATABASE_URL": f"sqlite:///{tmp_path / 'probe.db'}",
         "KUBECONFIG": str(tmp_path / "no-kubeconfig"),
+        # Windows needs these even in a hand-built environment, or the network stack (asyncio) cannot start.
+        **{k: os.environ[k] for k in ("SYSTEMROOT", "SystemDrive") if k in os.environ},
     }
 
     completed = subprocess.run([sys.executable, "-c", PROBE], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)

@@ -75,19 +75,19 @@ def _observed_failures(snapshot_dir: Path) -> list[FailureObservation]:
         nodes_file = result_file.parent / "nodes-after-detection.txt"
         if not nodes_file.exists():
             continue
-        failed = [r["NAME"] for r in _table_rows(nodes_file.read_text()) if r.get("STATUS") == "NotReady"]
-        outcome = result_file.read_text().strip()
+        failed = [r["NAME"] for r in _table_rows(nodes_file.read_text(encoding="utf-8")) if r.get("STATUS") == "NotReady"]
+        outcome = result_file.read_text(encoding="utf-8").strip()
         observations.append(FailureObservation(failed, outcome == "SERVICE_AVAILABLE"))
     return observations
 
 
 def evaluate_snapshot(snapshot_dir: Path = KIND_CONCENTRATED_BASELINE) -> SnapshotEvaluation:
     start = time.perf_counter()
-    pod_objects = json.loads((snapshot_dir / "pods.json").read_text())["items"]
-    node_objects = json.loads((snapshot_dir / "nodes.json").read_text())["items"]
+    pod_objects = json.loads((snapshot_dir / "pods.json").read_text(encoding="utf-8"))["items"]
+    node_objects = json.loads((snapshot_dir / "nodes.json").read_text(encoding="utf-8"))["items"]
     services = [
         doc for path in sorted(snapshot_dir.glob("*-service.yaml"))
-        for doc in yaml.safe_load_all(path.read_text()) if isinstance(doc, dict)
+        for doc in yaml.safe_load_all(path.read_text(encoding="utf-8")) if isinstance(doc, dict)
     ]
     namespace = pod_objects[0]["metadata"]["namespace"] if pod_objects else "default"
 
@@ -100,11 +100,11 @@ def evaluate_snapshot(snapshot_dir: Path = KIND_CONCENTRATED_BASELINE) -> Snapsh
     predicted_pod_node = {p.name: p.node for p in pods if p.node}
     predicted_pod_service = {pod["name"]: svc["name"] for svc in analyzed for pod in svc["pods"]}
 
-    wide = _table_rows((snapshot_dir / "pod-placement.txt").read_text())
+    wide = _table_rows((snapshot_dir / "pod-placement.txt").read_text(encoding="utf-8"))
     truth_pod_node = {r["NAME"]: r["NODE"] for r in wide}
     ip_to_pod = {r["IP"]: r["NAME"] for r in wide}
     truth_pod_service = {}
-    for row in _table_rows((snapshot_dir / "endpoints-before.txt").read_text()):
+    for row in _table_rows((snapshot_dir / "endpoints-before.txt").read_text(encoding="utf-8")):
         service_name = row["NAME"].rsplit("-", 1)[0]  # EndpointSlice name = <service>-<suffix>
         for ip in row.get("ENDPOINTS", "").split(","):
             if ip in ip_to_pod:

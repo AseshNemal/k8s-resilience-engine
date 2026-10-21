@@ -7,6 +7,7 @@ or log credentials).
 
 import base64
 import json
+import os
 import stat
 from datetime import datetime, timedelta, timezone
 
@@ -78,12 +79,13 @@ def test_an_expired_token_is_reported_as_expired(client):
     assert client.get("/_extension/cluster").json()["expired"] is True
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no Unix file modes")
 def test_stored_file_is_private_and_minimal(client, tmp_path):
     put(client, kubeconfig(cluster_extra={"extensions": [{"name": "x"}]}))
 
     path = tmp_path / "kube" / "config"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    stored = yaml.safe_load(path.read_text())
+    stored = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert set(stored["users"][0]["user"]) == {"token"}
     assert set(stored["clusters"][0]["cluster"]) <= {"server", "certificate-authority-data", "tls-server-name"}
 
@@ -107,7 +109,9 @@ def test_responses_never_contain_the_credential(client):
         (kubeconfig(user={"auth-provider": {"name": "gcp"}}), "bearer tokens"),
         ("not: a kubeconfig", "current-context"),
         (":\n - [", "valid YAML"),
-        ("a: " + "x" * 70000, "too large"),
+        # An explicit id: pytest keeps the test id in an environment variable, and Windows refuses one that is
+        # longer than 32767 characters, which this 70000-character value would make it.
+        pytest.param("a: " + "x" * 70000, "too large", id="oversized-file"),
     ],
 )
 def test_unsafe_or_malformed_kubeconfigs_are_rejected(client, tmp_path, text, message):

@@ -152,7 +152,7 @@ def test_the_new_scripts_never_write_html_or_log(script):
 
 def test_automatic_setup_is_limited_to_platforms_that_were_verified():
     code = (UI_SRC / "autoconnect.js").read_text(encoding="utf-8")
-    assert 'const VERIFIED_PLATFORMS = ["darwin"];' in code
+    assert 'const ENABLED_PLATFORMS = ["darwin", "win32", "linux"];' in code
 
 
 # ---- the stylesheet ------------------------------------------------------------------------------

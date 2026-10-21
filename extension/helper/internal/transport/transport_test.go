@@ -187,7 +187,7 @@ func TestFindDockerPrefersPathThenKnownLocationsPerOS(t *testing.T) {
 	notOnPath := func(string) (string, error) { return "", errors.New("no") }
 	exists := map[string]bool{}
 	stat := func(p string) (os.FileInfo, error) {
-		if exists[p] {
+		if exists[filepath.ToSlash(p)] { // the code joins with the host's separator; the fixtures use "/"
 			return fakeInfo{}, nil
 		}
 		return nil, os.ErrNotExist
@@ -195,16 +195,16 @@ func TestFindDockerPrefersPathThenKnownLocationsPerOS(t *testing.T) {
 	if p, _ := FindDocker(func(string) (string, error) { return "/on/path/docker", nil }, stat, "darwin", "/Users/x"); p != "/on/path/docker" {
 		t.Fatalf("PATH must win, got %s", p)
 	}
-	exists["/Users/x/.docker/bin/docker"] = true
-	if p, err := FindDocker(notOnPath, stat, "darwin", "/Users/x"); err != nil || p != "/Users/x/.docker/bin/docker" {
+	exists[filepath.ToSlash("/Users/x/.docker/bin/docker")] = true
+	if p, err := FindDocker(notOnPath, stat, "darwin", "/Users/x"); err != nil || filepath.ToSlash(p) != "/Users/x/.docker/bin/docker" {
 		t.Fatalf("darwin: %s %v", p, err)
 	}
-	exists[`C:\Program Files\Docker\Docker\resources\bin\docker.exe`] = true
+	exists[filepath.ToSlash(`C:\Program Files\Docker\Docker\resources\bin\docker.exe`)] = true
 	if p, err := FindDocker(notOnPath, stat, "windows", `C:\Users\x`); err != nil || !strings.HasSuffix(p, "docker.exe") {
 		t.Fatalf("windows: %s %v", p, err)
 	}
-	exists["/opt/docker-desktop/bin/docker"] = true
-	if p, err := FindDocker(notOnPath, stat, "linux", "/home/x"); err != nil || p != "/opt/docker-desktop/bin/docker" {
+	exists[filepath.ToSlash("/opt/docker-desktop/bin/docker")] = true
+	if p, err := FindDocker(notOnPath, stat, "linux", "/home/x"); err != nil || filepath.ToSlash(p) != "/opt/docker-desktop/bin/docker" {
 		t.Fatalf("linux: %s %v", p, err)
 	}
 	if _, err := FindDocker(notOnPath, func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }, "linux", "/home/x"); err == nil {
@@ -305,7 +305,7 @@ func TestSocketThatIsNotThereIsUnavailable(t *testing.T) {
 
 func TestSocketIsOnlyOfferedWhereItWasVerified(t *testing.T) {
 	s, err := NewSocket("darwin", "/Users/x")
-	if err != nil || !strings.HasSuffix(s.Dir, "Library/Containers/com.docker.docker/Data/ext-sockets/k8s-resilience-engine") {
+	if err != nil || !strings.HasSuffix(filepath.ToSlash(s.Dir), "Library/Containers/com.docker.docker/Data/ext-sockets/k8s-resilience-engine") {
 		t.Fatalf("darwin: %+v %v", s, err)
 	}
 	for _, goos := range []string{"windows", "linux", "freebsd"} {
@@ -387,7 +387,13 @@ func TestADockerThatFailsForAnotherReasonIsNotCalledSlow(t *testing.T) {
 }
 
 func TestASocketThatNeverAnswersKeepsTheDeadlineAsTheCause(t *testing.T) {
-	dir, err := os.MkdirTemp("/tmp", "slow")
+	// A short base keeps the socket path under the unix limit (macOS: 104 bytes); where there is no /tmp
+	// (Windows) the default temporary folder is used.
+	base := "/tmp"
+	if st, statErr := os.Stat(base); statErr != nil || !st.IsDir() {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "slow")
 	if err != nil {
 		t.Fatal(err)
 	}

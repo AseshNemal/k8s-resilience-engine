@@ -64,7 +64,7 @@ users:
     exec:
       apiVersion: client.authentication.k8s.io/v1
       command: /bin/sh
-      args: ["-c", "touch ` + marker + `"]
+      args: ["-c", "touch ` + filepath.ToSlash(marker) + `"]
       interactiveMode: Never
 contexts:
 - name: kind-resilience-research

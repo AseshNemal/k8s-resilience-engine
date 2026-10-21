@@ -53,7 +53,8 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     for os in darwin linux windows; do \
         ext=""; [ "$os" = "windows" ] && ext=".exe"; \
         GOOS="$os" GOARCH="$TARGETARCH" go build -p 2 -trimpath -ldflags "-s -w" -o "/out/$os/resilience-helper$ext" . || exit 1; \
-    done
+    done; \
+    GOOS=windows GOARCH="$TARGETARCH" go build -p 2 -trimpath -ldflags "-s -w -H=windowsgui" -o /out/windows/resilience-helper-bg.exe .
 
 # --- Render the existing dashboard pages to static files (build time only) ------------------
 # This stage is defined after the helper stage on purpose: BuildKit builds independent stages at the
@@ -81,6 +82,8 @@ COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoco
 COPY --from=helper --chmod=0755 /out/darwin/resilience-helper /darwin/resilience-helper
 COPY --from=helper --chmod=0755 /out/linux/resilience-helper /linux/resilience-helper
 COPY --from=helper --chmod=0755 /out/windows/resilience-helper.exe /windows/resilience-helper.exe
+# The same program without a console window: the Windows background task runs this one, so nothing flashes on screen.
+COPY --from=helper --chmod=0755 /out/windows/resilience-helper-bg.exe /windows/resilience-helper-bg.exe
 COPY --chmod=0755 extension/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

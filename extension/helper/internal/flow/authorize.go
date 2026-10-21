@@ -50,7 +50,7 @@ func Authorize(ctx context.Context, d Deps, name string) Result {
 	}
 	plan := rbac.Plan(report)
 
-	decision, err := d.Prompter.Confirm(ctx, authorizeDialog(c, ver, plan, d.Agent != nil && d.Agent.Supported()))
+	decision, err := d.Prompter.Confirm(ctx, authorizeDialog(c, ver, plan, d.backgroundNote()))
 	switch {
 	case errors.Is(err, approve.ErrNoApprovalChannel), errors.Is(err, approve.ErrUnsupportedPlatform):
 		return fail(cmd, StateApprovalUnavailable, "no approval dialog is available on this system; use the manual connection instead")

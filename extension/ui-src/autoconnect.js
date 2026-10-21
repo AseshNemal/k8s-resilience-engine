@@ -8,7 +8,7 @@
  * only the fixed messages below.
  *
  * While an extension page is open it checks every 60 seconds (every 20 while a renewal is pending)
- * and when the tab becomes visible. When no page is open a small macOS background job renews the
+ * and when the tab becomes visible. When no page is open a small background job (a LaunchAgent, a Task Scheduler task or a systemd timer) renews the
  * credential instead (see helper/internal/agent); the person turns that on once, in a native dialog.
  * Either way, the first check after a long gap finds an expired credential and renews it.
  *
@@ -22,9 +22,11 @@
 (function () {
     "use strict";
 
-    // Automatic setup is offered only where it was tested on a real machine. Add an operating system
-    // here only after it was verified there (see docs/EXTENSION.md); until then it gets the manual path.
-    const VERIFIED_PLATFORMS = ["darwin"];
+    // Automatic setup is offered on these systems. Only macOS has been tried on a real machine; Windows and
+    // Linux are enabled on purpose before that (their jobs and dialogs are covered by tests and compile, see
+    // docs/EXTENSION.md), so a problem there is expected to show up as a clear message, not silence. Any
+    // other system gets the manual path.
+    const ENABLED_PLATFORMS = ["darwin", "win32", "linux"];
     const POLL_MS = 60000;
     // While a renewal is pending (failed and waiting to retry, or running) look more often. The back-off
     // below still decides when a retry is actually allowed, so this never makes the helper run more.
@@ -71,12 +73,12 @@
     }
 
     function platformSupport(platform) {
-        if (VERIFIED_PLATFORMS.includes(platform)) return { automatic: true, note: "" };
+        if (ENABLED_PLATFORMS.includes(platform)) return { automatic: true, note: "" };
         const names = { win32: "Windows", linux: "Linux", darwin: "macOS" };
         const name = names[platform] || "this operating system";
         return {
             automatic: false,
-            note: `Automatic setup has not been verified on ${name} yet, so it is turned off. Use the manual connection below.`,
+            note: `Automatic setup is not available on ${name}. Use the manual connection below.`,
         };
     }
 
@@ -302,11 +304,11 @@
     }
 
     window.__resilienceAuto = {
-        VERIFIED_PLATFORMS, POLL_MS, PENDING_POLL_MS, BACKOFF_MS, WAIT_MS, platformOf, platformSupport, helperFile, messageFor, parseHelperOutput, createController,
+        ENABLED_PLATFORMS, POLL_MS, PENDING_POLL_MS, BACKOFF_MS, WAIT_MS, platformOf, platformSupport, helperFile, messageFor, parseHelperOutput, createController,
     };
     if (!window.document || !window.document.addEventListener) return;
 
-    // ---- browser wiring: only where the host helper exists and automatic setup was verified ----
+    // ---- browser wiring: only where the host helper exists and automatic setup is enabled ----
     const dd = window.ddClient;
     const platform = platformOf(dd, window.navigator);
     const support = platformSupport(platform);

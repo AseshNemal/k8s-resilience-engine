@@ -956,7 +956,7 @@ bash. Use the `.cmd` launcher where this README shows the `.sh` one:
 They need Python 3.9 or newer (the `py` launcher is preferred on Windows) and `docker`, `kind` and `kubectl` on
 `PATH`. What is checked: their logic is covered by tests that run on every platform. What is not: they have been
 run on macOS, not on a real Windows machine. One real difference: automatic background renewal of the cluster
-credential exists on macOS only, so on Windows the token is renewed while the extension tab is open.
+credential is a LaunchAgent on macOS, a Task Scheduler task on Windows and a systemd user timer on Linux. Only the macOS one has been tried on a real machine.
 
 ## Deployment
 
@@ -1038,9 +1038,9 @@ All commands below are run from the repository root.
 4. **Approve read-only access.** Under *Set up automatically*, click **Find clusters**, pick your kind
    cluster and click **Set up access**. A system dialog lists the exact cluster, permissions and changes;
    nothing happens until you approve. The extension then holds only a read-only token (valid for up to
-   7 days) that renews itself with no button to press: while the extension is open, and, on macOS, from a
-   small background job (a LaunchAgent, named in the same dialog) that checks every 15 minutes even when
-   Docker Desktop is closed or the Mac was asleep. Your own kubeconfig never leaves your computer.
+   7 days) that renews itself with no button to press: while the extension is open, and from a
+   small background job (a LaunchAgent, a scheduled task or a systemd timer, named in the same dialog) that checks every 15 minutes even when
+   Docker Desktop is closed or the computer was asleep. Your own kubeconfig never leaves your computer.
    *(Manual alternative: run `./scripts/extension-cluster-access.sh`, then pick
    `.kube/extension-readonly.kubeconfig` under *Advanced: use a kubeconfig file*.)*
 5. **Use the pages.** Every page reads your connected cluster; if it cannot, the page says so with an

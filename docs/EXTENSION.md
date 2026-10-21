@@ -423,7 +423,13 @@ tests, and by a real macOS check that `plutil` accepts the generated plist and t
 Not yet verified: the background job renewing a real expired credential end to end through Docker Desktop,
 and anything on Windows or Linux. The cluster scripts and `extension-manage` are cross-platform Python and their
 logic is covered by tests that run on every platform, but no real Windows machine has run them. The background
-renewal job exists on macOS only; on Windows and Linux the token is renewed while the extension tab is open.
+renewal job exists for all three systems: a LaunchAgent on macOS (tried on a real machine), a per-user Task Scheduler
+task on Windows (it runs `resilience-helper-bg.exe`, the same program built without a console window) and a systemd
+user timer on Linux. The Windows and Linux jobs are covered by tests against a fake `schtasks` and `systemctl` and
+compile for their systems, but have **not been run on a real Windows or Linux machine**; the page offers automatic setup
+there (`ENABLED_PLATFORMS` in `autoconnect.js`) before that has been done, on purpose. A Linux system without a systemd
+user session (a container, WSL without systemd) reports background renewal as unavailable, and the token then renews
+while the extension tab is open.
 
 Checked in Docker Desktop 4.95.0 (macOS, Apple silicon, host architecture only).
 

@@ -21,7 +21,7 @@ func TestAuthorizeDisclosesTheBackgroundJobInTheDialogAndInstallsItAfterApproval
 		t.Fatalf("result = %+v installs=%d", r, a.installs)
 	}
 	dialog := p.requests[0].Title + "\n" + p.requests[0].Body
-	for _, want := range []string{"background", "LaunchAgent", "15 minutes", "never changes the cluster"} {
+	for _, want := range []string{"background", "a test background job", "15 minutes", "never changes the cluster"} {
 		if !strings.Contains(dialog, want) {
 			t.Errorf("the dialog must disclose the background job; lacks %q:\n%s", want, dialog)
 		}
@@ -42,7 +42,7 @@ func TestAuthorizeWithoutAVerifiedBackgroundJobSaysNothingAboutOne(t *testing.T)
 	if !r.OK || r.Background != string(agent.Unsupported) {
 		t.Fatalf("result = %+v", r)
 	}
-	if strings.Contains(p.requests[0].Body, "LaunchAgent") {
+	if strings.Contains(p.requests[0].Body, "a test background job") {
 		t.Fatalf("the dialog must not promise a job this system cannot have:\n%s", p.requests[0].Body)
 	}
 }
@@ -68,7 +68,7 @@ func TestEnableBackgroundAsksOnceAndInstallsOnlyOnApproval(t *testing.T) {
 	if !r.OK || r.Background != string(agent.On) || a.installs != 1 || len(p.requests) != 1 {
 		t.Fatalf("result = %+v installs=%d dialogs=%d", r, a.installs, len(p.requests))
 	}
-	if !strings.Contains(p.requests[0].Body, ctxName) || !strings.Contains(p.requests[0].Body, "LaunchAgent") {
+	if !strings.Contains(p.requests[0].Body, ctxName) || !strings.Contains(p.requests[0].Body, "a test background job") {
 		t.Fatalf("the dialog must name the cluster and the job:\n%s", p.requests[0].Body)
 	}
 }
