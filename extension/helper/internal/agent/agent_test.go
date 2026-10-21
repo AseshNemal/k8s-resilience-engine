@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -42,6 +43,9 @@ func (r *recorder) verbs() []string {
 
 func newAgent(t *testing.T, r *recorder) (*LaunchAgent, string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the LaunchAgent is macOS-only and its tests use POSIX paths")
+	}
 	home := t.TempDir()
 	return &LaunchAgent{
 		GOOS:   "darwin",

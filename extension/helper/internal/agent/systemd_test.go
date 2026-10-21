@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -69,6 +70,9 @@ func TestTimerInstallWritesUnitsThatRunOnlyRenewManagedAndEnablesTheTimer(t *tes
 }
 
 func TestTimerHonoursXDGConfigHomeAndPassesOnAnAbsoluteKubeconfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a Windows temp folder is not a POSIX path, which is what the Linux timer accepts")
+	}
 	r := &scripted{}
 	a, home := newTimer(t, r)
 	xdg := filepath.Join(home, "xdg")

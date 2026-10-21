@@ -1,0 +1,128 @@
+name: CI
+
+# What this proves that a Mac cannot: the Windows and Linux background renewal jobs against the real
+# Task Scheduler and the real systemd, and the project's Python and page tests on Windows.
+# The integration jobs install and remove a background job, so they run only on these throwaway runners
+# (RESILIENCE_INTEGRATION=1); never run them on a machine where you use the extension.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helper-unit:
+    name: Go helper tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: extension/helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: extension/helper/go.mod
+      - run: go vet ./...
+      - run: go test ./... -count=1
+
+  helper-cross-compile:
+    name: Go helper builds for every system
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension/helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: extension/helper/go.mod
+      - name: Build and vet every target (with the integration tests compiled in)
+        run: |
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./...
+            GOOS=${target%/*} GOARCH=${target#*/} go vet -tags integration ./...
+            echo "ok $target"
+          done
+      - name: The console-less Windows helper is a GUI program
+        run: |
+          GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -H=windowsgui" -o "$RUNNER_TEMP/bg.exe" .
+          file "$RUNNER_TEMP/bg.exe" | tee /dev/stderr | grep -q "(GUI)"
+
+  windows-task-scheduler:
+    name: Windows Task Scheduler (real)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: extension/helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: extension/helper/go.mod
+      - name: Shell scripts that run in Linux containers keep LF line endings on a Windows checkout
+        shell: bash
+        working-directory: .
+        run: |
+          for f in scripts/docker-entrypoint.sh extension/entrypoint.sh; do
+            if grep -q $'\r' "$f"; then echo "$f has CRLF line endings"; exit 1; fi
+          done
+      - name: Install, run and remove the real scheduled task
+        env:
+          RESILIENCE_INTEGRATION: "1"
+        run: go test -tags integration ./internal/agent -run Integration -count=1 -v
+
+  linux-systemd:
+    name: Linux systemd user timer (real)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension/helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: extension/helper/go.mod
+      - name: Start a systemd user session for the runner account
+        run: |
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Show that the user manager answers
+        run: systemctl --user show-environment | head -5
+      - name: Install, run and remove the real timer
+        env:
+          RESILIENCE_INTEGRATION: "1"
+        run: go test -tags integration ./internal/agent -run Integration -count=1 -v
+
+  python-and-pages:
+    name: Python and page tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+      - run: node --test extension/ui-src/*.test.mjs
