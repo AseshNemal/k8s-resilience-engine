@@ -66,6 +66,19 @@
         <div><span>Business success</span><strong>Researcher-defined success contract</strong></div>
         <div><span>Evidence source</span><strong>Recorded service activity + controlled outcomes</strong></div>
     </div>
+    <div class="guided-find" data-role="guided-find">
+        <button type="button" class="experiment-button" data-role="find-workflows-button">Find workflows</button>
+        <span class="guided-find__hint">Checks the trace service, offers to start it if it is not running, and lists the workflows it has recorded.</span>
+        <button type="button" class="secondary-button" data-role="trace-stop-button" hidden>Stop the trace service</button>
+    </div>
+    <div class="guided-find__prompt" data-role="trace-start-prompt" hidden>
+        <p><strong>The trace service (Jaeger) is not running.</strong> Start it? It runs one container, about 10 MB, reachable only from this computer on ports 16686, 4317 and 4318. Nothing else is started and no traffic is generated. You can stop it again here.</p>
+        <div class="guided-find__actions">
+            <button type="button" class="experiment-button" data-role="trace-start-confirm">Start the trace service</button>
+            <button type="button" class="secondary-button" data-role="trace-start-cancel">Not now</button>
+        </div>
+    </div>
+    <output class="guided-find__status" data-role="find-workflows-status" aria-live="polite"></output>
     <div class="guided-discovery" data-role="guided-discovery">
         <div>
             <label for="guided-operation">Choose a business workflow</label>
@@ -171,6 +184,7 @@
             </button>
         </div>
     </div>
+    <output data-role="live-config-status" aria-live="polite" style="display: block; min-height: 18px; margin-top: var(--space-sm); font-size: 12px; color: var(--color-text-muted);"></output>
     <div data-role="discovered-workflows-container" style="display: none; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px dashed var(--color-border);">
         <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: var(--space-sm);">

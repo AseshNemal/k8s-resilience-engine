@@ -115,6 +115,27 @@ def test_every_page_runs_autoconnect_after_chrome(built, name):
     assert page.index('src="chrome.js"') < page.index('src="autoconnect.js"')
 
 
+def test_only_the_workflows_page_loads_the_trace_service_bridge_and_after_autoconnect(built):
+    for name in PAGE_FILES:
+        page = html(built, name)
+        if name == "workflows.html":
+            assert 'src="trace-service.js"' in page
+            assert page.index('src="autoconnect.js"') < page.index('src="trace-service.js"')
+        else:
+            assert 'src="trace-service.js"' not in page, name
+
+
+def test_the_trace_service_bridge_only_ever_asks_the_helper_for_its_three_fixed_commands():
+    code = (UI_SRC / "trace-service.js").read_text(encoding="utf-8")
+    code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
+    code = re.sub(r"(?m)^\s*//.*$", "", code)
+    commands = set(re.findall(r'"(trace-(?:status|start|stop))"', code))
+    assert commands == {"trace-status", "trace-start", "trace-stop"}
+    # The helper is never given a page-supplied value: exec is called with a file and a one-item array.
+    assert code.count("env.exec(") == 1
+    assert code.count("env.exec(helperFile(env.platform), [command])") == 1
+
+
 def test_connect_page_offers_automatic_setup_and_keeps_the_manual_fallback(built):
     page = html(built, "connect.html")
     for role in AUTO_ROLES:
@@ -137,7 +158,7 @@ def test_the_page_says_nothing_happens_without_approval_in_a_system_dialog(built
     assert "nothing is changed unless you approve there" in page
 
 
-@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js"])
+@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js"])
 def test_the_new_scripts_never_write_html_or_log(script):
     source = (UI_SRC / script).read_text(encoding="utf-8")
     # Comments may discuss these APIs (they explain why they are not used); only code is checked.

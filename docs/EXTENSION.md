@@ -249,6 +249,28 @@ Every route that takes a trace-server address from the caller (`/api/workflows/j
 before contacting it. The server's own `WORKFLOW_JAEGER_URL` is trusted as configured. A refused address answers 422
 with `JAEGER_ADDRESS_NOT_APPROVED` and a message naming the host, which the page shows instead of waiting.
 
+**Find workflows (starting the trace service from the page).** The Workflow dependencies page has a **Find workflows**
+button. It checks the trace service; if it is running it looks for workflows straight away. If it is not running and the
+host helper is available (the extension, not a plain browser), the page asks first: "Start the trace service?". Only after
+you say yes does the helper (`resilience-helper trace-start`) run one container, `resilience-trace-jaeger`
+(`jaegertracing/all-in-one:1.56`, the version in `deploy/docker-compose.jaeger.yml`). The page cannot start a container
+itself, and it can pass the helper nothing but one of three fixed commands: `trace-status`, `trace-start`, `trace-stop`.
+
+- **Light and local:** the container is limited to 256 MB, keeps at most 5000 traces in memory, restarts with Docker Desktop
+  (`unless-stopped`), and publishes ports 16686, 4317 and 4318 on `127.0.0.1` only. It is reachable from the extension and from
+  containers through `host.docker.internal`, but not from other computers. The first start may download the image.
+- **Only its own container:** the helper starts, stops and (after a failed start) removes `resilience-trace-jaeger` and nothing
+  else. A Jaeger started another way (for example from the compose file) is reported ("already running, started somewhere
+  else") and never stopped. **Stop the trace service** appears only for the helper's own container.
+- **Plain results:** a result is one of: running, running elsewhere, stopped, not started yet, not answering yet, port in use,
+  Docker could not start it, or Docker not reachable. Docker's own error text is never shown. If another program holds one of
+  the ports, the page says so and nothing is changed.
+- **Without the helper** (opened in a plain browser) the page shows the command to run by hand.
+- **What it does not do:** it starts no application, generates no traffic and changes no Kubernetes workload. A running trace
+  service is only where traces are stored. If nothing has sent it traces, the page says so ("Nothing has sent traces to it
+  yet: an application must send them (OTLP, port 4317 or 4318)") and shows no workflows. Bookinfo, for example, sends no traces
+  until it is instrumented.
+
 ## Automatic renewal
 
 A credential the extension set up itself (not one uploaded by hand) renews with no button and shows no

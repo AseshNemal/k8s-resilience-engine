@@ -151,6 +151,10 @@ def _static_paths(html: str, key: str, title: str) -> str:
     html = html.replace("</head>", '    <link rel="stylesheet" href="docker.css">\n</head>', 1)
     html = html.replace("<body>", f'<body data-page="{key}">', 1)
     html = html.replace("</body>", '<script src="chrome.js" defer></script>\n<script src="autoconnect.js" defer></script>\n</body>', 1)
+    if key == "workflows":
+        # Only this page can start the trace service (through the host helper), so only it loads the bridge.
+        html = html.replace('<script src="autoconnect.js" defer></script>\n</body>',
+                            '<script src="autoconnect.js" defer></script>\n<script src="trace-service.js" defer></script>\n</body>', 1)
 
     for old, new in NAV_LABELS.items():
         html = html.replace(f'<span class="sidebar__link-label">{old}</span>', f'<span class="sidebar__link-label">{new}</span>')
