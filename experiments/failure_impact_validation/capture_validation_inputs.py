@@ -156,66 +156,77 @@ def build_evidence_manifest(
     return payload
 
 
-def _check_output_paths(prediction_output: Path, evidence_output: Path) -> None:
-    if prediction_output.resolve() == evidence_output.resolve():
-        raise ValueError("prediction and evidence outputs must be different files")
-    existing = [
-        str(path)
-        for path in (prediction_output, evidence_output)
-        if path.exists()
-    ]
-    if existing:
-        raise ValueError(
-            "refusing to overwrite existing validation input: "
-            + ", ".join(existing)
-        )
-
-
-def _write_json_pair(
-    prediction_output: Path,
-    prediction: Mapping[str, object],
-    evidence_output: Path,
-    evidence: Mapping[str, object],
-) -> None:
-    created: list[Path] = []
+def _write_new_json(
+    path: Path,
+    payload: Mapping[str, object],
+) -> Path:
+    created = False
     try:
-        for path, payload in (
-            (prediction_output, prediction),
-            (evidence_output, evidence),
-        ):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("x", encoding="utf-8", newline="\n") as stream:
-                created.append(path)
-                json.dump(payload, stream, indent=2)
-                stream.write("\n")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", encoding="utf-8", newline="\n") as stream:
+            created = True
+            json.dump(payload, stream, indent=2)
+            stream.write("\n")
+    except FileExistsError as error:
+        raise ValueError(
+            f"refusing to overwrite existing validation input: {path}"
+        ) from error
     except Exception:
-        for path in created:
+        if created:
             path.unlink(missing_ok=True)
         raise
+    return path
 
 
-def prepare_validation_inputs(
+def capture_prediction_input(
     *,
     base_url: str,
     workflow_id: str,
     failed_node: str,
     namespace: str,
+    output: Path,
+    prediction_fetcher: PredictionFetcher = fetch_live_prediction,
+) -> Path:
+    """Capture the live prediction before the controlled failure begins."""
+
+    if output.exists():
+        raise ValueError(
+            f"refusing to overwrite existing validation input: {output}"
+        )
+    prediction_payload = prediction_fetcher(
+        base_url=base_url,
+        workflow_id=workflow_id,
+        failed_node=failed_node,
+        namespace=namespace,
+    )
+    prediction = FailureImpactReport.model_validate(prediction_payload)
+    if prediction.workflow_id != workflow_id:
+        raise ValueError("runtime prediction returned a different workflow")
+    if prediction.failed_node != failed_node:
+        raise ValueError("runtime prediction returned a different failed node")
+    return _write_new_json(
+        output,
+        prediction.model_dump(by_alias=True, mode="json"),
+    )
+
+
+def record_evidence_input(
+    *,
     experiment_id: str,
+    failed_node: str,
     observation_source: str,
     observed_at: str,
     expected_services: Sequence[str],
     service_results: Mapping[str, str],
     expected_workflows: Sequence[str],
     workflow_results: Mapping[str, str],
-    prediction_output: Path,
-    evidence_output: Path,
+    output: Path,
     workflow_freeze_id: str | None = None,
     deployment_snapshot_id: str | None = None,
-    prediction_fetcher: PredictionFetcher = fetch_live_prediction,
-) -> tuple[Path, Path]:
-    """Validate all inputs before creating the two new artifact files."""
+    namespace: str | None = None,
+) -> Path:
+    """Record complete observations after the controlled failure."""
 
-    _check_output_paths(prediction_output, evidence_output)
     evidence = build_evidence_manifest(
         experiment_id=experiment_id,
         failed_node=failed_node,
@@ -229,107 +240,105 @@ def prepare_validation_inputs(
         deployment_snapshot_id=deployment_snapshot_id,
         namespace=namespace,
     )
-    prediction_payload = prediction_fetcher(
-        base_url=base_url,
-        workflow_id=workflow_id,
-        failed_node=failed_node,
-        namespace=namespace,
-    )
-    prediction = FailureImpactReport.model_validate(prediction_payload)
-    if prediction.workflow_id != workflow_id:
-        raise ValueError("runtime prediction returned a different workflow")
-    if prediction.failed_node != failed_node:
-        raise ValueError("runtime prediction returned a different failed node")
-
-    _write_json_pair(
-        prediction_output,
-        prediction.model_dump(by_alias=True, mode="json"),
-        evidence_output,
-        evidence,
-    )
-    return prediction_output, evidence_output
+    return _write_new_json(output, evidence)
 
 
 def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--workflow-id", required=True)
-    parser.add_argument("--failed-node", required=True)
-    parser.add_argument("--namespace", default="default")
-    parser.add_argument("--experiment-id", required=True)
-    parser.add_argument("--observation-source", required=True)
-    parser.add_argument(
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    prediction = commands.add_parser(
+        "capture-prediction",
+        help="Save the live prediction before failure injection",
+    )
+    prediction.add_argument(
+        "--base-url",
+        default="http://127.0.0.1:8000",
+    )
+    prediction.add_argument("--workflow-id", required=True)
+    prediction.add_argument("--failed-node", required=True)
+    prediction.add_argument("--namespace", default="default")
+    prediction.add_argument("--output", required=True, type=Path)
+
+    evidence = commands.add_parser(
+        "record-evidence",
+        help="Save observed outcomes after the controlled failure",
+    )
+    evidence.add_argument("--failed-node", required=True)
+    evidence.add_argument("--namespace", default="default")
+    evidence.add_argument("--experiment-id", required=True)
+    evidence.add_argument("--observation-source", required=True)
+    evidence.add_argument(
         "--observed-at",
         required=True,
         help="ISO 8601 experiment observation time including its timezone",
     )
-    parser.add_argument("--workflow-freeze-id")
-    parser.add_argument("--deployment-snapshot-id")
-    parser.add_argument(
+    evidence.add_argument("--workflow-freeze-id")
+    evidence.add_argument("--deployment-snapshot-id")
+    evidence.add_argument(
         "--expected-service",
         action="append",
         required=True,
         dest="expected_services",
     )
-    parser.add_argument(
+    evidence.add_argument(
         "--service-result",
         action="append",
         required=True,
         help="Observed NAME=SERVICE_AVAILABLE or NAME=SERVICE_UNAVAILABLE",
     )
-    parser.add_argument(
+    evidence.add_argument(
         "--expected-workflow",
         action="append",
         required=True,
         dest="expected_workflows",
     )
-    parser.add_argument(
+    evidence.add_argument(
         "--workflow-result",
         action="append",
         required=True,
         help="Observed NAME=WORKFLOW_SUCCEEDED or NAME=WORKFLOW_FAILED",
     )
-    parser.add_argument("--prediction-output", required=True, type=Path)
-    parser.add_argument("--evidence-output", required=True, type=Path)
+    evidence.add_argument("--output", required=True, type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Capture a validated pair of files and print their locations."""
+    """Capture one stage of a validation experiment."""
 
     arguments = _argument_parser().parse_args(argv)
-    prediction_path, evidence_path = prepare_validation_inputs(
-        base_url=arguments.base_url,
-        workflow_id=arguments.workflow_id,
-        failed_node=arguments.failed_node,
-        namespace=arguments.namespace,
-        experiment_id=arguments.experiment_id,
-        observation_source=arguments.observation_source,
-        observed_at=arguments.observed_at,
-        expected_services=arguments.expected_services,
-        service_results=_result_mapping(
-            arguments.service_result,
-            argument_name="--service-result",
-        ),
-        expected_workflows=arguments.expected_workflows,
-        workflow_results=_result_mapping(
-            arguments.workflow_result,
-            argument_name="--workflow-result",
-        ),
-        workflow_freeze_id=arguments.workflow_freeze_id,
-        deployment_snapshot_id=arguments.deployment_snapshot_id,
-        prediction_output=arguments.prediction_output,
-        evidence_output=arguments.evidence_output,
-    )
-    print(
-        json.dumps(
-            {
-                "prediction": str(prediction_path),
-                "evidence": str(evidence_path),
-            },
-            indent=2,
+    if arguments.command == "capture-prediction":
+        path = capture_prediction_input(
+            base_url=arguments.base_url,
+            workflow_id=arguments.workflow_id,
+            failed_node=arguments.failed_node,
+            namespace=arguments.namespace,
+            output=arguments.output,
         )
-    )
+        result = {"prediction": str(path)}
+    else:
+        path = record_evidence_input(
+            experiment_id=arguments.experiment_id,
+            failed_node=arguments.failed_node,
+            observation_source=arguments.observation_source,
+            observed_at=arguments.observed_at,
+            expected_services=arguments.expected_services,
+            service_results=_result_mapping(
+                arguments.service_result,
+                argument_name="--service-result",
+            ),
+            expected_workflows=arguments.expected_workflows,
+            workflow_results=_result_mapping(
+                arguments.workflow_result,
+                argument_name="--workflow-result",
+            ),
+            workflow_freeze_id=arguments.workflow_freeze_id,
+            deployment_snapshot_id=arguments.deployment_snapshot_id,
+            namespace=arguments.namespace,
+            output=arguments.output,
+        )
+        result = {"evidence": str(path)}
+    print(json.dumps(result, indent=2))
     return 0
 
 

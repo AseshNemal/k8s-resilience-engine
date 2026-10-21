@@ -11,9 +11,11 @@ from experiments.failure_impact_validation import capture_validation_inputs
 from experiments.failure_impact_validation.capture_validation_inputs import (
     _result_mapping,
     _runtime_prediction_url,
+    capture_prediction_input,
     cli,
     fetch_live_prediction,
-    prepare_validation_inputs,
+    main,
+    record_evidence_input,
 )
 from experiments.failure_impact_validation.run_validation import (
     evaluate_saved_experiment,
@@ -29,31 +31,41 @@ def _prediction_payload() -> dict[str, object]:
     ).model_dump(by_alias=True, mode="json")
 
 
-def _prepare(tmp_path, **overrides):
+def _capture(tmp_path, **overrides):
     arguments = {
         "base_url": "http://127.0.0.1:8000",
         "workflow_id": "checkout",
         "failed_node": "node-1",
         "namespace": "research",
+        "output": tmp_path / "prediction.json",
+        "prediction_fetcher": lambda **_: _prediction_payload(),
+    }
+    arguments.update(overrides)
+    return capture_prediction_input(**arguments)
+
+
+def _record(tmp_path, **overrides):
+    arguments = {
         "experiment_id": "captured-node-1-failure",
+        "failed_node": "node-1",
         "observation_source": "connected-cluster probes",
         "observed_at": "2026-10-21T05:00:00Z",
         "expected_services": ["cartservice"],
         "service_results": {"cartservice": "SERVICE_UNAVAILABLE"},
         "expected_workflows": ["checkout"],
         "workflow_results": {"checkout": "WORKFLOW_FAILED"},
-        "prediction_output": tmp_path / "prediction.json",
-        "evidence_output": tmp_path / "evidence.json",
+        "output": tmp_path / "evidence.json",
         "workflow_freeze_id": "checkout-freeze-v1",
         "deployment_snapshot_id": "deployment-before-node-1",
-        "prediction_fetcher": lambda **_: _prediction_payload(),
+        "namespace": "research",
     }
     arguments.update(overrides)
-    return prepare_validation_inputs(**arguments)
+    return record_evidence_input(**arguments)
 
 
-def test_prepare_writes_real_input_shapes_accepted_by_runner(tmp_path) -> None:
-    prediction_path, evidence_path = _prepare(tmp_path)
+def test_staged_capture_writes_input_shapes_accepted_by_runner(tmp_path) -> None:
+    prediction_path = _capture(tmp_path)
+    evidence_path = _record(tmp_path)
 
     prediction = json.loads(prediction_path.read_text(encoding="utf-8"))
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -68,15 +80,14 @@ def test_prepare_writes_real_input_shapes_accepted_by_runner(tmp_path) -> None:
     assert artifact["validation"]["exactMatchCount"] == 1
 
 
-def test_prepare_rejects_missing_observation_without_writing(tmp_path) -> None:
+def test_record_rejects_missing_observation_without_writing(tmp_path) -> None:
     with pytest.raises(IncompleteCapturedExperimentError):
-        _prepare(tmp_path, workflow_results={})
+        _record(tmp_path, workflow_results={})
 
-    assert not (tmp_path / "prediction.json").exists()
     assert not (tmp_path / "evidence.json").exists()
 
 
-def test_prepare_refuses_to_overwrite_before_fetching(tmp_path) -> None:
+def test_capture_refuses_to_overwrite_before_fetching(tmp_path) -> None:
     prediction_path = tmp_path / "prediction.json"
     prediction_path.write_text("keep", encoding="utf-8")
     called = False
@@ -87,21 +98,20 @@ def test_prepare_refuses_to_overwrite_before_fetching(tmp_path) -> None:
         return _prediction_payload()
 
     with pytest.raises(ValueError, match="refusing to overwrite"):
-        _prepare(tmp_path, prediction_fetcher=fetcher)
+        _capture(tmp_path, prediction_fetcher=fetcher)
 
     assert prediction_path.read_text(encoding="utf-8") == "keep"
     assert called is False
 
 
-def test_prepare_rejects_prediction_for_another_node(tmp_path) -> None:
+def test_capture_rejects_prediction_for_another_node(tmp_path) -> None:
     payload = _prediction_payload()
     payload["failedNode"] = "node-2"
 
     with pytest.raises(ValueError, match="different failed node"):
-        _prepare(tmp_path, prediction_fetcher=lambda **_: payload)
+        _capture(tmp_path, prediction_fetcher=lambda **_: payload)
 
     assert not (tmp_path / "prediction.json").exists()
-    assert not (tmp_path / "evidence.json").exists()
 
 
 def test_runtime_url_encodes_query_values() -> None:
@@ -188,6 +198,7 @@ def test_capture_command_reports_invalid_backend_without_traceback(
 ) -> None:
     exit_code = cli(
         [
+            "capture-prediction",
             "--base-url",
             "not-a-url",
             "--workflow-id",
@@ -196,8 +207,45 @@ def test_capture_command_reports_invalid_backend_without_traceback(
             "node-1",
             "--namespace",
             "research",
+            "--output",
+            str(tmp_path / "prediction.json"),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "error: base_url must be an absolute HTTP or HTTPS URL" in (
+        captured.err
+    )
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+    assert not (tmp_path / "prediction.json").exists()
+
+
+def test_record_evidence_command_does_not_contact_backend(
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    def unexpected_request(*_, **__):
+        raise AssertionError("record-evidence must not contact the backend")
+
+    monkeypatch.setattr(
+        capture_validation_inputs,
+        "urlopen",
+        unexpected_request,
+    )
+    evidence_path = tmp_path / "evidence.json"
+
+    exit_code = main(
+        [
+            "record-evidence",
+            "--failed-node",
+            "node-1",
+            "--namespace",
+            "research",
             "--experiment-id",
-            "invalid-backend-run",
+            "post-failure-run",
             "--observation-source",
             "connected-cluster probes",
             "--observed-at",
@@ -210,19 +258,14 @@ def test_capture_command_reports_invalid_backend_without_traceback(
             "checkout",
             "--workflow-result",
             "checkout=WORKFLOW_FAILED",
-            "--prediction-output",
-            str(tmp_path / "prediction.json"),
-            "--evidence-output",
-            str(tmp_path / "evidence.json"),
+            "--output",
+            str(evidence_path),
         ]
     )
-    captured = capsys.readouterr()
+    output = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 2
-    assert "error: base_url must be an absolute HTTP or HTTPS URL" in (
-        captured.err
-    )
-    assert "Traceback" not in captured.err
-    assert captured.out == ""
-    assert not (tmp_path / "prediction.json").exists()
-    assert not (tmp_path / "evidence.json").exists()
+    assert exit_code == 0
+    assert output == {"evidence": str(evidence_path)}
+    assert json.loads(evidence_path.read_text(encoding="utf-8"))[
+        "experimentId"
+    ] == "post-failure-run"
