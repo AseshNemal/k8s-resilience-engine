@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
     configure_analysis_session_repository,
     discover_analysis_workflows,
+    discover_observed_workflow_candidates,
     get_workflow_analysis,
     list_workflow_analyses,
     start_workflow_analysis,
@@ -373,6 +374,7 @@ __all__ = [
     "preview_workflow_probe",
     "discover_live_workflows",
     "discover_analysis_workflows",
+    "discover_observed_workflow_candidates",
     "evaluate_workflow_by_id",
     "freeze_workflow_graph",
     "get_evidence_source",

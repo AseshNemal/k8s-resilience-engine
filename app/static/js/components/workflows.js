@@ -56,6 +56,13 @@
     const guidedOperation = document.querySelector('[data-role="guided-operation"]');
     const guidedInspectButton = document.querySelector('[data-role="guided-inspect-button"]');
     const guidedResult = document.querySelector('[data-role="guided-result"]');
+    const guidedObserved = document.querySelector('[data-role="guided-observed"]');
+    const guidedObservedState = document.querySelector('[data-role="guided-observed-state"]');
+    const guidedObservedDetail = document.querySelector('[data-role="guided-observed-detail"]');
+    const guidedObservedChecked = document.querySelector('[data-role="guided-observed-checked"]');
+    const guidedCandidates = document.querySelector('[data-role="guided-candidates"]');
+    const guidedAddress = document.getElementById("guided-jaeger-url");
+    const guidedLookback = document.getElementById("guided-lookback");
     const researchAudit = document.querySelector(".research-audit");
 
     let discoveredWorkflows = [];
@@ -111,6 +118,19 @@
         return data;
     }
 
+    // One candidate is one root operation under one entry service; the same operation name can occur under two.
+    function workflowKey(workflow) {
+        return `${workflow.rootService || ""} ${workflow.operationName}`;
+    }
+
+    function selectedGuidedWorkflow() {
+        return guidedOperation
+            ? guidedWorkflows.find((workflow) => workflowKey(workflow) === guidedOperation.value)
+            : undefined;
+    }
+
+    // Only the Online Boutique benchmark has a controlled checkout experiment; it is offered for the
+    // operations that name checkout and is never a default for any other workflow.
     function supportsGuidedExperiment(workflow) {
         return Boolean(
             workflow &&
@@ -120,9 +140,7 @@
 
     function updateGuidedSelectionAction() {
         if (!guidedOperation || !guidedInspectButton) return;
-        const selected = guidedWorkflows.find(
-            (workflow) => workflow.operationName === guidedOperation.value
-        );
+        const selected = selectedGuidedWorkflow();
         guidedInspectButton.disabled = !selected;
         guidedInspectButton.textContent = !selected
             ? "No workflow available"
@@ -137,7 +155,6 @@
             environmentId: String(values.get("environmentId")).trim(),
             evidenceTier: String(values.get("evidenceTier")),
             jaegerUrl: String(values.get("jaegerUrl")).trim(),
-            entryService: String(values.get("entryService")).trim(),
             lookback: String(values.get("lookback")),
         };
     }
@@ -153,7 +170,7 @@
     function guidedConnectionError(error) {
         const message = String(error && error.message ? error.message : error);
         if (message.includes("Could not fetch traces") || message.includes("Jaeger")) {
-            return "The workflow trace service is unavailable. In the project folder, run: docker compose -f deploy/docker-compose.boutique.yml up -d. Wait for the demo store to start, then try again.";
+            return "The workflow trace service could not be reached. The page keeps checking and loads workflows by itself once it answers.";
         }
         return message;
     }
@@ -851,96 +868,270 @@
         }
     }
 
-    async function discoverGuidedWorkflows(event) {
+    // ---------------------------------------------------------------------------
+    // Automatic discovery of observed workflows
+    //
+    // The page asks the trace service by itself: a lightweight health check until it answers, then a bounded
+    // discovery, then a slower refresh for newly arriving traces (see workflow-discovery-poller.js). The
+    // candidates are what was observed. Nothing here classifies, approves or ranks them by business value.
+    // ---------------------------------------------------------------------------
+
+    const OBSERVED_STATE_LABELS = {
+        waiting: "Waiting for trace service…",
+        checking: "Checking trace service…",
+        jaeger_unavailable: "Waiting for trace service…",
+        no_traces: "Trace service connected · no traces yet",
+        no_candidates: "Traces recorded · no business workflows",
+        incomplete_traces: "Traces recorded · tracing evidence incomplete",
+        discovered: "Observed workflows found",
+        error: "Discovery could not run",
+    };
+    const EVIDENCE_LABELS = {
+        complete: "Complete trace evidence",
+        incomplete: "Some traces incomplete",
+        unusable: "Trace evidence incomplete",
+    };
+    const LOADING_TEXT = "Loading available workflows…";
+
+    let lastDiscoverySignature = null;
+    let resolveFirstDiscovery = () => {};
+    let firstDiscovery = Promise.resolve();
+
+    function setGuidedOptions(texts) {
+        guidedOperation.replaceChildren();
+        texts.forEach(({ value, label }) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            guidedOperation.appendChild(option);
+        });
+    }
+
+    function clearLoadingText() {
+        if (guidedStatus && guidedStatus.textContent === LOADING_TEXT) setGuidedStatus("");
+    }
+
+    function showObservedState(state, detail) {
+        if (guidedObserved) {
+            guidedObserved.hidden = false;
+            guidedObserved.dataset.state = state;
+        }
+        if (guidedObservedState) guidedObservedState.textContent = OBSERVED_STATE_LABELS[state] || state;
+        if (guidedObservedDetail) guidedObservedDetail.textContent = detail || "";
+        if (guidedObservedChecked) guidedObservedChecked.textContent = `Last checked ${new Date().toLocaleTimeString()}`;
+    }
+
+    function showNoWorkflows(label) {
+        guidedWorkflows = [];
+        setGuidedOptions([{ value: "", label }]);
+        if (guidedCandidates) guidedCandidates.replaceChildren();
+        updateGuidedSelectionAction();
+    }
+
+    function renderCandidate(workflow) {
+        const row = document.createElement("li");
+        row.className = "guided-candidate";
+        row.dataset.evidence = workflow.evidenceStatus || "";
+        const head = document.createElement("div");
+        head.className = "guided-candidate__head";
+        head.append(
+            guidedText("strong", "guided-candidate__operation", workflow.operationName),
+            guidedText(
+                "span",
+                "guided-candidate__meta",
+                `enters at ${workflow.rootService} · ${workflow.traceCount} trace${workflow.traceCount === 1 ? "" : "s"}`
+            )
+        );
+        const services = document.createElement("div");
+        services.className = "guided-candidate__services";
+        (workflow.participatingServices || []).forEach((service) => {
+            services.appendChild(guidedText("span", "contract-chip", service));
+        });
+        const evidence = guidedText(
+            "small",
+            "guided-candidate__evidence",
+            `${EVIDENCE_LABELS[workflow.evidenceStatus] || "Evidence not graded"} · observed only, dependency class not determined`
+        );
+        row.append(head, services, evidence);
+        return row;
+    }
+
+    function renderDiscoveredWorkflows(report) {
+        const previous = guidedOperation.value;
+        guidedWorkflows = [...report.workflows];
+        setGuidedOptions(
+            guidedWorkflows.map((workflow) => ({
+                value: workflowKey(workflow),
+                label:
+                    `${workflow.operationName} — ${supportsGuidedExperiment(workflow) ? "ready for dependency experiment" : "observation only"}` +
+                    ` · ${workflow.traceCount} traces · ${workflow.participatingServices.length} services`,
+            }))
+        );
+        // A refresh keeps the operator's choice when that workflow is still there.
+        if (guidedWorkflows.some((workflow) => workflowKey(workflow) === previous)) guidedOperation.value = previous;
+        if (guidedCandidates) guidedCandidates.replaceChildren(...guidedWorkflows.map(renderCandidate));
+        updateGuidedSelectionAction();
+    }
+
+    function observedDetail(report) {
+        const parts = [];
+        if (report.workflows.length) {
+            parts.push(
+                `${report.workflows.length} workflow${report.workflows.length === 1 ? "" : "s"} from ${report.tracesFetched} traces`
+            );
+        }
+        const scanned = report.servicesScanned.length;
+        if (report.entryDetection === "call_graph") {
+            // Only services nothing else calls are read; the rest are inside their callers' traces.
+            parts.push(
+                `read the most recent traces of ${scanned} entry service${scanned === 1 ? "" : "s"} ` +
+                `(${report.servicesCalledByOthers.length} more reached through them)`
+            );
+        } else {
+            parts.push(`${scanned} of ${report.servicesRecorded.length} recorded services read (call graph not available)`);
+        }
+        if (report.servicesUnexamined && report.servicesUnexamined.length) {
+            // Never hidden: a service the limits kept from being read, and that no other trace showed.
+            parts.push(
+                `not examined because of the discovery limit: ${report.servicesUnexamined.join(", ")} ` +
+                "(raise WORKFLOW_DISCOVERY_MAX_SERVICES)"
+            );
+        } else if (report.truncated) {
+            parts.push("a sample: the busiest services have more traces in this window than the limit reads");
+        }
+        if (report.workflows.some((workflow) => workflow.evidenceStatus !== "complete") && report.state === "discovered") {
+            parts.push("some trace evidence is incomplete");
+        }
+        return parts.join(" · ");
+    }
+
+    function onDiscoveryReport(report) {
+        clearLoadingText();
+        const state = report.state;
+        if (state === "discovered" || state === "incomplete_traces") {
+            const signature = JSON.stringify([
+                state,
+                report.workflows.map((w) => [workflowKey(w), w.traceCount, w.participatingServices, w.evidenceStatus]),
+            ]);
+            // Unchanged evidence leaves the list and the operator's selection alone.
+            if (signature !== lastDiscoverySignature) {
+                lastDiscoverySignature = signature;
+                renderDiscoveredWorkflows(report);
+            }
+        } else {
+            lastDiscoverySignature = null;
+            showNoWorkflows(
+                state === "jaeger_unavailable"
+                    ? OBSERVED_STATE_LABELS.waiting
+                    : state === "no_traces"
+                        ? `No traces recorded in the last ${report.lookback} yet`
+                        : "No business workflows among the recorded traces"
+            );
+        }
+        const detail =
+            state === "discovered" ? observedDetail(report) : `${report.message} ${observedDetail(report)}`.trim();
+        showObservedState(state, detail);
+        resolveFirstDiscovery();
+    }
+
+    function onDiscoveryWaiting() {
+        clearLoadingText();
+        lastDiscoverySignature = null;
+        showNoWorkflows(OBSERVED_STATE_LABELS.waiting);
+        showObservedState(
+            "waiting",
+            "Checking again every 10 seconds. Workflows load here by themselves once the trace service answers; " +
+                "the address is under Advanced connection settings."
+        );
+        resolveFirstDiscovery();
+    }
+
+    function onDiscoveryError(error) {
+        clearLoadingText();
+        lastDiscoverySignature = null;
+        showNoWorkflows("No workflows available — check advanced settings");
+        const rejected = Boolean(error && error.status === 422);
+        // A rejected setting is explained as the server wrote it; only a failed connection gets the generic text.
+        showObservedState("error", rejected ? error.message : guidedConnectionError(error));
+        if (rejected) {
+            // A rejected address or setting will not fix itself; changing it starts discovery again.
+            discoveryPoller.stop();
+        }
+        resolveFirstDiscovery();
+    }
+
+    async function checkTraceServiceHealth() {
+        const address = guidedAddress ? guidedAddress.value.trim() : "";
+        try {
+            const status = await fetchJson(
+                `/api/workflows/jaeger/status${address ? `?jaeger_url=${encodeURIComponent(address)}` : ""}`
+            );
+            return Boolean(status.healthy);
+        } catch (error) {
+            if (error && error.status === 422) {
+                // The address was refused (for example, a host that is not approved). Waiting will not help:
+                // say why, and stop until the address changes.
+                onDiscoveryError(error);
+            }
+            return false;
+        }
+    }
+
+    function discoverObservedWorkflows() {
+        const connection = guidedConnectionPayload();
+        return requestScenario("/api/workflows/discovery", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jaegerUrl: connection.jaegerUrl, lookback: connection.lookback }),
+        });
+    }
+
+    const discoveryPoller = window.WorkflowDiscoveryPoller.create({
+        checkHealth: checkTraceServiceHealth,
+        discover: discoverObservedWorkflows,
+        onChecking: () => {
+            if (guidedObserved && guidedObserved.hidden) showObservedState("checking", "");
+        },
+        onWaiting: onDiscoveryWaiting,
+        onReport: onDiscoveryReport,
+        onError: onDiscoveryError,
+        isHidden: () => Boolean(document.hidden),
+    });
+
+    function reportMissingAddress() {
+        // The page starts in a "Loading…" state. Returning silently would leave it there forever, so say what
+        // is missing and put the controls back.
+        showNoWorkflows("Enter the trace service address to load workflows");
+        setGuidedStatus("Enter the workflow trace service address (under Advanced connection settings) to load workflows.", true);
+        resolveFirstDiscovery();
+    }
+
+    // Starts, or immediately repeats, discovery. Used on page open, by the refresh button, and when the
+    // address or time window changes.
+    function discoverGuidedWorkflows(event) {
         if (event) event.preventDefault();
         if (!guidedForm) return;
         if (!guidedForm.reportValidity()) {
-            // The page starts in a "Loading…" state. Returning silently here would leave it there forever, so
-            // say what is missing and put the controls back.
-            guidedWorkflows = [];
-            guidedOperation.replaceChildren();
-            const missing = document.createElement("option");
-            missing.value = "";
-            missing.textContent = "Enter the trace service address to load workflows";
-            guidedOperation.appendChild(missing);
-            updateGuidedSelectionAction();
-            setGuidedStatus("Enter the workflow trace service address (under Advanced connection settings) to load workflows.", true);
+            discoveryPoller.stop();
+            reportMissingAddress();
             return;
         }
-        const button = guidedForm.querySelector('[data-role="guided-discover-button"]');
-        button.disabled = true;
-        guidedInspectButton.disabled = true;
-        guidedInspectButton.textContent = "Loading…";
-        guidedOperation.replaceChildren();
-        const loadingOption = document.createElement("option");
-        loadingOption.value = "";
-        loadingOption.textContent = "Loading recorded workflows…";
-        guidedOperation.appendChild(loadingOption);
-        setGuidedStatus("Loading available workflows…");
-        try {
-            const payload = guidedConnectionPayload();
-            const discovered = await requestScenario(
-                "/api/workflows/analysis-sessions/discover",
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                }
-            );
-            guidedWorkflows = [...discovered].sort(
-                (left, right) =>
-                    Number(supportsGuidedExperiment(right)) -
-                    Number(supportsGuidedExperiment(left))
-            );
-            guidedOperation.replaceChildren();
-            guidedWorkflows.forEach((workflow) => {
-                const option = document.createElement("option");
-                option.value = workflow.operationName;
-                const readiness = supportsGuidedExperiment(workflow)
-                    ? "ready for dependency experiment"
-                    : "observation only";
-                option.textContent = `${workflow.operationName} — ${readiness} · ${workflow.traceCount} traces · ${workflow.participatingServices.length} services`;
-                guidedOperation.appendChild(option);
-            });
-            if (!guidedWorkflows.length) {
-                const emptyOption = document.createElement("option");
-                emptyOption.value = "";
-                emptyOption.textContent = "No recorded workflows in this time window";
-                guidedOperation.appendChild(emptyOption);
-            }
-            guidedDiscovery.hidden = false;
-            updateGuidedSelectionAction();
-            setGuidedStatus(
-                guidedWorkflows.length
-                    ? `Found ${guidedWorkflows.length} recorded workflow${guidedWorkflows.length === 1 ? "" : "s"}. Checkout is selected because its experiment is ready to run.`
-                    : "The trace service is connected, but no workflow activity was recorded in this time window.",
-                guidedWorkflows.length === 0
-            );
-        } catch (error) {
-            guidedWorkflows = [];
-            guidedDiscovery.hidden = false;
-            guidedOperation.replaceChildren();
-            const unavailableOption = document.createElement("option");
-            unavailableOption.value = "";
-            unavailableOption.textContent = "No workflows available — check advanced settings";
-            guidedOperation.appendChild(unavailableOption);
-            updateGuidedSelectionAction();
-            if (guidedResult) {
-                guidedResult.hidden = true;
-                guidedResult.replaceChildren();
-            }
-            setGuidedStatus(guidedConnectionError(error), true);
-        } finally {
-            button.disabled = false;
-        }
+        setGuidedStatus("");
+        discoveryPoller.refresh();
+    }
+
+    // The first discovery result (or its failure) is awaited so the previous experiment loads after it, as before.
+    function startGuidedDiscovery() {
+        firstDiscovery = new Promise((resolve) => { resolveFirstDiscovery = resolve; });
+        discoverGuidedWorkflows();
+        return firstDiscovery;
     }
 
     async function inspectGuidedWorkflow() {
         if (!guidedOperation || !guidedOperation.value) return;
         guidedInspectButton.disabled = true;
-        const selected = guidedWorkflows.find(
-            (workflow) => workflow.operationName === guidedOperation.value
-        );
+        const selected = selectedGuidedWorkflow();
+        if (!selected) return;
         setGuidedStatus(
             supportsGuidedExperiment(selected)
                 ? "Opening the checkout dependency experiment…"
@@ -970,7 +1161,8 @@
                 },
                 body: JSON.stringify({
                     ...guidedConnectionPayload(),
-                    operationName: guidedOperation.value,
+                    entryService: selected.rootService,
+                    operationName: selected.operationName,
                 }),
             });
             renderGuidedSession(session);
@@ -1318,11 +1510,12 @@
     function useDiscoveredCandidate() {
         if (!scenarioForm || !discoveredSelect || !discoveredSelect.value) return;
         const candidate = discoveredWorkflows.find(
-            (item) => item.operationName === discoveredSelect.value
+            (item) => workflowKey(item) === discoveredSelect.value
         );
         if (!candidate) return;
         const services = candidate.participatingServices || [];
-        const entryService = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
+        // A typed entry service overrides; blank means the service the traces show the request entering at.
+        const entryService = (entryServiceInput && entryServiceInput.value.trim()) || candidate.rootService || "";
         scenarioForm.elements.workflowId.value = candidate.operationName
             .toLowerCase()
             .replace(/[^a-z0-9_-]+/g, "_")
@@ -1982,7 +2175,9 @@
                 jaegerStatusBadge.className = "status-badge status-badge--danger";
             }
         } catch (err) {
-            jaegerStatusBadge.textContent = "Trace service unavailable";
+            const rejected = Boolean(err && err.status === 422);
+            jaegerStatusBadge.textContent = rejected ? "Address not approved" : "Trace service unavailable";
+            jaegerStatusBadge.title = rejected ? err.message : "";
             jaegerStatusBadge.className = "status-badge status-badge--danger";
         }
     }
@@ -1993,20 +2188,31 @@
         discoverButton.textContent = "Discovering…";
 
         const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
-        const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
+        const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "";
         const lookback = lookbackSelect ? lookbackSelect.value : "1h";
 
         try {
-            const url = `/api/workflows/discover?limit=1000&service_name=${encodeURIComponent(serviceName)}${jaegerQuery(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
-            discoveredWorkflows = await fetchJson(url);
+            if (serviceName) {
+                const url = `/api/workflows/discover?limit=1000&service_name=${encodeURIComponent(serviceName)}${jaegerQuery(jaegerUrl)}&lookback=${encodeURIComponent(lookback)}`;
+                discoveredWorkflows = await fetchJson(url);
+            } else {
+                // No entry service named: find the entry services from the recorded traces, within the bounds.
+                const report = await requestScenario("/api/workflows/discovery", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jaegerUrl, lookback, limit: 1000 }),
+                });
+                if (report.state === "jaeger_unavailable") throw new Error(report.message);
+                discoveredWorkflows = report.workflows;
+            }
 
             if (discoveredSelect && discoveredContainer) {
                 discoveredSelect.innerHTML = "";
                 if (discoveredWorkflows.length > 0) {
                     discoveredWorkflows.forEach((w) => {
                         const opt = document.createElement("option");
-                        opt.value = w.operationName;
-                        opt.textContent = `${w.operationName} (${w.traceCount} traces, ${w.participatingServices.length} services)`;
+                        opt.value = workflowKey(w);
+                        opt.textContent = `${w.operationName} · enters at ${w.rootService} (${w.traceCount} traces, ${w.participatingServices.length} services)`;
                         discoveredSelect.appendChild(opt);
                     });
                     discoveredContainer.style.display = "block";
@@ -2014,7 +2220,7 @@
                 } else {
                     const opt = document.createElement("option");
                     opt.value = "";
-                    opt.textContent = "No traces found in Jaeger yet for this service";
+                    opt.textContent = "No workflows observed in this time window yet";
                     discoveredSelect.appendChild(opt);
                     discoveredContainer.style.display = "block";
                     if (extractLiveButton) extractLiveButton.disabled = true;
@@ -2030,17 +2236,20 @@
 
     async function handleExtractLive() {
         if (!extractLiveButton) return;
-        const operation = discoveredSelect ? discoveredSelect.value : "";
-        if (!operation) {
+        const candidate = discoveredSelect
+            ? discoveredWorkflows.find((item) => workflowKey(item) === discoveredSelect.value)
+            : undefined;
+        if (!candidate) {
             alert("Please select a candidate operation from the dropdown.");
             return;
         }
+        const operation = candidate.operationName;
 
         extractLiveButton.disabled = true;
         extractLiveButton.textContent = "Extracting…";
 
         const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
-        const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "frontend";
+        const serviceName = (entryServiceInput && entryServiceInput.value.trim()) || candidate.rootService || "";
         const lookback = lookbackSelect ? lookbackSelect.value : "1h";
 
         try {
@@ -2101,6 +2310,14 @@
     if (guidedForm) guidedForm.addEventListener("submit", discoverGuidedWorkflows);
     if (guidedInspectButton) guidedInspectButton.addEventListener("click", inspectGuidedWorkflow);
     if (guidedOperation) guidedOperation.addEventListener("change", updateGuidedSelectionAction);
+    // A new address or time window asks again straight away; the poller keeps requests from overlapping.
+    if (guidedAddress) guidedAddress.addEventListener("change", discoverGuidedWorkflows);
+    if (guidedLookback) guidedLookback.addEventListener("change", discoverGuidedWorkflows);
+    // Nothing is requested while the tab is hidden; coming back to it (or focusing the window) refreshes once.
+    document.addEventListener("visibilitychange", () => discoveryPoller.pageVisibilityChanged());
+    if (typeof window.addEventListener === "function") {
+        window.addEventListener("focus", () => discoveryPoller.pageVisibilityChanged());
+    }
     if (researchAudit) {
         researchAudit.addEventListener("toggle", () => {
             if (!researchAudit.open || researchAuditInitialized) return;
@@ -2122,6 +2339,6 @@
         activateWorkflowStage("define");
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
         if (sourcePill) sourcePill.textContent = "No active campaign";
-        ensureJaegerDefault().then(discoverGuidedWorkflows).then(loadLatestExperiment);
+        ensureJaegerDefault().then(startGuidedDiscovery).then(loadLatestExperiment);
     });
 })();

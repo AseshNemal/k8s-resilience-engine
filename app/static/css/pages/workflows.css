@@ -865,6 +865,7 @@
 }
 
 .guided-discovery[hidden],
+.guided-observed[hidden],
 .guided-result[hidden],
 .workflow-stage[hidden] {
     display: none !important;
@@ -1733,4 +1734,82 @@
     .assessment-form__interventions {
         grid-column: span 1;
     }
+}
+
+
+/* Observed workflow candidates found automatically from the trace service. */
+.guided-observed {
+    display: grid;
+    gap: var(--space-xs);
+    margin-top: var(--space-md);
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-left-width: 4px;
+    border-radius: var(--radius-medium);
+}
+
+.guided-observed[data-state="discovered"] {
+    border-left-color: var(--color-success);
+}
+
+.guided-observed[data-state="waiting"],
+.guided-observed[data-state="jaeger_unavailable"],
+.guided-observed[data-state="error"] {
+    border-left-color: var(--color-danger);
+}
+
+.guided-observed[data-state="incomplete_traces"],
+.guided-observed[data-state="no_candidates"] {
+    border-left-color: var(--color-warning, var(--color-border));
+}
+
+.guided-observed__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.guided-observed__header small,
+.guided-observed__detail {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.guided-candidates {
+    display: grid;
+    gap: var(--space-xs);
+    margin: var(--space-xs) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.guided-candidate {
+    display: grid;
+    gap: 6px;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+}
+
+.guided-candidate__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.guided-candidate__meta,
+.guided-candidate__evidence {
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.guided-candidate__services {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }

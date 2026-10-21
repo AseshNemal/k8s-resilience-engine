@@ -98,6 +98,12 @@ class TraceSource(Protocol):
     def fetch_trace(self, trace_id: str) -> list[dict[str, Any]]: ...
 
 
+class ServiceListingTraceSource(TraceSource, Protocol):
+    """A trace source that can also say which services it has recorded."""
+
+    def list_services(self) -> list[str]: ...
+
+
 @dataclass(frozen=True)
 class JaegerTraceSource:
     """Read workflow traces from the Jaeger Query API."""
@@ -153,3 +159,11 @@ class JaegerTraceSource:
     def fetch_trace(self, trace_id: str) -> list[dict[str, Any]]:
         """Return only evidence addressed by the registered trace ID."""
         return self.client.fetch_trace(trace_id)
+
+    def list_services(self) -> list[str]:
+        """Names of the services the backend has recorded spans for."""
+        return self.client.get_services()
+
+    def list_call_edges(self, lookback_ms: int) -> list[tuple[str, str]]:
+        """(caller, callee) service pairs seen within the window; an empty list means not known."""
+        return self.client.get_dependencies(lookback_ms)

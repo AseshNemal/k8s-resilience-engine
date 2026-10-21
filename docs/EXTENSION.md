@@ -213,6 +213,42 @@ To get real trace data you need two things the extension cannot do for you:
    traces unless it runs with Istio sidecars or is otherwise instrumented, and then Jaeger is reachable but empty.
    Which services, operations and workflows can be discovered depends on what is instrumented.
 
+**Automatic discovery.** Nothing has to be named or started from the page. When the Workflows page opens it checks
+the trace service and, while it is unreachable, shows "Waiting for trace service…" and repeats a lightweight health
+check every 10 seconds. As soon as Jaeger answers, the page discovers the workflows it has recorded, with no reload
+or click. While the answer stays the same the wait between reads doubles (30, 60, then 120 seconds; 10, 20, 40, then
+60 while nothing usable has arrived), and a change, a new address or time window, or the refresh button goes back to
+the base cadence. Requests never overlap, nothing is requested while the tab is hidden, and returning to the tab
+refreshes at most every 5 seconds. Measured against a Boutique-shaped Jaeger (12 services, 25-span traces), one
+read is 9 requests and about 0.5 MB, and a visible page left alone for 6 minutes made about 50 requests and 2.4 MB.
+
+Discovery (`POST /api/workflows/discovery`) needs no entry service. It asks Jaeger which services call which, reads
+the recent traces of the *entry points* (services nothing else calls) and removes duplicates by trace ID; a callee's
+spans are inside its callers' traces, so each trace is read about once rather than once per service it touches
+(this cut one read from 2.75 MB to 0.47 MB). If Jaeger cannot give a call graph (some storage backends fill it only
+with a batch job), every recorded service is read in name order instead. Every trace is then grouped by its own root
+service and root operation. It reports one of five states: trace service unavailable, connected with no traces,
+traces with no business operation, traces whose evidence is incomplete (missing parents, several roots, unidentified
+services), or workflows discovered. Candidates are observations only: they carry no dependency class, criticality
+or approval, which still need the controlled experiment and an approved WorkflowGraph.
+
+Reads are bounded, never unbounded history. The backend's settings (environment variables on the container) are
+`WORKFLOW_DISCOVERY_MAX_SERVICES` (default 12, at most 50 services read), `WORKFLOW_DISCOVERY_TRACES_PER_SERVICE`
+(default 50, at most 1000), `WORKFLOW_DISCOVERY_MAX_TRACES` (default 500, at most 5000 in total),
+`WORKFLOW_DISCOVERY_EXCLUDED_SERVICES` (default `jaeger-all-in-one,jaeger-query,jaeger`: Jaeger's own tracing) and
+`WORKFLOW_DISCOVERY_ENTRY_DETECTION` (`auto`, or `scan_all` to ignore the call graph). The page's time window sets the
+lookback. Nothing is dropped silently: if a limit kept an entry service from being read and no other trace showed it,
+the page names it ("not examined because of the discovery limit") so the limit can be raised. One limit of the
+call-graph shortcut: a service that other services call *and* that also receives requests from something
+uninstrumented has its own root traces only if they appear in a caller's entry traces; set
+`WORKFLOW_DISCOVERY_ENTRY_DETECTION=scan_all` if that matters. The extension still starts no containers and
+generates no traffic.
+
+Every route that takes a trace-server address from the caller (`/api/workflows/jaeger/status`, `/jaeger/services`,
+`/discover`, `/live`, `/live/evidence` and the POST routes) checks the host against `WORKFLOW_JAEGER_ALLOWED_HOSTS`
+before contacting it. The server's own `WORKFLOW_JAEGER_URL` is trusted as configured. A refused address answers 422
+with `JAEGER_ADDRESS_NOT_APPROVED` and a message naming the host, which the page shows instead of waiting.
+
 ## Automatic renewal
 
 A credential the extension set up itself (not one uploaded by hand) renews with no button and shows no

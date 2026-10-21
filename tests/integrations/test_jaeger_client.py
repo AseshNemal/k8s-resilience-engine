@@ -161,3 +161,37 @@ def test_jaeger_client_treats_missing_exact_trace_as_pending(mock_client_cls):
 def test_jaeger_client_rejects_unsafe_trace_id() -> None:
     with pytest.raises(ValueError, match="hexadecimal"):
         JaegerClient("http://localhost:16686").fetch_trace("../../api/services")
+
+
+def test_get_dependencies_returns_caller_callee_pairs_for_the_window():
+    from unittest.mock import MagicMock, patch
+
+    response = MagicMock()
+    response.json.return_value = {"data": [
+        {"parent": "web", "child": "orders", "callCount": 9},
+        {"parent": "orders", "child": "billing", "callCount": 4},
+        {"parent": "", "child": "bad"},
+        "not-an-edge",
+    ]}
+    with patch("httpx.Client") as client_class:
+        get = client_class.return_value.__enter__.return_value.get
+        get.return_value = response
+        edges = JaegerClient("http://localhost:16686").get_dependencies(3_600_000)
+    assert edges == [("web", "orders"), ("orders", "billing")]
+    called_url = get.call_args.args[0]
+    params = get.call_args.kwargs["params"]
+    assert called_url == "http://localhost:16686/api/dependencies"
+    assert params["lookback"] == 3_600_000 and params["endTs"] > 0
+
+
+def test_get_dependencies_failure_is_a_connection_error():
+    from unittest.mock import patch
+
+    with patch("httpx.Client") as client_class:
+        client_class.return_value.__enter__.return_value.get.side_effect = RuntimeError("boom")
+        try:
+            JaegerClient("http://localhost:16686").get_dependencies(1000)
+        except ConnectionError as err:
+            assert "dependencies" in str(err)
+        else:
+            raise AssertionError("expected ConnectionError")

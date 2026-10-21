@@ -44,11 +44,11 @@ def test_an_empty_address_means_the_default_not_an_empty_url():
 def test_the_status_check_says_which_address_it_used(monkeypatch):
     monkeypatch.setattr(JaegerClient, "is_healthy", lambda self: False)
 
-    given = client.get("/api/workflows/jaeger/status", params={"jaeger_url": "http://jaeger.local:16686"}).json()
+    given = client.get("/api/workflows/jaeger/status", params={"jaeger_url": "http://jaeger:16686"}).json()
     default = client.get("/api/workflows/jaeger/status").json()
     blank = client.get("/api/workflows/jaeger/status", params={"jaeger_url": ""}).json()
 
-    assert given["jaegerUrl"] == "http://jaeger.local:16686"
+    assert given["jaegerUrl"] == "http://jaeger:16686"
     assert default["jaegerUrl"] == DEFAULT_JAEGER_URL == blank["jaegerUrl"]
 
 
