@@ -6,16 +6,20 @@
 window.DeploymentsDriftWidget = (function () {
     "use strict";
 
+    // Every request carries the namespace chosen in the page header (deployments_namespace.js).
+    const scoped = (url) => (window.DeploymentsNamespace ? window.DeploymentsNamespace.withNamespace(url) : url);
+
     // The page reads the connected cluster only, so drift always compares declared intent with that cluster.
     async function loadDriftSignals() {
         try {
             // 1. Categories Breakdown
-            const catResp = await fetch("/api/deployments/drift/categories");
+            const catResp = await fetch(scoped("/api/deployments/drift/categories"));
             if (!catResp.ok) {
                 const body = await catResp.json().catch(() => ({}));
                 const container = document.getElementById("spof-workloads-list");
+                const reason = body.detail?.message || body.detail || "HTTP " + catResp.status;
                 if (container) {
-                    container.textContent = `Drift analysis unavailable: ${body.detail?.message || body.detail || `HTTP ${catResp.status}`}`;
+                    container.textContent = `Drift analysis unavailable: ${reason}`;
                 }
                 return;
             }
@@ -23,14 +27,14 @@ window.DeploymentsDriftWidget = (function () {
             renderCategoryCounters(catData.summary || {});
 
             // 2. SPOF Workloads
-            const spofResp = await fetch("/api/deployments/drift/spofs");
+            const spofResp = await fetch(scoped("/api/deployments/drift/spofs"));
             if (spofResp.ok) {
                 const spofs = await spofResp.json();
                 renderSpofList(spofs);
             }
 
             // 3. Worker Node Risks
-            const nodeResp = await fetch("/api/deployments/drift/nodes/risk");
+            const nodeResp = await fetch(scoped("/api/deployments/drift/nodes/risk"));
             if (nodeResp.ok) {
                 const nodeRisks = await nodeResp.json();
                 renderNodeRisks(nodeRisks);

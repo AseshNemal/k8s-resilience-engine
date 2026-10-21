@@ -42,8 +42,12 @@ function backendPath(input) {
     if (raw.startsWith("//") || url.protocol !== window.location.protocol || url.host !== window.location.host) {
         return null;
     }
-    if (!BACKEND_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) return null;
-    return url.pathname + url.search;
+    // On Windows Docker Desktop loads the page from file:///C:/..., and the URL parser keeps the drive
+    // letter when it resolves "/api/..." against it (file:///C:/api/...). Drop it so the backend path is
+    // the same as on macOS and Linux; otherwise every backend call falls through to the browser's fetch.
+    const pathname = url.protocol === "file:" ? url.pathname.replace(/^\/[A-Za-z]:(?=\/)/, "") : url.pathname;
+    if (!BACKEND_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return null;
+    return pathname + url.search;
 }
 
 function jsonResponse(body, status) {

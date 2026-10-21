@@ -6,6 +6,9 @@
 window.DeploymentsModalManager = (function () {
     "use strict";
 
+    // Every request carries the namespace chosen in the page header (deployments_namespace.js).
+    const scoped = (url) => (window.DeploymentsNamespace ? window.DeploymentsNamespace.withNamespace(url) : url);
+
     async function openViolationModal(serviceName) {
         const backdrop = document.getElementById("modal-violation-backdrop");
         if (!backdrop) return;
@@ -17,7 +20,7 @@ window.DeploymentsModalManager = (function () {
         backdrop.removeAttribute("hidden");
 
         try {
-            const resp = await fetch(`/api/deployments/drift/exposure/${serviceName}`);
+            const resp = await fetch(scoped(`/api/deployments/drift/exposure/${encodeURIComponent(serviceName)}`));
             if (!resp.ok) return;
             const exp = await resp.json();
 

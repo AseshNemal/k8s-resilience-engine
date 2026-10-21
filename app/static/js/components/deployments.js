@@ -9,6 +9,7 @@
     "use strict";
 
     const LIVE_ENDPOINT = "/api/deployments/discovery";
+    const NAMESPACES_ENDPOINT = "/api/deployments/discovery/all";
 
     // base.html loads api.js, ui.js and connection-state.js with `defer`, so they run after this script.
     // Read them when the page loads (DOMContentLoaded), not at the top of this file.
@@ -26,6 +27,36 @@
     const reloadButton = document.querySelector('[data-role="reload-button"]');
     const sourceBadge = document.querySelector('[data-role="source-badge"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
+    const namespacePicker = document.querySelector('[data-role="namespace-select"]');
+    const scope = () => window.DeploymentsNamespace;
+
+    function namespaceOption(row) {
+        const option = document.createElement("option");
+        option.value = row.namespace;
+        option.textContent = `${row.namespace} · ${(row.graph?.services || []).length} services`;
+        return option;
+    }
+
+    // Fills the header selector with the namespaces that hold workloads and picks the one to show.
+    // If the list cannot be read, the page still loads "default" (or the URL's namespace) and loadPage
+    // shows the cluster failure itself.
+    async function loadNamespaces() {
+        let rows = [];
+        try {
+            rows = (await api().fetchJson(NAMESPACES_ENDPOINT)).namespaces || [];
+        } catch (error) {
+            console.warn("Could not list the cluster's namespaces:", error);
+        }
+        const requested = scope().requested();
+        const chosen = rows.length ? scope().choose(rows, requested) : requested || scope().get();
+        if (namespacePicker) {
+            const listed = rows.some((row) => row.namespace === chosen) ? rows : [...rows, { namespace: chosen }];
+            namespacePicker.replaceChildren(...listed.map(namespaceOption));
+            namespacePicker.value = chosen;
+            namespacePicker.disabled = false;
+        }
+        scope().set(chosen);
+    }
 
     function setMetric(name, value) {
         const element = document.querySelector(`[data-metric="${name}"]`);
@@ -57,7 +88,7 @@
         const { initJsonPanel, updateLastRefreshed } = ui();
         try {
             // The discovery envelope: the graph plus how complete it is (ok / empty / partial).
-            const body = await api().fetchJson(LIVE_ENDPOINT);
+            const body = await api().fetchJson(scope().withNamespace(LIVE_ENDPOINT));
             const deployment = body.graph;
             if (region) region.replaceChildren();
             if (applyBadge && describeDiscovery) {
@@ -99,6 +130,13 @@
         });
     }
 
+    if (namespacePicker) {
+        namespacePicker.addEventListener("change", () => {
+            scope().set(namespacePicker.value);
+            loadPage().catch((err) => console.error("Failed to load deployment data:", err));
+        });
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
         if (window.DeploymentsTabRouter) window.DeploymentsTabRouter.init();
         if (window.DeploymentsAcademicWidget) window.DeploymentsAcademicWidget.init();
@@ -107,6 +145,8 @@
         if (window.DeploymentsLiveExperimentsWidget) window.DeploymentsLiveExperimentsWidget.init();
         if (window.DeploymentsModalManager) window.DeploymentsModalManager.init();
 
-        loadPage().catch((err) => console.error("Failed to load deployment data:", err));
+        loadNamespaces()
+            .then(loadPage)
+            .catch((err) => console.error("Failed to load deployment data:", err));
     });
 })();

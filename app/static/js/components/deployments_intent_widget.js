@@ -6,6 +6,9 @@
 window.DeploymentsIntentWidget = (function () {
     "use strict";
 
+    // Every request carries the namespace chosen in the page header (deployments_namespace.js).
+    const scoped = (url) => (window.DeploymentsNamespace ? window.DeploymentsNamespace.withNamespace(url) : url);
+
     // Same order as service._declared_target: say where the declared intent comes from.
     async function showManifestSource() {
         const note = document.querySelector("[data-role='manifest-source']");
@@ -31,7 +34,7 @@ window.DeploymentsIntentWidget = (function () {
     async function loadIntentCompliance(activeServices) {
         await showManifestSource();
         try {
-            const resp = await fetch("/api/deployments/manifests");
+            const resp = await fetch(scoped("/api/deployments/manifests"));
             if (!resp.ok) return;
             const intents = await resp.json();
             renderIntentTable(intents, activeServices);
@@ -47,7 +50,7 @@ window.DeploymentsIntentWidget = (function () {
         if (!rateEl) return;
         rateEl.textContent = "n/a";
         try {
-            const resp = await fetch("/api/deployments/manifests/compliance");
+            const resp = await fetch(scoped("/api/deployments/manifests/compliance"));
             if (!resp.ok) return;
             const data = await resp.json();
             rateEl.textContent = data.constraint_compliance_rate == null
@@ -58,43 +61,61 @@ window.DeploymentsIntentWidget = (function () {
         }
     }
 
+    // Live ready replicas from camelCase, snake_case or the pod list; null when the service was not observed.
+    function liveReadyReplicas(live) {
+        if (live.readyReplicas !== undefined) return live.readyReplicas;
+        if (live.ready_replicas !== undefined) return live.ready_replicas;
+        if (Array.isArray(live.pods)) return live.pods.filter((p) => p.ready).length;
+        return null;
+    }
+
+    function limitsText(item) {
+        if (!item.resource_limits) return "None";
+        return `${item.resource_limits.cpu || "N/A"} / ${item.resource_limits.memory || "N/A"}`;
+    }
+
+    function replicaStatusHtml(comparable, replicaMismatch, declaredRep, readyRep) {
+        if (replicaMismatch) {
+            return `<span class="status-pill status-pill--warning" title="Declared ${declaredRep} vs live ${readyRep} ready">⚠️ Replica drift</span>`;
+        }
+        if (comparable) return '<span class="status-pill status-pill--success">✓ Match</span>';
+        return '<span class="status-pill">Not observed</span>';
+    }
+
+    // Keyed by namespace + name, like the backend, so a YAML in another namespace that reuses a
+    // service name (e.g. deploy/test-workloads in resilience-test) is never compared with it.
+    const key = (namespace, name) => `${namespace || "default"}/${name}`;
+
+    // A declared Deployment is matched to the live Service that the backend resolved it to through owner
+    // references (deploymentNames), not only by name: Bookinfo's Deployment reviews-v1 backs Service reviews.
+    function buildLiveMap(liveServices) {
+        const liveMap = {};
+        (liveServices || []).forEach((s) => {
+            liveMap[key(s.namespace, s.name)] = s;
+            (s.deploymentNames ?? s.deployment_names ?? []).forEach((deployment) => {
+                liveMap[key(s.namespace, deployment)] = s;
+            });
+        });
+        return liveMap;
+    }
+
     function renderIntentTable(intents, liveServices = []) {
         const tbody = document.getElementById("intent-table-body");
         if (!tbody) return;
 
         tbody.innerHTML = "";
-        // Keyed by namespace + name, like the backend, so a YAML in another namespace that reuses a
-        // service name (e.g. deploy/test-workloads in resilience-test) is never compared with it.
-        const key = (namespace, name) => `${namespace || "default"}/${name}`;
-        const liveMap = {};
-        (liveServices || []).forEach((s) => {
-            liveMap[key(s.namespace, s.name)] = s;
-        });
+        const liveMap = buildLiveMap(liveServices);
 
         let compliantCount = 0;
         let comparedCount = 0;
 
         intents.forEach((item) => {
             const svcName = item.service_name || "unknown";
-            const live = liveMap[key(item.namespace, svcName)] || {};
             const declaredRep = item.expected_replicas ?? item.declared_replicas ?? null;
-
-            // Live ready replicas from snake_case or camelCase or pod list; null when not observed
-            let readyRep = null;
-            if (live.readyReplicas !== undefined) {
-                readyRep = live.readyReplicas;
-            } else if (live.ready_replicas !== undefined) {
-                readyRep = live.ready_replicas;
-            } else if (live.pods && Array.isArray(live.pods)) {
-                readyRep = live.pods.filter((p) => p.ready).length;
-            }
-
-            const limits = item.resource_limits
-                ? `${item.resource_limits.cpu || "N/A"} / ${item.resource_limits.memory || "N/A"}`
-                : "None";
-
+            const readyRep = liveReadyReplicas(liveMap[key(item.namespace, svcName)] || {});
+            const limits = limitsText(item);
             const hasAffinity = item.has_node_affinity ? "✓ Required" : "None";
-            const hasSpread = (item.spread_constraints && item.spread_constraints.length > 0) ? "✓ Configured" : "None";
+            const hasSpread = item.spread_constraints?.length > 0 ? "✓ Configured" : "None";
 
             // Only compared when both sides are known; otherwise shown as not observed.
             const comparable = declaredRep != null && readyRep != null;
@@ -103,13 +124,7 @@ window.DeploymentsIntentWidget = (function () {
                 comparedCount++;
                 if (!replicaMismatch) compliantCount++;
             }
-
-            let statusHtml = '<span class="status-pill">Not observed</span>';
-            if (replicaMismatch) {
-                statusHtml = `<span class="status-pill status-pill--warning" title="Declared ${declaredRep} vs live ${readyRep} ready">⚠️ Replica drift</span>`;
-            } else if (comparable) {
-                statusHtml = '<span class="status-pill status-pill--success">✓ Match</span>';
-            }
+            const statusHtml = replicaStatusHtml(comparable, replicaMismatch, declaredRep, readyRep);
 
             const tr = document.createElement("tr");
             tr.innerHTML = `
