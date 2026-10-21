@@ -8,6 +8,7 @@ clearing on disconnect or manual replace, and that no credential ever leaves the
 import io
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -204,14 +205,15 @@ def test_replacing_with_a_manual_upload_clears_the_managed_record(client):
     assert body["managed"] is False and "context" not in body
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no Unix file modes")
 def test_the_managed_record_holds_no_credential_and_is_private(client, tmp_path):
     token = fresh_token(8)
     managed_put(client, token)
     record = tmp_path / "kube" / "managed.json"
 
     assert oct(record.stat().st_mode & 0o777) == "0o600"
-    assert token not in record.read_text()
-    assert json.loads(record.read_text()) == {"context": "kind-resilience-research", "expiresAt": None}
+    assert token not in record.read_text(encoding="utf-8")
+    assert json.loads(record.read_text(encoding="utf-8")) == {"context": "kind-resilience-research", "expiresAt": None}
 
 
 def test_a_tampered_managed_record_is_ignored_not_trusted(client, tmp_path):
@@ -264,7 +266,7 @@ def test_ingest_installs_a_managed_credential_from_stdin(tmp_path, monkeypatch):
     assert code == 0 and result["ok"] is True
     assert result["managed"] is True and result["state"] == "ok"
     assert token not in json.dumps(result)
-    assert yaml.safe_load((tmp_path / "kube" / "config").read_text())["users"][0]["user"]["token"] == token
+    assert yaml.safe_load((tmp_path / "kube" / "config").read_text(encoding="utf-8"))["users"][0]["user"]["token"] == token
 
 
 def test_ingest_applies_the_same_rules_as_the_http_route(tmp_path, monkeypatch):
