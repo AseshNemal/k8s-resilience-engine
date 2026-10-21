@@ -12,6 +12,7 @@ reviews-v1 for Service reviews.
 from dataclasses import dataclass
 from pathlib import Path
 
+from experiments.placement_drift.live import bookinfo_workloads as bookinfo
 from experiments.placement_drift.live import generate_workloads as standin
 
 DEPLOY_DIR = Path(__file__).resolve().parents[3] / "deploy" / "experiments"
@@ -47,4 +48,20 @@ STANDIN = Workload(
     },
 )
 
-WORKLOADS = {w.name: w for w in (STANDIN,)}
+# The real-application check: the team's Bookinfo benchmark (v1) in its own namespace, reviews as the target
+# (the largest service, and productpage depends on it). Every service is still observed in every run.
+BOOKINFO = Workload(
+    name="bookinfo",
+    namespace=bookinfo.NAMESPACE,
+    deployments=tuple(bookinfo.SERVICES.values()),
+    target_service="reviews",
+    target_deployment=bookinfo.SERVICES["reviews"],
+    target_replicas=bookinfo.REPLICAS,
+    configs={
+        "A-no-rule": str(DEPLOY_DIR / "placement-drift-bookinfo" / "config-a-no-rule.yaml"),
+        "B-spread": str(DEPLOY_DIR / "placement-drift-bookinfo" / "config-b-topology-spread.yaml"),
+    },
+    results_prefix="bookinfo-",
+)
+
+WORKLOADS = {w.name: w for w in (STANDIN, BOOKINFO)}
