@@ -48,7 +48,7 @@
 <section class="guided-analysis" aria-labelledby="guided-analysis-title">
     <div class="guided-analysis__header">
         <div>
-            <p class="workflow-kicker">Online Boutique · controlled experiment</p>
+            <p class="workflow-kicker">Observed workflows · controlled experiment</p>
             <h3 id="guided-analysis-title">Determine what a business workflow actually depends on</h3>
             <p>Start from observed workflow traces, establish a stable baseline, then compare confirmed service interventions. Frequency alone never becomes a dependency claim.</p>
         </div>
@@ -76,13 +76,21 @@
         </div>
         <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>Loading…</button>
     </div>
+    <div class="guided-observed" data-role="guided-observed" data-state="checking" hidden>
+        <div class="guided-observed__header">
+            <strong data-role="guided-observed-state" aria-live="polite">Checking trace service…</strong>
+            <small data-role="guided-observed-checked"></small>
+        </div>
+        <p class="guided-observed__detail" data-role="guided-observed-detail"></p>
+        <ul class="guided-candidates" data-role="guided-candidates" aria-label="Observed workflow candidates"></ul>
+    </div>
     <details class="guided-advanced">
         <summary>Advanced connection settings</summary>
         <form class="guided-analysis__form" data-role="guided-analysis-form">
             <div class="guided-field">
                 <label for="guided-environment">Experiment dataset name</label>
-                <input id="guided-environment" name="environmentId" value="online-boutique-local" required>
-                <small>A label that keeps results from different test environments separate.</small>
+                <input id="guided-environment" name="environmentId" value="local-observed" required>
+                <small>A label that keeps results from different test environments separate. The Online Boutique benchmark's saved experiments use online-boutique-local.</small>
             </div>
             <div class="guided-field guided-field--wide">
                 <label for="guided-jaeger-url">Workflow trace service address</label>
@@ -99,7 +107,6 @@
                     <option value="7d">Last 7 days</option>
                 </select>
             </div>
-            <input name="entryService" value="frontend" type="hidden">
             <input name="evidenceTier" value="experimental" type="hidden">
             <div class="guided-analysis__action">
                 <button type="submit" class="secondary-button" data-role="guided-discover-button">Refresh workflow choices</button>
@@ -146,8 +153,8 @@
             <input id="jaeger-url-input" type="text" data-role="jaeger-url-input" placeholder="Filled in from the server's setting" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);">
         </div>
         <div class="form-group" style="width: 140px;">
-            <label for="entry-service-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Entry Service</label>
-            <input id="entry-service-input" type="text" data-role="entry-service-input" value="frontend" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="frontend">
+            <label for="entry-service-input" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Entry Service (optional)</label>
+            <input id="entry-service-input" type="text" data-role="entry-service-input" value="" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" placeholder="Detected from traces">
         </div>
         <div class="form-group" style="width: 120px;">
             <label for="lookback-select" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Lookback</label>
@@ -217,7 +224,7 @@
         </div>
         <div class="scenario-form__field">
             <label for="scenario-entry-service">Entry service</label>
-            <input id="scenario-entry-service" name="entryService" required placeholder="frontend">
+            <input id="scenario-entry-service" name="entryService" required placeholder="Service that receives the request">
         </div>
         <div class="scenario-form__field">
             <label for="scenario-source">Definition source</label>
@@ -586,5 +593,6 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=phase-5-workflow-picker" defer></script>
+<script src="{{ url_for('static', path='/js/workflow-discovery-poller.js') }}?v=auto-discovery-1" defer></script>
+<script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=auto-discovery-1" defer></script>
 {% endblock %}

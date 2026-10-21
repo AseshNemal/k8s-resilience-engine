@@ -18,6 +18,7 @@ from app.engine.workflow_dependency_modeling.service import (
     create_experiment_campaign,
     discover_live_workflows,
     discover_analysis_workflows,
+    discover_observed_workflow_candidates,
     evaluate_approved_dependency_assessment_with_reference,
     freeze_workflow_graph,
     get_live_workflow,
@@ -83,7 +84,9 @@ from app.engine.workflow_dependency_modeling.scenario_repository import (
     ScenarioVersionConflictError,
 )
 from app.engine.workflow_dependency_modeling.scenario_service import parse_scenario_etag
+from app.engine.workflow_dependency_modeling.analysis_session_service import approved_jaeger_url
 from app.integrations.jaeger.client import DEFAULT_JAEGER_URL, JaegerClient
+from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.workflow import WorkflowGraph
 
 
@@ -94,6 +97,27 @@ router = APIRouter(
 
 NOT_FOUND_RESPONSE = {404: {"description": "Requested workflow evidence was not found"}}
 JAEGER_UNAVAILABLE_RESPONSE = {503: {"description": "Jaeger service is unavailable"}}
+def _approved_address(jaeger_url: str) -> str:
+    """The address a caller asked for, once it passes the same connection policy as the POST routes.
+
+    An empty address, or the backend's own setting, means "the server's configured trace service" and is
+    trusted as configured. Anything else is a caller-chosen destination and must be on the allowlist; the
+    rejection carries the reason as a structured error so the page can show it.
+    """
+    typed = jaeger_url.strip()
+    if not typed or typed == DEFAULT_JAEGER_URL:
+        return jaeger_url
+    try:
+        return approved_jaeger_url(typed)
+    except ValueError as err:
+        raise EvidenceError(
+            "JAEGER_ADDRESS_NOT_APPROVED",
+            str(err),
+            http_status=422,
+            component="workflow_dependency_modeling",
+        ).to_http() from err
+
+
 JAEGER_AND_NOT_FOUND_RESPONSES = {
     **NOT_FOUND_RESPONSE,
     **JAEGER_UNAVAILABLE_RESPONSE,
@@ -564,6 +588,24 @@ def discover_workflow_analysis_operations(
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
+@router.post(
+    "/discovery",
+    summary="Discover observed workflow candidates without naming an entry service",
+    responses={422: {"description": "Connection input is invalid"}},
+)
+def discover_observed_workflows(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Read bounded recent traces and report what was observed; never approves or classifies anything.
+
+    An unreachable trace service is a normal answer (``state: jaeger_unavailable``) so a page can wait and retry.
+    """
+    try:
+        return discover_observed_workflow_candidates(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
 @router.get(
     "/analysis-sessions/{session_id}",
     responses={404: {"description": "Analysis session was not found"}},
@@ -979,7 +1021,7 @@ def read_live_evidence(
     lookback: str = Query("1h"),
 ) -> dict[str, Any]:
     try:
-        return get_live_evidence(service_name, operation, jaeger_url, limit, lookback)
+        return get_live_evidence(service_name, operation, _approved_address(jaeger_url), limit, lookback)
     except ConnectionError as err:
         raise HTTPException(status_code=503, detail=str(err)) from err
     except ValueError as err:
@@ -994,7 +1036,7 @@ def check_jaeger_status(
     jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
 ) -> dict[str, Any]:
     """Check whether the Jaeger query server is online and reachable."""
-    client = JaegerClient(base_url=jaeger_url)
+    client = JaegerClient(base_url=_approved_address(jaeger_url))
     healthy = client.is_healthy()
     return {
         "healthy": healthy,
@@ -1013,7 +1055,7 @@ def list_jaeger_services(
     jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
 ) -> list[str]:
     """List all instrumented microservices that have reported traces to Jaeger."""
-    client = JaegerClient(base_url=jaeger_url)
+    client = JaegerClient(base_url=_approved_address(jaeger_url))
     try:
         return client.get_services()
     except ConnectionError as err:
@@ -1036,7 +1078,7 @@ def discover_workflows(
     try:
         return discover_live_workflows(
             service_name=service_name,
-            jaeger_url=jaeger_url,
+            jaeger_url=_approved_address(jaeger_url),
             limit=limit,
             lookback=lookback,
         )
@@ -1070,7 +1112,7 @@ def read_live_workflow(
         return get_live_workflow(
             service_name=service_name,
             operation=operation,
-            jaeger_url=jaeger_url,
+            jaeger_url=_approved_address(jaeger_url),
             criticality=criticality,
             mandatory_threshold=mandatory_threshold,
             limit=limit,

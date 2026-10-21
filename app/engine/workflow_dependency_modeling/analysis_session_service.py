@@ -17,6 +17,10 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     SqlAlchemyAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.auto_discovery import slugify_operation
+from app.engine.workflow_dependency_modeling.observed_discovery import (
+    DiscoveryLimits,
+    discover_observed_workflows,
+)
 from app.engine.workflow_dependency_modeling.trace_source import (
     JaegerTraceSource,
     TraceSourceConfiguration,
@@ -61,7 +65,8 @@ def _repository(repository: AnalysisSessionRepository | None) -> AnalysisSession
     return _default_repository
 
 
-def _jaeger_url(value: Any) -> str:
+def approved_jaeger_url(value: Any) -> str:
+    """The trace-server address, once it passes the connection policy; ``ValueError`` says what is wrong."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("jaegerUrl is required")
     parsed = urlsplit(value.strip())
@@ -78,9 +83,13 @@ def _jaeger_url(value: Any) -> str:
     }
     if parsed.hostname.lower() not in allowed:
         raise ValueError(
-            "Jaeger host is not approved; configure WORKFLOW_JAEGER_ALLOWED_HOSTS"
+            f"Jaeger host '{parsed.hostname}' is not approved; "
+            "configure WORKFLOW_JAEGER_ALLOWED_HOSTS"
         )
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
+
+_jaeger_url = approved_jaeger_url
 
 
 def _trace_source(data: Mapping[str, Any]) -> TraceSourceConfiguration:
@@ -114,6 +123,20 @@ def _text(data: Mapping[str, Any], key: str) -> str:
     return value.strip()
 
 
+def _lookback(data: Mapping[str, Any]) -> str:
+    lookback = str(data.get("lookback", "1h")).strip()
+    if not _LOOKBACK.fullmatch(lookback):
+        raise ValueError("lookback must use a positive duration such as 30m, 1h, or 2d")
+    return lookback
+
+
+def _limit(data: Mapping[str, Any]) -> int:
+    limit = data.get("limit", 1000)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5000:
+        raise ValueError("limit must be an integer between 1 and 5000")
+    return limit
+
+
 def _timestamp(value: datetime | None) -> datetime:
     result = value or datetime.now(timezone.utc)
     if result.tzinfo is None:
@@ -137,12 +160,8 @@ def start_workflow_analysis(
     environment_id = _text(data, "environmentId")
     entry_service = _text(data, "entryService")
     operation_name = _text(data, "operationName")
-    lookback = str(data.get("lookback", "1h")).strip()
-    if not _LOOKBACK.fullmatch(lookback):
-        raise ValueError("lookback must use a positive duration such as 30m, 1h, or 2d")
-    limit = data.get("limit", 1000)
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5000:
-        raise ValueError("limit must be an integer between 1 and 5000")
+    lookback = _lookback(data)
+    limit = _limit(data)
     evidence_tier = str(data.get("evidenceTier", "experimental"))
     if evidence_tier not in {"experimental", "production"}:
         raise ValueError("evidenceTier must be experimental or production")
@@ -211,12 +230,8 @@ def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]
     """Discover operations through the same allowlisted connection policy."""
     trace_source = _trace_source(data)
     entry_service = _text(data, "entryService")
-    lookback = str(data.get("lookback", "1h")).strip()
-    if not _LOOKBACK.fullmatch(lookback):
-        raise ValueError("lookback must use a positive duration such as 30m, 1h, or 2d")
-    limit = data.get("limit", 1000)
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5000:
-        raise ValueError("limit must be an integer between 1 and 5000")
+    lookback = _lookback(data)
+    limit = _limit(data)
 
     from app.engine.workflow_dependency_modeling.service import discover_live_workflows
 
@@ -226,6 +241,25 @@ def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]
         limit=limit,
         lookback=lookback,
         trace_source=JaegerTraceSource.from_configuration(trace_source),
+    )
+
+
+def discover_observed_workflow_candidates(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Discover observed workflow candidates without naming an entry service.
+
+    Goes through the same allowlisted connection policy as every other trace read. ``limit``, when given,
+    bounds the total traces read; the per-service and service counts come from the backend's own settings.
+    """
+    trace_source = _trace_source(data)
+    lookback = _lookback(data)
+    limits = DiscoveryLimits.from_environment(
+        max_traces=_limit(data) if "limit" in data else None
+    )
+    return discover_observed_workflows(
+        JaegerTraceSource.from_configuration(trace_source),
+        jaeger_url=trace_source.endpoint,
+        lookback=lookback,
+        limits=limits,
     )
 
 

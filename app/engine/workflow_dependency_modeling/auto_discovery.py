@@ -52,7 +52,18 @@ def slugify_operation(text: str) -> str:
 _slugify = slugify_operation
 
 
-def operation_key(root: Span) -> str | None:
+# Route templates that stand for one workflow however many resource IDs it is called with. This is the Online
+# Boutique benchmark's profile, kept as the default so the benchmark runners and the outcome evaluator behave as
+# before; generic discovery passes ``route_patterns=()`` and so never assumes any application's routes.
+BENCHMARK_ROUTE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^/product/[^/]+$"), "/product/{id}"),
+)
+
+
+def operation_key(
+    root: Span,
+    route_patterns: tuple[tuple[re.Pattern[str], str], ...] = BENCHMARK_ROUTE_PATTERNS,
+) -> str | None:
     """Group requests by method and route, excluding health and telemetry traffic."""
     method = root.tags.get("http.request.method", root.tags.get("http.method"))
     target = root.tags.get("http.route") or root.tags.get("http.target") or root.tags.get("url.full")
@@ -60,8 +71,8 @@ def operation_key(root: Span) -> str | None:
         path = urlsplit(target).path
         if path in {"/_healthz", "/healthz", "/health", "/readyz", "/metrics"} or path.startswith("/static/"):
             return None
-        # Online Boutique product IDs identify resources, not different workflows.
-        path = re.sub(r"^/product/[^/]+$", "/product/{id}", path)
+        for pattern, template in route_patterns:
+            path = pattern.sub(template, path)
         return f"{method.upper()} {path}"
     if "TraceService/Export" in root.operation_name or root.tags.get("span.kind") == "client":
         return None
@@ -69,11 +80,15 @@ def operation_key(root: Span) -> str | None:
 
 
 def select_workflow_traces(traces: list[dict], operation: str) -> list[dict]:
+    """Traces whose root operation is ``operation``, named by the generic or the benchmark profile."""
     selected = []
     for trace in traces:
         spans = parse_spans([trace])
         roots = find_root_spans({trace.get("traceID", ""): spans})
-        if roots and operation_key(next(iter(roots.values()))) == operation:
+        if not roots:
+            continue
+        root = next(iter(roots.values()))
+        if operation in {operation_key(root), operation_key(root, ())}:
             selected.append(trace)
     return selected
 
@@ -116,11 +131,15 @@ def find_root_spans(spans_by_trace: dict[str, list[Span]]) -> dict[str, Span]:
     }
 
 
-def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWorkflowSummary]:
+def discover_root_workflows(
+    traces: list[dict[str, Any]],
+    route_patterns: tuple[tuple[re.Pattern[str], str], ...] = BENCHMARK_ROUTE_PATTERNS,
+) -> list[DiscoveredWorkflowSummary]:
     """Scan raw Jaeger traces and auto-discover all distinct entry workflows.
 
     Args:
         traces: Raw Jaeger trace list (from file or Jaeger REST API).
+        route_patterns: Route templates that merge resource IDs; ``()`` for none.
 
     Returns:
         List of :class:`DiscoveredWorkflowSummary` sorted by trace count descending.
@@ -140,7 +159,7 @@ def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWork
     root_service_by_op: dict[str, str] = {}
 
     for trace_id, root in root_spans.items():
-        op_name = operation_key(root)
+        op_name = operation_key(root, route_patterns)
         if not op_name:
             continue
         traces_by_operation[op_name].append(trace_id)

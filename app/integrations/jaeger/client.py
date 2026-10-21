@@ -98,6 +98,33 @@ class JaegerClient:
                 f"Could not fetch operations for '{service_name}' from Jaeger: {err}"
             ) from err
 
+    def get_dependencies(self, lookback_ms: int) -> list[tuple[str, str]]:
+        """Fetch which service calls which, over the last ``lookback_ms`` milliseconds.
+
+        Returns (caller, callee) pairs. Jaeger builds this from stored traces; some storage backends only fill
+        it with a separate batch job, so an empty answer means "not known", not "no calls".
+        """
+        import time
+
+        try:
+            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+                response = client.get(
+                    f"{self.base_url}/api/dependencies",
+                    params={"endTs": int(time.time() * 1000), "lookback": int(lookback_ms)},
+                )
+                response.raise_for_status()
+                data = response.json().get("data", []) or []
+        except Exception as err:
+            logger.warning("Failed to fetch dependencies from Jaeger at %s: %s", self.base_url, err)
+            raise ConnectionError(
+                f"Could not fetch service dependencies from Jaeger at {self.base_url}: {err}"
+            ) from err
+        return [
+            (str(edge["parent"]), str(edge["child"]))
+            for edge in data
+            if isinstance(edge, dict) and edge.get("parent") and edge.get("child")
+        ]
+
     def fetch_traces(
         self,
         service_name: str,
