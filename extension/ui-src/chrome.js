@@ -45,7 +45,7 @@
         }
         let how = "The credential renews itself while the extension is open.";
         if (auto && auto.background === "on") how = "The credential renews itself and is kept renewed in the background, even when Docker Desktop is closed.";
-        else if (offered) how = "The credential renews itself while the extension is open. Turn on background renewal to keep it renewed when Docker Desktop is closed or the Mac sleeps.";
+        else if (offered) how = "The credential renews itself while the extension is open. Turn on background renewal to keep it renewed when Docker Desktop is closed or the computer sleeps.";
         return { state: "connected", chip: "Connected · read-only", title: `Connected to ${status.server}`,
             detail: `Read-only access. ${how} ${live}`, action: offered ? BACKGROUND_ACTION : "Manage connection" };
     }

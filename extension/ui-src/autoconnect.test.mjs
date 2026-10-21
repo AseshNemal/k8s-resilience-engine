@@ -277,15 +277,19 @@ test("quick setup passes a failed discovery through and a decline is not an erro
 
 // ------------------------------------------------------------------ platform handling
 
-test("automatic setup is offered only where it was verified, and says so honestly elsewhere", () => {
-    assert.equal(A.platformSupport("darwin").automatic, true);
-    for (const [platform, name] of [["win32", "Windows"], ["linux", "Linux"], ["", "this operating system"]]) {
+test("automatic setup is offered on macOS, Windows and Linux, and says so honestly elsewhere", () => {
+    for (const platform of ["darwin", "win32", "linux"]) {
+        const s = A.platformSupport(platform);
+        assert.equal(s.automatic, true, platform);
+        assert.equal(s.note, "");
+    }
+    for (const platform of ["", "freebsd"]) {
         const s = A.platformSupport(platform);
         assert.equal(s.automatic, false);
-        assert.match(s.note, new RegExp(`has not been verified on ${name}`));
+        assert.match(s.note, /not available on this operating system/);
         assert.match(s.note, /manual connection/);
     }
-    assert.deepEqual(plain(A.VERIFIED_PLATFORMS), ["darwin"]);
+    assert.deepEqual(plain(A.ENABLED_PLATFORMS), ["darwin", "win32", "linux"]);
 });
 
 test("the platform comes from Docker Desktop, with the browser as a fallback", () => {
