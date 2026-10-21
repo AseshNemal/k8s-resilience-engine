@@ -184,9 +184,16 @@ def _execute_probe_step(
     form_body = {
         key: _render_text(value, variables) for key, value in step.form_body.items()
     }
+    rendered_path = _render_text(step.path, variables)
+    rendered_url = urlsplit(rendered_path)
+    if (
+        rendered_url.scheme or rendered_url.netloc
+        or not rendered_path.startswith("/") or rendered_path.startswith("//")
+    ):
+        raise ValueError("Rendered request path must remain relative to the application URL")
     response = client.request(
         method=step.method,
-        url=_render_text(step.path, variables),
+        url=rendered_path,
         params={
             key: _render_text(value, variables) for key, value in step.query.items()
         },

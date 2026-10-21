@@ -442,6 +442,26 @@ def test_experiment_campaign_api(monkeypatch) -> None:
     monkeypatch.setattr(analysis_session_service, "_default_repository", analyses)
     monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
     client = TestClient(app)
+    requirements = client.get("/api/workflows/analysis-sessions/analysis:checkout/workflow-setup")
+    assert requirements.status_code == 200
+    assert requirements.json()["action"] == {"method": "POST", "path": "/cart/checkout", "pathParameters": []}
+    assert requirements.json()["baselineLimits"] == {"minimum": 3, "maximum": 30}
+    assert client.get("/api/workflows/analysis-sessions/missing/workflow-setup").status_code == 404
+    guided_preview = client.post(
+        "/api/workflows/analysis-sessions/analysis:checkout/workflow-probe-preview",
+        json={"mode": "guided_sequence", "successStatuses": "200", "actionInputs": {
+            "bodyFormat": "form", "bodyFields": [{"name": "userChoice", "value": "explicit-input"}],
+        }, "preparationSteps": [{"operation": "GET /session", "successStatuses": "200", "inputs": {}}]},
+    )
+    assert guided_preview.status_code == 200
+    assert guided_preview.json()["executionDefinition"]["steps"][-1]["formBody"] == {"userChoice": "explicit-input"}
+    assert [step["measured"] for step in guided_preview.json()["summary"]] == [False, True]
+    invalid_preview = client.post(
+        "/api/workflows/analysis-sessions/analysis:checkout/workflow-probe-preview",
+        json={"mode": "guided_sequence", "successStatuses": "200,wrong"},
+    )
+    assert invalid_preview.status_code == 422
+    assert campaigns.list() == []  # Checking setup never creates or executes a campaign.
     preview = client.post(
         "/api/workflows/analysis-sessions/analysis:checkout/workflow-probe-preview",
         json={

@@ -82,7 +82,7 @@ async function runWorkflowLifecycle() {
             const setup = page.locator('[data-role="guided-result"]');
             assert.equal(await setup.getByLabel('Business importance (0–1)',{exact:true}).inputValue(),'');
             assert.equal(await setup.getByLabel('Baseline runs to collect',{exact:true}).inputValue(),'');
-            await setup.getByRole('button',{name:'Save and continue to baseline runs',exact:true}).click();
+            assert(await setup.getByRole('button',{name:'Save and continue to baseline runs',exact:true}).isDisabled());
             assert.equal(await setup.locator('form').evaluate(el=>el.checkValidity()),false);
             check('Workflow setup requires explicit success checks, importance, run count and review');
             await setup.getByLabel('Workflow name',{exact:true}).fill('Checkout availability UI check');
@@ -90,11 +90,12 @@ async function runWorkflowLifecycle() {
             await setup.getByLabel('HTTP response codes that count as success',{exact:true}).fill('200');
             await setup.getByLabel('Business importance (0–1)',{exact:true}).fill('0.27');
             await setup.getByLabel('Baseline runs to collect',{exact:true}).fill('3');
-            const requestSettings = setup.getByText('Request data and multi-step setup',{exact:true});
+            const requestSettings = setup.getByText('Import existing settings (advanced)',{exact:true});
             if (await requestSettings.locator('..').getAttribute('open') === null) await requestSettings.click();
-            await setup.getByLabel('Use a multi-step execution definition',{exact:true}).check();
+            await setup.getByLabel('Import an execution definition (advanced)',{exact:true}).check();
             const executionDefinition=await (await page.request.get(base+'/api/workflows/execution-templates/online-boutique-checkout')).json();
             await setup.getByLabel('Execution definition JSON',{exact:true}).fill(JSON.stringify(executionDefinition));
+            await clickPost(setup.getByRole('button',{name:'Check execution plan',exact:true}),'/workflow-probe-preview');
             await setup.getByLabel('I reviewed the success checks for this workflow.',{exact:true}).check();
             const campaign = await clickPost(setup.getByRole('button',{name:'Save and continue to baseline runs',exact:true}),'/experiment-campaigns',201);
             assert.equal(campaign.criticality,.27);
@@ -351,13 +352,154 @@ async function runWorkspaceStateChecks() {
  finally{await browser.close()}
 }
 
+async function runGuidedSetupChecks() {
+    const {browser, page, errors, checks, check} = await openTestPage();
+    const suffix = '/workflow-probe-preview';
+    const preview = async (expected = 200) => {
+        const pending = page.waitForResponse(response => response.url().endsWith(suffix) && response.request().method() === 'POST');
+        pending.catch(() => {});
+        await page.getByRole('button', {name: 'Check execution plan', exact: true}).click();
+        const response = await pending;
+        const result = await response.json();
+        assert.equal(response.status(), expected, JSON.stringify(result));
+        return result;
+    };
+    try {
+        const campaigns = await (await page.request.get(fixtureBase + '/api/workflows/experiment-campaigns')).json();
+        const sessionId = campaigns.find(item => item.workflowName.includes('Checkout lifecycle')).analysisSessionId;
+        await page.goto(fixtureBase + '/components/workflows?inspection=' + encodeURIComponent(sessionId), {waitUntil: 'networkidle'});
+        const form = page.locator('[data-role="guided-result"] form');
+        const action = form.locator('.request-section').filter({has: page.getByRole('heading', {name: 'Request to measure', exact: true})});
+        const save = form.getByRole('button', {name: 'Save and continue to baseline runs', exact: true});
+        const confirm = form.getByLabel('I reviewed the success checks for this workflow.', {exact: true});
+        await form.getByRole('heading', {name: 'Set up the workflow and success checks', exact: true}).waitFor();
+        assert(await save.isDisabled());
+        assert(await confirm.isDisabled());
+        assert.equal(await action.getByLabel('Request body', {exact: true}).inputValue(), 'none');
+        assert.equal(await form.getByLabel('HTTP response codes that count as success', {exact: true}).inputValue(), '');
+        assert.equal(await form.locator('textarea:visible').count(), 0);
+        check('Guided setup starts without invented inputs or mandatory JSON and requires a server-checked plan');
+        await form.getByLabel('Workflow name', {exact: true}).fill('Guided fixture workflow');
+        await form.getByLabel('What should a successful run achieve?', {exact: true}).fill('A supplied reference is confirmed');
+        await form.getByLabel('Business importance (0–1)', {exact: true}).fill('0.4');
+        await form.getByLabel('Baseline runs to collect', {exact: true}).fill('3');
+        const codes = form.getByLabel('HTTP response codes that count as success', {exact: true});
+        await codes.fill('200,invalid');
+        await preview(422);
+        await form.locator('.workspace-status').filter({hasText: 'HTTP success codes'}).waitFor();
+        assert(await save.isDisabled());
+        check('Backend validation errors keep the form editable and prevent saving');
+        await codes.fill('200');
+        await action.getByLabel('Request body', {exact: true}).selectOption('json');
+        await action.getByRole('button', {name: 'Add body field', exact: true}).click();
+        let rows = action.locator('.request-row');
+        await rows.nth(0).getByLabel('Field name', {exact: true}).fill('quantity');
+        await rows.nth(0).getByLabel('Value', {exact: true}).fill('2');
+        await rows.nth(0).getByLabel('Value type', {exact: true}).selectOption('number');
+        await action.getByRole('button', {name: 'Add body field', exact: true}).click();
+        await rows.nth(1).getByLabel('Field name', {exact: true}).fill('enabled');
+        await rows.nth(1).getByLabel('Value', {exact: true}).fill('false');
+        await rows.nth(1).getByLabel('Value type', {exact: true}).selectOption('boolean');
+        let plan = await preview();
+        assert.deepEqual(plan.executionDefinition.steps[0].jsonBody, {quantity: 2, enabled: false});
+        await confirm.check();
+        assert(await save.isEnabled());
+        check('Ordinary fields produce server-typed JSON numbers and booleans and enable save only after review');
+        await rows.nth(0).getByLabel('Value', {exact: true}).fill('3');
+        assert(await save.isDisabled());
+        assert(await confirm.isDisabled());
+        assert.equal(await form.locator('.execution-preview').isVisible(), false);
+        check('Changing inputs invalidates the previous plan and its approval');
+        await form.getByText('Preparation steps (optional)', {exact: true}).click();
+        await form.getByRole('button', {name: 'Add preparation step', exact: true}).click();
+        const steps = form.locator('.preparation-steps > section');
+        await steps.nth(0).getByLabel('Request (method and path)', {exact: true}).fill('POST /orders');
+        await steps.nth(0).getByLabel('Preparation success codes', {exact: true}).fill('201');
+        await steps.nth(0).getByText('Use a response value in a later step (optional)', {exact: true}).click();
+        await steps.nth(0).getByRole('button', {name: 'Add captured value', exact: true}).click();
+        await steps.nth(0).getByLabel('Variable name', {exact: true}).fill('orderId');
+        await steps.nth(0).getByLabel('Field path or header name', {exact: true}).fill('id');
+        await action.getByRole('button', {name: 'Add body field', exact: true}).click();
+        await rows.nth(2).getByLabel('Field name', {exact: true}).fill('reference');
+        await rows.nth(2).getByLabel('Value', {exact: true}).fill('{{orderId}}');
+        await form.getByRole('button', {name: 'Add preparation step', exact: true}).click();
+        await steps.nth(1).getByLabel('Request (method and path)', {exact: true}).fill('GET /session');
+        await steps.nth(1).getByLabel('Preparation success codes', {exact: true}).fill('200');
+        await steps.nth(1).getByRole('button', {name: 'Move earlier', exact: true}).click();
+        plan = await preview();
+        assert.deepEqual(plan.summary.map(step => step.path), ['/session', '/orders', '/fixture-checkout']);
+        assert.deepEqual(plan.summary.map(step => step.measured), [false, false, true]);
+        assert.deepEqual(plan.executionDefinition.steps[1].extract.orderId, {source: 'json_field', selector: 'id'});
+        assert.equal(plan.executionDefinition.steps[2].jsonBody.reference, '{{orderId}}');
+        check('Preparation steps reorder without losing inputs; the server resolves captures and keeps the selected action measured');
+        await steps.nth(0).getByRole('button', {name: 'Remove step', exact: true}).click();
+        await rows.nth(2).getByLabel('Value', {exact: true}).fill('{{missing}}');
+        await preview(422);
+        assert(await save.isDisabled());
+        await rows.nth(2).getByLabel('Value', {exact: true}).fill('{{orderId}}');
+        check('Removing steps preserves the remaining values; missing captured variables are rejected by the backend');
+        // Delay a genuine backend preview to verify stale replies cannot approve edited inputs.
+        let release;
+        const gate = new Promise(resolve => release = resolve);
+        await page.route('**/workflow-probe-preview', async route => {
+            const response = await route.fetch();
+            await gate;
+            await route.fulfill({response});
+        });
+        const sent = page.waitForRequest(request => request.url().endsWith(suffix));
+        await form.getByRole('button', {name: 'Check execution plan', exact: true}).click();
+        await sent;
+        await codes.fill('201');
+        release();
+        await form.getByRole('button', {name: 'Check execution plan', exact: true}).waitFor({state: 'visible'});
+        await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(item => item.textContent === 'Check execution plan').disabled);
+        assert(await confirm.isDisabled());
+        await page.unroute('**/workflow-probe-preview');
+        check('A delayed preview cannot approve settings edited while the request was in flight');
+        await form.getByText('Import existing settings (advanced)', {exact: true}).click();
+        await form.getByLabel('Import an execution definition (advanced)', {exact: true}).check();
+        await form.getByLabel('Execution definition JSON', {exact: true}).fill('{broken');
+        await form.getByRole('button', {name: 'Check execution plan', exact: true}).click();
+        await form.locator('.workspace-status.is-error').waitFor();
+        await form.getByLabel('Import an execution definition (advanced)', {exact: true}).uncheck();
+        plan = await preview();
+        assert.equal(plan.executionDefinition.steps.at(-1).jsonBody.quantity, 3);
+        assert.deepEqual(plan.summary.at(-1).successStatuses, [201]);
+        check('Advanced import errors are recoverable and switching modes preserves guided inputs');
+        await page.setViewportSize({width: 375, height: 812});
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('.content')).marginLeft === '0px');
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        assert.equal(await form.locator('input:not([type="hidden"]),select,textarea').evaluateAll(inputs => inputs.filter(input => !input.disabled && !input.labels?.length).length), 0);
+        await page.screenshot({path: path.join(out, 'guided-mobile.png'), fullPage: true});
+        check('Guided setup fits a 375px viewport and every active input has an associated label');
+        await page.setViewportSize({width: 1440, height: 1050});
+        await page.screenshot({path: path.join(out, 'guided-desktop.png'), fullPage: true});
+        await confirm.check();
+        const pending = page.waitForResponse(response => response.url().endsWith('/experiment-campaigns') && response.request().method() === 'POST');
+        await save.click();
+        const response = await pending;
+        const campaign = await response.json();
+        assert.equal(response.status(), 201, JSON.stringify(campaign));
+        assert.equal(campaign.workloadProfile, 'reviewed_guided_sequence');
+        assert.equal(campaign.baseline.requiredTrials, 3);
+        await page.getByRole('button', {name: 'Run one baseline test', exact: true}).waitFor();
+        check('The reviewed guided plan saves through the real API and continues to baseline collection without sending application requests');
+        assert.deepEqual(errors, []);
+        await fs.writeFile(path.join(out, 'guided-checks.json'), JSON.stringify({checks, errors, evidence: 'controlled fixture only', realServiceOutages: 0}, null, 2));
+    } catch (error) {
+        await page.screenshot({path: path.join(out, 'guided-failure.png'), fullPage: true});
+        throw error;
+    } finally { await browser.close(); }
+}
+
 async function main() {
     if (!base || !fixtureBase) {
         throw new Error('Set WORKFLOW_TEST_URL to the running app and WORKFLOW_FIXTURE_URL to browser_fixture.py on a fresh port.');
     }
     const selection = process.env.WORKFLOW_BROWSER_TESTS || 'all';
-    if (!['all', 'lifecycle', 'state'].includes(selection)) throw new Error('WORKFLOW_BROWSER_TESTS must be all, lifecycle or state.');
-    if (selection !== 'state') await runWorkflowLifecycle();
-    if (selection !== 'lifecycle') await runWorkspaceStateChecks();
+    if (!['all', 'lifecycle', 'state', 'setup'].includes(selection)) throw new Error('WORKFLOW_BROWSER_TESTS must be all, lifecycle, state or setup.');
+    if (['all', 'lifecycle'].includes(selection)) await runWorkflowLifecycle();
+    if (['all', 'state'].includes(selection)) await runWorkspaceStateChecks();
+    if (['all', 'setup'].includes(selection)) await runGuidedSetupChecks();
 }
 main().catch(error => { console.error(error); process.exit(1); });
