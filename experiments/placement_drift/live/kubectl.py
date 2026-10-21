@@ -5,8 +5,11 @@ Every command is pinned to one kubeconfig context with `--context`, so the user'
 system namespaces are refused.
 """
 import json
+import os
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 from experiments.placement_drift.constants import PROTECTED_NAMESPACES
@@ -37,6 +40,20 @@ class Kubectl:
 
     def get_json(self, *args: str, namespaced: bool = True) -> dict[str, Any]:
         return json.loads(self.run("get", *args, "-o", "json", namespaced=namespaced))
+
+    def write_pinned_kubeconfig(self) -> Path:
+        """Writes a kubeconfig holding only this context (as its current-context) to a private temp file.
+
+        The Component 2 collector reads the kubeconfig's current context, so pointing $KUBECONFIG at
+        this file makes it observe the experiment cluster, never the user's current one. The file holds
+        the local KinD credential: it is created with owner-only permissions and the caller deletes it.
+        """
+        text = self.run("config", "view", "--minify", "--flatten", namespaced=False)
+        descriptor, name = tempfile.mkstemp(prefix="kubeconfig-experiment-", suffix=".yaml")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.chmod(name, 0o600)
+        return Path(name)
 
     # --- workload ---------------------------------------------------------------------------
 

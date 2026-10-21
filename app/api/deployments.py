@@ -8,18 +8,22 @@ Categorized into 6 distinct research topics for Swagger documentation:
 - Topic 5: Cluster Snapshots (content-hashed placement snapshots)
 - Topic 6: Validation & Results (accuracy vs kubectl ground truth, live experiment results, dry-run reports)
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
+# Our additions: the discovery status envelope and the all-namespaces overview used by the extension.
+from app.engine.deployment_topology_modeling.discovery import DiscoveryResult
+from app.engine.deployment_topology_modeling.discovery_all import AllNamespacesDiscovery, discover_all
+from app.shared.evidence_errors import EvidenceError, unavailable
 from app.engine.deployment_topology_modeling.service import (
     ClusterUnavailableError,
-    analyze_sample_topology,
+    chaos_topology,
+    discover_live,
     get_ground_truth_evaluation,
     get_live_experiment_results,
-    get_sample_deployment,
     get_live_deployment_graph,
     get_manifest_intent,
     get_manifest_service_detail,
@@ -62,9 +66,13 @@ class ClusterAwareRoute(APIRoute):
             try:
                 return await handler(request)
             except ClusterUnavailableError as exc:
+                if isinstance(exc, EvidenceError):
+                    # A coded error (CLUSTER_NOT_CONNECTED, ...): the app-level handler answers it with
+                    # its stable code, which the extension's pages switch on.
+                    raise
                 return JSONResponse(
                     status_code=503,
-                    content={"detail": str(exc), "data_source": "live", "hint": "Use /api/deployments/sample/analysis for the sample fixture."},
+                    content={"detail": str(exc), "data_source": "live"},
                 )
 
         return route_handler
@@ -81,38 +89,16 @@ TAG_BENCHMARKS = "6. Validation & Results"
 
 DESC_K8S_NAMESPACE = "Target Kubernetes namespace"
 DESC_TARGET_NAMESPACE = "Target namespace"
+DESC_CHAOS_SOURCE = (
+    "Where the scenario placements come from: 'live' (default) is the connected cluster's real nodes and "
+    "pods, disrupted by a deterministic rule on a copy, so the cluster is never changed; 'scripted' is the "
+    "made-up placements written in the scenario code, labelled as such in every result"
+)
 
 
 # =====================================================================
 # Topic 1: Topology & Live Cluster State
 # =====================================================================
-
-@router.get(
-    "/sample",
-    response_model_by_alias=True,
-    tags=[TAG_TOPOLOGY],
-    summary="[Phase 1] Retrieve baseline static sample deployment graph",
-)
-def read_sample_deployment() -> DeploymentGraph:
-    """Returns static golden reference topology model for offline testing."""
-    return get_sample_deployment()
-
-
-@router.get(
-    "/sample/analysis",
-    tags=[TAG_TOPOLOGY],
-    summary="[Phase 3] Exposure analysis and Baseline B2 computed on the sample fixture",
-)
-def read_sample_analysis() -> Dict[str, Any]:
-    """Same analysis as the live path, run on sample_data/deployment.json and labelled as sample."""
-    analysis = analyze_sample_topology()
-    return {
-        "data_source": analysis.data_source,
-        "graph": analysis.graph.model_dump(by_alias=True),
-        "exposure_report": analysis.report.model_dump(),
-        "baseline_b2": analysis.baseline_b2.model_dump(),
-    }
-
 
 @router.get(
     "/live",
@@ -125,6 +111,44 @@ def read_live_deployment(
 ) -> DeploymentGraph:
     """Queries live Kubernetes API (Docker Desktop / KinD) and compiles topology graph."""
     return get_live_deployment_graph(namespace=namespace)
+
+
+# ---------------------------------------------------------------------------------------------
+# Live discovery for the Docker Desktop extension.
+#
+# /live above returns the bare DeploymentGraph. These two routes return it wrapped in a status
+# envelope (ok / empty / partial) so a page can say how much of the cluster was actually resolved
+# and what could not be, instead of showing an incomplete graph as if it were complete. They read the
+# connected cluster only; when it cannot be read they fail with an explicit EvidenceError code.
+# ---------------------------------------------------------------------------------------------
+
+@router.get(
+    "/discovery",
+    response_model_by_alias=True,
+    tags=[TAG_TOPOLOGY],
+    summary="[Phase 1] Live topology with discovery status, warnings and unresolved relationships",
+)
+def read_discovery(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> DiscoveryResult:
+    """The DeploymentGraph wrapped with: status (ok/empty/partial), capture time, connection fingerprint
+    (not proof of cluster identity), warnings, unresolved relationships and per-service evidence."""
+    return discover_live(namespace=namespace)
+
+
+@router.get(
+    "/discovery/all",
+    response_model_by_alias=True,
+    tags=[TAG_TOPOLOGY],
+    summary="[Phase 1] Live discovery of every namespace with workloads, for the Overview",
+)
+def read_discovery_all(
+    include_system: bool = Query(False, description="Also include system namespaces such as kube-system"),
+) -> AllNamespacesDiscovery:
+    """One discovery result per namespace that holds workloads, plus cluster-wide totals. System namespaces
+    are left out unless asked for and are named in ``excludedNamespaces``. Fails explicitly when the cluster
+    cannot be read; there is never a partial or substituted overview."""
+    return discover_all(include_system=include_system)
 
 
 @router.get(
@@ -243,9 +267,12 @@ def get_service_topology_detail(
     tags=[TAG_MANIFEST],
     summary="[Phase 2] Parse declared YAML intent from deployment manifests",
 )
-def read_manifest_intent() -> List[Dict[str, Any]]:
-    """Parses the manifest named by /manifests/source and extracts declared replicas, limits, and topology spread."""
-    return get_manifest_intent()
+def read_manifest_intent(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> List[Dict[str, Any]]:
+    """Declared replicas, limits and topology spread: from named manifests, else the connected cluster's own
+    Deployment specs (see service.py for the order)."""
+    return get_manifest_intent(namespace=namespace)
 
 
 @router.get(
@@ -254,7 +281,8 @@ def read_manifest_intent() -> List[Dict[str, Any]]:
     summary="[Phase 2] Which manifest file the declared intent is read from",
 )
 def read_manifest_source() -> Dict[str, Any]:
-    """deploy/kubernetes/boutique.yaml when present, else deploy/test-workloads. Drift analysis uses the same source."""
+    """A named manifest (RESILIENCE_MANIFEST_PATH), else the repository's manifests, else the connected cluster's
+    Deployment specs. Drift analysis reads declared intent in the same order."""
     return get_manifest_source()
 
 
@@ -263,9 +291,11 @@ def read_manifest_source() -> Dict[str, Any]:
     tags=[TAG_MANIFEST],
     summary="[Phase 2] List declared microservice deployment constraints",
 )
-def list_manifest_service_constraints() -> List[Dict[str, Any]]:
+def list_manifest_service_constraints(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> List[Dict[str, Any]]:
     """Extracts declared constraints (limits, nodeAffinity, topologySpreadConstraints) per service."""
-    intent_data = get_manifest_intent()
+    intent_data = get_manifest_intent(namespace=namespace)
     services_raw = intent_data.get("declared_services", intent_data.get("services", [])) if isinstance(intent_data, dict) else intent_data
     if isinstance(services_raw, dict):
         return [
@@ -283,9 +313,10 @@ def list_manifest_service_constraints() -> List[Dict[str, Any]]:
 )
 def get_manifest_service_detail_endpoint(
     service_name: str,
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Retrieves declared replica count, resource limits, and spread constraints for a service."""
-    detail = get_manifest_service_detail(service_name=service_name)
+    detail = get_manifest_service_detail(service_name=service_name, namespace=namespace)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Service '{service_name}' not found in manifests.")
     return detail
@@ -301,6 +332,13 @@ def get_manifest_compliance_rate(
 ) -> Dict[str, Any]:
     """Calculates percentage of live workloads strictly meeting their declared intent constraints."""
     report, _ = analyze_resilience_drift(namespace=namespace)
+    if report.declared_state == "unavailable":
+        # Compliance is a comparison with declared intent. With nothing declared there is no rate to report.
+        raise unavailable(
+            "DECLARED_STATE_UNAVAILABLE",
+            "No declared-state source (deployment manifests) is available, so compliance cannot be computed.",
+            "deployment_topology",
+        )
     return {
         "constraint_compliance_rate": report.constraint_compliance_rate,
         "services_with_placement_rules": report.services_with_placement_rules,
@@ -505,9 +543,11 @@ def get_chaos_scenario_detail(
 def run_chaos_scenario(
     scenario_id: str,
     namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
-    """Replays the scenario's scripted T0/T1 placements and computes D_rate and pod moves. Nothing is injected into a cluster."""
-    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace)
+    """Simulates a specific disruption (e.g. node drain, pod crash) and calculates placement drift. A dry run:
+    the cluster is never changed. With source=live it starts from the connected cluster's real topology."""
+    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace, topology_source=source)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
     return result.model_dump()
@@ -524,10 +564,14 @@ def run_chaos_scenario(
 )
 def get_scenario_transition_matrix(
     scenario_id: str,
+    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
     """Counts pods (matched by name) on node i at T0 and node j at T1."""
     repo = SnapshotRepository()
-    orchestrator = DisruptionOrchestrator(repository=repo)
+    orchestrator = DisruptionOrchestrator(
+        namespace=namespace, repository=repo, topology=chaos_topology(source, namespace)
+    )
     result = orchestrator.run_scenario(scenario_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
@@ -645,9 +689,11 @@ def clear_snapshots_cache() -> Dict[str, Any]:
 )
 def get_chaos_benchmarks(
     namespace: str = Query("default", description=f"{DESC_TARGET_NAMESPACE} for chaos simulation"),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
-    """Executes all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions."""
-    return run_chaos_benchmark_pipeline(namespace=namespace)
+    """Simulates all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions.
+    source=live starts from the connected cluster's real topology; source=scripted uses made-up placements."""
+    return run_chaos_benchmark_pipeline(namespace=namespace, topology_source=source)
 
 
 @router.get(

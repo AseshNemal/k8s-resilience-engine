@@ -23,7 +23,10 @@ Docker Desktop
   Apple silicon).
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) and `kubectl` on your `PATH`
   (macOS: `brew install kind kubectl`).
-- A bash shell. Verified on macOS only; Windows needs WSL2 (untested).
+- Python 3.9 or newer. The scripts in `scripts/` are Python behind thin launchers, so they run on macOS, Linux
+  and Windows: `./scripts/cluster-up.sh` on macOS and Linux, `scripts\cluster-up.cmd` on Windows (the same
+  for `extension-cluster-access` and `extension-manage`). They are covered by tests that run on every platform;
+  they have been run on macOS only, and not yet on a real Windows machine.
 
 ## First-time setup
 
@@ -137,12 +140,17 @@ Pointing the workflow probes at an Online Boutique frontend needs `WORKFLOW_TARG
 
 ## Current limitations
 
-- Only Component 2 (deployment topology, `/api/deployments/live`) reads the live cluster.
-  Component 3 runs its prediction over contract fixtures (not your cluster) and Component 4 still serves
-  sample data, there is no recommendation apply or validation step,
-  and Components 1 to 4 are not yet connected end to end.
+- Component 2 (deployment topology, `/api/deployments/discovery` and `/live`) reads the live cluster.
+  Component 3 predicts over that live topology plus an approved, frozen workflow, and refuses when either
+  is missing or incomplete. Component 4 computes a live recommendation from that evidence, and an approval can be
+  requested for it. There is no recommendation apply, YAML proposal or validation step. No endpoint serves sample data.
 - The fresh kind cluster contains no application workloads, so live topology shows the three
-  worker nodes and no services. Online Boutique is not deployed into kind by this setup.
+  worker nodes and an empty (valid) result with no services. Online Boutique is not deployed into kind by
+  this setup.
+- Service/ownership resolution follows the Service selector and owner references, so applications whose
+  Deployment names differ from their pods' `app` label (Istio Bookinfo) resolve completely; this is covered
+  by tests on a fake cluster, not yet by a real Bookinfo run. The live recommendation covers topology spread only
+  (`docs/RECOMMENDATION_LIVE_DATA.md`).
 - kind worker nodes are containers on the same Docker host. They are **logical** worker-node failure
   domains, not independent physical machines, and share one kernel and one Docker VM. Results
   from this setup are not evidence about independent hardware failures.

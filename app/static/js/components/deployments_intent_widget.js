@@ -6,7 +6,7 @@
 window.DeploymentsIntentWidget = (function () {
     "use strict";
 
-    // Same rule as service.resolve_manifest_source: say which YAML the declared intent comes from.
+    // Same order as service._declared_target: say where the declared intent comes from.
     async function showManifestSource() {
         const note = document.querySelector("[data-role='manifest-source']");
         if (!note) return;
@@ -14,42 +14,38 @@ window.DeploymentsIntentWidget = (function () {
             const resp = await fetch("/api/deployments/manifests/source");
             if (!resp.ok) return;
             const src = await resp.json();
-            note.classList.toggle("manifest-source--warning", !src.is_default);
-            if (!src.found) {
-                note.textContent = "No manifest found (deploy/kubernetes/boutique.yaml or deploy/test-workloads), so there is no declared intent to compare.";
-            } else if (src.is_default) {
+            note.classList.toggle("manifest-source--warning", !src.found);
+            if (src.source === "cluster") {
+                note.textContent = "Declared intent from the Deployment specs of the connected cluster (no manifest file found).";
+            } else if (src.found) {
                 note.textContent = `Declared intent from ${src.path}.`;
             } else {
-                note.textContent = `deploy/kubernetes/boutique.yaml not found: declared intent comes from ${src.path}. Only services in the same namespace as that YAML are compared.`;
+                note.textContent = `The named manifest ${src.path} does not exist, so there is no declared intent to compare.`;
             }
         } catch (err) {
             console.warn("Could not load manifest source:", err);
         }
     }
 
-    async function loadIntentCompliance(activeServices, isLive) {
+    // activeServices are the connected cluster's services; the declared intent is compared with them.
+    async function loadIntentCompliance(activeServices) {
         await showManifestSource();
         try {
             const resp = await fetch("/api/deployments/manifests");
             if (!resp.ok) return;
             const intents = await resp.json();
-
-            // The manifests are the real YAML; comparing them with the sample fixture would invent drift.
-            renderIntentTable(intents, isLive ? activeServices : []);
+            renderIntentTable(intents, activeServices);
         } catch (err) {
             console.warn("Could not load manifest intent:", err);
         }
-        await loadPlacementCompliance(isLive);
+        await loadPlacementCompliance();
     }
 
-    // Placement-rule compliance comes from the backend definition (placement_metrics.compliance_rate)
-    // and needs a live cluster; on sample data it stays n/a.
-    async function loadPlacementCompliance(isLive) {
+    // Placement-rule compliance comes from the backend definition (placement_metrics.compliance_rate).
+    async function loadPlacementCompliance() {
         const rateEl = document.getElementById("compliance-rate-val");
         if (!rateEl) return;
         rateEl.textContent = "n/a";
-        rateEl.title = isLive ? "" : "Live cluster only";
-        if (!isLive) return;
         try {
             const resp = await fetch("/api/deployments/manifests/compliance");
             if (!resp.ok) return;

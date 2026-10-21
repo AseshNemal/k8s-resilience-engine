@@ -30,7 +30,10 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
 from app.engine.workflow_dependency_modeling.execution_service import (
     list_executions,
 )
-from app.engine.workflow_dependency_modeling.fixture_repository import get_reference
+from app.engine.workflow_dependency_modeling.reference_source import (
+    ReferenceEvidenceUnavailableError,
+    ReferenceSource,
+)
 from app.engine.workflow_dependency_modeling.scenario_service import (
     get_versioned_scenario,
 )
@@ -38,9 +41,13 @@ from app.shared.schemas.workflow import WorkflowGraph
 
 if TYPE_CHECKING:
     from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
+    from app.engine.workflow_dependency_modeling.models import ReferenceWorkflow
 
 
 _default_repository: DependencyAssessmentRepository | None = None
+# Where graph evaluation gets its reference graph. None in the product: with no configured source the
+# evaluation reports insufficient evidence instead of scoring against a built-in synthetic reference.
+_default_reference_source: ReferenceSource | None = None
 _SERVER_FIELDS = {"services", "edges", "createdAt", "createdBy"}
 
 
@@ -49,6 +56,11 @@ def configure_dependency_assessment_repository(
 ) -> None:
     global _default_repository
     _default_repository = repository
+
+
+def configure_reference_source(source: ReferenceSource | None) -> None:
+    global _default_reference_source
+    _default_reference_source = source
 
 
 def _repository(
@@ -443,22 +455,54 @@ def get_validated_workflow_graph(
     return _repository(repository).latest_approval(workflow_id).approved_graph
 
 
-def evaluate_approved_dependency_assessment(
+def evaluate_approved_dependency_assessment_with_reference(
     assessment_id: str,
     repository: DependencyAssessmentRepository | None = None,
-) -> GraphEvaluationResult:
-    """Score one approved prediction against its independent reference graph."""
+    reference_source: ReferenceSource | None = None,
+) -> tuple[GraphEvaluationResult, ReferenceWorkflow, ReferenceSource]:
+    """Score one approved prediction against an explicitly supplied reference graph.
+
+    Returns the result together with the reference and the source it came from, so callers can state the
+    provenance. Raises ``ReferenceEvidenceUnavailableError`` when no source is configured or the source
+    has no reference for the workflow.
+    """
     from app.engine.workflow_dependency_modeling.evaluator import evaluate_graph
 
     repo = _repository(repository)
     assessment = repo.get_assessment(assessment_id)
     approval = repo.get_approval(assessment_id)
-    reference = get_reference(assessment.workflow_id)
+
+    source = reference_source or _default_reference_source
+    if source is None:
+        raise ReferenceEvidenceUnavailableError(
+            f"No reference graph source is configured, so workflow '{assessment.workflow_id}' cannot be scored "
+            "at graph level. Supply a reviewed reference graph, or use the user-supplied classification "
+            "references (dependency-evaluations) for service-level scoring."
+        )
+    try:
+        reference = source.load(assessment.workflow_id)
+    except (FileNotFoundError, LookupError) as error:
+        raise ReferenceEvidenceUnavailableError(
+            f"Reference source '{source.name}' has no reference graph for workflow '{assessment.workflow_id}'."
+        ) from error
+
     predicted_mandatory_edges = (
         set(approval.mandatory_edges) if assessment.edge_interventions else None
     )
-    return evaluate_graph(
+    result = evaluate_graph(
         approval.approved_graph,
         reference,
         predicted_mandatory_edges=predicted_mandatory_edges,
     )
+    return result, reference, source
+
+
+def evaluate_approved_dependency_assessment(
+    assessment_id: str,
+    repository: DependencyAssessmentRepository | None = None,
+    reference_source: ReferenceSource | None = None,
+) -> GraphEvaluationResult:
+    """Score one approved prediction against its independent reference graph."""
+    return evaluate_approved_dependency_assessment_with_reference(
+        assessment_id, repository, reference_source
+    )[0]

@@ -1,6 +1,7 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from app.api.deployments import router as deployments_router
 from app.engine.deployment_topology_modeling.service import (
@@ -217,13 +218,15 @@ def test_api_get_markdown_benchmark_report(client: TestClient):
 
 
 def test_run_benchmarks_script_execution(tmp_path):
-    # Writes to a temporary folder so running the tests never rewrites the committed reports.
+    # Written to a temporary folder: with no output_dir the script overwrites the tracked report in
+    # experiments/placement_drift (its runtime figures change on every run), which dirtied the working tree.
     metrics = run_benchmarks(output_dir=tmp_path)
     assert metrics["total_scenarios"] == 8.0
     assert metrics["completed_count"] == 8.0
 
-    md_file = tmp_path / "benchmark_report.md"
-    json_file = tmp_path / "benchmark_report.json"
+    output_dir = tmp_path
+    md_file = output_dir / "benchmark_report.md"
+    json_file = output_dir / "benchmark_report.json"
 
     assert md_file.exists()
     assert json_file.exists()
@@ -344,7 +347,19 @@ def test_api_post_chaos_safety_validate(client: TestClient):
 # Additional Topic 5 Tests: Snapshots & Provenance
 # =====================================================================
 
-def test_api_snapshots_lifecycle(client: TestClient):
+class _StoredConnection:
+    """A connection that can vouch for snapshots taken from the stored KinD snapshot."""
+
+    def connection_fingerprint(self) -> str:
+        return "stored-kind-snapshot"
+
+
+def test_api_snapshots_lifecycle(client: TestClient, monkeypatch):
+    # Every stored snapshot records which connection took it (see service._active_connection), so this test
+    # gives the stored snapshot one. Without a connection, snapshots are refused rather than shown unverified.
+    from app.engine.deployment_topology_modeling import discovery
+    monkeypatch.setattr(discovery, "get_cluster_source", lambda: _StoredConnection())
+
     # 1. Freeze a snapshot
     freeze_resp = client.post("/api/deployments/snapshots/freeze?snapshot_id=test_freeze")
     assert freeze_resp.status_code == 200

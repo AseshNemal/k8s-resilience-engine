@@ -103,6 +103,58 @@ def test_connect_page_has_every_control_the_script_expects(built):
     assert 'role="alert"' in page
 
 
+AUTO_ROLES = ["auto-card", "auto-note", "auto-controls", "auto-clusters", "auto-refresh", "auto-connect", "auto-remove",
+              "auto-message", "auto-attention", "auto-attention-text", "auto-retry", "manual-details"]
+
+
+@pytest.mark.parametrize("name", PAGE_FILES)
+def test_every_page_runs_autoconnect_after_chrome(built, name):
+    page = html(built, name)
+    assert 'src="autoconnect.js"' in page, name
+    # chrome.js listens for the event autoconnect.js sends, so it must be loaded first.
+    assert page.index('src="chrome.js"') < page.index('src="autoconnect.js"')
+
+
+def test_connect_page_offers_automatic_setup_and_keeps_the_manual_fallback(built):
+    page = html(built, "connect.html")
+    for role in AUTO_ROLES:
+        assert f'data-role="{role}"' in page, role
+    assert 'src="connect-auto.js"' in page
+    # The manual connection is still there, behind an Advanced disclosure and still complete.
+    assert "Advanced: use a kubeconfig file" in page
+    assert 'data-role="connect-file"' in page and 'data-role="connect-submit"' in page
+    assert page.index('data-role="auto-card"') < page.index('data-role="manual-details"')
+
+
+def test_the_automatic_card_starts_hidden_until_the_script_decides_what_to_offer(built):
+    page = html(built, "connect.html")
+    assert re.search(r'<section[^>]*data-role="auto-card"[^>]*\shidden', page)
+
+
+def test_the_page_says_nothing_happens_without_approval_in_a_system_dialog(built):
+    page = html(built, "connect.html")
+    assert "A system dialog shows the exact cluster" in page
+    assert "nothing is changed unless you approve there" in page
+
+
+@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js"])
+def test_the_new_scripts_never_write_html_or_log(script):
+    source = (UI_SRC / script).read_text(encoding="utf-8")
+    # Comments may discuss these APIs (they explain why they are not used); only code is checked.
+    code = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
+    code = re.sub(r"(?m)^\s*//.*$", "", code)
+    # Cluster and context names come from the user's kubeconfig; they may only ever be written as text.
+    assert "innerHTML" not in code and "insertAdjacentHTML" not in code and "document.write" not in code
+    # Nothing here may log: helper output must never reach a console.
+    assert not re.search(r"\bconsole\.", code)
+    assert "eval(" not in code and "new Function" not in code
+
+
+def test_automatic_setup_is_limited_to_platforms_that_were_verified():
+    code = (UI_SRC / "autoconnect.js").read_text(encoding="utf-8")
+    assert 'const ENABLED_PLATFORMS = ["darwin", "win32", "linux"];' in code
+
+
 # ---- the stylesheet ------------------------------------------------------------------------------
 
 CSS = (UI_SRC / "docker.css").read_text(encoding="utf-8")

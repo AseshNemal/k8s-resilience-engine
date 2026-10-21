@@ -100,7 +100,9 @@ def test_workflow_page_defaults_to_guided_analysis_not_internal_artifacts() -> N
     assert "Refresh workflow choices" in response.text
     assert "Workflow trace service address" in response.text
     assert "Interventions require approval" in response.text
-    assert "Synthetic Fixture Dataset" in response.text
+    assert "Synthetic Fixture Dataset" not in response.text
+    assert "Seed Synthetic Demo Traces" not in response.text
+    assert "Load Synthetic Fixture" not in response.text
     assert "NO ACTIVE CAMPAIGN" in response.text
     assert "Research audit controls" in response.text
     assert '<details class="research-audit">' in response.text

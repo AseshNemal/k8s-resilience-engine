@@ -1,3 +1,7 @@
+> **Historical planning document.** The `/sample` endpoints and mock-data steps described below were the
+> scaffold plan. They have been removed from the running application, which now serves live cluster evidence
+> only. See `docs/REAL_DATA_PHASE1.md` for the current contracts and limits.
+
 # K8s Resilience Engine — Complete AI Project Context
 
 ## 1. Project Identity

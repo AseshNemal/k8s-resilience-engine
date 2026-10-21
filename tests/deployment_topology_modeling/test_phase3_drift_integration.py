@@ -43,6 +43,25 @@ def test_placement_drift_report_markdown_handles_unmeasurable_rates():
     assert "not measurable" in md
 
 
+from tests.support.fake_cluster import cluster_from_graph
+from app.engine.deployment_topology_modeling.service import discover_live, get_sample_deployment
+
+
+def test_discover_live_graph_integration(use_cluster):
+    """discover_live is the extension's discovery path: it reads through the ClusterSource seam."""
+    use_cluster(cluster_from_graph(get_sample_deployment()))
+    result = discover_live()
+    graph = result.graph
+    assert graph.nodes is not None
+    assert graph.services is not None
+    assert graph.validation.runtime_overhead_ms >= 0.0
+    # Every service must have drift_detected boolean
+    for svc in graph.services:
+        assert isinstance(svc.drift_detected, bool)
+        assert isinstance(svc.drift_reasons, list)
+    assert result.declared_state == "unavailable"  # no declared-state source selected
+
+
 def test_live_graph_from_real_snapshot():
     graph = service.get_live_deployment_graph()
     assert graph.cluster.node_names == [

@@ -3,7 +3,7 @@ Data Models for Phase 4: Controlled Chaos & Disruption Drift Experiments.
 Component: Component 2 - Deployment Topology Modeling
 """
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from experiments.placement_drift.constants import (
@@ -66,6 +66,11 @@ class ScenarioResult(BaseModel):
     execution_mode: ScenarioExecutionMode = Field(
         default=ScenarioExecutionMode.DRY_RUN_SIMULATION,
         description="Whether run against live Kubernetes or dry-run simulation",
+    )
+    topology_source: Literal["scripted", "live"] = Field(
+        default="scripted",
+        description="'scripted': placements written in the scenario code. 'live': placements taken from the "
+                    "connected cluster's real topology and disrupted by a deterministic rule (still a dry run)",
     )
     baseline_snapshot_id: str = Field(..., description="T0 snapshot identifier")
     target_snapshot_id: str = Field(..., description="T1 snapshot identifier")

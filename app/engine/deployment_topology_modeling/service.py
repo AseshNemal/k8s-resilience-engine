@@ -5,14 +5,18 @@ Data sources are never mixed silently:
 - sample: sample_data/deployment.json, only through the *_sample functions
 """
 import json
+import logging
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
-from kubernetes.config.config_exception import ConfigException
-from urllib3.exceptions import MaxRetryError, NewConnectionError
-
+from app.integrations.kubernetes.client import ClusterAccessError
+from app.shared.evidence_errors import EvidenceError, unavailable
+from app.engine.deployment_topology_modeling import discovery
+from app.engine.deployment_topology_modeling.discovery import DiscoveryResult
 from app.shared.schemas.deployment import DeploymentGraph
 from app.engine.deployment_topology_modeling import placement_metrics as pm
 from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterNode
@@ -20,6 +24,7 @@ from app.engine.deployment_topology_modeling.live_state.cluster_state_parser imp
 from app.engine.deployment_topology_modeling.live_state.ownership_resolver import resolve_deployment_ownership
 from app.engine.deployment_topology_modeling.live_state.concentration_analyzer import analyze_replica_concentration
 from app.engine.deployment_topology_modeling.graph_builder import DeploymentGraphBuilder
+from app.engine.deployment_topology_modeling.manifest_parsing.manifest_parser import parse_declared_intents
 from app.engine.deployment_topology_modeling.manifest_parsing.pipeline import run_manifest_pipeline
 from app.engine.deployment_topology_modeling.drift_analysis.constants import DriftType, INTENT_DRIFT_TYPES
 from app.engine.deployment_topology_modeling.drift_analysis.drift_analyzer import DriftAnalyzer
@@ -33,6 +38,8 @@ from app.engine.deployment_topology_modeling.drift_analysis.placement_drift_diff
     PlacementDriftDiffEngine,
 )
 
+logger = logging.getLogger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "deploy" / "kubernetes" / "boutique.yaml"
 FALLBACK_MANIFEST_DIR = PROJECT_ROOT / "deploy" / "test-workloads"
@@ -43,6 +50,21 @@ HOSTNAME_LABEL = "kubernetes.io/hostname"
 
 class ClusterUnavailableError(RuntimeError):
     """No Kubernetes cluster could be reached. Callers must not substitute sample data silently."""
+
+
+class CodedClusterUnavailableError(ClusterUnavailableError, discovery.DiscoveryError):
+    """The cluster could not be read, reported both ways.
+
+    It is a ClusterUnavailableError, so everything written against that (the 503 route class, the safety
+    status) keeps working, and it is a DiscoveryError, so the stable code (CLUSTER_NOT_CONNECTED,
+    CLUSTER_AUTH_FAILED, ...) reaches the extension's pages unchanged.
+    """
+
+    def __init__(self, error: discovery.DiscoveryError) -> None:
+        discovery.DiscoveryError.__init__(
+            self, error.code, error.message, http_status=error.http_status,
+            retryable=error.retryable, details=error.details,
+        )
 
 
 @dataclass
@@ -58,16 +80,121 @@ class TopologyAnalysis:
 # ---------------------------------------------------------------------------------------------
 
 def collect_live_cluster(namespace: str = "default") -> tuple[list[ClusterNode], list[dict[str, Any]]]:
-    """Worker nodes and analysed services of one namespace from the live cluster."""
+    """Worker nodes and analysed services of one namespace from the live cluster.
+
+    Everything is read through the one cluster source (discovery.get_cluster_source), so this path and
+    discover_live() see the same cluster, and a test that installs a fake cluster covers both.
+    """
+    if not discovery.NAMESPACE_PATTERN.match((namespace or "").strip()):
+        raise discovery.DiscoveryError(
+            "INVALID_NAMESPACE", "The namespace is not a valid Kubernetes namespace name.", http_status=422
+        )
     try:
-        nodes = get_cluster_nodes()
-        pods = get_cluster_pods(namespace=namespace)
-        workloads = resolve_deployment_ownership(pods=pods, namespace=namespace)
-    except ConfigException as exc:
-        raise ClusterUnavailableError(f"No Kubernetes credentials available: {exc}") from exc
-    except (MaxRetryError, NewConnectionError, ConnectionError) as exc:
+        source = discovery.get_cluster_source()
+        nodes = get_cluster_nodes(source)
+        pods = get_cluster_pods(namespace=namespace, source=source)
+        workloads = resolve_deployment_ownership(pods=pods, namespace=namespace, source=source)
+    except ClusterAccessError as exc:
+        # NotConnected, ConnectionFailed, AuthFailed, Forbidden and ApiFailed all come from the REST
+        # client with messages that never carry credentials. The caller must not substitute sample data.
+        raise CodedClusterUnavailableError(discovery.classify_access_error(exc)) from None
+    except ConnectionError as exc:
         raise ClusterUnavailableError(f"Kubernetes API is unreachable: {exc}") from exc
+    except discovery.DiscoveryError:
+        raise
+    except Exception:
+        # The exception text may contain request details or a credential; it stays in the server log and
+        # the caller gets the stable code only.
+        logger.exception("Unexpected failure while reading the cluster")
+        raise CodedClusterUnavailableError(discovery.DiscoveryError(
+            "DISCOVERY_FAILED", "The cluster returned an unexpected error during discovery.",
+            http_status=502, retryable=True,
+        )) from None
     return nodes, analyze_replica_concentration(workloads, {n.name: n.ready for n in nodes})
+
+
+# ---------------------------------------------------------------------------------------------
+# Live discovery for the Docker Desktop extension
+#
+# The functions above build a graph per namespace and raise ClusterUnavailableError. The extension
+# needs more: a status envelope saying how complete the discovery was, and a coded EvidenceError (never
+# a bare 500) for every way the cluster can be unreadable. discover_live() provides that on top of
+# discovery.py, which reads the cluster through the REST client and reports whatever it could not
+# resolve instead of guessing. Both paths stay available and read the same cluster.
+# ---------------------------------------------------------------------------------------------
+
+COMPONENT = "deployment_topology"
+
+
+def _declared_intent(manifest_path: str | None) -> dict[str, Any]:
+    """Declared deployment intent from an explicitly selected source, or none.
+
+    No default manifest is ever read. Runtime discovery works from live cluster state alone; declared
+    intent is optional evidence that the caller must name.
+    """
+    if manifest_path is None:
+        return {}
+    directory = Path(manifest_path)
+    if not directory.is_dir():
+        raise unavailable(
+            "DECLARED_STATE_UNAVAILABLE",
+            "The selected declared-state source does not exist or is not a directory.",
+            COMPONENT,
+        )
+    intents = run_manifest_pipeline(str(directory))
+    if not intents:
+        raise unavailable(
+            "DECLARED_STATE_UNAVAILABLE",
+            "The selected declared-state source contains no readable deployment manifests.",
+            COMPONENT,
+        )
+    return {m.service_name: m for m in intents}
+
+
+def _pods_by_service(graph: DeploymentGraph) -> dict[str, list[dict[str, Any]]]:
+    return {
+        svc.name: [{"name": p.name, "node": p.node, "ready": p.ready} for p in svc.pods]
+        for svc in graph.services
+    }
+
+
+def _nodes_for_drift(graph: DeploymentGraph) -> list[dict[str, Any]]:
+    return [
+        {"name": n.name, "zone": n.zone, "labels": {"kubernetes.io/hostname": n.name}}
+        for n in graph.nodes
+    ]
+
+
+def discover_live(
+    namespace: str = "default",
+    manifest_path: str | None = None,
+) -> DiscoveryResult:
+    """Discovery envelope for the connected cluster: the DeploymentGraph plus how much was resolved.
+
+    Raises ``DiscoveryError`` when the cluster cannot be read; it never substitutes sample data.
+    Drift is checked against declared intent only when ``manifest_path`` names a source.
+    """
+    start_time = time.perf_counter()
+    result = discovery.discover(namespace)
+    manifest_map = _declared_intent(manifest_path)
+
+    cluster_report, _ = DriftAnalyzer().analyze_cluster(
+        manifests_by_service=manifest_map,
+        runtime_pods_by_service=_pods_by_service(result.graph),
+        cluster_nodes=_nodes_for_drift(result.graph),
+    )
+    # Same rule as the per-namespace graph builder: drift means declared intent differs from runtime
+    # (scale, affinity, spread). Informational findings such as missing resource limits are not drift.
+    drift_by_service = _drift_reports(cluster_report)
+    for svc in result.graph.services:
+        drift = drift_by_service.get(svc.name)
+        if drift is not None:
+            svc.drift_detected = drift["drift_detected"]
+            svc.drift_reasons = drift["drift_reasons"]
+
+    result.declared_state = "available" if manifest_map else "unavailable"
+    result.graph.validation.runtime_overhead_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+    return result
 
 
 def _associate_manifest_intents(
@@ -122,36 +249,74 @@ def _associate_manifest_intents(
     return drift_manifests, service_intents
 
 
-def resolve_manifest_source(manifest_path: str | None = None) -> Path | None:
-    """The single manifest source for drift analysis and the Intent tab, so both always read the
-    same YAML: an explicit path, else deploy/kubernetes/boutique.yaml, else deploy/test-workloads."""
-    if manifest_path:
-        return Path(manifest_path)
-    return next((p for p in (DEFAULT_MANIFEST_PATH, FALLBACK_MANIFEST_DIR) if p.exists()), None)
+# Where declared intent (replicas, nodeSelector, affinity, topology spread) comes from, in this order:
+#   1. a manifest file or folder the caller names (manifest_path),
+#   2. the one the operator named with RESILIENCE_MANIFEST_PATH (set on the backend, never taken from a
+#      request, so a client cannot make the server read an arbitrary path),
+#   3. the repository's own manifests (DEFAULT_MANIFEST_PATH), which exist only in a repository checkout,
+#   4. the Deployment specs of the connected cluster itself.
+# The last one is the real source for the packaged extension, which ships no manifest folder. The
+# Kubernetes API returns a Deployment in the same schema as a manifest, so the same parser reads it. It is
+# the intent as applied to the cluster; a manifest in git can differ from it, which is why 1-3 win.
+MANIFEST_PATH_ENV = "RESILIENCE_MANIFEST_PATH"
+
+
+def _declared_target(manifest_path: str | None) -> Path | None:
+    """The manifest file or folder to read, or None when the cluster's own Deployment specs are the source."""
+    for candidate in (manifest_path, os.environ.get(MANIFEST_PATH_ENV)):
+        if candidate:
+            return Path(candidate)  # a named source is used, or reported empty; it never falls through
+    return DEFAULT_MANIFEST_PATH if DEFAULT_MANIFEST_PATH.exists() else None
 
 
 def get_manifest_source() -> dict[str, Any]:
-    """Which manifest the declared intent comes from, so the dashboard can say so."""
-    target = resolve_manifest_source()
+    """Where declared intent comes from (same order as _declared_target), so the dashboard can say so."""
+    target = _declared_target(None)
     if target is None:
-        return {"found": False, "path": None, "is_default": False}
+        return {"source": "cluster", "path": None, "found": True}
     try:
         shown = target.relative_to(PROJECT_ROOT).as_posix()
     except ValueError:
         shown = target.name
-    return {"found": True, "path": shown, "is_default": target == DEFAULT_MANIFEST_PATH}
+    return {"source": "manifest", "path": shown, "found": target.exists()}
+
+
+def _cluster_declared_intents(namespace: str) -> list[Any]:
+    """Declared intent read from the Deployments of the connected cluster (see the source order above)."""
+    if not discovery.NAMESPACE_PATTERN.match((namespace or "").strip()):
+        raise discovery.DiscoveryError(
+            "INVALID_NAMESPACE", "The namespace is not a valid Kubernetes namespace name.", http_status=422
+        )
+    try:
+        items = discovery.get_cluster_source().list_objects(
+            "deployments", f"/apis/apps/v1/namespaces/{quote(namespace, safe='')}/deployments"
+        )
+    except ClusterAccessError as exc:
+        raise CodedClusterUnavailableError(discovery.classify_access_error(exc)) from None
+    # List items carry no kind or apiVersion, and status is observed state, not declared intent.
+    documents = [{"apiVersion": "apps/v1", "kind": "Deployment", **{k: v for k, v in item.items() if k != "status"}}
+                 for item in items]
+    return parse_declared_intents(documents)
+
+
+def _declared_intents(manifest_path: str | None, namespace: str) -> list[Any]:
+    target = _declared_target(manifest_path)
+    if target is None:
+        return _cluster_declared_intents(namespace)
+    if not target.exists():
+        return []
+    try:
+        return run_manifest_pipeline(str(target))
+    except Exception as exc:
+        raise ValueError(f"Unable to parse deployment manifest '{target}': {exc}") from exc
 
 
 def _load_manifest_intents(
-    manifest_path: str | None, analyzed_services: list[dict[str, Any]]
+    manifest_path: str | None, analyzed_services: list[dict[str, Any]], namespace: str = "default"
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    target = resolve_manifest_source(manifest_path)
-    if target is None or not target.exists():
+    parsed = _declared_intents(manifest_path, namespace)
+    if not parsed:
         return {}, {}
-    try:
-        parsed = run_manifest_pipeline(str(target))
-    except Exception as exc:
-        raise ValueError(f"Unable to parse deployment manifest '{target}': {exc}") from exc
     return _associate_manifest_intents(parsed, analyzed_services)
 
 
@@ -183,15 +348,20 @@ def _analyse(
     data_source: str,
     start_time: float,
     load_manifests: bool = True,
+    namespace: str = "default",
 ) -> TopologyAnalysis:
     manifest_map, service_intents = (
-        _load_manifest_intents(manifest_path, analyzed_services) if load_manifests else ({}, {})
+        _load_manifest_intents(manifest_path, analyzed_services, namespace) if load_manifests else ({}, {})
     )
     report, baseline_b2 = DriftAnalyzer().analyze_cluster(
         manifests_by_service=manifest_map,
         runtime_pods_by_service={s["name"]: s.get("pods", []) for s in analyzed_services if s.get("name")},
         cluster_nodes=_detector_nodes(nodes),
     )
+    if not manifest_map:
+        # Nothing was declared to compare the cluster against. Say so, and never let that read as 100%
+        # compliance: exposure and concentration still come from actual placement.
+        report = report.model_copy(update={"constraint_compliance_rate": None, "declared_state": "unavailable"})
     builder = DeploymentGraphBuilder()
     builder.attach_nodes(nodes)
     builder.attach_services(analyzed_services, _drift_reports(report), service_intents)
@@ -203,7 +373,7 @@ def analyze_live_topology(namespace: str = "default", manifest_path: str | None 
     """Graph, exposure report and Baseline B2 computed from one live collection."""
     start_time = time.perf_counter()
     nodes, analyzed = collect_live_cluster(namespace)
-    return _analyse(nodes, analyzed, manifest_path, "live", start_time)
+    return _analyse(nodes, analyzed, manifest_path, "live", start_time, namespace=namespace)
 
 
 def get_live_deployment_graph(namespace: str = "default", manifest_path: str | None = None) -> DeploymentGraph:
@@ -267,16 +437,21 @@ def analyze_sample_topology() -> TopologyAnalysis:
 # Manifest intent
 # ---------------------------------------------------------------------------------------------
 
-def get_manifest_intent() -> list[dict[str, Any]]:
-    """Declared Deployment intent from the same source drift analysis uses (resolve_manifest_source)."""
-    target = resolve_manifest_source()
-    if target is None:
-        return []
-    return [i.model_dump() for i in run_manifest_pipeline(str(target))]
+def get_manifest_intent(namespace: str = "default") -> list[dict[str, Any]]:
+    """Declared Deployment intent, from the source order described above (named manifests, the repository's
+    own, else the connected cluster's Deployment specs). An empty list means nothing is declared there."""
+    intents = [i.model_dump() for i in _declared_intents(None, namespace)]
+    if not intents:
+        raise unavailable(
+            "DECLARED_STATE_UNAVAILABLE",
+            "No declared-state source (deployment manifests or cluster Deployments) is available.",
+            COMPONENT,
+        )
+    return intents
 
 
-def get_manifest_service_detail(service_name: str) -> dict[str, Any] | None:
-    return next((i for i in get_manifest_intent() if i.get("service_name") == service_name), None)
+def get_manifest_service_detail(service_name: str, namespace: str = "default") -> dict[str, Any] | None:
+    return next((i for i in get_manifest_intent(namespace) if i.get("service_name") == service_name), None)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -469,28 +644,89 @@ from experiments.placement_drift.parametric_ensemble_evaluator import Parametric
 _GLOBAL_SNAPSHOT_REPO = SnapshotRepository()
 
 
-def run_chaos_benchmark_pipeline(namespace: str = "default") -> dict[str, Any]:
+def chaos_topology(topology_source: str, namespace: str) -> DeploymentGraph | None:
+    """The placements the dry-run scenarios start from.
+
+    "live": the connected cluster's real topology (raises the usual coded error when it cannot be read, so a
+    result is never quietly built on something else). "scripted": the placements written in the scenario
+    code, which are made-up nodes and pods and are labelled so in every result.
+    """
+    if topology_source == "scripted":
+        return None
+    if topology_source == "live":
+        graph = get_live_deployment_graph(namespace=namespace)
+        if not any(pod.node != "unscheduled" for svc in graph.services for pod in svc.pods):
+            raise unavailable(
+                "TOPOLOGY_HAS_NO_WORKLOADS",
+                "The connected cluster has no service with a placed pod in this namespace, so there is nothing "
+                "to disrupt in a simulation.",
+                COMPONENT,
+            )
+        return graph
+    raise ValueError(f"topology_source must be 'live' or 'scripted', got '{topology_source}'")
+
+
+def run_chaos_benchmark_pipeline(namespace: str = "default", topology_source: str = "scripted") -> dict[str, Any]:
     """Runs the 8 dry-run scenarios and returns their results and aggregate metrics."""
-    orchestrator = DisruptionOrchestrator(namespace=namespace)
+    orchestrator = DisruptionOrchestrator(namespace=namespace, topology=chaos_topology(topology_source, namespace))
     results = orchestrator.run_all()
     return DisruptionReporter.generate_json_payload(results, orchestrator.compute_aggregate_metrics(results))
 
 
-def run_single_chaos_scenario(scenario_id: str, namespace: str = "default") -> Any:
-    return DisruptionOrchestrator(namespace=namespace).run_scenario(scenario_id)
+def run_single_chaos_scenario(scenario_id: str, namespace: str = "default", topology_source: str = "scripted") -> Any:
+    orchestrator = DisruptionOrchestrator(namespace=namespace, topology=chaos_topology(topology_source, namespace))
+    return orchestrator.run_scenario(scenario_id)
 
 
 def list_cluster_snapshots() -> list[str]:
     return _GLOBAL_SNAPSHOT_REPO.list_keys()
 
 
+# Where each stored snapshot came from. A snapshot taken through one cluster connection must never be
+# shown as current evidence after the connection changes, so each one records the connection fingerprint
+# (a hash of the API server address and CA, never a credential) and when it was captured.
+_SNAPSHOT_PROVENANCE: dict[str, dict[str, Any]] = {}
+
+
+def _snapshot_unverified(reason: str) -> EvidenceError:
+    return unavailable("SNAPSHOT_PROVENANCE_UNVERIFIED", reason, COMPONENT)
+
+
+def _active_connection() -> str:
+    """The active connection's fingerprint; refuses when no connection can vouch for stored snapshots."""
+    fingerprint = discovery.get_cluster_source().connection_fingerprint()
+    if fingerprint is None:
+        raise _snapshot_unverified(
+            "Stored snapshots cannot be shown while no cluster connection is available to confirm their origin."
+        )
+    if any(p["connectionFingerprint"] != fingerprint for p in _SNAPSHOT_PROVENANCE.values()):
+        # They were taken through a different connection; drop them rather than show them as current.
+        _GLOBAL_SNAPSHOT_REPO.clear()
+        _SNAPSHOT_PROVENANCE.clear()
+    return fingerprint
+
+
+def list_cluster_snapshots() -> list[str]:
+    """Snapshot keys whose origin is recorded and matches the active connection."""
+    _active_connection()
+    return [key for key in _GLOBAL_SNAPSHOT_REPO.list_keys() if key in _SNAPSHOT_PROVENANCE]
+
+
 def get_cluster_snapshot(scenario_id: str, phase_tag: str) -> dict[str, Any] | None:
+    """A stored snapshot, labelled as historical with its origin."""
+    _active_connection()
     snap = _GLOBAL_SNAPSHOT_REPO.get(scenario_id, phase_tag)
-    return snap.model_dump() if snap else None
+    if not snap:
+        return None
+    provenance = _SNAPSHOT_PROVENANCE.get(f"{scenario_id}_{phase_tag}")
+    if provenance is None:
+        raise _snapshot_unverified("This snapshot has no recorded origin, so it cannot be shown as evidence.")
+    return {**snap.model_dump(), "provenance": {**provenance, "historical": True}}
 
 
 def freeze_cluster_state(snapshot_id: str, namespace: str = "default") -> dict[str, Any]:
-    """Freezes the current live placement into a hashed snapshot."""
+    """Freezes the current live placement into a hashed snapshot, recording which connection took it."""
+    fingerprint = _active_connection()
     graph = get_live_deployment_graph(namespace=namespace)
     all_pods = [
         {"pod_name": p.name, "service_name": svc.name, "node_name": p.node, "zone": p.zone, "is_ready": p.ready}
@@ -502,12 +738,20 @@ def freeze_cluster_state(snapshot_id: str, namespace: str = "default") -> dict[s
         nodes=[{"name": n.name, "zone": n.zone} for n in graph.nodes],
         namespace=namespace,
     )
-    _GLOBAL_SNAPSHOT_REPO.save(scenario_id=snapshot_id, phase_tag="MANUAL", snapshot=snapshot)
-    return snapshot.model_dump()
+    key = _GLOBAL_SNAPSHOT_REPO.save(scenario_id=snapshot_id, phase_tag="MANUAL", snapshot=snapshot)
+    provenance = {
+        "capturedAt": graph.timestamp,
+        "connectionFingerprint": fingerprint,
+        # The fingerprint detects a change of connection; it does not prove which cluster this is.
+        "identityVerified": False,
+    }
+    _SNAPSHOT_PROVENANCE[key] = provenance
+    return {**snapshot.model_dump(), "provenance": {**provenance, "historical": False}}
 
 
 def clear_cluster_snapshots() -> dict[str, Any]:
     _GLOBAL_SNAPSHOT_REPO.clear()
+    _SNAPSHOT_PROVENANCE.clear()
     return {"message": "Snapshot cache cleared successfully."}
 
 

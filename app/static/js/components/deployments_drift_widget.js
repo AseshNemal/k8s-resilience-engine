@@ -6,36 +6,21 @@
 window.DeploymentsDriftWidget = (function () {
     "use strict";
 
-    function showLiveOnly(message) {
-        renderCategoryCounters({});
-        renderSpofList([]);
-        const spofList = document.getElementById("spof-workloads-list");
-        const nodeList = document.getElementById("node-risk-rankings-list");
-        if (spofList) spofList.textContent = message;
-        if (nodeList) nodeList.textContent = "";
-    }
-
-    async function loadDriftSignals(isLive) {
-        // The drift analysis compares the YAML with a real cluster, so it is never shown next to sample data.
-        if (!isLive) {
-            showLiveOnly("Drift analysis needs the live cluster. Switch to Live Cluster (KinD) to see it.");
-            return;
-        }
+    // The page reads the connected cluster only, so drift always compares declared intent with that cluster.
+    async function loadDriftSignals() {
         try {
             // 1. Categories Breakdown
             const catResp = await fetch("/api/deployments/drift/categories");
-            if (catResp.status === 503) {
+            if (!catResp.ok) {
                 const body = await catResp.json().catch(() => ({}));
                 const container = document.getElementById("spof-workloads-list");
                 if (container) {
-                    container.textContent = `No Kubernetes cluster reachable — live drift analysis unavailable. ${body.detail || ""}`;
+                    container.textContent = `Drift analysis unavailable: ${body.detail?.message || body.detail || `HTTP ${catResp.status}`}`;
                 }
                 return;
             }
-            if (catResp.ok) {
-                const catData = await catResp.json();
-                renderCategoryCounters(catData.summary || {});
-            }
+            const catData = await catResp.json();
+            renderCategoryCounters(catData.summary || {});
 
             // 2. SPOF Workloads
             const spofResp = await fetch("/api/deployments/drift/spofs");

@@ -69,14 +69,72 @@ docker extension update k8s-resilience-engine:0.1.5
 docker extension ls                                                    # shows the new version, VM Running(1)
 ```
 
-- Use a **new tag for every update**. That is what was tested; reusing a tag was not.
+- Use a **new tag for every update**. That is what was tested; reusing a tag was not. The script picks it
+  for you (see "How versions work" below).
 - `update` removes and reinstalls the extension (container and image are replaced). **The data
   volume is kept, so your database, approval records and stored credential survive**; new Alembic
   migrations run automatically on the next start.
 - The open tab reloads itself. Wait about five seconds if a page briefly says it cannot reach the
   backend; reads are retried automatically. Writes are not retried, so repeat a failed action by hand.
-- Old image tags stay on disk. After confirming the new version works, remove the ones you no longer
-  need yourself (`docker image rm k8s-resilience-engine:<old tag>`). Nothing deletes them for you.
+- Old image tags stay on disk when you update by hand: Docker never deletes a tagged image you built.
+  `extension-manage.sh update` removes them for you after a successful update, keeping the new version and
+  the one it replaced so a rollback is one command (`docker extension update k8s-resilience-engine:<old tag>`).
+  Pass `--keep-all` to keep every image, or use `extension-manage.sh clean`.
+- **If the read-only role changed between versions** (it now also reads services and replicasets), the
+  stored grant no longer matches. Connect cluster shows "Access needs updating" and renewal pauses until
+  you click **Set up access** and approve once; the dialog lists exactly the role update.
+
+### One command: `scripts/extension-manage.sh`
+
+The build, install, update and clean-up steps above are wrapped in one script, run from the repository
+root. It only manages the Docker extension and its image; it never touches your cluster or its access
+objects, and every command accepts `--dry-run` to print what it would run.
+
+It works the same on macOS, Linux and Windows. `scripts/extension-manage.sh` (macOS, Linux) and
+`scripts\extension-manage.cmd` (Windows) are launchers for `scripts/extension_manage.py`, which needs
+Python 3.9 or newer and the Docker CLI; `check` also needs Go and Node and lists any that are missing
+instead of skipping their tests. Before building it asks Docker for its memory: below 3 GB (override with
+`RESILIENCE_MIN_DOCKER_MEMORY_GB`) it prints a warning, and if Docker does not answer within 30 seconds it
+stops and says the Docker VM may be out of memory.
+
+| Command | What it does |
+|---|---|
+| `install [--version X.Y.Z]` | Run the tests, build, and install. Refuses if already installed. |
+| `update [--version X.Y.Z] [--keep-all]` | Run the tests, build the version for this commit, and replace the installed one. The data volume is kept. Afterwards the older local images are deleted, keeping the new one and the previous one (`--keep-all` keeps everything). Does nothing if this commit is already installed. |
+| `uninstall` | Remove the extension after asking. Remove cluster access separately with `extension-cluster-access.sh --revoke`. |
+| `status` | Installed version, VM state, the commit and branch it was built from, whether that matches this folder, and the local image tags. |
+| `check` | Run the Python, Go and Node suites without building. |
+| `clean` | Delete old local `X.Y.Z` image tags after asking. The installed tag is never removed; tags such as `0.1.5-qs` are left alone. |
+
+Other options: `--skip-checks` (build without running the tests first), `--keep-all` (do not delete old
+images after an update) and `--yes` (no prompts). The extension's backend container is hidden from
+`docker ps`, so there is no `logs` command.
+
+#### How versions work
+
+With no `--version`, the script follows git, so everyone on the same commit builds the same version:
+
+| Situation | Version |
+|---|---|
+| Clean checkout, number not used here yet | `0.1.<number of commits>`, for example `0.1.214`. After a `git pull` it moves forward by itself |
+| Uncommitted changes, or that number is already taken | The next number nobody has used, because Docker keeps running the old image when a tag is reused |
+| Not a git checkout, or git missing | The next patch above the installed version and every local tag |
+| `--version X.Y.Z` | Exactly that |
+
+Every image is stamped with the commit it was built from (`-dirty` is added when uncommitted changes
+were included) and the branch, as the image labels `org.opencontainers.image.revision` and
+`org.opencontainers.image.ref.name`. **The number alone does not identify the code**: two branches with
+the same number of commits get the same number. `extension-manage.sh status` prints both, for example
+
+```
+Built from : commit aaaaaaa on integration/team-sync
+This folder: commit 16c62a1 on feature/x
+            It differs from the installed extension: run 'update' to install this folder.
+```
+
+so compare the commit and branch, not just the number, and only compare numbers between people on the
+same branch. `update` rebuilds when the installed image came from a different commit, even under the same
+number, and the number can go down when you switch to a branch with fewer commits.
 
 ### Check that it is healthy
 
@@ -96,8 +154,13 @@ no published ports (`map[]`).
 
 ```bash
 ./scripts/extension-cluster-access.sh --revoke            # optional: invalidate the cluster token first
-docker extension uninstall k8s-resilience-engine
+./scripts/extension-manage.sh uninstall                   # also removes the background renewal job
 ```
+
+`extension-manage.sh uninstall` runs `resilience-helper agent-disable` first, so the macOS background job
+never outlives the helper binary it runs. (Plain `docker extension uninstall` does not know about the job;
+if you used it, run `~/Library/Containers/com.docker.docker/Data/extensions/k8s-resilience-engine/host/resilience-helper agent-disable`
+before removing the extension, or delete `~/Library/LaunchAgents/com.sliit.resilience-engine.renew.plist`.)
 
 **Uninstalling deletes the data volume** (the SQLite database and the stored credential), the backend
 container, and the local extension image. Rebuild the image to install again. Cluster-side access is
@@ -110,7 +173,7 @@ not touched by uninstalling: revoke it separately with `--revoke`.
 | Install says the extension is not from the Marketplace | Untick "Allow only extensions distributed through the Docker Marketplace" (Prerequisites). |
 | A page shows "Failed to fetch" right after install, update or Docker Desktop start | The backend is still starting. Wait about five seconds and reload the tab. Persisting longer: check `docker logs` and the health command above. |
 | Page keeps failing and `docker ps` shows the backend `unhealthy` or restarting | Read `docker logs`. A failed migration or an unreadable volume prints the reason. Do not delete the volume to "fix" it unless you accept losing the database and credential. |
-| Deployment Topology shows sample nodes, not your cluster | No cluster is connected. Run `./scripts/extension-cluster-access.sh`, then **Connect cluster** and pick `.kube/extension-readonly.kubeconfig`. |
+| Deployment Topology says "No cluster connected" (`CLUSTER_NOT_CONNECTED`) | No cluster is connected. Run `./scripts/extension-cluster-access.sh`, then **Connect cluster** and pick `.kube/extension-readonly.kubeconfig`. The app never shows sample topology in its place. |
 | "This credential can change the cluster (…)" | Working as intended: only the read-only file from the script is accepted. Do not upload your personal or the kind admin kubeconfig. |
 | "Could not reach the cluster API server" after Docker Desktop restarted | Re-run `./scripts/cluster-up.sh` (restarts the kind nodes; the published API port can change), then `./scripts/extension-cluster-access.sh` and pick the new file. |
 | "The cluster rejected the credential. It may have expired." or the page flags the credential as expired | The token reached its time limit or was revoked. Run `./scripts/extension-cluster-access.sh` again and pick the new file. |
@@ -124,24 +187,73 @@ not touched by uninstalling: revoke it separately with `--revoke`.
 ./scripts/extension-cluster-access.sh       # explicit setup: read-only access, asks before changing the cluster
 ```
 
+On Windows run the same two commands as `scripts\cluster-up.cmd` and `scripts\extension-cluster-access.cmd` in a
+normal Command Prompt or PowerShell; no WSL or bash is needed. All the scripts in `scripts/` are Python behind a
+thin launcher (`.sh` for macOS and Linux, `.cmd` for Windows), so they behave the same everywhere. They need
+Python 3.9 or newer and `docker`, `kind` and `kubectl` on `PATH`.
+
 Then open **Resilience Engine** in Docker Desktop, choose **Connect cluster**, and pick
-`.kube/extension-readonly.kubeconfig`. Until a cluster is connected the Deployment Topology page
-shows the app's built-in sample topology, as it does outside Docker.
+`.kube/extension-readonly.kubeconfig`. Until a cluster is connected every page that needs the cluster
+says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never substitutes sample data.
+
+## Jaeger (optional)
+
+The Workflows page can read call traces from a Jaeger server. The extension does not start one. Inside the
+extension's container, `localhost` is the container itself, so the backend is set to look for Jaeger on your
+computer instead: `WORKFLOW_JAEGER_URL=http://host.docker.internal:16686`, with `host.docker.internal` on the
+safelist (`WORKFLOW_JAEGER_ALLOWED_HOSTS`) that the workflow component checks before it contacts a trace server.
+Both are set in `extension/compose.yaml`. The address fields on the Workflows page fill themselves in from that
+setting; type another address only to use a different trace service.
+
+To get real trace data you need two things the extension cannot do for you:
+
+1. A running Jaeger, for example `docker compose -f deploy/docker-compose.jaeger.yml up -d`, listening on port 16686
+   of your computer. Until then the page says "Trace service unavailable".
+2. Traces in it. Jaeger only knows what an application sent it. A plain Bookinfo deployment on kind sends no
+   traces unless it runs with Istio sidecars or is otherwise instrumented, and then Jaeger is reachable but empty.
+   Which services, operations and workflows can be discovered depends on what is instrumented.
+
+## Automatic renewal
+
+A credential the extension set up itself (not one uploaded by hand) renews with no button and shows no
+expiry. The token lasts up to **7 days** (what the cluster actually grants is what counts) and is renewed
+once **2 days** remain, so a long weekend with the laptop shut cannot let it lapse. Three things renew it:
+
+1. **The open extension** checks every 60 seconds (every 20 while a renewal is pending) and when the
+   tab becomes visible.
+2. **A macOS background job** (a per-user LaunchAgent, `com.sliit.resilience-engine.renew`, no
+   administrator rights) runs `resilience-helper renew-managed` every 15 minutes. It does nothing unless
+   the token is due. It is installed **only after you approve it in the native dialog** (the setup dialog
+   names it; a connection set up earlier shows a one-time *Turn on background renewal* action), is
+   removed when you remove the access or uninstall with `extension-manage.sh`, and logs to
+   `~/Library/Logs/ResilienceEngine/renew.log`. Windows and Linux have none yet.
+3. **A page that loaded while the token was expired** presses its own *Retry* the moment a renewal
+   succeeds, so it fills in without a click.
+
+Every renewal, from either path, only issues a read-only token: it shows no dialog, makes no write to the
+cluster, and **never recreates removed or changed access**. If the access was removed, changed or widened,
+the page says so and waits for you to approve again. That is the one case that needs a person.
+
+When Docker Desktop is overloaded, `docker exec` alone can take 30 seconds. The helper therefore allows a
+renewal 4 minutes, every call in the page has a watchdog (a call that never answers cannot stall the loop
+forever), and a run that still runs out of time is reported as `too-slow` and retried with back-off rather
+than as "backend unavailable". Closing unused kind clusters or giving Docker more memory makes it faster.
 
 ## The cluster credential
 
 `scripts/extension-cluster-access.sh` is the only thing that changes the cluster, and only when you
 run it and confirm. It creates `namespace/resilience-engine`, a service account, and a cluster role
-(`deploy/rbac/resilience-readonly.yaml`) that allows **only `get`/`list` on nodes, pods and
-deployments**; it deploys nothing and modifies nothing else. It then issues a **time-limited bearer
+(`deploy/rbac/resilience-readonly.yaml`) that allows **only `get`/`list` on nodes, pods, services,
+deployments and replicasets**; it deploys nothing and modifies nothing else. It then issues a **time-limited bearer
 token** (default 168 h, `--duration 24h` for shorter) and writes the kubeconfig file, mode 600.
 
-- **Renew:** run the script again and pick the new file. The page shows the expiry and flags an
-  expired credential. Older tokens stay valid until they expire.
+- **Renew:** a credential added by hand never renews itself: run the script again and pick the new file.
+  The page shows its expiry and flags it when expired. (A credential set up from *Connect cluster* renews
+  itself; see Automatic renewal.) Older tokens stay valid until they expire.
 - **Revoke:** `./scripts/extension-cluster-access.sh --revoke` deletes the service account's access
   objects, which invalidates every issued token immediately. Then use **Disconnect cluster**.
 - **Trade-off:** anyone who can read the file (or the extension's data volume) can read this cluster's
-  nodes, pods and deployments until the token expires or is revoked. They cannot change anything or
+  nodes, pods, services, deployments and replicasets until the token expires or is revoked. They cannot change anything or
   read secrets. A shorter `--duration` reduces that window at the cost of more frequent renewal.
 - **The backend refuses anything stronger.** On upload it asks the cluster what the credential may do
   and rejects it if it can create or delete pods, patch or create deployments, delete nodes, read
@@ -210,9 +322,9 @@ edited, so the standalone web app looks exactly as before.
 - **Header**: the page title, and one cluster chip (not connected, connected read-only, credential
   expired) that links to Connect cluster. The decorative badges and refresh time are hidden; the health
   badge appears only if the backend is unreachable.
-- **Sample vs live** is stated in the same place on every page: the data-source chip leads each page's
-  row, and the Overview opens with a connection panel that says plainly the overview shows sample data
-  and that only Deployment topology can show the live cluster. No metric is invented.
+- **Live vs unavailable** is stated in the same place on every page: the data-source chip shows whether
+  the figures come from the connected cluster (complete, partial, or connected with no workloads), or that
+  nothing is shown because the cluster could not be read. No metric is invented.
 - **Overview** shows connection status first, then the existing metrics as one continuous strip, the
   analysis, and the components as a list with "Open component" links.
 - **Recommendations** keeps its comparison table and approval gate, adds a plain note ahead of the
@@ -274,12 +386,26 @@ package.
   stopped the page loading anywhere (also in the plain browser app): `recommendations.js` passed its
   `approvalBase` URL prefix to `fetchAll()`, which requested `GET /api/recommendations` (404). The fix
   is four lines in `app/static/js/components/recommendations.js`; it belongs to Member 4's area and is
-  isolated in its own commit so it can be reviewed or dropped independently.
-- Component 3 (Failure impact) now runs its own deterministic prediction, but over disclosed contract
-  fixtures, not your cluster, and the page says so ("Contract Fixtures"). Component 4 still serves sample
-  data, and there is no recommendation apply or validation step.
+  isolated in its own commit so it can be reviewed or dropped independently. (The page script has since
+  been reworked for real-data-only operation.)
+- Component 3 (Failure impact) runs its deterministic prediction over the connected cluster's live
+  topology and an approved, frozen workflow from Component 1, and refuses (`TOPOLOGY_INCOMPLETE`,
+  `WORKFLOW_EVIDENCE_UNAVAILABLE`) when that evidence is missing. Component 4 computes a live
+  recommendation from that same evidence (the Recommendations page takes the frozen workflow ID, an optional
+  failed node and the namespace); without a workflow it says so (`RECOMMENDATION_EVIDENCE_UNAVAILABLE`).
+  There is no recommendation apply or validation step.
   Nothing here applies Kubernetes changes, runs chaos experiments or deploys workloads.
-- The live topology of a fresh kind cluster shows its three worker nodes and no services.
+- The live topology of a fresh kind cluster shows its three worker nodes and an empty (valid) result with no services.
+- Service/ownership resolution follows Kubernetes (Service selector, then pod → ReplicaSet → Deployment), so
+  applications whose Deployments are named differently from their `app` label (Istio Bookinfo's
+  `productpage-v1`) resolve completely. This is covered by tests on a Bookinfo-shaped fake cluster and has not
+  been verified against a real Bookinfo cluster yet. A pod that a Service selects but no Deployment owns
+  (a StatefulSet's pod) leaves that service `partial`, so a prediction that depends on it is refused.
+- **The live recommendation is partial:** a `RecommendationReport` is produced from live evidence (topology
+  spread only, simulated on a copy), but no YAML proposal or `ValidationReport` is, and it has not been run
+  against a real cluster yet.
+- An installed extension keeps running the image it was installed from. Changes only appear after
+  rebuilding and running `docker extension update`.
 - kind workers are containers on one Docker host: logical failure domains, not independent machines.
 - Component 1's pages default to `localhost` Jaeger and workload URLs, which do not point at anything
   useful from the extension backend. Jaeger-dependent features report that Jaeger is unreachable.
@@ -291,7 +417,24 @@ package.
 
 ## Verification status
 
+**Automatic renewal (7-day tokens, background job, watchdogs).** Verified by Go, Node and Python unit
+tests, and by a real macOS check that `plutil` accepts the generated plist and that launchd loads it
+(`run interval = 900 seconds`, run at load) and unloads it again, using a scratch label and `/usr/bin/true`.
+Not yet verified: the background job renewing a real expired credential end to end through Docker Desktop,
+and anything on Windows or Linux. The cluster scripts and `extension-manage` are cross-platform Python and their
+logic is covered by tests that run on every platform, but no real Windows machine has run them. The background
+renewal job exists for all three systems: a LaunchAgent on macOS (tried on a real machine), a per-user Task Scheduler
+task on Windows (it runs `resilience-helper-bg.exe`, the same program built without a console window) and a systemd
+user timer on Linux. The Windows and Linux jobs are covered by tests against a fake `schtasks` and `systemctl` and
+compile for their systems, but have **not been run on a real Windows or Linux machine**; the page offers automatic setup
+there (`ENABLED_PLATFORMS` in `autoconnect.js`) before that has been done, on purpose. A Linux system without a systemd
+user session (a container, WSL without systemd) reports background renewal as unavailable, and the token then renews
+while the extension tab is open.
+
 Checked in Docker Desktop 4.95.0 (macOS, Apple silicon, host architecture only).
+
+> Everything in this section was verified **before the real-data-only change** and has not been re-run
+> against it. Treat the rows as the record of that earlier build, not of the current code.
 
 **How the UI was verified.** Docker Desktop's tab cannot be driven by a browser tool and its console
 is not logged, so a temporary diagnostic script (never part of the repository or of the shipped
@@ -320,12 +463,12 @@ SDK that reproduces its behaviour:
 | `docker extension install`, `update`, `uninstall`, reinstall | Done |
 | Backend container configuration as Docker Desktop created it | Done (`docker inspect`) |
 | Every page loads in the tab with the SDK present, reached by clicking links | Done |
-| Overview, Deployment Topology, Failure Impact, Recommendations show real API results (metric values, tables, sample content), no error states, no console errors | Done |
+| Overview, Deployment Topology, Failure Impact, Recommendations show real API results (metric values, tables, sample content), no error states, no console errors | Done (before the real-data-only change; not re-run since) |
 | Workflows page shows its own "trace service is unavailable" message (Jaeger is not running) with no errors | Done |
-| GET over the SDK; POST through the UI (Request Approval → `PENDING_APPROVAL`, Approve/Reject offered, nothing applied) | Done |
+| GET over the SDK; POST through the UI (Request Approval → `PENDING_APPROVAL`, Approve/Reject offered, nothing applied) | Done before the real-data-only change; **superseded**: a request now needs a live recommendation (`RECOMMENDATION_EVIDENCE_UNAVAILABLE` until Member 4's pipeline exists) |
 | Error reporting: backend messages reach the page (invalid kubeconfig → "The kubeconfig needs a current-context.") | Done |
 | Connect page: not-connected state, connected state (server, credential, expiry), Disconnect | Done |
-| Deployment Topology live view shows the three real worker nodes, none of the sample nodes | Done |
+| Deployment Topology live view shows the three real worker nodes, none of the sample nodes | Done before the real-data-only change; not re-run |
 | Requests after more than 5 s idle (stale keep-alive) | Done, all pages |
 | First load racing a starting backend (install/update) | Done: pages recover via the retry |
 | No application TCP listener; unreachable from kind nodes (same-network positive control) | Done (final build) |

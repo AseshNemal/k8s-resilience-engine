@@ -7,6 +7,7 @@ experiment measures exactly what the DeploymentGraph reports. Metrics use placem
   D_rate  = share of services whose exposure status changed between T0 and T1
   Delta_E = exposure rate at T1 - exposure rate at T0
 """
+import atexit
 import json
 import os
 import time
@@ -16,7 +17,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.engine.deployment_topology_modeling import placement_metrics as pm
-from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import KUBE_CONTEXT_ENV
 from experiments.placement_drift.exceptions import ScenarioExecutionError
 from experiments.placement_drift.live.kubectl import Kubectl
 from experiments.placement_drift.live.scenarios import TARGET_SERVICE, LiveScenario, RunContext
@@ -92,7 +92,11 @@ class LiveExperimentRunner:
         self.disruption_timeout_s = disruption_timeout_s
         self.settle_s = settle_s
         if observe is None or observe_nodes is None:
-            os.environ[KUBE_CONTEXT_ENV] = kube.context  # the collector reads the same cluster
+            # The collector reads the kubeconfig's current context; give it a kubeconfig that holds only the
+            # experiment context, so T0/T1 are observed on the same cluster kubectl changes.
+            pinned = kube.write_pinned_kubeconfig()
+            atexit.register(pinned.unlink, missing_ok=True)
+            os.environ["KUBECONFIG"] = str(pinned)
         if observe is None:
             from app.engine.deployment_topology_modeling.service import analyze_live_topology
             observe = lambda namespace, manifest: analyze_live_topology(namespace, manifest)  # noqa: E731

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.engine.deployment_topology_modeling import service
+from app.engine.deployment_topology_modeling.manifest_parsing.manifest_models import DeclaredIntent
 
 
 @pytest.fixture
@@ -47,54 +48,48 @@ def test_manifest_source_api_endpoint(client):
     response = client.get("/api/deployments/manifests/source")
     assert response.status_code == 200
     src = response.json()
-    assert src["found"] is True
+    assert src["source"] == "manifest"
     assert src["path"] == "deploy/test-workloads"
 
 
-def _point_sources(monkeypatch, default, fallback):
-    monkeypatch.setattr(service, "DEFAULT_MANIFEST_PATH", default)
-    monkeypatch.setattr(service, "FALLBACK_MANIFEST_DIR", fallback)
-
-
-def test_resolver_prefers_default_manifest(monkeypatch, tmp_path):
+def test_source_is_the_repository_manifest_when_present(monkeypatch, tmp_path):
     default = tmp_path / "boutique.yaml"
     default.write_text("")
-    _point_sources(monkeypatch, default, tmp_path / "fallback")
-    assert service.resolve_manifest_source() == default
-    assert service.get_manifest_source()["is_default"] is True
+    monkeypatch.delenv(service.MANIFEST_PATH_ENV, raising=False)
+    monkeypatch.setattr(service, "DEFAULT_MANIFEST_PATH", default)
+    assert service.get_manifest_source() == {"source": "manifest", "path": "boutique.yaml", "found": True}
 
 
-def test_resolver_falls_back_when_default_missing(monkeypatch, tmp_path):
-    fallback = tmp_path / "fallback"
-    fallback.mkdir()
-    _point_sources(monkeypatch, tmp_path / "missing.yaml", fallback)
-    assert service.resolve_manifest_source() == fallback
-    assert service.get_manifest_source()["is_default"] is False
+def test_source_is_the_cluster_when_no_manifest_exists(monkeypatch, tmp_path):
+    monkeypatch.delenv(service.MANIFEST_PATH_ENV, raising=False)
+    monkeypatch.setattr(service, "DEFAULT_MANIFEST_PATH", tmp_path / "missing.yaml")
+    assert service.get_manifest_source() == {"source": "cluster", "path": None, "found": True}
 
 
-def test_resolver_reports_no_manifest(monkeypatch, tmp_path):
-    _point_sources(monkeypatch, tmp_path / "missing.yaml", tmp_path / "missing-dir")
-    assert service.resolve_manifest_source() is None
-    assert service.get_manifest_source()["found"] is False
-    assert service.get_manifest_intent() == []
-
-
-def test_explicit_manifest_path_wins(monkeypatch, tmp_path):
-    _point_sources(monkeypatch, tmp_path / "missing.yaml", tmp_path / "missing-dir")
-    assert service.resolve_manifest_source("custom.yaml") == service.Path("custom.yaml")
+def test_operator_named_manifest_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv(service.MANIFEST_PATH_ENV, str(tmp_path / "named"))
+    monkeypatch.setattr(service, "DEFAULT_MANIFEST_PATH", tmp_path / "boutique.yaml")
+    src = service.get_manifest_source()
+    assert src["source"] == "manifest"
+    assert src["path"] == "named"
+    assert src["found"] is False  # a named source that does not exist is reported, never skipped
 
 
 def test_drift_analysis_and_intent_tab_read_the_same_manifest(monkeypatch, tmp_path):
-    fallback = tmp_path / "fallback"
-    fallback.mkdir()
-    _point_sources(monkeypatch, tmp_path / "missing.yaml", fallback)
+    named = tmp_path / "named"
+    named.mkdir()
+    monkeypatch.setenv(service.MANIFEST_PATH_ENV, str(named))
     read_paths = []
-    monkeypatch.setattr(service, "run_manifest_pipeline", lambda path: read_paths.append(path) or [])
 
+    def fake_pipeline(path):
+        read_paths.append(path)
+        return [DeclaredIntent(service_name="paymentservice")]
+
+    monkeypatch.setattr(service, "run_manifest_pipeline", fake_pipeline)
     service._load_manifest_intents(None, [])
     service.get_manifest_intent()
 
-    assert read_paths == [str(fallback), str(fallback)]
+    assert read_paths == [str(named), str(named)]
 
 
 def test_manifest_compliance_api_endpoint(client):

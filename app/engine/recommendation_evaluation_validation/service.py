@@ -1,5 +1,6 @@
 from app.engine.recommendation_evaluation_validation.candidate_generation import (
     CandidateContextBuilder,
+    CandidateSpec,
     generate_candidates,
 )
 from app.engine.recommendation_evaluation_validation.feasibility_analyzer import (
@@ -48,7 +49,15 @@ def evaluate_first_recommendation(
     if not candidates:
         raise ValueError("No recommendation candidates generated.")
 
-    candidate = candidates[0]
+    return evaluate_candidate(deployment, candidates[0])
+
+
+def evaluate_candidate(deployment: DeploymentGraph, candidate: CandidateSpec) -> SimulationResult:
+    """Check one candidate's feasibility and simulate it on a copy of the deployment.
+
+    The deployment passed in is never changed. Raises ValueError for a recommendation type that is not
+    supported yet, so a caller can skip it instead of guessing an outcome.
+    """
 
     if candidate.recommendation_type != "TOPOLOGY_SPREAD":
         raise ValueError(
