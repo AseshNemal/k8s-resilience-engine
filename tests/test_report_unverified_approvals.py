@@ -1,6 +1,7 @@
 """The audit CLI reports approval provenance and never writes to the database."""
 
 import hashlib
+import os
 import json
 import subprocess
 import sys
@@ -17,10 +18,16 @@ from tests.recommendation_evaluation_validation.test_approval_api import sqlite_
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def os_essentials() -> dict:
+    """Variables a Windows process needs even when the test builds its environment by hand: without SYSTEMROOT
+    the network stack cannot start, so importing asyncio fails with WinError 10106."""
+    return {k: os.environ[k] for k in ("SYSTEMROOT", "SystemDrive") if k in os.environ}
+
+
 def run_report(database_url: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-I", str(ROOT / "scripts" / "report_unverified_approvals.py"), *args],
-        capture_output=True, text=True, cwd=ROOT, env={"DATABASE_URL": database_url, "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, cwd=ROOT, env={"DATABASE_URL": database_url, "PATH": "/usr/bin:/bin", **os_essentials()},
     )
 
 

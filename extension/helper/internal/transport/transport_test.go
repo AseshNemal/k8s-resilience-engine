@@ -187,7 +187,7 @@ func TestFindDockerPrefersPathThenKnownLocationsPerOS(t *testing.T) {
 	notOnPath := func(string) (string, error) { return "", errors.New("no") }
 	exists := map[string]bool{}
 	stat := func(p string) (os.FileInfo, error) {
-		if exists[p] {
+		if exists[filepath.ToSlash(p)] { // the code joins with the host's separator; the fixtures use "/"
 			return fakeInfo{}, nil
 		}
 		return nil, os.ErrNotExist
@@ -305,7 +305,7 @@ func TestSocketThatIsNotThereIsUnavailable(t *testing.T) {
 
 func TestSocketIsOnlyOfferedWhereItWasVerified(t *testing.T) {
 	s, err := NewSocket("darwin", "/Users/x")
-	if err != nil || !strings.HasSuffix(s.Dir, "Library/Containers/com.docker.docker/Data/ext-sockets/k8s-resilience-engine") {
+	if err != nil || !strings.HasSuffix(filepath.ToSlash(s.Dir), "Library/Containers/com.docker.docker/Data/ext-sockets/k8s-resilience-engine") {
 		t.Fatalf("darwin: %+v %v", s, err)
 	}
 	for _, goos := range []string{"windows", "linux", "freebsd"} {
@@ -387,7 +387,13 @@ func TestADockerThatFailsForAnotherReasonIsNotCalledSlow(t *testing.T) {
 }
 
 func TestASocketThatNeverAnswersKeepsTheDeadlineAsTheCause(t *testing.T) {
-	dir, err := os.MkdirTemp("/tmp", "slow")
+	// A short base keeps the socket path under the unix limit (macOS: 104 bytes); where there is no /tmp
+	// (Windows) the default temporary folder is used.
+	base := "/tmp"
+	if st, statErr := os.Stat(base); statErr != nil || !st.IsDir() {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "slow")
 	if err != nil {
 		t.Fatal(err)
 	}

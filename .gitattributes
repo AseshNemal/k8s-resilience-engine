@@ -6,3 +6,6 @@
 
 # Shell scripts run inside Linux containers: CRLF in the shebang breaks them.
 *.sh text eol=lf
+
+# Test fixtures (certificates, keys, kubeconfigs) are compared byte for byte by Python and Go tests.
+tests/fixtures/** text eol=lf

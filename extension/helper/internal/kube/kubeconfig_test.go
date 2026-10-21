@@ -214,7 +214,7 @@ clusters:
 users:
 - {name: token, user: {token: t}}
 - name: exec
-  user: {exec: {apiVersion: client.authentication.k8s.io/v1, command: /bin/sh, args: ["-c", "touch `+marker+`"]}}
+  user: {exec: {apiVersion: client.authentication.k8s.io/v1, command: /bin/sh, args: ["-c", "touch `+filepath.ToSlash(marker)+`"]}}
 - {name: provider, user: {auth-provider: {name: gcp}}}
 - {name: basic, user: {username: admin, password: pw}}
 contexts:

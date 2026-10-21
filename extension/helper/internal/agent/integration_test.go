@@ -103,10 +103,15 @@ func TestIntegrationWindowsTaskInstallsRunsAndUninstalls(t *testing.T) {
 	if !ok {
 		t.Fatalf("query failed:\n%s", out)
 	}
-	for _, want := range []string{"renew-managed", "PT15M", "LeastPrivilege", "StartWhenAvailable"} {
+	// Task Scheduler leaves out settings that have their default value when it prints a task back, and
+	// least privilege is the default, so check that nothing asked for more instead.
+	for _, want := range []string{"renew-managed", "PT15M", "StartWhenAvailable", "InteractiveToken"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the registered task lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "HighestAvailable") {
+		t.Errorf("the task must not ask for elevated rights:\n%s", out)
 	}
 
 	// Have the scheduler start the program, then read how it ended. The helper exits 0 whenever it

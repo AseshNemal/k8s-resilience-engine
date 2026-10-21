@@ -6,6 +6,7 @@ macOS and Linux. tests/test_extension_manage_py.py covers the same program in-pr
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -42,7 +43,11 @@ def fake_docker(tmp_path):
 
 
 def run(fake_docker, *args, installed=None, tags="", stdin="", path=None):
+    # GIT_DIR points at nothing, so the script sees "no git here" and picks the next free version number.
+    # Without it a clean checkout (CI) is given 0.1.<commit count> instead, and the answer depended on
+    # whether the working tree happened to have uncommitted changes.
     env = {
+        "GIT_DIR": str(fake_docker.parent / "no-git-here"),
         "PATH": path or f"{fake_docker.parent / 'bin'}:/usr/bin:/bin",
         "FAKE_DOCKER_LOG": str(fake_docker),
         "FAKE_TAGS": tags,
@@ -80,8 +85,19 @@ def test_unknown_command_is_refused_with_usage(fake_docker):
     assert only(calls, "docker build") == []
 
 
-def test_missing_docker_is_reported(fake_docker):
-    result, _ = run(fake_docker, "status", path="/usr/bin:/bin")
+def test_missing_docker_is_reported(fake_docker, tmp_path):
+    # A PATH that has what the launcher needs (bash, python3, dirname) and no docker. "/usr/bin:/bin" is not
+    # such a path on every machine: CI runners keep docker in /usr/bin.
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    # python3 is the interpreter running these tests, not whatever "python3" resolves to on this machine
+    # (macOS has a stub in /usr/bin that tries to launch developer tools).
+    (bare / "python3").symlink_to(os.path.realpath(sys.executable))
+    for tool in ("bash", "dirname"):
+        found = shutil.which(tool)
+        assert found, f"{tool} is needed to run the launcher"
+        (bare / tool).symlink_to(os.path.realpath(found))
+    result, _ = run(fake_docker, "status", path=str(bare))
 
     assert result.returncode == 1
     assert "docker" in result.stderr.lower()
