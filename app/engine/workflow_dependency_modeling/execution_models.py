@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from hashlib import sha256
+import json
 import re
 from typing import Any, Mapping
 
@@ -71,6 +73,66 @@ def _iso(value: datetime) -> str:
 
 
 @dataclass(frozen=True)
+class TraceEvidenceSnapshot:
+    """Canonical, checksummed copy of the exact trace used for one decision."""
+
+    trace_id: str
+    source_locator: str
+    captured_at: datetime
+    sha256_digest: str
+    canonical_json: str = field(repr=False)
+
+    @classmethod
+    def from_trace(
+        cls,
+        trace: Mapping[str, Any],
+        *,
+        trace_id: str,
+        source_locator: str,
+        captured_at: datetime,
+    ) -> "TraceEvidenceSnapshot":
+        if trace.get("traceID") != trace_id:
+            raise ComponentDataError("Trace evidence ID does not match rawTrace.traceID")
+        if captured_at.tzinfo is None:
+            raise ComponentDataError("Trace evidence timestamp must include a timezone")
+        canonical = json.dumps(
+            trace, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+        )
+        return cls(
+            trace_id=trace_id,
+            source_locator=source_locator,
+            captured_at=captured_at,
+            sha256_digest=f"sha256:{sha256(canonical.encode('utf-8')).hexdigest()}",
+            canonical_json=canonical,
+        )
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "TraceEvidenceSnapshot":
+        raw_trace = data.get("rawTrace")
+        if not isinstance(raw_trace, Mapping):
+            raise ComponentDataError("Trace evidence rawTrace must be an object")
+        snapshot = cls.from_trace(
+            raw_trace,
+            trace_id=_required_text(data, "traceId"),
+            source_locator=_required_text(data, "sourceLocator"),
+            captured_at=_timestamp(data.get("capturedAt"), "capturedAt", required=True),
+        )
+        claimed = _required_text(data, "sha256")
+        if claimed != snapshot.sha256_digest:
+            raise ComponentDataError("Trace evidence checksum does not match rawTrace")
+        return snapshot
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "traceId": self.trace_id,
+            "sourceLocator": self.source_locator,
+            "capturedAt": _iso(self.captured_at),
+            "sha256": self.sha256_digest,
+            "rawTrace": json.loads(self.canonical_json),
+        }
+
+
+@dataclass(frozen=True)
 class ExecutionRegistration:
     """Caller-supplied identity and provenance for one workflow invocation."""
 
@@ -83,9 +145,12 @@ class ExecutionRegistration:
     evidence_locator: str
     environment_id: str
     started_at: datetime
+    condition_id: str = "default"
     finished_at: datetime | None = None
     expected_trace_id: str | None = None
     registered_by: str = "system"
+    experiment_record_id: str | None = None
+    experiment_record_digest: str | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExecutionRegistration":
@@ -109,6 +174,17 @@ class ExecutionRegistration:
         finished_at = _timestamp(data.get("finishedAt"), "finishedAt", required=False)
         if finished_at is not None and finished_at < started_at:
             raise ComponentDataError("finishedAt cannot precede startedAt")
+        record_id = data.get("experimentRecordId")
+        record_digest = data.get("experimentRecordDigest")
+        if (record_id is None) != (record_digest is None):
+            raise ComponentDataError("Experiment record ID and digest must be supplied together")
+        if record_id is not None and (
+            not isinstance(record_id, str) or not record_id.strip()
+            or not isinstance(record_digest, str) or not record_digest.startswith("sha256:")
+            or len(record_digest) != 71
+            or any(c not in "0123456789abcdef" for c in record_digest[7:])
+        ):
+            raise ComponentDataError("Invalid experiment record identity or digest")
         return cls(
             execution_id=_identifier(data, "executionId"),
             batch_id=_identifier(data, "batchId"),
@@ -122,9 +198,15 @@ class ExecutionRegistration:
                 "environmentId",
             ),
             started_at=started_at,
+            condition_id=_identifier(
+                {"conditionId": data.get("conditionId", "default")},
+                "conditionId",
+            ),
             finished_at=finished_at,
             expected_trace_id=expected_trace_id.strip() if expected_trace_id else None,
             registered_by=_required_text(data, "registeredBy"),
+            experiment_record_id=record_id,
+            experiment_record_digest=record_digest,
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -137,6 +219,7 @@ class ExecutionRegistration:
             "source": self.source,
             "evidenceLocator": self.evidence_locator,
             "environmentId": self.environment_id,
+            "conditionId": self.condition_id,
             "startedAt": _iso(self.started_at),
             "registeredBy": self.registered_by,
         }
@@ -144,6 +227,9 @@ class ExecutionRegistration:
             result["finishedAt"] = _iso(self.finished_at)
         if self.expected_trace_id is not None:
             result["expectedTraceId"] = self.expected_trace_id
+        if self.experiment_record_id is not None:
+            result["experimentRecordId"] = self.experiment_record_id
+            result["experimentRecordDigest"] = self.experiment_record_digest
         return result
 
 
@@ -171,11 +257,12 @@ class ExecutionOutcome:
     recorded_at: datetime
     matched_trace_id: str | None = None
     evidence_id: str | None = None
+    evidence_snapshot: TraceEvidenceSnapshot | None = None
     assertions: tuple[AssertionResult, ...] = ()
     reasons: tuple[str, ...] = field(default_factory=tuple)
 
     def to_mapping(self) -> dict[str, Any]:
-        return {
+        result = {
             **self.registration.to_mapping(),
             "status": self.status.value,
             "correlationStatus": self.correlation_status.value,
@@ -185,6 +272,9 @@ class ExecutionOutcome:
             "reasons": list(self.reasons),
             "recordedAt": _iso(self.recorded_at),
         }
+        if self.evidence_snapshot is not None:
+            result["evidenceSnapshot"] = self.evidence_snapshot.to_mapping()
+        return result
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExecutionOutcome":
@@ -203,6 +293,7 @@ class ExecutionOutcome:
             correlation = CorrelationStatus(data.get("correlationStatus"))
         except ValueError as err:
             raise ComponentDataError("Execution outcome status is invalid") from err
+        snapshot = data.get("evidenceSnapshot")
         return cls(
             registration=registration,
             status=status,
@@ -210,6 +301,11 @@ class ExecutionOutcome:
             recorded_at=_timestamp(data.get("recordedAt"), "recordedAt", required=True),
             matched_trace_id=data.get("matchedTraceId"),
             evidence_id=data.get("evidenceId"),
+            evidence_snapshot=(
+                TraceEvidenceSnapshot.from_mapping(snapshot)
+                if isinstance(snapshot, Mapping)
+                else None
+            ),
             assertions=assertions,
             reasons=tuple(str(item) for item in data.get("reasons", [])),
         )

@@ -27,6 +27,7 @@ class ValidatedDependencyType(str, Enum):
     MANDATORY = "mandatory"
     OPTIONAL = "optional"
     SUPPORTING = "supporting"
+    CONDITIONAL = "conditional"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
@@ -130,6 +131,7 @@ class InterventionCohort:
     batch_ids: tuple[str, ...]
     intervention_confirmed: bool
     confirmation_evidence: str | None = None
+    condition_id: str = "default"
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "InterventionCohort":
@@ -153,6 +155,10 @@ class InterventionCohort:
             batch_ids=_batch_ids(data.get("batchIds"), "batchIds"),
             intervention_confirmed=confirmed,
             confirmation_evidence=evidence.strip() if evidence else None,
+            condition_id=_identifier(
+                {"conditionId": data.get("conditionId", "default")},
+                "conditionId",
+            ),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -162,6 +168,7 @@ class InterventionCohort:
             "batchIds": list(self.batch_ids),
             "interventionConfirmed": self.intervention_confirmed,
             "confirmationEvidence": self.confirmation_evidence,
+            "conditionId": self.condition_id,
         }
 
 
@@ -175,6 +182,7 @@ class EdgeInterventionCohort:
     batch_ids: tuple[str, ...]
     intervention_confirmed: bool
     confirmation_evidence: str | None = None
+    condition_id: str = "default"
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "EdgeInterventionCohort":
@@ -205,6 +213,10 @@ class EdgeInterventionCohort:
             batch_ids=_batch_ids(data.get("batchIds"), "batchIds"),
             intervention_confirmed=confirmed,
             confirmation_evidence=evidence.strip() if evidence else None,
+            condition_id=_identifier(
+                {"conditionId": data.get("conditionId", "default")},
+                "conditionId",
+            ),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -215,6 +227,7 @@ class EdgeInterventionCohort:
             "batchIds": list(self.batch_ids),
             "interventionConfirmed": self.intervention_confirmed,
             "confirmationEvidence": self.confirmation_evidence,
+            "conditionId": self.condition_id,
         }
 
 
@@ -226,6 +239,8 @@ class CohortStatistics:
     succeeded_records: int
     failed_records: int
     success_rate: float | None
+    eligible_execution_ids: tuple[str, ...] = ()
+    eligible_trace_ids: tuple[str, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -235,6 +250,8 @@ class CohortStatistics:
             "succeededRecords": self.succeeded_records,
             "failedRecords": self.failed_records,
             "successRate": self.success_rate,
+            "eligibleExecutionIds": list(self.eligible_execution_ids),
+            "eligibleTraceIds": list(self.eligible_trace_ids),
         }
 
     @classmethod
@@ -247,6 +264,65 @@ class CohortStatistics:
             failed_records=int(data.get("failedRecords", 0)),
             success_rate=(
                 float(data["successRate"]) if data.get("successRate") is not None else None
+            ),
+            eligible_execution_ids=tuple(
+                str(item) for item in data.get("eligibleExecutionIds", [])
+            ),
+            eligible_trace_ids=tuple(
+                str(item) for item in data.get("eligibleTraceIds", [])
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class DependencyConditionResult:
+    """One dependency decision within one declared business condition."""
+
+    condition_id: str
+    classification: ValidatedDependencyType
+    baseline: CohortStatistics
+    intervention: CohortStatistics
+    intervention_type: InterventionType | None
+    failure_effect: float | None
+    evidence_strength: float
+    reasons: tuple[str, ...]
+    excluded_execution_ids: tuple[str, ...] = ()
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "conditionId": self.condition_id,
+            "classification": self.classification.value,
+            "baseline": self.baseline.to_mapping(),
+            "intervention": self.intervention.to_mapping(),
+            "interventionType": (
+                self.intervention_type.value if self.intervention_type else None
+            ),
+            "failureEffect": self.failure_effect,
+            "evidenceStrength": self.evidence_strength,
+            "reasons": list(self.reasons),
+            "excludedExecutionIds": list(self.excluded_execution_ids),
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "DependencyConditionResult":
+        intervention_type = data.get("interventionType")
+        return cls(
+            condition_id=_identifier(data, "conditionId"),
+            classification=ValidatedDependencyType(data.get("classification")),
+            baseline=CohortStatistics.from_mapping(data.get("baseline", {})),
+            intervention=CohortStatistics.from_mapping(data.get("intervention", {})),
+            intervention_type=(
+                InterventionType(intervention_type) if intervention_type else None
+            ),
+            failure_effect=(
+                float(data["failureEffect"])
+                if data.get("failureEffect") is not None
+                else None
+            ),
+            evidence_strength=float(data.get("evidenceStrength", 0.0)),
+            reasons=tuple(str(item) for item in data.get("reasons", [])),
+            excluded_execution_ids=tuple(
+                str(item) for item in data.get("excludedExecutionIds", [])
             ),
         )
 
@@ -262,6 +338,7 @@ class ServiceDependencyAssessment:
     evidence_strength: float
     reasons: tuple[str, ...]
     excluded_execution_ids: tuple[str, ...] = ()
+    condition_results: tuple[DependencyConditionResult, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -276,6 +353,7 @@ class ServiceDependencyAssessment:
             "evidenceStrength": self.evidence_strength,
             "reasons": list(self.reasons),
             "excludedExecutionIds": list(self.excluded_execution_ids),
+            "conditionResults": [item.to_mapping() for item in self.condition_results],
         }
 
     @classmethod
@@ -299,6 +377,10 @@ class ServiceDependencyAssessment:
             excluded_execution_ids=tuple(
                 str(item) for item in data.get("excludedExecutionIds", [])
             ),
+            condition_results=tuple(
+                DependencyConditionResult.from_mapping(item)
+                for item in data.get("conditionResults", [])
+            ),
         )
 
 
@@ -314,6 +396,7 @@ class EdgeDependencyAssessment:
     evidence_strength: float
     reasons: tuple[str, ...]
     excluded_execution_ids: tuple[str, ...] = ()
+    condition_results: tuple[DependencyConditionResult, ...] = ()
 
     @property
     def edge(self) -> tuple[str, str]:
@@ -333,6 +416,7 @@ class EdgeDependencyAssessment:
             "evidenceStrength": self.evidence_strength,
             "reasons": list(self.reasons),
             "excludedExecutionIds": list(self.excluded_execution_ids),
+            "conditionResults": [item.to_mapping() for item in self.condition_results],
         }
 
     @classmethod
@@ -357,6 +441,10 @@ class EdgeDependencyAssessment:
             excluded_execution_ids=tuple(
                 str(item) for item in data.get("excludedExecutionIds", [])
             ),
+            condition_results=tuple(
+                DependencyConditionResult.from_mapping(item)
+                for item in data.get("conditionResults", [])
+            ),
         )
 
 
@@ -378,6 +466,24 @@ class DependencyAssessment:
     created_at: datetime
     created_by: str
 
+    def _services_with_classification(
+        self, classification: ValidatedDependencyType
+    ) -> list[str]:
+        return sorted(
+            item.service_name
+            for item in self.services
+            if item.classification is classification
+        )
+
+    def _edges_with_classification(
+        self, classification: ValidatedDependencyType
+    ) -> list[dict[str, str]]:
+        return [
+            {"source": item.source_service, "target": item.target_service}
+            for item in sorted(self.edges, key=lambda edge: edge.edge)
+            if item.classification is classification
+        ]
+
     def to_mapping(self) -> dict[str, Any]:
         return {
             "assessmentId": self.assessment_id,
@@ -395,6 +501,36 @@ class DependencyAssessment:
             "policy": self.policy.to_mapping(),
             "services": [item.to_mapping() for item in self.services],
             "edges": [item.to_mapping() for item in self.edges],
+            "mandatoryServices": self._services_with_classification(
+                ValidatedDependencyType.MANDATORY
+            ),
+            "supportingServices": self._services_with_classification(
+                ValidatedDependencyType.SUPPORTING
+            ),
+            "optionalServices": self._services_with_classification(
+                ValidatedDependencyType.OPTIONAL
+            ),
+            "conditionalServices": self._services_with_classification(
+                ValidatedDependencyType.CONDITIONAL
+            ),
+            "insufficientEvidenceServices": self._services_with_classification(
+                ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+            ),
+            "mandatoryEdges": self._edges_with_classification(
+                ValidatedDependencyType.MANDATORY
+            ),
+            "supportingEdges": self._edges_with_classification(
+                ValidatedDependencyType.SUPPORTING
+            ),
+            "optionalEdges": self._edges_with_classification(
+                ValidatedDependencyType.OPTIONAL
+            ),
+            "conditionalEdges": self._edges_with_classification(
+                ValidatedDependencyType.CONDITIONAL
+            ),
+            "insufficientEvidenceEdges": self._edges_with_classification(
+                ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+            ),
             "createdAt": _iso(self.created_at),
             "createdBy": self.created_by,
         }
@@ -467,6 +603,9 @@ class AssessmentApproval:
             "approvedAt": _iso(self.approved_at),
             "approvedBy": self.approved_by,
             "rationale": self.rationale,
+            "mandatoryServices": list(self.approved_graph.mandatory_services),
+            "supportingServices": list(self.excluded_supporting_services),
+            "optionalServices": list(self.approved_graph.optional_services),
             "excludedSupportingServices": list(self.excluded_supporting_services),
             "mandatoryEdges": [
                 {"source": source, "target": target}

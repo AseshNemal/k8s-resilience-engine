@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -282,13 +284,14 @@ def test_generic_discovery_does_not_merge_routes_by_an_application_specific_patt
     assert sorted(w["operationName"] for w in generic["workflows"]) == ["GET /product/0", "GET /product/1"]
 
 
-def test_the_benchmark_profile_still_merges_product_routes_and_both_names_select_the_traces() -> None:
+def test_explicit_route_profiles_merge_ids_without_assuming_application_routes() -> None:
     traces = [make_trace(f"t{i}", [(f"s{i}", None, "frontend", "h")], route=f"/product/{i}") for i in range(2)]
-    assert {w.operation_name: w.trace_count for w in discover_root_workflows(traces)} == {"GET /product/{id}": 2}
+    profile = ((re.compile(r"^/product/[^/]+$"), "/product/{id}"),)
+    assert {w.operation_name: w.trace_count for w in discover_root_workflows(traces, profile)} == {"GET /product/{id}": 2}
     root = parse_spans(traces[:1])[0]
-    assert operation_key(root) == "GET /product/{id}"
+    assert operation_key(root, profile) == "GET /product/{id}"
     assert operation_key(root, ()) == "GET /product/0"
-    assert len(select_workflow_traces(traces, "GET /product/{id}")) == 2
+    assert len(select_workflow_traces(traces, "GET /product/{id}", route_patterns=profile)) == 2
     assert len(select_workflow_traces(traces, "GET /product/0")) == 1
 
 

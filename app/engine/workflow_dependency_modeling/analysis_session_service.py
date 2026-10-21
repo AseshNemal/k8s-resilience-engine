@@ -22,8 +22,9 @@ from app.engine.workflow_dependency_modeling.observed_discovery import (
     discover_observed_workflows,
 )
 from app.engine.workflow_dependency_modeling.trace_source import (
-    JaegerTraceSource,
     TraceSourceConfiguration,
+    JaegerTraceSource,
+    create_trace_source,
 )
 
 
@@ -65,30 +66,36 @@ def _repository(repository: AnalysisSessionRepository | None) -> AnalysisSession
     return _default_repository
 
 
-def approved_jaeger_url(value: Any) -> str:
-    """The trace-server address, once it passes the connection policy; ``ValueError`` says what is wrong."""
+def _trace_endpoint(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError("jaegerUrl is required")
+        raise ValueError("trace source endpoint is required")
     parsed = urlsplit(value.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("jaegerUrl must be an absolute HTTP or HTTPS URL")
+        raise ValueError("trace source endpoint must be an absolute HTTP or HTTPS URL")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError("jaegerUrl cannot contain credentials, a query, or a fragment")
+        raise ValueError(
+            "trace source endpoint cannot contain credentials, a query, or a fragment"
+        )
     allowed = {
         item.strip().lower()
         for item in os.getenv(
-            "WORKFLOW_JAEGER_ALLOWED_HOSTS", "localhost,127.0.0.1,::1,jaeger"
+            "WORKFLOW_TRACE_ALLOWED_HOSTS",
+            os.getenv(
+                "WORKFLOW_JAEGER_ALLOWED_HOSTS",
+                "localhost,127.0.0.1,::1,jaeger,zipkin,tempo",
+            ),
         ).split(",")
         if item.strip()
     }
     if parsed.hostname.lower() not in allowed:
         raise ValueError(
-            f"Jaeger host '{parsed.hostname}' is not approved; "
-            "configure WORKFLOW_JAEGER_ALLOWED_HOSTS"
+            f"Trace source host '{parsed.hostname}' is not approved; configure "
+            "WORKFLOW_TRACE_ALLOWED_HOSTS or WORKFLOW_JAEGER_ALLOWED_HOSTS"
         )
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
 
 
+approved_jaeger_url = _trace_endpoint
 _jaeger_url = approved_jaeger_url
 
 
@@ -107,7 +114,7 @@ def _trace_source(data: Mapping[str, Any]) -> TraceSourceConfiguration:
         )
     else:
         source = TraceSourceConfiguration.from_mapping(raw_source)
-    endpoint = _jaeger_url(source.endpoint)
+    endpoint = _trace_endpoint(source.endpoint)
     return TraceSourceConfiguration(
         kind=source.kind,
         endpoint=endpoint,
@@ -174,11 +181,16 @@ def start_workflow_analysis(
         trace_source.endpoint,
         limit,
         lookback,
-        JaegerTraceSource.from_configuration(trace_source),
+        create_trace_source(trace_source),
     )
     timestamp = _timestamp(now)
-    trace_quality = evidence.get("traceQuality", {})
-    evidence_eligible = trace_quality.get("excludedCount") == 0
+    trace_quality = dict(evidence.get("traceQuality", {}))
+    if "inputTraceQuality" in evidence:
+        trace_quality["inputInvalidCount"] = evidence["inputTraceQuality"].get("invalidCount", 0)
+    evidence_eligible = (
+        trace_quality.get("excludedCount") == 0
+        and trace_quality.get("inputInvalidCount", 0) == 0
+    )
     limitations = [
         "Observed calls show participation, not dependency necessity.",
         "No controlled intervention evidence has been collected.",
@@ -226,6 +238,14 @@ def start_workflow_analysis(
     return _repository(repository).create(analysis)
 
 
+def list_analysis_services(data: Mapping[str, Any]) -> list[str]:
+    """Read available service identities from an approved trace connection."""
+    configuration = _trace_source(data)
+    source = create_trace_source(configuration)
+    services = source.get_services()
+    return sorted({name.strip() for name in services if isinstance(name, str) and name.strip()})
+
+
 def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Discover operations through the same allowlisted connection policy."""
     trace_source = _trace_source(data)
@@ -240,7 +260,7 @@ def discover_analysis_workflows(data: Mapping[str, Any]) -> list[dict[str, Any]]
         jaeger_url=trace_source.endpoint,
         limit=limit,
         lookback=lookback,
-        trace_source=JaegerTraceSource.from_configuration(trace_source),
+        trace_source=create_trace_source(trace_source),
     )
 
 
@@ -256,7 +276,7 @@ def discover_observed_workflow_candidates(data: Mapping[str, Any]) -> dict[str, 
         max_traces=_limit(data) if "limit" in data else None
     )
     return discover_observed_workflows(
-        JaegerTraceSource.from_configuration(trace_source),
+        create_trace_source(trace_source),
         jaeger_url=trace_source.endpoint,
         lookback=lookback,
         limits=limits,

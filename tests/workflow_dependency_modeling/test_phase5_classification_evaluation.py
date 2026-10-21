@@ -377,11 +377,10 @@ def test_phase5_experiment_api(monkeypatch) -> None:
     assert repeatability.json()["stableServiceRate"] == pytest.approx(1.0)
 
 
-def test_workflow_page_contains_phase5_validation_lab() -> None:
+def test_research_evaluation_lab_is_not_rendered_in_the_user_workspace() -> None:
     response = TestClient(app).get("/components/workflows")
     assert response.status_code == 200
-    assert 'data-role="dependency-reference-form"' in response.text
-    assert 'data-role="run-classification-evaluation"' in response.text
-    assert 'data-role="run-policy-sensitivity"' in response.text
-    assert 'data-role="run-repeatability"' in response.text
-    assert "Synthetic references are engineering evidence only" in response.text
+    assert 'data-role="dependency-reference-form"' not in response.text
+    assert 'data-role="run-classification-evaluation"' not in response.text
+    assert 'data-role="run-policy-sensitivity"' not in response.text
+    assert 'data-role="run-repeatability"' not in response.text

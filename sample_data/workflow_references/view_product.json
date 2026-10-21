@@ -17,5 +17,23 @@
     {"source": "frontend", "target": "recommendationservice"},
     {"source": "frontend", "target": "adservice"}
   ],
+  "evaluatedNonEdges": [
+    {"source": "productcatalogservice", "target": "frontend"},
+    {"source": "productcatalogservice", "target": "currencyservice"},
+    {"source": "productcatalogservice", "target": "recommendationservice"},
+    {"source": "productcatalogservice", "target": "adservice"},
+    {"source": "currencyservice", "target": "frontend"},
+    {"source": "currencyservice", "target": "productcatalogservice"},
+    {"source": "currencyservice", "target": "recommendationservice"},
+    {"source": "currencyservice", "target": "adservice"},
+    {"source": "recommendationservice", "target": "frontend"},
+    {"source": "recommendationservice", "target": "productcatalogservice"},
+    {"source": "recommendationservice", "target": "currencyservice"},
+    {"source": "recommendationservice", "target": "adservice"},
+    {"source": "adservice", "target": "frontend"},
+    {"source": "adservice", "target": "productcatalogservice"},
+    {"source": "adservice", "target": "currencyservice"},
+    {"source": "adservice", "target": "recommendationservice"}
+  ],
   "synthetic": true
 }

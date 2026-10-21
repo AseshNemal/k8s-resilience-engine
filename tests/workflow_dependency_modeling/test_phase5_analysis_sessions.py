@@ -12,6 +12,7 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
 )
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
     discover_analysis_workflows,
+    list_analysis_services,
     start_workflow_analysis,
 )
 from app.main import app
@@ -19,6 +20,80 @@ from app.shared.persistence.models import Base
 
 
 NOW = datetime(2026, 10, 3, tzinfo=timezone.utc)
+
+
+def test_opt_in_boutique_template_contains_setup_and_measured_success():
+    response = TestClient(app).get('/api/workflows/execution-templates/online-boutique-checkout')
+    assert response.status_code == 200
+    template = response.json()
+    assert template['measuredStep'] == 'checkout'
+    assert [step['name'] for step in template['steps']] == ['view_product', 'add_to_cart', 'checkout']
+    assert template['steps'][-1]['responseContains'] == ['Your order is complete!']
+    assert template['successCondition']['operationName'] == 'POST /cart/checkout'
+    assert int(template['initialVariables']['expiration_year']) > datetime.now(timezone.utc).year
+
+
+@pytest.mark.parametrize("backend", ["jaeger", "zipkin", "tempo"])
+def test_service_choices_come_from_selected_source_without_manual_identity(monkeypatch, backend):
+    from app.engine.workflow_dependency_modeling import analysis_session_service
+
+    configurations = []
+
+    class Source:
+        def get_services(self):
+            return ["payments", "gateway", "payments", ""]
+
+    def source(configuration):
+        configurations.append(configuration)
+        return Source()
+
+    monkeypatch.setattr(analysis_session_service, "create_trace_source", source)
+    result = list_analysis_services({"traceSource": {
+        "type": backend,
+        "endpoint": "http://localhost:16686",
+        "authentication": {"type": "none"},
+    }})
+    assert result == ["gateway", "payments"]
+    assert configurations[0].kind.value == backend
+
+
+def test_service_listing_rejects_unapproved_connection_before_creating_adapter(monkeypatch):
+    from app.engine.workflow_dependency_modeling import analysis_session_service
+
+    def unexpected_adapter(*args):
+        pytest.fail("Unapproved connection reached adapter creation")
+
+    monkeypatch.setattr(analysis_session_service, "create_trace_source", unexpected_adapter)
+    response = TestClient(app).post(
+        "/api/workflows/analysis-sessions/services",
+        json={"jaegerUrl": "http://169.254.169.254/latest/meta-data"},
+    )
+    assert response.status_code == 422
+    assert "not approved" in response.json()["detail"]
+
+
+def test_service_listing_api_distinguishes_empty_source_from_connection_failure(monkeypatch):
+    from app.engine.workflow_dependency_modeling import analysis_session_service
+
+    class Source:
+        fail = False
+
+        def get_services(self):
+            if self.fail:
+                raise ConnectionError("Trace query unavailable")
+            return []
+
+    source = Source()
+    monkeypatch.setattr(analysis_session_service, "create_trace_source", lambda configuration: source)
+    client = TestClient(app)
+    payload = {"jaegerUrl": "http://localhost:16686"}
+    response = client.post("/api/workflows/analysis-sessions/services", json=payload)
+    assert response.status_code == 200
+    assert response.json() == []
+    source.fail = True
+    response = client.post("/api/workflows/analysis-sessions/services", json=payload)
+    assert response.status_code == 503
+    assert "Trace query unavailable" in response.json()["detail"]
 
 
 def _evidence() -> dict:

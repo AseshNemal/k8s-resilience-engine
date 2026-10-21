@@ -82,6 +82,10 @@ def _registration(
 ) -> ExecutionRegistration:
     if "registeredBy" in data:
         raise ValueError("registeredBy is server-managed")
+    if data.get("source") == "controlled_workflow_experiment" or any(
+        key in data for key in ("experimentRecordId", "experimentRecordDigest")
+    ):
+        raise ValueError("Controlled campaign provenance is reserved for server-run trials")
     return ExecutionRegistration.from_mapping({**data, "registeredBy": actor})
 
 

@@ -4,7 +4,11 @@ from app.engine.recommendation_evaluation_validation.candidate_generation.candid
 from app.engine.recommendation_evaluation_validation.candidate_generation.models import (
     CandidateContext,
 )
-from app.shared.schemas.deployment import DeploymentGraph
+from app.shared.schemas.deployment import (
+    ClusterMetadata,
+    DeploymentGraph,
+    ValidationMetrics,
+)
 from app.shared.schemas.failure_impact import FailureImpactReport, RootCause
 
 
@@ -19,7 +23,19 @@ def build_context(root_causes: list[RootCause]) -> CandidateContext:
         root_causes=root_causes,
     )
 
-    deployment = DeploymentGraph(nodes=[], services=[])
+    deployment = DeploymentGraph(
+        snapshot_id="candidate-generation-test",
+        timestamp="2026-10-15T00:00:00Z",
+        cluster=ClusterMetadata(node_names=[]),
+        validation=ValidationMetrics(
+            service_pod_mapping_accuracy=1.0,
+            pod_node_mapping_accuracy=1.0,
+            concentration_detection_accuracy=1.0,
+            runtime_overhead_ms=0.0,
+        ),
+        nodes=[],
+        services=[],
+    )
 
     return CandidateContext(deployment=deployment, failure_impact=failure_impact)
 

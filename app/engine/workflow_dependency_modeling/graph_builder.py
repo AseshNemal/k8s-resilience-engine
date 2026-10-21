@@ -26,7 +26,7 @@ def build_workflow_graph(
         raise ValueError(
             "Classification workflow ID does not match the scenario workflow ID"
         )
-    if not 0.0 <= min_edge_frequency <= 1.0:
+    if isinstance(min_edge_frequency, bool) or not isinstance(min_edge_frequency, (int, float)) or not 0.0 <= min_edge_frequency <= 1.0:
         raise ValueError("min_edge_frequency must be between 0 and 1")
 
     filtered_edges = [

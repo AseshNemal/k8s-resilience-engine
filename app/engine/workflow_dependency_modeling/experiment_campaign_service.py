@@ -24,10 +24,12 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_repository impo
     SqlAlchemyExperimentCampaignRepository,
 )
 from app.engine.workflow_dependency_modeling.online_boutique_workload import (
+    DEFAULT_PRODUCT_ID,
     online_boutique_checkout_probe,
 )
 from app.engine.workflow_dependency_modeling.workflow_onboarding import (
     build_workflow_probe,
+    workflow_setup_requirements,
 )
 from app.engine.workflow_dependency_modeling.workflow_probe_models import (
     WorkflowProbeDefinition,
@@ -39,6 +41,7 @@ _SERVER_FIELDS = {
     "campaignId",
     "environmentId",
     "workflowId",
+    "entryService",
     "workloadProfile",
     "evidenceTier",
     "observedTraceCount",
@@ -52,6 +55,8 @@ _SERVER_FIELDS = {
 }
 
 _default_repository: ExperimentCampaignRepository | None = None
+_MINIMUM_BASELINE_TRIALS = 3
+_MAXIMUM_BASELINE_TRIALS = 30
 
 
 def configure_experiment_campaign_repository(
@@ -147,11 +152,29 @@ def _campaign_setup(
     benchmark_profile = data.get("benchmarkProfile")
     if benchmark_profile is None:
         definition, setup_mode = _custom_probe(data, analysis)
+        local_control = data.get("localDemoControlConfirmed", False)
+        if not isinstance(local_control, bool):
+            raise ValueError("localDemoControlConfirmed must be a boolean")
+        workload_profile = f"reviewed_{setup_mode}"
+        if local_control:
+            canonical = online_boutique_checkout_probe(DEFAULT_PRODUCT_ID, _timestamp(now).year + 2)
+            if (
+                setup_mode != "imported_definition"
+                or analysis.entry_service != "frontend"
+                or analysis.operation_name != "POST /cart/checkout"
+                or analysis.trace_source.kind.value != "jaeger"
+                or analysis.trace_source.endpoint.rstrip("/") not in {
+                    "http://localhost:16686", "http://127.0.0.1:16686"
+                }
+                or definition.to_mapping() != canonical.to_mapping()
+            ):
+                raise ValueError("Local demo controls require the unchanged local Online Boutique checkout template")
+            workload_profile = ONLINE_BOUTIQUE_CHECKOUT_PROFILE
         return _CampaignSetup(
             definition=definition,
             workflow_id=analysis.workflow_id,
             workflow_name=_required_campaign_text(data, "workflowName"),
-            workload_profile=f"reviewed_{setup_mode}",
+            workload_profile=workload_profile,
             outcome=_required_campaign_text(data, "businessOutcome"),
             response_marker=None,
         )
@@ -177,7 +200,7 @@ def _required_baseline_trials(data: Mapping[str, Any]) -> int:
     value = data.get("requiredBaselineTrials", 5)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("requiredBaselineTrials must be an integer")
-    if not 3 <= value <= 30:
+    if not _MINIMUM_BASELINE_TRIALS <= value <= _MAXIMUM_BASELINE_TRIALS:
         raise ValueError("requiredBaselineTrials must be between 3 and 30")
     return value
 
@@ -204,7 +227,7 @@ def create_experiment_campaign(
 
     analysis = get_workflow_analysis(session_id.strip(), analysis_repository)
     excluded_traces = analysis.trace_quality.get("excludedCount")
-    if excluded_traces != 0:
+    if excluded_traces != 0 or analysis.trace_quality.get("inputInvalidCount", 0) != 0:
         raise ValueError(
             "Dependency validation requires complete trace evidence; repair "
             "instrumentation and create a new analysis session"
@@ -227,10 +250,12 @@ def create_experiment_campaign(
     campaign = ExperimentCampaign.from_mapping(
         {
             "campaignId": f"campaign:{token}",
+            **({"criticality": data["criticality"]} if "criticality" in data else {}),
             "analysisSessionId": analysis.session_id,
             "environmentId": analysis.environment_id,
             "workflowId": setup.workflow_id,
             "workflowName": setup.workflow_name,
+            "entryService": analysis.entry_service,
             "workloadProfile": setup.workload_profile,
             "evidenceTier": analysis.evidence_tier.value,
             "observedTraceCount": analysis.trace_count,
@@ -299,6 +324,33 @@ def preview_workflow_probe(
         "workflowId": analysis.workflow_id,
         "observedOperation": analysis.operation_name,
         "executionDefinition": definition.to_mapping(),
+        "summary": [
+            {
+                "position": index + 1,
+                "method": step.method,
+                "path": step.path,
+                "successStatuses": list(step.expected_status_codes),
+                "measured": step.name == definition.measured_step,
+                "capturedValues": list(step.extract),
+            }
+            for index, step in enumerate(definition.steps)
+        ],
+    }
+
+
+def get_workflow_setup_requirements(
+    session_id: str,
+    *,
+    analysis_repository: AnalysisSessionRepository | None = None,
+) -> dict[str, Any]:
+    """Expose request requirements without issuing requests to the target application."""
+    analysis = get_workflow_analysis(session_id, analysis_repository)
+    return {
+        "analysisSessionId": analysis.session_id,
+        "entryService": analysis.entry_service,
+        "operationName": analysis.operation_name,
+        **workflow_setup_requirements(analysis.operation_name),
+        "baselineLimits": {"minimum": _MINIMUM_BASELINE_TRIALS, "maximum": _MAXIMUM_BASELINE_TRIALS},
     }
 
 

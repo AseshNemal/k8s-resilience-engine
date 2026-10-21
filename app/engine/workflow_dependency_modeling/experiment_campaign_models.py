@@ -193,6 +193,7 @@ class ExperimentCampaign:
     environment_id: str
     workflow_id: str
     workflow_name: str
+    entry_service: str
     workload_profile: str
     evidence_tier: str
     observed_trace_count: int
@@ -205,9 +206,17 @@ class ExperimentCampaign:
     blockers: tuple[str, ...]
     created_at: datetime
     created_by: str
+    criticality: float | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExperimentCampaign":
+        criticality = data.get("criticality")
+        if "criticality" in data and (
+            isinstance(criticality, bool)
+            or not isinstance(criticality, (int, float))
+            or not 0 <= criticality <= 1
+        ):
+            raise ComponentDataError("Campaign criticality must be numeric between 0 and 1")
         services = tuple(
             sorted({str(item).strip() for item in data.get("candidateServices", [])})
         )
@@ -222,17 +231,27 @@ class ExperimentCampaign:
             status = CampaignStatus(data.get("status"))
         except ValueError as err:
             raise ComponentDataError("Campaign status is invalid") from err
+        success_contract = WorkflowSuccessContract.from_mapping(
+            data.get("successContract", {})
+        )
         return cls(
             campaign_id=_text(data, "campaignId"),
             analysis_session_id=_text(data, "analysisSessionId"),
             environment_id=_text(data, "environmentId"),
             workflow_id=_text(data, "workflowId"),
             workflow_name=_text(data, "workflowName"),
+            entry_service=_text(
+                {
+                    "entryService": data.get("entryService")
+                    or success_contract.terminal_service
+                },
+                "entryService",
+            ),
             workload_profile=_text(data, "workloadProfile"),
             evidence_tier=_text(data, "evidenceTier"),
             observed_trace_count=_positive_integer(data, "observedTraceCount"),
             candidate_services=services,
-            success_contract=WorkflowSuccessContract.from_mapping(data.get("successContract", {})),
+            success_contract=success_contract,
             execution_definition=(
                 WorkflowProbeDefinition.from_mapping(data["executionDefinition"])
                 if data.get("executionDefinition") is not None
@@ -244,15 +263,20 @@ class ExperimentCampaign:
             blockers=tuple(str(item) for item in data.get("blockers", [])),
             created_at=_timestamp(data.get("createdAt")),
             created_by=_text(data, "createdBy"),
+            criticality=float(criticality) if criticality is not None else None,
         )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
+            # Preserve old manifest snapshots byte-for-byte in meaning. Legacy
+            # campaigns omitted this field and used an effective weight of 1.
+            **({"criticality": self.criticality} if self.criticality is not None else {}),
             "campaignId": self.campaign_id,
             "analysisSessionId": self.analysis_session_id,
             "environmentId": self.environment_id,
             "workflowId": self.workflow_id,
             "workflowName": self.workflow_name,
+            "entryService": self.entry_service,
             "workloadProfile": self.workload_profile,
             "evidenceTier": self.evidence_tier,
             "observedTraceCount": self.observed_trace_count,

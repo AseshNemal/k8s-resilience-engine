@@ -263,6 +263,11 @@ def test_assessment_is_immutable_and_approval_projects_validated_graph(
         "inventoryservice": ValidatedDependencyType.SUPPORTING,
         "paymentservice": ValidatedDependencyType.MANDATORY,
     }
+    assessment_payload = created.to_mapping()
+    assert assessment_payload["mandatoryServices"] == ["paymentservice"]
+    assert assessment_payload["supportingServices"] == ["inventoryservice"]
+    assert assessment_payload["optionalServices"] == ["emailservice"]
+    assert assessment_payload["insufficientEvidenceServices"] == []
     approval = approve_dependency_assessment(
         created.assessment_id,
         actor="lead-researcher",
@@ -273,6 +278,10 @@ def test_assessment_is_immutable_and_approval_projects_validated_graph(
     assert approval.approved_graph.mandatory_services == ["paymentservice"]
     assert approval.approved_graph.optional_services == ["emailservice"]
     assert approval.excluded_supporting_services == ("inventoryservice",)
+    approval_payload = approval.to_mapping()
+    assert approval_payload["mandatoryServices"] == ["paymentservice"]
+    assert approval_payload["supportingServices"] == ["inventoryservice"]
+    assert approval_payload["optionalServices"] == ["emailservice"]
 
 
 def test_explicit_edge_interventions_create_independent_edge_labels(
@@ -722,9 +731,9 @@ def test_dependency_assessment_http_exceptions_are_documented() -> None:
     assert {"201", "404", "409", "422"} <= approval_responses.keys()
 
 
-def test_workflow_page_contains_dependency_validation_controls() -> None:
+def test_workflow_page_has_a_workspace_for_state_driven_dependency_review() -> None:
     response = TestClient(app).get("/components/workflows")
     assert response.status_code == 200
-    assert 'data-role="assessment-form"' in response.text
-    assert 'data-role="dependency-assessment-list"' in response.text
-    assert 'data-role="assessment-approval-rationale"' in response.text
+    assert 'data-role="guided-result"' in response.text
+    assert 'aria-label="Selected workflow" hidden' in response.text
+    assert 'data-role="assessment-form"' not in response.text

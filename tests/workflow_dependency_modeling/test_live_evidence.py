@@ -19,8 +19,8 @@ def trace(tid, method, path, callee=None):
 
 
 def test_discovery_separates_requests_normalizes_products_excludes_health():
-    traces = [trace("1", "GET", "/product/a?currency=USD"),
-              trace("2", "GET", "/product/b"),
+    traces = [trace("1", "GET", "/product/123?currency=USD"),
+              trace("2", "GET", "/product/456"),
               trace("3", "POST", "/cart/checkout", "paymentservice"),
               trace("4", "GET", "/_healthz")]
     results = {r.operation_name: r.trace_count for r in discover_root_workflows(traces)}
@@ -49,7 +49,7 @@ def test_live_evidence_uses_injected_trace_source() -> None:
     class Source:
         def fetch_workflow_traces(self, **query):
             assert query == {
-                "service_name": "gateway",
+                "service_name": "frontend",
                 "operation": "",
                 "limit": 25,
                 "lookback": "30m",
@@ -57,7 +57,7 @@ def test_live_evidence_uses_injected_trace_source() -> None:
             return [trace("1", "POST", "/orders", "order-api")]
 
     result = get_live_evidence(
-        "gateway",
+        "frontend",
         "POST /orders",
         "https://unused.invalid",
         25,

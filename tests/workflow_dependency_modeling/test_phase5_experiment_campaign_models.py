@@ -75,6 +75,38 @@ def _campaign() -> ExperimentCampaign:
     )
 
 
+@pytest.mark.parametrize("value", [0, .35, 1])
+def test_business_criticality_is_preserved_in_campaign_and_execution(value):
+    from app.engine.workflow_dependency_modeling.campaign_execution_service import _scenario
+    campaign = ExperimentCampaign.from_mapping({**_campaign().to_mapping(), "criticality": value})
+    assert campaign.to_mapping()["criticality"] == pytest.approx(value)
+    assert _scenario(campaign).criticality == pytest.approx(value)
+
+
+@pytest.mark.parametrize("value", [True, None, "0.5", -.1, 1.1, float("nan"), float("inf")])
+def test_invalid_campaign_criticality_is_rejected(value):
+    with pytest.raises(ValueError, match="criticality"):
+        ExperimentCampaign.from_mapping({**_campaign().to_mapping(), "criticality": value})
+
+
+def test_legacy_campaign_keeps_its_manifest_snapshot_shape():
+    campaign = _campaign()
+    assert campaign.criticality is None
+    assert "criticality" not in campaign.to_mapping()
+
+
+def test_invalid_input_traces_cannot_disappear_from_the_campaign_readiness_gate():
+    from dataclasses import replace
+    analysis = _analysis()
+    analyses = InMemoryAnalysisSessionRepository()
+    analyses.create(replace(analysis, trace_quality={**analysis.trace_quality, "inputInvalidCount": 1}))
+    with pytest.raises(ValueError, match="complete trace evidence"):
+        create_experiment_campaign({
+            "analysisSessionId": analysis.session_id, "successContractConfirmed": True,
+            "benchmarkProfile": "online_boutique_checkout_v0_10_1",
+        }, actor="test", repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses)
+
+
 def test_campaign_requires_safe_interventions_and_exact_correlation() -> None:
     campaign = _campaign()
     assert campaign.baseline.exact_trace_correlation_required is True
@@ -170,6 +202,50 @@ def _analysis() -> WorkflowAnalysisSession:
             "createdBy": "operator",
         }
     )
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_reviewed_demo_definition_needs_explicit_local_control_opt_in(confirmed):
+    from app.engine.workflow_dependency_modeling.online_boutique_workload import online_boutique_checkout_probe, DEFAULT_PRODUCT_ID
+    now = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    analyses = InMemoryAnalysisSessionRepository()
+    analyses.create(_analysis())
+    created = create_experiment_campaign({
+        "analysisSessionId": "analysis:checkout", "successContractConfirmed": True,
+        "workflowName": "Reviewed demo input", "businessOutcome": "Order completion page",
+        "executionDefinition": online_boutique_checkout_probe(DEFAULT_PRODUCT_ID, now.year + 2).to_mapping(),
+        "localDemoControlConfirmed": confirmed, "criticality": .35,
+    }, actor="test", repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses, now=now)
+    assert created.workload_profile == ("online_boutique_checkout_v0_10_1" if confirmed else "reviewed_imported_definition")
+    assert created.criticality == pytest.approx(.35)
+    assert created.workflow_name == "Reviewed demo input"
+
+
+@pytest.mark.parametrize("problem", ["modified_template", "remote_endpoint", "wrong_source", "non_boolean_confirmation"])
+def test_local_control_opt_in_rejects_unreviewed_or_nonlocal_inputs(problem):
+    from dataclasses import replace
+    from app.engine.workflow_dependency_modeling.online_boutique_workload import online_boutique_checkout_probe, DEFAULT_PRODUCT_ID
+    from app.engine.workflow_dependency_modeling.trace_source import TraceSourceKind
+    now = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    analysis = _analysis()
+    definition = online_boutique_checkout_probe(DEFAULT_PRODUCT_ID, now.year + 2).to_mapping()
+    confirmation = True
+    if problem == "modified_template":
+        definition["initialVariables"]["unreviewed_variable"] = "changed"
+    elif problem == "remote_endpoint":
+        analysis = replace(analysis, trace_source=replace(analysis.trace_source, endpoint="http://jaeger:16686"))
+    elif problem == "wrong_source":
+        analysis = replace(analysis, trace_source=replace(analysis.trace_source, kind=TraceSourceKind.TEMPO))
+    else:
+        confirmation = "true"
+    analyses = InMemoryAnalysisSessionRepository()
+    analyses.create(analysis)
+    with pytest.raises(ValueError, match="Local demo|localDemoControlConfirmed"):
+        create_experiment_campaign({
+            "analysisSessionId": analysis.session_id, "successContractConfirmed": True,
+            "workflowName": "Test", "businessOutcome": "Test",
+            "executionDefinition": definition, "localDemoControlConfirmed": confirmation,
+        }, actor="test", repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses, now=now)
 
 
 def test_service_derives_online_boutique_plan_from_observation() -> None:
@@ -366,6 +442,26 @@ def test_experiment_campaign_api(monkeypatch) -> None:
     monkeypatch.setattr(analysis_session_service, "_default_repository", analyses)
     monkeypatch.setattr(experiment_campaign_service, "_default_repository", campaigns)
     client = TestClient(app)
+    requirements = client.get("/api/workflows/analysis-sessions/analysis:checkout/workflow-setup")
+    assert requirements.status_code == 200
+    assert requirements.json()["action"] == {"method": "POST", "path": "/cart/checkout", "pathParameters": []}
+    assert requirements.json()["baselineLimits"] == {"minimum": 3, "maximum": 30}
+    assert client.get("/api/workflows/analysis-sessions/missing/workflow-setup").status_code == 404
+    guided_preview = client.post(
+        "/api/workflows/analysis-sessions/analysis:checkout/workflow-probe-preview",
+        json={"mode": "guided_sequence", "successStatuses": "200", "actionInputs": {
+            "bodyFormat": "form", "bodyFields": [{"name": "userChoice", "value": "explicit-input"}],
+        }, "preparationSteps": [{"operation": "GET /session", "successStatuses": "200", "inputs": {}}]},
+    )
+    assert guided_preview.status_code == 200
+    assert guided_preview.json()["executionDefinition"]["steps"][-1]["formBody"] == {"userChoice": "explicit-input"}
+    assert [step["measured"] for step in guided_preview.json()["summary"]] == [False, True]
+    invalid_preview = client.post(
+        "/api/workflows/analysis-sessions/analysis:checkout/workflow-probe-preview",
+        json={"mode": "guided_sequence", "successStatuses": "200,wrong"},
+    )
+    assert invalid_preview.status_code == 422
+    assert campaigns.list() == []  # Checking setup never creates or executes a campaign.
     preview = client.post(
         "/api/workflows/analysis-sessions/analysis:checkout/workflow-probe-preview",
         json={

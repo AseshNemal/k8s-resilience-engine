@@ -58,7 +58,7 @@ def _definition() -> WorkflowProbeDefinition:
     )
 
 
-def test_traces_only_measured_terminal_step_not_setup_requests() -> None:
+def test_traces_each_step_with_separate_trace_roots() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -81,14 +81,16 @@ def test_traces_only_measured_terminal_step_not_setup_requests() -> None:
         "/api/carts",
         "/api/orders",
     ]
-    assert "traceparent" not in requests[0].headers
+    assert requests[0].headers["traceparent"].startswith("00-")
+    assert TRACE_ID not in requests[0].headers["traceparent"]
     assert requests[1].headers["traceparent"].startswith(f"00-{TRACE_ID}-")
+    assert result.trace_id == TRACE_ID
     assert requests[0].headers["authorization"] == "Bearer test-secret"
     assert requests[1].headers["x-cart"] == "cart-7"
     assert requests[1].content == b'{"cartId":"cart-7"}'
 
 
-def test_explicit_measured_step_controls_trace_scope() -> None:
+def test_explicit_measured_step_controls_success_trace_id() -> None:
     payload = _definition().to_mapping()
     payload["measuredStep"] = "create_cart"
     definition = WorkflowProbeDefinition.from_mapping(payload)
@@ -109,7 +111,8 @@ def test_explicit_measured_step_controls_trace_scope() -> None:
     )
 
     assert requests[0].headers["traceparent"].startswith(f"00-{TRACE_ID}-")
-    assert "traceparent" not in requests[1].headers
+    assert requests[1].headers["traceparent"].startswith("00-")
+    assert TRACE_ID not in requests[1].headers["traceparent"]
 
 
 def test_rejects_unknown_measured_step() -> None:
@@ -139,6 +142,28 @@ def test_stops_after_first_failed_assertion() -> None:
     assert called_paths == ["/api/carts"]
     assert "HTTP 503" in result.reason
     assert result.steps[0].succeeded is False
+
+
+def test_early_failure_reports_the_trace_id_used_for_failed_request() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(503, text="unavailable")
+
+    result = run_http_workflow_probe(
+        "http://127.0.0.1:9000",
+        _definition(),
+        trace_id=TRACE_ID,
+        transport=httpx.MockTransport(handler),
+        secrets={"SHOP_API_TOKEN": "secret"},
+    )
+
+    assert result.business_success is False
+    assert result.trace_id != TRACE_ID
+    assert requests[0].headers["traceparent"].startswith(
+        f"00-{result.trace_id}-"
+    )
 
 
 def test_rejects_missing_secret_before_network_access() -> None:

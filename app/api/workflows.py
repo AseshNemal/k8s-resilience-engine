@@ -1,21 +1,27 @@
 from typing import Any
 import httpx
-from fastapi import APIRouter, Body, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, Response, status
 
 from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
 from app.engine.workflow_dependency_modeling.service import (
+    analyze_workflow_evidence,
+    assess_telemetry_readiness,
     approve_experiment_campaign,
     assess_experiment_campaign,
     approve_dependency_assessment,
+    build_condition_scoped_workflow_graph,
     baseline_readiness,
     intervention_status,
+    inspect_telemetry_payload,
     record_intervention_event,
     start_workflow_analysis,
     create_scenario,
+    list_analysis_services,
     create_dependency_assessment,
     create_dependency_classification_evaluation,
     create_dependency_classification_reference,
     create_experiment_campaign,
+    create_experiment_manifest,
     discover_live_workflows,
     discover_analysis_workflows,
     discover_observed_workflow_candidates,
@@ -23,9 +29,13 @@ from app.engine.workflow_dependency_modeling.service import (
     freeze_workflow_graph,
     get_live_workflow,
     get_workflow_analysis,
+    get_workflow_setup_requirements,
     get_live_evidence,
+    get_boutique_demo_execution_template,
+    get_experiment_progress,
     get_execution,
     get_experiment_campaign,
+    get_experiment_manifest,
     get_experiment_campaign_assessment,
     get_experiment_campaign_approval,
     get_frozen_workflow_graph,
@@ -36,20 +46,25 @@ from app.engine.workflow_dependency_modeling.service import (
     get_validated_workflow_graph,
     list_executions,
     list_experiment_campaigns,
+    list_experiment_manifests,
     list_dependency_assessments,
     list_dependency_classification_evaluations,
     list_dependency_classification_references,
     list_versioned_scenarios,
     list_workflow_analyses,
+    normalize_telemetry_payload,
     preview_workflow_probe,
     register_jaeger_execution,
     run_dependency_repeatability_analysis,
     run_dependency_sensitivity_analysis,
     run_campaign_baseline_trial,
     run_campaign_intervention_trial,
+    run_local_boutique_intervention_cohort,
     scenario_etag,
     transition_scenario_lifecycle,
+    telemetry_source_capabilities,
     update_scenario,
+    verify_experiment_manifest,
 )
 from app.engine.workflow_dependency_modeling.analysis_session_repository import (
     AnalysisSessionConflictError,
@@ -61,6 +76,7 @@ from app.engine.workflow_dependency_modeling.classification_evaluation_repositor
 )
 from app.engine.workflow_dependency_modeling.dependency_assessment_repository import (
     DependencyAssessmentAlreadyExistsError,
+    DependencyAssessmentNotApprovableError,
     DependencyAssessmentNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.execution_repository import (
@@ -70,6 +86,10 @@ from app.engine.workflow_dependency_modeling.execution_repository import (
 from app.engine.workflow_dependency_modeling.experiment_campaign_repository import (
     ExperimentCampaignConflictError,
     ExperimentCampaignNotFoundError,
+)
+from app.engine.workflow_dependency_modeling.experiment_manifest_repository import (
+    ExperimentManifestConflictError,
+    ExperimentManifestNotFoundError,
 )
 from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
     FrozenGraphAlreadyExistsError,
@@ -88,12 +108,24 @@ from app.engine.workflow_dependency_modeling.analysis_session_service import app
 from app.integrations.jaeger.client import DEFAULT_JAEGER_URL, JaegerClient
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.workflow import WorkflowGraph
+from app.engine.workflow_dependency_modeling.offline_analysis import (
+    WorkflowAnalysisRequest, WorkflowAnalysisResult,
+)
 
 
 router = APIRouter(
     prefix="/api/workflows",
     tags=["Workflow Dependency Modeling"],
 )
+
+
+@router.post("/analyze", response_model=WorkflowAnalysisResult, response_model_by_alias=True)
+def analyze_uploaded_workflow(payload: WorkflowAnalysisRequest) -> WorkflowAnalysisResult:
+    """Analyze caller-supplied workflow and traces without loading sample answers."""
+    try:
+        return analyze_workflow_evidence(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 NOT_FOUND_RESPONSE = {404: {"description": "Requested workflow evidence was not found"}}
 JAEGER_UNAVAILABLE_RESPONSE = {503: {"description": "Jaeger service is unavailable"}}
@@ -160,6 +192,9 @@ def _graph_evaluation_payload(
             "truePositives": result.service_metrics.true_positives,
             "falsePositives": result.service_metrics.false_positives,
             "falseNegatives": result.service_metrics.false_negatives,
+            "trueNegatives": result.service_metrics.true_negatives,
+            "evaluatedCount": result.service_metrics.evaluated_count,
+            "accuracyDefinition": result.service_metrics.accuracy_definition,
         },
         "serviceMetrics": {
             "precision": result.mandatory_service_metrics.precision,
@@ -169,6 +204,9 @@ def _graph_evaluation_payload(
             "truePositives": result.mandatory_service_metrics.true_positives,
             "falsePositives": result.mandatory_service_metrics.false_positives,
             "falseNegatives": result.mandatory_service_metrics.false_negatives,
+            "trueNegatives": result.mandatory_service_metrics.true_negatives,
+            "evaluatedCount": result.mandatory_service_metrics.evaluated_count,
+            "accuracyDefinition": result.mandatory_service_metrics.accuracy_definition,
         },
         "mandatoryServiceMetrics": {
             "precision": result.mandatory_service_metrics.precision,
@@ -178,6 +216,9 @@ def _graph_evaluation_payload(
             "truePositives": result.mandatory_service_metrics.true_positives,
             "falsePositives": result.mandatory_service_metrics.false_positives,
             "falseNegatives": result.mandatory_service_metrics.false_negatives,
+            "trueNegatives": result.mandatory_service_metrics.true_negatives,
+            "evaluatedCount": result.mandatory_service_metrics.evaluated_count,
+            "accuracyDefinition": result.mandatory_service_metrics.accuracy_definition,
         },
         "edgeMetrics": {
             "precision": result.edge_metrics.precision,
@@ -187,6 +228,9 @@ def _graph_evaluation_payload(
             "truePositives": result.edge_metrics.true_positives,
             "falsePositives": result.edge_metrics.false_positives,
             "falseNegatives": result.edge_metrics.false_negatives,
+            "trueNegatives": result.edge_metrics.true_negatives,
+            "evaluatedCount": result.edge_metrics.evaluated_count,
+            "accuracyDefinition": result.edge_metrics.accuracy_definition,
             "jaccardSimilarity": result.edge_metrics.jaccard_similarity,
         },
         "pathMetrics": {
@@ -207,6 +251,9 @@ def _graph_evaluation_payload(
                 "truePositives": result.mandatory_edge_metrics.true_positives,
                 "falsePositives": result.mandatory_edge_metrics.false_positives,
                 "falseNegatives": result.mandatory_edge_metrics.false_negatives,
+                "trueNegatives": result.mandatory_edge_metrics.true_negatives,
+                "evaluatedCount": result.mandatory_edge_metrics.evaluated_count,
+                "accuracyDefinition": result.mandatory_edge_metrics.accuracy_definition,
             }
             if result.mandatory_edge_metrics is not None
             else None
@@ -311,7 +358,7 @@ def revise_workflow_scenario(
         404: {"description": "Scenario or version was not found"},
         409: {"description": "Execution ID already exists"},
         422: {"description": "Execution registration is invalid"},
-        503: {"description": "Jaeger service is unavailable"},
+        503: {"description": "Selected trace-query service is unavailable"},
     },
 )
 def register_workflow_execution(
@@ -479,6 +526,30 @@ def read_validated_workflow_graph(workflow_id: str) -> WorkflowGraph:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
+@router.get(
+    "/dependency-assessments/{assessment_id}/conditions/{condition_id}/graph",
+    response_model=WorkflowGraph,
+    response_model_by_alias=True,
+    responses={
+        404: {"description": "Dependency assessment was not found"},
+        422: {"description": "Condition evidence is missing or insufficient"},
+    },
+)
+def read_condition_scoped_workflow_graph(
+    assessment_id: str, condition_id: str, response: Response
+) -> WorkflowGraph:
+    """Return a graph projection whose labels apply only to one business condition."""
+    try:
+        graph = build_condition_scoped_workflow_graph(assessment_id, condition_id)
+        response.headers["X-Workflow-Approval"] = "unapproved-condition-projection"
+        response.headers["Cache-Control"] = "no-store"
+        return graph
+    except DependencyAssessmentNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except (DependencyAssessmentNotApprovableError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
 @router.post(
     "/dependency-references",
     status_code=status.HTTP_201_CREATED,
@@ -547,7 +618,7 @@ def change_workflow_scenario_lifecycle(
     responses={
         409: {"description": "Analysis session already exists"},
         422: {"description": "Connection or operation input is invalid"},
-        503: {"description": "Jaeger service is unavailable"},
+        503: {"description": "Selected trace-query service is unavailable"},
     },
 )
 def create_workflow_analysis_session(
@@ -568,6 +639,30 @@ def create_workflow_analysis_session(
 @router.get("/analysis-sessions")
 def read_workflow_analysis_sessions() -> list[dict[str, Any]]:
     return [analysis.to_mapping() for analysis in list_workflow_analyses()]
+
+
+@router.get("/execution-templates/online-boutique-checkout")
+def read_boutique_demo_execution_template() -> dict[str, Any]:
+    return get_boutique_demo_execution_template()
+
+
+@router.post(
+    "/analysis-sessions/services",
+    responses={
+        422: {"description": "Trace connection input is invalid"},
+        503: {"description": "Trace-query service is unavailable"},
+    },
+)
+def list_workflow_analysis_services(
+    payload: dict[str, Any] = Body(...),
+) -> list[str]:
+    """List recorded services without requiring a manually entered identity."""
+    try:
+        return list_analysis_services(payload)
+    except ConnectionError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.post(
@@ -613,6 +708,17 @@ def discover_observed_workflows(
 def read_workflow_analysis_session(session_id: str) -> dict[str, Any]:
     try:
         return get_workflow_analysis(session_id).to_mapping()
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get(
+    "/analysis-sessions/{session_id}/workflow-setup",
+    responses={404: {"description": "Analysis session was not found"}},
+)
+def read_analysis_workflow_setup(session_id: str) -> dict[str, Any]:
+    try:
+        return get_workflow_setup_requirements(session_id)
     except AnalysisSessionNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
@@ -673,6 +779,64 @@ def read_workflow_experiment_campaigns() -> list[dict[str, Any]]:
 def read_workflow_experiment_campaign(campaign_id: str) -> dict[str, Any]:
     try:
         return get_experiment_campaign(campaign_id).to_mapping()
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+def _manifest_payload(manifest) -> dict[str, Any]:
+    return {
+        **manifest.to_mapping(),
+        "integrityVerified": verify_experiment_manifest(manifest),
+    }
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/manifest",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Experiment campaign or analysis session was not found"},
+        409: {"description": "A different manifest already uses this identity"},
+        422: {"description": "Reproducibility controls are invalid"},
+    },
+)
+def create_workflow_experiment_manifest(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(default={}),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Freeze a campaign and its evidence query into a reproducible artifact."""
+    try:
+        return _manifest_payload(
+            create_experiment_manifest(campaign_id, payload, actor=actor)
+        )
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ExperimentManifestConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except (TypeError, ValueError) as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get("/experiment-manifests")
+def read_workflow_experiment_manifests() -> list[dict[str, Any]]:
+    return [_manifest_payload(item) for item in list_experiment_manifests()]
+
+
+@router.get(
+    "/experiment-manifests/{manifest_id}",
+    responses={404: {"description": "Experiment manifest was not found"}},
+)
+def read_workflow_experiment_manifest(manifest_id: str) -> dict[str, Any]:
+    try:
+        return _manifest_payload(get_experiment_manifest(manifest_id))
+    except ExperimentManifestNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get("/experiment-campaigns/{campaign_id}/progress")
+def read_experiment_progress(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_experiment_progress(campaign_id)
     except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
@@ -756,6 +920,42 @@ def read_workflow_campaign_intervention_status(campaign_id: str) -> dict[str, An
         return intervention_status(campaign_id)
     except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/local-demo/{target_service}/run-cohort",
+    responses={
+        403: {"description": "Local demo control is not allowed for this request"},
+        422: {"description": "Local demo target or evidence is not ready"},
+        503: {"description": "Docker, the demo app, or Jaeger is unavailable"},
+    },
+)
+def execute_local_boutique_intervention_cohort(
+    campaign_id: str,
+    target_service: str,
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    confirmation: str = Header(..., alias="X-Local-Demo-Confirm"),
+) -> dict[str, Any]:
+    """Explicit browser action, confined to the local Compose Online Boutique demo."""
+    if (
+        request.client is None
+        or request.client.host not in {"127.0.0.1", "::1"}
+        or confirmation != "stop-and-restore-one-demo-service"
+    ):
+        raise HTTPException(status_code=403, detail="Local demo control requires explicit loopback confirmation")
+    try:
+        return run_local_boutique_intervention_cohort(
+            campaign_id,
+            target_service,
+            _campaign_application_url(payload),
+            actor=actor,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+    except (RuntimeError, ConnectionError, httpx.HTTPError) as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
 
 
 @router.post(
@@ -1026,6 +1226,63 @@ def read_live_evidence(
         raise HTTPException(status_code=503, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get(
+    "/telemetry/source-types",
+    summary="List supported telemetry evidence sources and adapter status",
+)
+def read_telemetry_source_types() -> list[dict[str, Any]]:
+    """Describe live, offline-import, and explicitly non-causal adapters."""
+    return telemetry_source_capabilities()
+
+
+@router.post(
+    "/telemetry/readiness",
+    summary="Assess telemetry readiness without fabricating unsupported evidence",
+    responses={
+        422: {"description": "The telemetry declaration is invalid"},
+        503: {"description": "The selected live telemetry source is unavailable"},
+    },
+)
+def check_telemetry_readiness(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Return the maximum defensible analysis level for a project's evidence."""
+    try:
+        return assess_telemetry_readiness(payload).to_mapping()
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/telemetry/normalize",
+    summary="Normalize supported trace or non-causal observation exports",
+    responses={422: {"description": "The telemetry payload is invalid"}},
+)
+def normalize_telemetry(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Normalize evidence while retaining its causal or non-causal label."""
+    try:
+        return normalize_telemetry_payload(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/telemetry/inspect",
+    summary="Inspect normalized evidence as a causal or non-causal candidate graph",
+    responses={422: {"description": "The telemetry payload is invalid"}},
+)
+def inspect_telemetry(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Return quality, services, workflows, and candidate edges when defensible."""
+    try:
+        return inspect_telemetry_payload(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.get(

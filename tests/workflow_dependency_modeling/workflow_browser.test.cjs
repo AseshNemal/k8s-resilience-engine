@@ -1,0 +1,591 @@
+// Real Chrome checks against the application and a separate controlled-fixture server.
+// Start browser_fixture.py on a fresh port and set WORKFLOW_TEST_URL / WORKFLOW_FIXTURE_URL.
+// Set WORKFLOW_RUN_LIVE=1 to include live Jaeger discovery and real workflow runs.
+// No container, Kubernetes, or service outage actions are performed.
+const {chromium} = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const base = process.env.WORKFLOW_TEST_URL;
+const fixtureBase = process.env.WORKFLOW_FIXTURE_URL;
+const runLive = process.env.WORKFLOW_RUN_LIVE === '1';
+const runResponsive = process.env.WORKFLOW_RUN_RESPONSIVE === '1';
+const out = path.resolve(process.env.WORKFLOW_BROWSER_OUTPUT || 'tmp/workflow-browser');
+
+async function openTestPage() {
+    await fs.mkdir(out, {recursive: true});
+    const browser = await chromium.launch({channel: 'chrome', headless: false});
+    const context = await browser.newContext({viewport: {width: 1440, height: 1050}, acceptDownloads: true});
+    const page = await context.newPage();
+    page.setDefaultTimeout(15000);
+    const errors = [], checks = [];
+    const check = text => { checks.push(text); console.log('PASS', text); };
+    page.on('pageerror', error => errors.push(error.message));
+    return {browser, page, errors, checks, check};
+}
+
+async function runWorkflowLifecycle() {
+    const {browser, page, errors, checks, check} = await openTestPage();
+    const clickPost = async (locator, suffix, expected=200, timeout=60000) => {
+        const pending = page.waitForResponse(r=>r.url().endsWith(suffix)&&r.request().method()==='POST',{timeout});
+        pending.catch(()=>{});
+        await locator.click();
+        const response = await pending;
+        const data = await response.json();
+        assert.equal(response.status(),expected,JSON.stringify(data));
+        return data;
+    };
+    try {
+        await page.goto(base+'/components/workflows',{waitUntil:'networkidle'});
+        await page.locator('[data-role="saved-status"]').filter({hasNotText:'Loading'}).waitFor();
+        assert(!/PP1|Research Environment|Research audit|Synthetic Fixture Dataset|Component 3/.test(await page.locator('body').innerText()));
+        assert.equal(await page.getByLabel('Trace query URL',{exact:true}).inputValue(),'');
+        assert.equal(await page.getByLabel('Environment name',{exact:true}).inputValue(),'');
+        check('Clean initial state: no research panels, assumed URLs, or preselected environment');
+        let calls=0;
+        page.on('request',r=>{if(r.url().endsWith('/analysis-sessions/services'))calls++;});
+        await page.getByRole('button',{name:'Connect',exact:true}).click();
+        assert.equal(calls,0);
+        check('Missing required connection inputs never reach the API');
+        const connection = page.locator('[data-role="guided-analysis-form"]');
+        await connection.getByLabel('Environment name',{exact:true}).fill('workspace-ui-verification');
+        await connection.getByLabel('Environment type',{exact:true}).selectOption('experimental');
+        await connection.getByLabel('Trace query URL',{exact:true}).fill('http://169.254.169.254');
+        await clickPost(connection.getByRole('button',{name:'Connect',exact:true}),'/analysis-sessions/services',422);
+        await page.locator('[data-role="guided-analysis-status"]').filter({hasText:'Could not connect'}).waitFor();
+        assert(await connection.getByRole('button',{name:'Connect',exact:true}).isEnabled());
+        check('Disallowed trace hosts show a recoverable API error');
+        await connection.getByLabel('Trace query URL',{exact:true}).fill('http://localhost:16687');
+        await clickPost(connection.getByRole('button',{name:'Connect',exact:true}),'/analysis-sessions/services',503);
+        check('Unavailable tracing source shows an error without invented services');
+        if (runLive) {
+            await connection.getByLabel('Trace query URL',{exact:true}).fill('http://localhost:16686');
+            const services = await clickPost(connection.getByRole('button',{name:'Connect',exact:true}),'/analysis-sessions/services');
+            assert(services.includes('frontend'));
+            const discovery = page.waitForResponse(r=>r.url().endsWith('/analysis-sessions/discover'));
+            await connection.getByLabel('Entry service',{exact:true}).selectOption('frontend');
+            const operations = await (await discovery).json();
+            const selected = operations.findIndex(item=>item.operationName==='POST /cart/checkout');
+            assert(selected>=0,JSON.stringify(operations));
+            await page.locator('[data-role="guided-operation"]').selectOption(String(selected));
+            let session = await clickPost(page.getByRole('button',{name:'Inspect traces and set up workflow',exact:true}),'/analysis-sessions',201);
+            if (session.traceQuality.excludedCount || session.traceQuality.inputInvalidCount) {
+                await page.getByRole('button',{name:'Choose another operation',exact:true}).waitFor();
+                check('Live incomplete evidence is blocked with trace issues rather than accepted');
+                const saved = await (await page.request.get(base+'/api/workflows/analysis-sessions')).json();
+                session=saved.find(item=>item.operationName==='POST /cart/checkout' && !item.traceQuality.excludedCount && !item.traceQuality.inputInvalidCount);
+                assert(session,'A complete saved checkout observation is needed for the live baseline check');
+                await page.goto(base+'/components/workflows?inspection='+encodeURIComponent(session.sessionId),{waitUntil:'networkidle'});
+                check('A saved complete inspection resumes setup through its URL');
+            }
+            await page.getByRole('heading',{name:'Set up the workflow and success checks',exact:true}).waitFor();
+            check('Live Jaeger services and operations populate from recorded data');
+            const setup = page.locator('[data-role="guided-result"]');
+            assert.equal(await setup.getByLabel('Business importance (0–1)',{exact:true}).inputValue(),'');
+            assert.equal(await setup.getByLabel('Baseline runs to collect',{exact:true}).inputValue(),'');
+            assert(await setup.getByRole('button',{name:'Save and continue to baseline runs',exact:true}).isDisabled());
+            assert.equal(await setup.locator('form').evaluate(el=>el.checkValidity()),false);
+            check('Workflow setup requires explicit success checks, importance, run count and review');
+            await setup.getByLabel('Workflow name',{exact:true}).fill('Checkout availability UI check');
+            await setup.getByLabel('What should a successful run achieve?',{exact:true}).fill('Checkout confirmation is returned');
+            await setup.getByLabel('HTTP response codes that count as success',{exact:true}).fill('200');
+            await setup.getByLabel('Business importance (0–1)',{exact:true}).fill('0.27');
+            await setup.getByLabel('Baseline runs to collect',{exact:true}).fill('3');
+            const requestSettings = setup.getByText('Import existing settings (advanced)',{exact:true});
+            if (await requestSettings.locator('..').getAttribute('open') === null) await requestSettings.click();
+            await setup.getByLabel('Import an execution definition (advanced)',{exact:true}).check();
+            const executionDefinition=await (await page.request.get(base+'/api/workflows/execution-templates/online-boutique-checkout')).json();
+            await setup.getByLabel('Execution definition JSON',{exact:true}).fill(JSON.stringify(executionDefinition));
+            await clickPost(setup.getByRole('button',{name:'Check execution plan',exact:true}),'/workflow-probe-preview');
+            await setup.getByLabel('I reviewed the success checks for this workflow.',{exact:true}).check();
+            const campaign = await clickPost(setup.getByRole('button',{name:'Save and continue to baseline runs',exact:true}),'/experiment-campaigns',201);
+            assert.equal(campaign.criticality,.27);
+            assert.equal(campaign.workloadProfile,'reviewed_imported_definition');
+            await setup.getByRole('button',{name:'Run one baseline test',exact:true}).waitFor();
+            assert.equal(await setup.getByLabel('Application base URL',{exact:true}).inputValue(),'');
+            check('User configuration is saved and test settings are recorded without demo templates');
+            await setup.getByRole('button',{name:'Run one baseline test',exact:true}).click();
+            assert.equal(await setup.locator('form').evaluate(el=>el.checkValidity()),false);
+            check('Running a workflow requires the user-supplied application address');
+            await setup.getByLabel('Application base URL',{exact:true}).fill('http://localhost:8080');
+            const baseline = await clickPost(setup.getByRole('button',{name:'Run one baseline test',exact:true}),'/baseline-runs',201,120000);
+            assert.equal(baseline.status,'succeeded',JSON.stringify(baseline));
+            assert.equal(baseline.correlationStatus,'matched');
+            await setup.getByText('1/3',{exact:true}).waitFor();
+            check('A real user-defined workflow run is executed, correlated and reflected as 1/3');
+            await page.reload({waitUntil:'networkidle'});
+            await setup.getByText('1/3',{exact:true}).waitFor();
+            assert.equal(await setup.getByLabel('Application base URL',{exact:true}).inputValue(),'http://localhost:8080');
+            assert.equal(await page.locator('[data-role="source-panel"]').isVisible(),false);
+            check('Reload restores the selected saved workflow and its actual progress');
+            await page.screenshot({path:path.join(out,'live-baseline.png'),fullPage:true});
+        } else {
+            console.log('SKIP Live Jaeger discovery and workflow execution: set WORKFLOW_RUN_LIVE=1 when those services are available.');
+        }
+        await page.getByRole('button',{name:'New workflow',exact:true}).click();
+        await page.getByRole('button',{name:'Upload traces',exact:true}).click();
+        const form=page.locator('[data-role="offline-analysis-form"]');
+        const status=page.locator('[data-role="offline-analysis-status"]');
+        const result=page.locator('[data-role="offline-analysis-result"]');
+        await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
+        assert.equal(await form.evaluate(el=>el.checkValidity()),false);
+        for(const [label,value] of [['Workflow name','Dispatch'],['Entry service','gateway-x'],['Root operation','POST /deliveries'],['Successful result','Delivery is dispatched'],['Expected HTTP statuses','201'],['Business importance (0–1)','0.65']]) await form.getByLabel(label,{exact:true}).fill(value);
+        const trace=(id,worker,code)=>({traceID:id,processes:{p1:{serviceName:'gateway-x'},p2:{serviceName:'dispatch-worker-x'}},spans:[{spanID:'root',processID:'p1',operationName:'POST /deliveries',duration:1500,references:[],tags:[{key:'http.status_code',value:code}]},...(worker?[{spanID:'child',processID:'p2',operationName:'dispatch',references:[{refType:'CHILD_OF',spanID:'root'}]}]:[])]});
+        const traces=[trace('a',true,201),trace('b',false,201),trace('c',true,503)];
+        const upload=contents=>form.getByLabel('Trace export file',{exact:true}).setInputFiles({name:'dispatch.json',mimeType:'application/json',buffer:Buffer.from(contents)});
+        await upload('{broken');
+        await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
+        await status.filter({hasText:'Trace export JSON:'}).waitFor();
+        assert(await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).isEnabled());
+        check('Malformed uploads show a readable error and restore the action');
+        await upload(JSON.stringify(traces));
+        let report=await clickPost(form.getByRole('button',{name:'Analyze uploaded traces',exact:true}),'/analyze');
+        await result.waitFor({state:'visible'});
+        assert.equal(report.successfulTraceCount,2);assert.equal(report.failedTraceCount,1);
+        assert.match(await result.innerText(),/dispatch-worker-x: 1\/2 successful traces \(50.0%\)/);
+        assert(!/Approved|MANDATORY|OPTIONAL/.test(await result.locator('svg').textContent()));
+        check('Plain upload fields produce computed outcomes and an unapproved observed graph');
+        const pending=page.waitForEvent('download');
+        await result.getByRole('button',{name:'Download analysis JSON',exact:true}).click();
+        const downloaded=await pending;
+        await downloaded.saveAs(path.join(out,'analysis.json'));
+        assert.deepEqual(JSON.parse(await fs.readFile(path.join(out,'analysis.json'),'utf8')),report);
+        check('Analysis download exactly matches the backend result');
+        await form.getByLabel('Root operation',{exact:true}).fill('POST /missing');
+        assert.equal(await result.isVisible(),false);
+        report=await clickPost(form.getByRole('button',{name:'Analyze uploaded traces',exact:true}),'/analyze');
+        assert.equal(report.candidateGraph,null);
+        await result.getByText('Insufficient evidence:',{exact:false}).waitFor();
+        check('Changed inputs clear old results; unmatched operations return insufficient evidence');
+        await form.getByText('Advanced analysis settings',{exact:true}).click();
+        await form.getByLabel('Use an existing workflow definition',{exact:true}).check();
+        await form.getByLabel('Workflow definition JSON',{exact:true}).fill('{invalid');
+        await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
+        await status.filter({hasText:'Workflow definition JSON:'}).waitFor();
+        check('Advanced imported definitions are optional and validated before submission');
+        if (runResponsive) {
+        await page.setViewportSize({width:375,height:812});
+        await page.waitForFunction(()=>getComputedStyle(document.querySelector('.content')).marginLeft==='0px');
+        assert(await page.locator('.workspace-main').evaluate(el=>el.clientWidth>=300));
+        assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+        await page.screenshot({path:path.join(out,'mobile-source.png'),fullPage:true});
+        check('Upload and connection layouts fit a 375px viewport');
+        }
+        await page.setViewportSize({width:1440,height:1050});
+        await page.goto(fixtureBase+'/components/workflows',{waitUntil:'networkidle'});
+        const fixtureCampaigns=await (await page.request.get(fixtureBase+'/api/workflows/experiment-campaigns')).json();
+        const fixture=fixtureCampaigns[0];
+        assert.match(fixture.environmentId,/FIXTURE/);
+        await page.locator(`[data-campaign="${fixture.campaignId}"]`).click();
+        await page.getByRole('button',{name:'Review dependency results',exact:true}).waitFor();
+        assert.equal(await page.getByRole('button',{name:'Run one baseline test',exact:true}).count(),0);
+        const assessment=await clickPost(page.getByRole('button',{name:'Review dependency results',exact:true}),'/assessment',201);
+        assert.deepEqual(assessment.mandatoryServices,['billing-api']);assert.deepEqual(assessment.supportingServices,['inventory-api']);assert.deepEqual(assessment.optionalServices,['notify-api']);
+        const table=page.locator('.workspace-table');
+        assert.match(await table.innerText(),/billing-api\s+mandatory\s+3\/3\s+0\/3/);
+        assert.match(await table.innerText(),/inventory-api\s+supporting\s+3\/3\s+2\/3/);
+        assert.match(await table.innerText(),/notify-api\s+optional\s+3\/3\s+3\/3/);
+        check('Controlled fixtures compute and display mandatory, supporting and optional results');
+        await page.getByRole('button',{name:'Approve graph',exact:true}).click();
+        assert.equal(await page.locator('.assessment-console form').evaluate(el=>el.checkValidity()),false);
+        await page.getByLabel('Reviewer name',{exact:true}).fill('Controlled fixture UI test');
+        await page.getByLabel('Review note',{exact:true}).fill('Synthetic evidence only; verifies the application review flow.');
+        await page.getByLabel('I reviewed these results and approve this graph.',{exact:true}).check();
+        const approval=await clickPost(page.getByRole('button',{name:'Approve graph',exact:true}),'/approval',201);
+        await page.getByRole('heading',{name:'Approved dependency graph',exact:true}).waitFor();
+        check('Approval requires a reviewer, review note and explicit confirmation');
+        const graphDownload=page.waitForEvent('download');
+        await page.getByRole('button',{name:'Download graph JSON',exact:true}).click();
+        await (await graphDownload).saveAs(path.join(out,'approved-graph.json'));
+        assert.deepEqual(JSON.parse(await fs.readFile(path.join(out,'approved-graph.json'),'utf8')),approval.approvedGraph);
+        assert.equal(approval.approvedGraph.criticality,.65);
+        await page.reload({waitUntil:'networkidle'});
+        await page.getByRole('heading',{name:'Approved dependency graph',exact:true}).waitFor();
+        assert.equal(await page.getByRole('button',{name:'Approve graph',exact:true}).count(),0);
+        check('Approved export preserves computed values and reload resumes the approved state');
+        await page.getByText('View test results',{exact:true}).click();
+        await page.getByRole('button',{name:'Download test results JSON',exact:true}).waitFor();
+        await page.screenshot({path:path.join(out,'fixture-approved.png'),fullPage:true});
+        if (runResponsive) {
+        await page.setViewportSize({width:375,height:812});
+        await page.waitForFunction(()=>getComputedStyle(document.querySelector('.content')).marginLeft==='0px');
+        assert(await page.locator('.workspace-main').evaluate(el=>el.clientWidth>=300));
+        assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+        await page.screenshot({path:path.join(out,'mobile-approved.png'),fullPage:true});
+        check('Approved results and evidence remain usable on mobile');
+        }
+        assert.deepEqual(errors,[]);
+        check('No browser JavaScript errors throughout the tested flows');
+        await fs.writeFile(path.join(out,'checks.json'),JSON.stringify({checks,errors,recordedAt:new Date().toISOString(),liveChecksIncluded:runLive,realServiceOutages:0},null,2));
+    } catch(error) {await page.screenshot({path:path.join(out,'failure.png'),fullPage:true});await fs.writeFile(path.join(out,'checks.json'),JSON.stringify({checks,errors,failure:error.message},null,2));throw error;}
+    finally {await browser.close();}
+}
+
+async function runWorkspaceStateChecks() {
+    const {browser, page: p, errors, checks, check} = await openTestPage();
+ try{
+  await p.goto(base+'/components/workflows',{waitUntil:'networkidle'});
+  const connection=p.locator('[data-role="guided-analysis-form"]');
+  await p.getByText('Authentication',{exact:true}).click();
+  await connection.getByLabel('Authentication method',{exact:true}).selectOption('bearer_env');
+  assert(await connection.getByLabel('Token environment variable',{exact:true}).isEnabled());
+  assert(await connection.getByLabel('Token environment variable',{exact:true}).evaluate(e=>e.required));
+  await connection.getByLabel('Authentication method',{exact:true}).selectOption('none');
+  assert.equal(await connection.getByLabel('Token environment variable',{exact:true}).isVisible(),false);
+  check('Authentication inputs follow the selected method without storing token values');
+  await connection.getByLabel('Trace query URL',{exact:true}).fill('http://localhost:16686');
+  await connection.getByLabel('Environment name',{exact:true}).fill('CONTROLLED-UI-STATE');
+  await connection.getByLabel('Environment type',{exact:true}).selectOption('experimental');
+  let releaseSource;
+  const gate=new Promise(resolve=>releaseSource=resolve);
+  let intercepted;
+  const started=new Promise(resolve=>intercepted=resolve);
+  await p.route('**/api/workflows/analysis-sessions/services',async route=>{intercepted();await gate;await route.fulfill({status:200,json:['fixture-obsolete-service']})});
+  const lateResponse=p.waitForResponse(r=>r.url().endsWith('/analysis-sessions/services'));
+  await connection.getByRole('button',{name:'Connect',exact:true}).click();await started;
+  assert(await connection.getByRole('button',{name:'Connect',exact:true}).isDisabled());
+  await p.getByRole('button',{name:'New workflow',exact:true}).click();releaseSource();await lateResponse;
+  assert.equal(await connection.getByLabel('Entry service',{exact:true}).isVisible(),false);
+  assert(await connection.getByRole('button',{name:'Connect',exact:true}).isEnabled());
+  assert(!/fixture-obsolete-service/.test(await p.locator('main').innerText()));
+  await p.unroute('**/api/workflows/analysis-sessions/services');
+  check('Starting over discards a late connection response and leaves Connect usable');
+  await p.getByRole('button',{name:'Upload traces',exact:true}).click();
+  const form=p.locator('[data-role="offline-analysis-form"]'),result=p.locator('[data-role="offline-analysis-result"]'),status=p.locator('[data-role="offline-analysis-status"]');
+  for(const [label,value] of [['Workflow name','Dispatch'],['Entry service','gateway-x'],['Root operation','POST /deliveries'],['Successful result','Delivery is dispatched'],['Expected HTTP statuses','201'],['Business importance (0–1)','0.65']]) await form.getByLabel(label,{exact:true}).fill(value);
+  const upload=data=>form.getByLabel('Trace export file',{exact:true}).setInputFiles({name:'fixture.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
+  const trace=(id,worker,code)=>({traceID:id,processes:{p1:{serviceName:'gateway-x'},p2:{serviceName:'worker-x'}},spans:[{spanID:'root',processID:'p1',operationName:'POST /deliveries',duration:1500,references:[],tags:[{key:'http.status_code',value:code}]},...(worker?[{spanID:'child',processID:'p2',operationName:'dispatch',references:[{refType:'CHILD_OF',spanID:'root'}]}]:[])]});
+  const analyze=async(expected=200)=>{const pending=p.waitForResponse(r=>r.url().endsWith('/analyze'));pending.catch(()=>{});await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();const response=await pending;const report=await response.json();assert.equal(response.status(),expected,JSON.stringify(report));return report;};
+  await upload([trace('a',true,201),trace('b',false,201)]);
+  await form.getByLabel('Expected HTTP statuses',{exact:true}).fill('201,abc');
+  await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
+  await status.filter({hasText:'HTTP status'}).waitFor();
+  assert.equal(await result.isVisible(),false);
+  await form.getByLabel('Expected HTTP statuses',{exact:true}).fill('201');
+  check('Partially valid status lists are rejected without producing a graph');
+  await form.getByText('Advanced analysis settings',{exact:true}).click();
+  await form.getByLabel('Mandatory candidate frequency',{exact:true}).fill('0.5');
+  await form.getByLabel('Minimum edge frequency',{exact:true}).fill('0.75');
+  let report=await analyze();
+  assert.deepEqual(report.candidateGraph.mandatoryServices,['gateway-x','worker-x']);assert.deepEqual(report.candidateGraph.edges,[]);
+  check('Changing frequency thresholds changes the actual computed graph');
+  await form.getByLabel('Mandatory candidate frequency',{exact:true}).fill('2');
+  await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
+  assert.equal(await form.evaluate(e=>e.checkValidity()),false);
+  await form.getByLabel('Mandatory candidate frequency',{exact:true}).fill('1');
+  await form.getByLabel('Minimum edge frequency',{exact:true}).fill('0');
+  check('Out-of-range analysis settings are blocked by the input constraints');
+  await form.getByLabel('Export format',{exact:true}).selectOption('zipkin');
+  await upload([[{traceId:'a'.repeat(32),id:'b'.repeat(16),name:'POST /deliveries',kind:'SERVER',timestamp:1,duration:1500,localEndpoint:{serviceName:'gateway-x'},tags:{'http.status_code':'201'}}]]);
+  report=await analyze();assert.equal(report.successfulTraceCount,1);assert.equal(report.candidateGraph.criticality,.65);
+  check('Zipkin export files are normalized through the same user input flow');
+  await form.getByLabel('Export format',{exact:true}).selectOption('vendor_tracing');
+  await upload({resourceSpans:[{resource:{attributes:[{key:'service.name',value:{stringValue:'gateway-x'}}]},scopeSpans:[{spans:[{traceId:'a'.repeat(32),spanId:'b'.repeat(16),name:'POST /deliveries',kind:2,startTimeUnixNano:'1000000',endTimeUnixNano:'2500000',status:{code:1},attributes:[{key:'http.response.status_code',value:{intValue:'201'}}]}]}]}]});
+  report=await analyze();assert.equal(report.successfulTraceCount,1);
+  check('OpenTelemetry export files are normalized through the upload form');
+  await form.getByLabel('Export format',{exact:true}).selectOption('offline_jaeger');
+  await upload([trace('failure',true,503)]);report=await analyze();assert.equal(report.failedTraceCount,1);assert.equal(report.candidateGraph,null);
+  check('A failed-only trace set produces no invented dependency graph');
+  const partial=trace('broken',true,201);partial.spans[1].references[0].spanID='missing';
+  await upload([trace('good',true,201),partial]);report=await analyze();assert.equal(report.successfulTraceCount,1);assert.equal(report.traceQuality.excludedCount,1);
+  check('Incomplete trace evidence is excluded from service frequencies');
+  await form.getByLabel('Use an existing workflow definition',{exact:true}).check();
+  const definition={workflowId:'dispatch',description:'Delivery is dispatched',criticality:.65,entryService:'gateway-x',successCondition:{protocol:'http',terminalService:'gateway-x',operationName:'POST /deliveries',httpStatusCodes:[201]},mandatoryServices:['injected-answer']};
+  await form.getByLabel('Workflow definition JSON',{exact:true}).fill(JSON.stringify(definition));
+  await analyze(422);await status.filter({hasText:'mandatoryServices'}).waitFor();assert.equal(await result.isVisible(),false);
+  check('Predefined dependency answers are rejected by the backend and shown as input errors');
+  await form.getByLabel('Use an existing workflow definition',{exact:true}).uncheck();
+  await upload([trace('valid',true,201)]);
+  let releaseAnalysis;const analysisGate=new Promise(resolve=>releaseAnalysis=resolve);let analysisStarted;const startAnalysis=new Promise(resolve=>analysisStarted=resolve);
+  await p.route('**/api/workflows/analyze',async route=>{const response=await route.fetch();analysisStarted();await analysisGate;await route.fulfill({response});});
+  const lateAnalysis=p.waitForResponse(r=>r.url().endsWith('/analyze'));
+  await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();await startAnalysis;
+  await form.getByLabel('Root operation',{exact:true}).fill('POST /changed');releaseAnalysis();await lateAnalysis;
+  assert.equal(await result.isVisible(),false);assert(await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).isEnabled());
+  await p.unroute('**/api/workflows/analyze');
+  check('Editing inputs during analysis discards the stale result and restores the action');
+  await p.goto(fixtureBase+'/components/workflows',{waitUntil:'networkidle'});
+  const campaigns=await (await p.request.get(fixtureBase+'/api/workflows/experiment-campaigns')).json();const campaign=campaigns[0];
+  const api=fixtureBase+'/api/workflows/experiment-campaigns/'+encodeURIComponent(campaign.campaignId);
+  await p.locator(`[data-campaign="${campaign.campaignId}"]`).click();
+  await p.getByRole('heading',{name:'Approved dependency graph',exact:true}).waitFor();
+  await p.getByText('Normal run results',{exact:true}).click();
+  await p.getByText('3 recorded runs',{exact:true}).waitFor();
+  assert.match(await p.locator('[data-role="guided-result"]').innerText(),/succeeded.*trace matched/);
+  check('Saved run history displays actual results and trace matches from its execution batch');
+  const progress=await(await p.request.get(api+'/progress')).json();
+  const interventions=await(await p.request.get(api+'/intervention-status')).json();
+  const assessment=await(await p.request.get(api+'/assessment')).json();
+  await p.route('**/experiment-campaigns/*/progress',route=>route.fulfill({status:200,json:{...progress,stage:'interventions_required'}}));
+  const active=interventions.services[0].targetService;
+  await p.route('**/experiment-campaigns/*/intervention-status',route=>route.fulfill({status:200,json:{...interventions,services:interventions.services.map((s,i)=>({...s,state:i===0?'active':'planned',evidenceReady:false,eligibleTrials:0,excludedTrials:0}))}}));
+  await p.locator(`[data-campaign="${campaign.campaignId}"]`).click();
+  await p.getByRole('button',{name:'Record recovery',exact:true}).waitFor();
+  assert(await p.getByRole('button',{name:'Record recovery',exact:true}).isEnabled());
+  const other=p.locator('.intervention-service').nth(1);await other.locator(':scope > summary').click();
+  assert(await other.getByRole('button',{name:'Record outage',exact:true}).isDisabled());
+  assert.match(await other.innerText(),new RegExp(active));
+  check('Only one fixture outage can be recorded at a time; recovery stays available even with zero trials');
+  await p.unroute('**/experiment-campaigns/*/intervention-status');await p.unroute('**/experiment-campaigns/*/progress');
+  await p.route('**/experiment-campaigns/*/progress',route=>route.fulfill({status:200,json:{...progress,stage:'reviewed'}}));
+  await p.route('**/experiment-campaigns/*/approval',route=>route.fulfill({status:404,json:{detail:'Controlled fixture: not approved'}}));
+  const unresolved={...assessment,services:assessment.services.map((s,i)=>i===0?{...s,classification:'insufficient_evidence',reasons:['Controlled fixture: insufficient runs']}:s)};
+  await p.route('**/experiment-campaigns/*/assessment',route=>route.fulfill({status:200,json:unresolved}));
+  await p.getByRole('button',{name:'Refresh status',exact:true}).click();
+  await p.getByRole('heading',{name:'Review dependencies',exact:true}).waitFor();
+  assert(await p.getByRole('button',{name:'Approve graph',exact:true}).isDisabled());
+  assert.equal(await p.getByRole('button',{name:'Download graph JSON',exact:true}).count(),0);
+  check('Unresolved fixture dependencies cannot be approved or exported as an approved graph');
+  await p.unrouteAll({behavior:'wait'});
+  await p.reload({waitUntil:'networkidle'});
+  await p.getByRole('heading',{name:'Approved dependency graph',exact:true}).waitFor();
+  await p.getByText('View test results',{exact:true}).click();
+        if (runResponsive) {
+  await p.setViewportSize({width:375,height:812});
+  await p.waitForFunction(()=>getComputedStyle(document.querySelector('.content')).marginLeft==='0px');
+  assert(await p.locator('.workspace-main').evaluate(e=>e.clientWidth>=300));
+  assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await p.screenshot({path:path.join(out,'mobile-approved.png'),fullPage:true});
+  check('Mobile approval evidence has a full-width content area after navigation transitions');
+  await p.getByRole('button',{name:'Toggle navigation',exact:true}).click();
+  assert.equal(await p.getByRole('button',{name:'Toggle navigation',exact:true}).getAttribute('aria-expanded'),'true');
+  await p.keyboard.press('Escape');
+  assert.equal(await p.getByRole('button',{name:'Toggle navigation',exact:true}).getAttribute('aria-expanded'),'false');
+  check('Mobile navigation opens with the keyboard-accessible control and closes with Escape');
+        }
+  assert.deepEqual(errors,[]);
+  await fs.writeFile(path.join(out,'additional-checks.json'),JSON.stringify({checks,errors,simulatedStates:'controlled fixture only',realServiceOutages:0},null,2));
+ }catch(e){await fs.writeFile(path.join(out,'additional-checks.json'),JSON.stringify({checks,errors,failure:e.message},null,2));await p.screenshot({path:path.join(out,'additional-failure.png'),fullPage:true});throw e}
+ finally{await browser.close()}
+}
+
+async function runGuidedSetupChecks() {
+    const {browser, page, errors, checks, check} = await openTestPage();
+    const suffix = '/workflow-probe-preview';
+    const preview = async (expected = 200) => {
+        const pending = page.waitForResponse(response => response.url().endsWith(suffix) && response.request().method() === 'POST');
+        pending.catch(() => {});
+        await page.getByRole('button', {name: 'Check execution plan', exact: true}).click();
+        const response = await pending;
+        const result = await response.json();
+        assert.equal(response.status(), expected, JSON.stringify(result));
+        return result;
+    };
+    try {
+        const campaigns = await (await page.request.get(fixtureBase + '/api/workflows/experiment-campaigns')).json();
+        const sessionId = campaigns.find(item => item.workflowName.includes('Checkout lifecycle')).analysisSessionId;
+        const session = await (await page.request.get(fixtureBase + '/api/workflows/analysis-sessions/' + encodeURIComponent(sessionId))).json();
+        await page.goto(fixtureBase + '/components/workflows', {waitUntil: 'networkidle'});
+        await page.getByRole('button', {name: 'New workflow', exact: true}).click();
+        await page.getByLabel('Trace query URL', {exact: true}).fill('http://localhost:16686');
+        await page.getByLabel('Environment name', {exact: true}).fill('CONTROLLED-FIXTURE-ONLY');
+        await page.getByLabel('Environment type', {exact: true}).selectOption('experimental');
+        let scans = 0;
+        await page.route('**/api/workflows/discovery', async route => {
+            assert.equal(route.request().postDataJSON().entryService, undefined);
+            scans += 1;
+            await route.fulfill({json: {state: scans === 1 ? 'no_traces' : 'discovered',
+                message: scans === 1 ? 'No traces yet' : 'Recorded workflows found',
+                fingerprint: String(scans), truncated: false,
+                workflows: scans === 1 ? [] : [
+                    {rootService: 'other-gateway', operationName: session.operationName, traceCount: 2},
+                    {rootService: session.entryService, operationName: session.operationName, traceCount: 3},
+                ]}});
+        });
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
+        await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'No traces yet'}).waitFor();
+        assert(await page.getByRole('button', {name: 'Inspect traces and set up workflow', exact: true}).isDisabled());
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
+        await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'Recorded workflows found'}).waitFor();
+        await page.getByLabel('Request or operation to test', {exact: true}).selectOption('1');
+        await page.route('**/api/workflows/analysis-sessions', async route => {
+            if (route.request().method() !== 'POST') return route.continue();
+            const payload = route.request().postDataJSON();
+            assert.equal(payload.entryService, session.entryService);
+            assert.equal(payload.operationName, session.operationName);
+            await route.fulfill({status: 201, json: session});
+        });
+        await page.getByRole('button', {name: 'Inspect traces and set up workflow', exact: true}).click();
+        check('Automatic discovery handles empty evidence, distinguishes equal operation names by entry service, and opens the guided setup for the chosen candidate');
+        const form = page.locator('[data-role="guided-result"] form');
+        const action = form.locator('.request-section').filter({has: page.getByRole('heading', {name: 'Request to measure', exact: true})});
+        const save = form.getByRole('button', {name: 'Save and continue to baseline runs', exact: true});
+        const confirm = form.getByLabel('I reviewed the success checks for this workflow.', {exact: true});
+        await form.getByRole('heading', {name: 'Set up the workflow and success checks', exact: true}).waitFor();
+        assert(await save.isDisabled());
+        assert(await confirm.isDisabled());
+        assert.equal(await action.getByLabel('Request body', {exact: true}).inputValue(), 'none');
+        assert.equal(await form.getByLabel('HTTP response codes that count as success', {exact: true}).inputValue(), '');
+        assert.equal(await form.locator('textarea:visible').count(), 0);
+        check('Guided setup starts without invented inputs or mandatory JSON and requires a server-checked plan');
+        await form.getByLabel('Workflow name', {exact: true}).fill('Guided fixture workflow');
+        await form.getByLabel('What should a successful run achieve?', {exact: true}).fill('A supplied reference is confirmed');
+        await form.getByLabel('Business importance (0–1)', {exact: true}).fill('0.4');
+        await form.getByLabel('Baseline runs to collect', {exact: true}).fill('3');
+        const codes = form.getByLabel('HTTP response codes that count as success', {exact: true});
+        await codes.fill('200,invalid');
+        await preview(422);
+        await form.locator('.workspace-status').filter({hasText: 'HTTP success codes'}).waitFor();
+        assert(await save.isDisabled());
+        check('Backend validation errors keep the form editable and prevent saving');
+        await codes.fill('200');
+        await action.getByLabel('Request body', {exact: true}).selectOption('json');
+        await action.getByRole('button', {name: 'Add body field', exact: true}).click();
+        let rows = action.locator('.request-row');
+        await rows.nth(0).getByLabel('Field name', {exact: true}).fill('quantity');
+        await rows.nth(0).getByLabel('Value', {exact: true}).fill('2');
+        await rows.nth(0).getByLabel('Value type', {exact: true}).selectOption('number');
+        await action.getByRole('button', {name: 'Add body field', exact: true}).click();
+        await rows.nth(1).getByLabel('Field name', {exact: true}).fill('enabled');
+        await rows.nth(1).getByLabel('Value', {exact: true}).fill('false');
+        await rows.nth(1).getByLabel('Value type', {exact: true}).selectOption('boolean');
+        let plan = await preview();
+        assert.deepEqual(plan.executionDefinition.steps[0].jsonBody, {quantity: 2, enabled: false});
+        await confirm.check();
+        assert(await save.isEnabled());
+        check('Ordinary fields produce server-typed JSON numbers and booleans and enable save only after review');
+        await rows.nth(0).getByLabel('Value', {exact: true}).fill('3');
+        assert(await save.isDisabled());
+        assert(await confirm.isDisabled());
+        assert.equal(await form.locator('.execution-preview').isVisible(), false);
+        check('Changing inputs invalidates the previous plan and its approval');
+        await form.getByText('Preparation steps (optional)', {exact: true}).click();
+        await form.getByRole('button', {name: 'Add preparation step', exact: true}).click();
+        const steps = form.locator('.preparation-steps > section');
+        await steps.nth(0).getByLabel('Request (method and path)', {exact: true}).fill('POST /orders');
+        await steps.nth(0).getByLabel('Preparation success codes', {exact: true}).fill('201');
+        await steps.nth(0).getByText('Use a response value in a later step (optional)', {exact: true}).click();
+        await steps.nth(0).getByRole('button', {name: 'Add captured value', exact: true}).click();
+        await steps.nth(0).getByLabel('Variable name', {exact: true}).fill('orderId');
+        await steps.nth(0).getByLabel('Field path or header name', {exact: true}).fill('id');
+        await action.getByRole('button', {name: 'Add body field', exact: true}).click();
+        await rows.nth(2).getByLabel('Field name', {exact: true}).fill('reference');
+        await rows.nth(2).getByLabel('Value', {exact: true}).fill('{{orderId}}');
+        await form.getByRole('button', {name: 'Add preparation step', exact: true}).click();
+        await steps.nth(1).getByLabel('Request (method and path)', {exact: true}).fill('GET /session');
+        await steps.nth(1).getByLabel('Preparation success codes', {exact: true}).fill('200');
+        await steps.nth(1).getByRole('button', {name: 'Move earlier', exact: true}).click();
+        plan = await preview();
+        assert.deepEqual(plan.summary.map(step => step.path), ['/session', '/orders', '/fixture-checkout']);
+        assert.deepEqual(plan.summary.map(step => step.measured), [false, false, true]);
+        assert.deepEqual(plan.executionDefinition.steps[1].extract.orderId, {source: 'json_field', selector: 'id'});
+        assert.equal(plan.executionDefinition.steps[2].jsonBody.reference, '{{orderId}}');
+        check('Preparation steps reorder without losing inputs; the server resolves captures and keeps the selected action measured');
+        await steps.nth(0).getByRole('button', {name: 'Remove step', exact: true}).click();
+        await rows.nth(2).getByLabel('Value', {exact: true}).fill('{{missing}}');
+        await preview(422);
+        assert(await save.isDisabled());
+        await rows.nth(2).getByLabel('Value', {exact: true}).fill('{{orderId}}');
+        check('Removing steps preserves the remaining values; missing captured variables are rejected by the backend');
+        // Delay a genuine backend preview to verify stale replies cannot approve edited inputs.
+        let release;
+        const gate = new Promise(resolve => release = resolve);
+        await page.route('**/workflow-probe-preview', async route => {
+            const response = await route.fetch();
+            await gate;
+            await route.fulfill({response});
+        });
+        const sent = page.waitForRequest(request => request.url().endsWith(suffix));
+        await form.getByRole('button', {name: 'Check execution plan', exact: true}).click();
+        await sent;
+        await codes.fill('201');
+        release();
+        await form.getByRole('button', {name: 'Check execution plan', exact: true}).waitFor({state: 'visible'});
+        await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(item => item.textContent === 'Check execution plan').disabled);
+        assert(await confirm.isDisabled());
+        await page.unroute('**/workflow-probe-preview');
+        check('A delayed preview cannot approve settings edited while the request was in flight');
+        await form.getByText('Import existing settings (advanced)', {exact: true}).click();
+        await form.getByLabel('Import an execution definition (advanced)', {exact: true}).check();
+        await form.getByLabel('Execution definition JSON', {exact: true}).fill('{broken');
+        await form.getByRole('button', {name: 'Check execution plan', exact: true}).click();
+        await form.locator('.workspace-status.is-error').waitFor();
+        await form.getByLabel('Import an execution definition (advanced)', {exact: true}).uncheck();
+        plan = await preview();
+        assert.equal(plan.executionDefinition.steps.at(-1).jsonBody.quantity, 3);
+        assert.deepEqual(plan.summary.at(-1).successStatuses, [201]);
+        check('Advanced import errors are recoverable and switching modes preserves guided inputs');
+        if (runResponsive) {
+        await page.setViewportSize({width: 375, height: 812});
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('.content')).marginLeft === '0px');
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        assert.equal(await form.locator('input:not([type="hidden"]),select,textarea').evaluateAll(inputs => inputs.filter(input => !input.disabled && !input.labels?.length).length), 0);
+        await page.screenshot({path: path.join(out, 'guided-mobile.png'), fullPage: true});
+        check('Guided setup fits a 375px viewport and every active input has an associated label');
+        }
+        await page.setViewportSize({width: 1440, height: 1050});
+        await page.screenshot({path: path.join(out, 'guided-desktop.png'), fullPage: true});
+        await confirm.check();
+        const pending = page.waitForResponse(response => response.url().endsWith('/experiment-campaigns') && response.request().method() === 'POST');
+        await save.click();
+        const response = await pending;
+        const campaign = await response.json();
+        assert.equal(response.status(), 201, JSON.stringify(campaign));
+        assert.equal(campaign.workloadProfile, 'reviewed_guided_sequence');
+        assert.equal(campaign.baseline.requiredTrials, 3);
+        await page.getByRole('button', {name: 'Run one baseline test', exact: true}).waitFor();
+        check('The reviewed guided plan saves through the real API and continues to baseline collection without sending application requests');
+        assert.deepEqual(errors, []);
+        await fs.writeFile(path.join(out, 'guided-checks.json'), JSON.stringify({checks, errors, evidence: 'controlled fixture only', realServiceOutages: 0}, null, 2));
+    } catch (error) {
+        await page.screenshot({path: path.join(out, 'guided-failure.png'), fullPage: true});
+        throw error;
+    } finally { await browser.close(); }
+}
+
+async function runTraceControlChecks() {
+    const {browser, page, errors, checks, check} = await openTestPage();
+    try {
+        await page.addInitScript(() => {
+            const fixture = {state: 'trace-stopped', starts: 0, stops: 0};
+            window.__fixtureTrace = fixture;
+            window.__resilienceTraceService = {available: true,
+                status: async () => ({ok: true, state: fixture.state, message: fixture.state}),
+                start: async () => {fixture.starts++; fixture.state = 'trace-running'; return {ok: true, state: fixture.state, message: 'Trace collector started'};},
+                stop: async () => {fixture.stops++; fixture.state = 'trace-stopped'; return {ok: true, state: fixture.state, message: 'Trace collector stopped'};},
+            };
+        });
+        await page.route('**/api/workflows/discovery', async route => {
+            const running = await page.evaluate(() => window.__fixtureTrace.state === 'trace-running');
+            await route.fulfill({json: {state: running ? 'no_traces' : 'jaeger_unavailable',
+                message: running ? 'No traces have arrived' : 'Trace service unavailable', workflows: [], truncated: false}});
+        });
+        await page.goto(fixtureBase + '/components/workflows', {waitUntil: 'networkidle'});
+        await page.getByRole('button', {name: 'New workflow', exact: true}).click();
+        await page.getByLabel('Trace query URL', {exact: true}).fill('http://localhost:16686');
+        await page.getByLabel('Environment name', {exact: true}).fill('Controlled trace UI');
+        await page.getByLabel('Environment type', {exact: true}).selectOption('experimental');
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
+        await page.locator('[data-role="trace-start-prompt"]').waitFor({state: 'visible'});
+        assert.equal(await page.evaluate(() => window.__fixtureTrace.starts), 0);
+        await page.getByRole('button', {name: 'Not now', exact: true}).click();
+        assert.equal(await page.locator('[data-role="trace-start-prompt"]').isVisible(), false);
+        check('Desktop Find workflows offers tracing without starting it; Not now leaves it stopped');
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
+        await page.locator('[data-role="trace-start-prompt"]').waitFor({state: 'visible'});
+        await page.screenshot({path: path.join(out, 'desktop-trace-start.png'), fullPage: true});
+        await page.getByRole('button', {name: 'Start the trace service', exact: true}).click();
+        await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'No traces have arrived'}).waitFor();
+        assert.equal(await page.evaluate(() => window.__fixtureTrace.starts), 1);
+        assert(await page.getByRole('button', {name: 'Stop the trace service', exact: true}).isVisible());
+        check('An explicit desktop start confirmation refreshes discovery and exposes Stop for the owned collector');
+        await page.getByRole('button', {name: 'Stop the trace service', exact: true}).click();
+        await page.locator('[data-role="trace-start-prompt"]').waitFor({state: 'visible'});
+        assert.equal(await page.evaluate(() => window.__fixtureTrace.stops), 1);
+        check('Desktop stop returns to the unavailable state using a controlled helper without changing real services');
+        assert.deepEqual(errors, []);
+        await fs.writeFile(path.join(out, 'trace-control-checks.json'), JSON.stringify({checks, errors, evidence: 'controlled helper fixture', realServiceChanges: 0}, null, 2));
+    } finally { await browser.close(); }
+}
+
+async function main() {
+    if (!base || !fixtureBase) {
+        throw new Error('Set WORKFLOW_TEST_URL to the running app and WORKFLOW_FIXTURE_URL to browser_fixture.py on a fresh port.');
+    }
+    const selection = process.env.WORKFLOW_BROWSER_TESTS || 'all';
+    if (!['all', 'lifecycle', 'state', 'setup'].includes(selection)) throw new Error('WORKFLOW_BROWSER_TESTS must be all, lifecycle, state or setup.');
+    if (['all', 'lifecycle'].includes(selection)) await runWorkflowLifecycle();
+    if (['all', 'state'].includes(selection)) await runWorkspaceStateChecks();
+    if (['all', 'setup'].includes(selection)) { await runGuidedSetupChecks(); await runTraceControlChecks(); }
+}
+main().catch(error => { console.error(error); process.exit(1); });

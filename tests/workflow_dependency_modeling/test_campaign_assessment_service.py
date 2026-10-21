@@ -1,9 +1,12 @@
 """Campaign-to-assessment orchestration tests."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from app.engine.workflow_dependency_modeling import experiment_manifest_service as manifests
+from app.engine.workflow_dependency_modeling.experiment_manifest_repository import InMemoryExperimentManifestRepository
 
 from app.engine.workflow_dependency_modeling.analysis_session_models import (
     WorkflowAnalysisSession,
@@ -12,6 +15,8 @@ from app.engine.workflow_dependency_modeling.analysis_session_repository import 
     InMemoryAnalysisSessionRepository,
 )
 from app.engine.workflow_dependency_modeling.campaign_assessment_service import (
+    _intervention_evidence,
+    _intervention_verification,
     approve_experiment_campaign,
     assess_experiment_campaign,
     get_experiment_campaign_assessment,
@@ -28,6 +33,7 @@ from app.engine.workflow_dependency_modeling.execution_models import (
     ExecutionOutcome,
     ExecutionOutcomeStatus,
     ExecutionRegistration,
+    TraceEvidenceSnapshot,
 )
 from app.engine.workflow_dependency_modeling.execution_repository import (
     InMemoryExecutionRepository,
@@ -48,6 +54,32 @@ from app.main import app
 
 
 NOW = datetime(2026, 10, 5, tzinfo=timezone.utc)
+
+
+def test_progress_does_not_call_docker_verified_trials_operator_attested(monkeypatch):
+    from app.engine.workflow_dependency_modeling import campaign_assessment_service as service
+
+    records = [SimpleNamespace(marker="paymentservice")]
+    monkeypatch.setattr(service, "execution_repository", lambda repository: SimpleNamespace(
+        list=lambda *, batch_id: records
+    ))
+    monkeypatch.setattr(service, "_eligible_campaign_outcome", lambda outcome: True)
+    monkeypatch.setattr(service, "_verified_outage_target", lambda outcome: outcome.marker)
+    services = [{"batchId": "batch:payment", "targetService": "paymentservice", "evidenceReady": True}]
+    assert _intervention_verification(services) == "docker_verified_local_demo"
+    records.append(SimpleNamespace(marker=None))
+    assert _intervention_verification(services) == "mixed"
+    assert _intervention_evidence(services) == {
+        "verification": "mixed", "verifiedTrials": 1, "eligibleTrials": 2,
+        "services": [{"targetService": "paymentservice", "verifiedTrials": 1, "eligibleTrials": 2}],
+    }
+    records[0].marker = None
+    assert _intervention_verification(services) == "operator_attested"
+
+
+@pytest.fixture(autouse=True)
+def isolated_experiment_manifests(monkeypatch):
+    monkeypatch.setattr(manifests, "_default_repository", InMemoryExperimentManifestRepository())
 
 
 def _analysis() -> WorkflowAnalysisSession:
@@ -127,7 +159,8 @@ def _campaign() -> ExperimentCampaign:
     )
 
 
-def _outcome(execution_id: str, batch_id: str, succeeded: bool) -> ExecutionOutcome:
+def _outcome(execution_id: str, batch_id: str, succeeded: bool, manifest) -> ExecutionOutcome:
+    started_at = NOW + (timedelta(seconds=90) if batch_id == "batch:payment" else timedelta())
     registration = ExecutionRegistration.from_mapping(
         {
             "executionId": execution_id,
@@ -135,15 +168,22 @@ def _outcome(execution_id: str, batch_id: str, succeeded: bool) -> ExecutionOutc
             "workflowId": "checkout",
             "scenarioVersion": 1,
             "invocationStatus": "completed",
-            "source": "controlled_online_boutique",
+            "source": "controlled_workflow_experiment",
             "evidenceLocator": f"jaeger://{execution_id}",
             "environmentId": "boutique-local",
             "expectedTraceId": f"trace:{execution_id}",
-            "startedAt": NOW.isoformat(),
-            "finishedAt": NOW.isoformat(),
+            "startedAt": started_at.isoformat(),
+            "finishedAt": started_at.isoformat(),
             "registeredBy": "runner",
+            "experimentRecordId": manifest.manifest_id,
+            "experimentRecordDigest": manifest.content_digest,
         }
     )
+    trace = {
+        "traceID": registration.expected_trace_id,
+        "processes": {"p1": {"serviceName": "frontend"}},
+        "spans": [{"spanID": f"span:{execution_id}", "processID": "p1", "references": []}],
+    }
     return ExecutionOutcome(
         registration=registration,
         status=(
@@ -155,6 +195,12 @@ def _outcome(execution_id: str, batch_id: str, succeeded: bool) -> ExecutionOutc
         recorded_at=NOW,
         matched_trace_id=registration.expected_trace_id,
         evidence_id=f"evidence:{execution_id}",
+        evidence_snapshot=TraceEvidenceSnapshot.from_trace(
+            trace,
+            trace_id=registration.expected_trace_id,
+            source_locator=registration.evidence_locator,
+            captured_at=NOW,
+        ),
     )
 
 
@@ -163,10 +209,14 @@ def _repositories():
     analyses.create(_analysis())
     campaigns = InMemoryExperimentCampaignRepository()
     campaigns.create(_campaign())
+    manifest = manifests.create_experiment_manifest(
+        "campaign:checkout1", {}, actor="researcher",
+        campaign_repository=campaigns, analysis_repository=analyses, now=NOW,
+    )
     executions = InMemoryExecutionRepository()
     for index in range(3):
-        executions.create(_outcome(f"base:{index}", "batch:baseline", True))
-        executions.create(_outcome(f"payment:{index}", "batch:payment", False))
+        executions.create(_outcome(f"base:{index}", "batch:baseline", True, manifest))
+        executions.create(_outcome(f"payment:{index}", "batch:payment", False, manifest))
     events = InMemoryInterventionEventRepository()
     for event_type, minute in (("activated", 1), ("restored", 2)):
         events.create(
@@ -233,6 +283,53 @@ def test_completed_campaign_creates_explainable_assessment() -> None:
     ) == approval
 
 
+def test_reviewed_business_criticality_survives_assessment_and_approval():
+    from dataclasses import replace
+    analyses, campaigns, executions, events = _repositories()
+    campaign = replace(campaigns.get("campaign:checkout1"), criticality=.42)
+    campaigns._campaigns[campaign.campaign_id] = campaign
+    manifests.configure_experiment_manifest_repository(InMemoryExperimentManifestRepository())
+    manifest = manifests.create_experiment_manifest(campaign.campaign_id, {}, actor="test",
+        campaign_repository=campaigns, analysis_repository=analyses, now=NOW)
+    for outcome in executions.list():
+        registration = replace(outcome.registration, experiment_record_id=manifest.manifest_id,
+                               experiment_record_digest=manifest.content_digest)
+        executions._records[registration.execution_id] = replace(outcome, registration=registration)
+    assessments = InMemoryDependencyAssessmentRepository()
+    result = assess_experiment_campaign(campaign.campaign_id, actor="test", campaign_repository=campaigns,
+        analysis_repository=analyses, execution_repository_override=executions,
+        event_repository=events, repository=assessments, now=NOW)
+    approval = approve_experiment_campaign(campaign.campaign_id, actor="test", rationale="Fixture review",
+        approval_confirmed=True, campaign_repository=campaigns, repository=assessments, now=NOW)
+    assert result.candidate_graph.criticality == pytest.approx(.42)
+    assert approval.approved_graph.criticality == pytest.approx(.42)
+
+
+def test_instrumented_local_demo_cannot_approve_unverified_eligible_trials(monkeypatch) -> None:
+    from app.engine.workflow_dependency_modeling import campaign_assessment_service as service
+
+    analyses, campaigns, executions, events = _repositories()
+    assessments = InMemoryDependencyAssessmentRepository()
+    assess_experiment_campaign(
+        "campaign:checkout1", actor="reviewer", campaign_repository=campaigns,
+        analysis_repository=analyses, execution_repository_override=executions,
+        event_repository=events, repository=assessments, now=NOW,
+    )
+    local_campaign = SimpleNamespace(
+        workload_profile="online_boutique_checkout_v0_10_1",
+        environment_id="online-boutique-local-instrumented-v0.10.1",
+        baseline=SimpleNamespace(required_trials=3),
+        interventions=(SimpleNamespace(batch_id="batch:payment", target_service="paymentservice"),),
+    )
+    monkeypatch.setattr(service, "get_experiment_campaign", lambda *args, **kwargs: local_campaign)
+    with pytest.raises(ValueError, match="backend-verified Docker outage proof"):
+        approve_experiment_campaign(
+            "campaign:checkout1", actor="reviewer", rationale="Reviewed evidence",
+            approval_confirmed=True, campaign_repository=campaigns,
+            repository=assessments, execution_repository_override=executions, now=NOW,
+        )
+
+
 def test_incomplete_intervention_cannot_be_assessed() -> None:
     analyses, campaigns, executions, _ = _repositories()
     events = InMemoryInterventionEventRepository()
@@ -246,6 +343,114 @@ def test_incomplete_intervention_cannot_be_assessed() -> None:
             execution_repository_override=executions,
             event_repository=events,
             repository=assessments,
+            now=NOW,
+        )
+
+
+def test_legacy_trial_remains_excluded_through_assessment_and_freeze() -> None:
+    from dataclasses import replace
+    from app.engine.workflow_dependency_modeling.graph_freeze_service import freeze_workflow_graph
+    from app.engine.workflow_dependency_modeling.graph_freeze_repository import InMemoryGraphFreezeRepository
+
+    analyses, campaigns, executions, events = _repositories()
+    manifest = manifests.list_experiment_manifests()[0]
+    legacy = _outcome("base:legacy", "batch:baseline", True, manifest)
+    legacy = replace(
+        legacy,
+        registration=replace(
+            legacy.registration,
+            experiment_record_id=None,
+            experiment_record_digest=None,
+        ),
+    )
+    executions.create(legacy)
+    assessments = InMemoryDependencyAssessmentRepository()
+    result = assess_experiment_campaign(
+        "campaign:checkout1",
+        actor="reviewer",
+        campaign_repository=campaigns,
+        analysis_repository=analyses,
+        execution_repository_override=executions,
+        event_repository=events,
+        repository=assessments,
+        now=NOW,
+    )
+    assert result.services[0].classification is ValidatedDependencyType.MANDATORY
+    assert result.services[0].baseline.total_records == 4
+    assert result.services[0].baseline.eligible_records == 3
+    assert "base:legacy" in result.services[0].excluded_execution_ids
+    approve_experiment_campaign(
+        "campaign:checkout1",
+        actor="reviewer",
+        rationale="Reviewed the eligible evidence and the excluded legacy trial",
+        approval_confirmed=True,
+        campaign_repository=campaigns,
+        repository=assessments,
+        now=NOW,
+    )
+    frozen = freeze_workflow_graph(
+        "checkout",
+        {"freezeId": "freeze:checkout:legacy", "assessmentId": result.assessment_id},
+        actor="reviewer",
+        repository=InMemoryGraphFreezeRepository(),
+        dependency_repository=assessments,
+        execution_repository=executions,
+        now=NOW,
+    )
+    assert frozen.valid_trace_count == 6
+    assert frozen.excluded_trace_count == 1
+    assert legacy.matched_trace_id not in frozen.trace_ids
+
+
+def test_trials_outside_confirmed_intervention_window_cannot_be_assessed() -> None:
+    from dataclasses import replace
+
+    analyses, campaigns, executions, events = _repositories()
+    for index in range(3):
+        execution_id = f"payment:{index}"
+        outcome = executions.get(execution_id)
+        executions._records[execution_id] = replace(
+            outcome,
+            registration=replace(
+                outcome.registration,
+                started_at=NOW,
+                finished_at=NOW,
+            ),
+        )
+    with pytest.raises(ValueError, match="Intervention evidence is incomplete"):
+        assess_experiment_campaign(
+            "campaign:checkout1",
+            actor="reviewer",
+            campaign_repository=campaigns,
+            analysis_repository=analyses,
+            execution_repository_override=executions,
+            event_repository=events,
+            repository=InMemoryDependencyAssessmentRepository(),
+            now=NOW,
+        )
+
+
+def test_assessment_rejects_trial_from_another_experiment_record() -> None:
+    from dataclasses import replace
+
+    analyses, campaigns, executions, events = _repositories()
+    outcome = executions.get("payment:0")
+    executions._records["payment:0"] = replace(
+        outcome,
+        registration=replace(
+            outcome.registration,
+            experiment_record_digest="sha256:" + "0" * 64,
+        ),
+    )
+    with pytest.raises(ValueError, match="does not match the frozen experiment record"):
+        assess_experiment_campaign(
+            "campaign:checkout1",
+            actor="reviewer",
+            campaign_repository=campaigns,
+            analysis_repository=analyses,
+            execution_repository_override=executions,
+            event_repository=events,
+            repository=InMemoryDependencyAssessmentRepository(),
             now=NOW,
         )
 

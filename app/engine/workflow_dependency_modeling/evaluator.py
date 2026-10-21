@@ -18,6 +18,9 @@ class EvaluationMetrics:
     true_positives: int
     false_positives: int
     false_negatives: int
+    true_negatives: int
+    evaluated_count: int
+    accuracy_definition: str
 
 
 @dataclass
@@ -58,7 +61,12 @@ class SensitivityStep:
     optional_services: list[str] = field(default_factory=list)
 
 
-def _compute_metrics(predicted: set, reference: set) -> EvaluationMetrics:
+def _compute_metrics(
+    predicted: set,
+    reference: set,
+    *,
+    candidate_universe: set | None = None,
+) -> EvaluationMetrics:
     tp = len(predicted & reference)
     fp = len(predicted - reference)
     fn = len(reference - predicted)
@@ -66,15 +74,38 @@ def _compute_metrics(predicted: set, reference: set) -> EvaluationMetrics:
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
     jaccard = tp / (tp + fp + fn) if tp + fp + fn else 0.0
+    if candidate_universe is None:
+        # Compatibility for set-reconstruction metrics that have no independently
+        # labelled negatives. The explicit definition prevents this value from
+        # being mistaken for confusion-matrix accuracy.
+        tn = 0
+        evaluated_count = tp + fp + fn
+        accuracy = jaccard
+        accuracy_definition = "jaccard_no_negative_universe"
+    else:
+        if not reference <= candidate_universe:
+            raise ValueError("Reference positives must be in the candidate universe")
+        evaluated_predictions = predicted & candidate_universe
+        fp = len(evaluated_predictions - reference)
+        unknown_predictions = predicted - candidate_universe
+        if unknown_predictions:
+            fp += len(unknown_predictions)
+        tn = len(candidate_universe - reference - evaluated_predictions)
+        evaluated_count = tp + fp + fn + tn
+        accuracy = (tp + tn) / evaluated_count if evaluated_count else 0.0
+        accuracy_definition = "confusion_matrix_over_explicit_universe"
     return EvaluationMetrics(
         precision,
         recall,
         f1,
-        jaccard,
+        accuracy,
         jaccard,
         tp,
         fp,
         fn,
+        tn,
+        evaluated_count,
+        accuracy_definition,
     )
 
 
@@ -143,18 +174,32 @@ def evaluate_graph(
     reference_mandatory_edges = {
         (edge.source, edge.target) for edge in reference.mandatory_edges
     }
+    edge_universe = {
+        (edge.source, edge.target) for edge in reference.evaluated_edge_universe
+    }
+    service_universe = set(reference.expected_services)
     predicted_paths = _root_to_leaf_paths(predicted_edges)
     reference_paths = _root_to_leaf_paths(reference_edges)
 
     return GraphEvaluationResult(
         workflow_id=generated.workflow_id,
-        edge_metrics=_compute_metrics(predicted_edges, reference_edges),
+        edge_metrics=_compute_metrics(
+            predicted_edges,
+            reference_edges,
+            candidate_universe=edge_universe or None,
+        ),
         service_metrics=_compute_metrics(predicted_services, reference_services),
         mandatory_service_metrics=_compute_metrics(
-            predicted_mandatory_services, reference_mandatory_services
+            predicted_mandatory_services,
+            reference_mandatory_services,
+            candidate_universe=service_universe,
         ),
         mandatory_edge_metrics=(
-            _compute_metrics(predicted_mandatory_edges, reference_mandatory_edges)
+            _compute_metrics(
+                predicted_mandatory_edges,
+                reference_mandatory_edges,
+                candidate_universe=edge_universe or reference_edges,
+            )
             if predicted_mandatory_edges is not None
             else None
         ),

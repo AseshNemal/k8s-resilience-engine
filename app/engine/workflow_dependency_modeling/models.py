@@ -64,6 +64,8 @@ TEnum = TypeVar("TEnum", bound=Enum)
 
 
 def _required_text(data: Mapping[str, Any], key: str, kind: str) -> str:
+    if not isinstance(data, Mapping):
+        raise ComponentDataError(f"{kind} must be an object")
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ComponentDataError(f"{kind} requires a non-empty '{key}' string")
@@ -240,6 +242,32 @@ class SuccessCondition:
 
 
 @dataclass(frozen=True)
+class WorkflowCondition:
+    """Named business branch under which dependency evidence is evaluated."""
+
+    condition_id: str
+    description: str
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "WorkflowCondition":
+        condition_id = _required_text(data, "conditionId", "WorkflowCondition")
+        if not _WORKFLOW_ID.fullmatch(condition_id):
+            raise ComponentDataError(
+                "WorkflowCondition conditionId must use lowercase letters, digits, '_' or '-'"
+            )
+        return cls(
+            condition_id=condition_id,
+            description=_required_text(data, "description", "WorkflowCondition"),
+        )
+
+    def to_mapping(self) -> dict[str, str]:
+        return {
+            "conditionId": self.condition_id,
+            "description": self.description,
+        }
+
+
+@dataclass(frozen=True)
 class WorkflowScenario:
     """Business input known before trace analysis.
 
@@ -252,6 +280,11 @@ class WorkflowScenario:
     criticality: float
     success_condition: SuccessCondition
     entry_service: str
+    conditions: tuple[WorkflowCondition, ...] = field(
+        default_factory=lambda: (
+            WorkflowCondition("default", "All workflow executions"),
+        )
+    )
     version: int = 1
     lifecycle: ScenarioLifecycle = ScenarioLifecycle.DRAFT
     source: ScenarioSource = ScenarioSource.MANUAL
@@ -261,6 +294,8 @@ class WorkflowScenario:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "WorkflowScenario":
+        if not isinstance(data, Mapping):
+            raise ComponentDataError("WorkflowScenario must be an object")
         forbidden = {"expectedServices", "expectedEdges", "traceFile"} & data.keys()
         if forbidden:
             names = ", ".join(sorted(forbidden))
@@ -275,12 +310,23 @@ class WorkflowScenario:
         success = data.get("successCondition")
         if not isinstance(success, Mapping):
             raise ComponentDataError("WorkflowScenario successCondition must be an object")
+        raw_conditions = data.get(
+            "conditions",
+            [{"conditionId": "default", "description": "All workflow executions"}],
+        )
+        if not isinstance(raw_conditions, list) or not raw_conditions:
+            raise ComponentDataError("WorkflowScenario conditions must be a non-empty list")
+        conditions = tuple(WorkflowCondition.from_mapping(item) for item in raw_conditions)
+        condition_ids = [item.condition_id for item in conditions]
+        if len(condition_ids) != len(set(condition_ids)):
+            raise ComponentDataError("WorkflowScenario condition IDs must be unique")
         return cls(
             workflow_id=workflow_id,
             description=_required_text(data, "description", "WorkflowScenario"),
             criticality=_criticality(data.get("criticality")),
             success_condition=SuccessCondition.from_mapping(success),
             entry_service=_required_text(data, "entryService", "WorkflowScenario"),
+            conditions=conditions,
             version=_positive_version(data.get("version", 1)),
             lifecycle=_enum_value(
                 ScenarioLifecycle,
@@ -306,6 +352,7 @@ class WorkflowScenario:
             "criticality": self.criticality,
             "successCondition": self.success_condition.to_mapping(),
             "entryService": self.entry_service,
+            "conditions": [item.to_mapping() for item in self.conditions],
             "version": self.version,
             "lifecycle": self.lifecycle.value,
             "source": self.source.value,
@@ -389,6 +436,7 @@ def _validate_reference_edges(
     expected: set[ReferenceEdge],
     mandatory: set[ReferenceEdge],
     optional: set[ReferenceEdge],
+    evaluated_non_edges: set[ReferenceEdge],
     mandatory_services: set[str],
     optional_services: set[str],
 ) -> None:
@@ -402,12 +450,20 @@ def _validate_reference_edges(
             "mandatoryEdges and optionalEdges"
         )
     expected_services = mandatory_services | optional_services
+    if expected & evaluated_non_edges:
+        raise ComponentDataError(
+            "ReferenceWorkflow expectedEdges and evaluatedNonEdges must not overlap"
+        )
     if any(
         edge.source not in expected_services or edge.target not in expected_services
-        for edge in expected
+        for edge in expected | evaluated_non_edges
     ):
         raise ComponentDataError(
             "ReferenceWorkflow edge endpoints must be declared in expectedServices"
+        )
+    if any(edge.source == edge.target for edge in evaluated_non_edges):
+        raise ComponentDataError(
+            "ReferenceWorkflow evaluatedNonEdges must not contain self edges"
         )
     if any(
         edge.source not in mandatory_services or edge.target not in mandatory_services
@@ -427,6 +483,7 @@ class ReferenceWorkflow:
     optional_services: tuple[str, ...]
     mandatory_edges: tuple[ReferenceEdge, ...]
     optional_edges: tuple[ReferenceEdge, ...]
+    evaluated_non_edges: tuple[ReferenceEdge, ...]
     synthetic: bool
 
     @property
@@ -438,6 +495,11 @@ class ReferenceWorkflow:
     def expected_edges(self) -> tuple[ReferenceEdge, ...]:
         """Return the combined edge-discovery ground truth."""
         return tuple(sorted(set(self.mandatory_edges + self.optional_edges)))
+
+    @property
+    def evaluated_edge_universe(self) -> tuple[ReferenceEdge, ...]:
+        """Return only independently labelled positive and negative edges."""
+        return tuple(sorted(set(self.expected_edges + self.evaluated_non_edges)))
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ReferenceWorkflow":
@@ -460,10 +522,14 @@ class ReferenceWorkflow:
         edges = _reference_edges(data["expectedEdges"], "expectedEdges")
         mandatory_edges = _reference_edges(data["mandatoryEdges"], "mandatoryEdges")
         optional_edges = _reference_edges(data["optionalEdges"], "optionalEdges")
+        evaluated_non_edges = _reference_edges(
+            data.get("evaluatedNonEdges", []), "evaluatedNonEdges"
+        )
         _validate_reference_edges(
             edges,
             mandatory_edges,
             optional_edges,
+            evaluated_non_edges,
             mandatory_services,
             optional_services,
         )
@@ -476,5 +542,6 @@ class ReferenceWorkflow:
             optional_services=tuple(sorted(optional_services)),
             mandatory_edges=tuple(sorted(mandatory_edges)),
             optional_edges=tuple(sorted(optional_edges)),
+            evaluated_non_edges=tuple(sorted(evaluated_non_edges)),
             synthetic=synthetic,
         )

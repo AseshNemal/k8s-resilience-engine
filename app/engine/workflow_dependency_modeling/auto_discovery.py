@@ -52,43 +52,55 @@ def slugify_operation(text: str) -> str:
 _slugify = slugify_operation
 
 
-# Route templates that stand for one workflow however many resource IDs it is called with. This is the Online
-# Boutique benchmark's profile, kept as the default so the benchmark runners and the outcome evaluator behave as
-# before; generic discovery passes ``route_patterns=()`` and so never assumes any application's routes.
-BENCHMARK_ROUTE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"^/product/[^/]+$"), "/product/{id}"),
+_DYNAMIC_PATH_SEGMENT = re.compile(
+    r"^(?:\d+|[0-9a-f]{8,}|[0-9a-f]{8}-[0-9a-f-]{27,})$",
+    re.IGNORECASE,
 )
 
 
+def _normalized_http_path(path: str) -> str:
+    """Normalize only strong identifier shapes without application-name rules."""
+    segments = path.split("/")
+    return "/".join(
+        "{id}" if _DYNAMIC_PATH_SEGMENT.fullmatch(segment) else segment
+        for segment in segments
+    )
+
+
 def operation_key(
-    root: Span,
-    route_patterns: tuple[tuple[re.Pattern[str], str], ...] = BENCHMARK_ROUTE_PATTERNS,
+    root: Span, route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None = None,
 ) -> str | None:
     """Group requests by method and route, excluding health and telemetry traffic."""
     method = root.tags.get("http.request.method", root.tags.get("http.method"))
-    target = root.tags.get("http.route") or root.tags.get("http.target") or root.tags.get("url.full")
+    route = root.tags.get("http.route") or root.tags.get("url.template")
+    target = route or root.tags.get("http.target") or root.tags.get("url.full")
     if method and target:
         path = urlsplit(target).path
         if path in {"/_healthz", "/healthz", "/health", "/readyz", "/metrics"} or path.startswith("/static/"):
             return None
-        for pattern, template in route_patterns:
-            path = pattern.sub(template, path)
+        if route_patterns is None and not route:
+            path = _normalized_http_path(path)
+        elif route_patterns is not None:
+            for pattern, template in route_patterns:
+                path = pattern.sub(template, path)
         return f"{method.upper()} {path}"
     if "TraceService/Export" in root.operation_name or root.tags.get("span.kind") == "client":
         return None
     return root.operation_name
 
 
-def select_workflow_traces(traces: list[dict], operation: str) -> list[dict]:
-    """Traces whose root operation is ``operation``, named by the generic or the benchmark profile."""
+def select_workflow_traces(
+    traces: list[dict], operation: str, entry_service: str | None = None,
+    route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None = None,
+) -> list[dict]:
     selected = []
     for trace in traces:
         spans = parse_spans([trace])
         roots = find_root_spans({trace.get("traceID", ""): spans})
-        if not roots:
-            continue
-        root = next(iter(roots.values()))
-        if operation in {operation_key(root), operation_key(root, ())}:
+        root = next(iter(roots.values()), None)
+        if root and operation in {operation_key(root, route_patterns), operation_key(root, ())} and (
+            entry_service is None or root.service_name == entry_service
+        ):
             selected.append(trace)
     return selected
 
@@ -133,7 +145,7 @@ def find_root_spans(spans_by_trace: dict[str, list[Span]]) -> dict[str, Span]:
 
 def discover_root_workflows(
     traces: list[dict[str, Any]],
-    route_patterns: tuple[tuple[re.Pattern[str], str], ...] = BENCHMARK_ROUTE_PATTERNS,
+    route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None = None,
 ) -> list[DiscoveredWorkflowSummary]:
     """Scan raw Jaeger traces and auto-discover all distinct entry workflows.
 
@@ -155,20 +167,17 @@ def discover_root_workflows(
     root_spans = find_root_spans(spans_by_trace)
 
     # Group traces by root operation name
-    traces_by_operation: dict[str, list[str]] = defaultdict(list)
-    root_service_by_op: dict[str, str] = {}
+    traces_by_operation: dict[tuple[str, str], list[str]] = defaultdict(list)
 
     for trace_id, root in root_spans.items():
         op_name = operation_key(root, route_patterns)
         if not op_name:
             continue
-        traces_by_operation[op_name].append(trace_id)
-        if op_name not in root_service_by_op:
-            root_service_by_op[op_name] = root.service_name
+        traces_by_operation[(root.service_name, op_name)].append(trace_id)
 
     results: list[DiscoveredWorkflowSummary] = []
 
-    for op_name, trace_ids in traces_by_operation.items():
+    for (root_service, op_name), trace_ids in traces_by_operation.items():
         # Find all participating services for this operation
         services: set[str] = set()
         for tid in trace_ids:
@@ -181,7 +190,7 @@ def discover_root_workflows(
             DiscoveredWorkflowSummary(
                 workflow_id=workflow_id,
                 operation_name=op_name,
-                root_service=root_service_by_op[op_name],
+                root_service=root_service,
                 trace_count=len(trace_ids),
                 participating_services=sorted(services),
                 sample_trace_ids=trace_ids[:5],
@@ -189,5 +198,5 @@ def discover_root_workflows(
         )
 
     # Sort most frequent workflows first
-    results.sort(key=lambda w: w.trace_count, reverse=True)
+    results.sort(key=lambda w: (-w.trace_count, w.root_service, w.operation_name))
     return results

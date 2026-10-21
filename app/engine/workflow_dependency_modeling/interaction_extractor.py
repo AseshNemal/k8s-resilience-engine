@@ -11,17 +11,16 @@ Pipeline position::
         -> aggregate_edges()        # cross-trace frequency
         -> dependency_classifier    # (Part 3)
 
-The key insight that makes the classifier work: a service edge whose
-*frequency* across all traces equals 1.0 appeared in every execution of
-the workflow, which is strong evidence that the target service is mandatory.
-An edge with frequency < 1.0 was sometimes absent, suggesting the target
-service is optional.
+Frequency measures observed participation, not dependency necessity.
+Mandatory, supporting, and optional claims require controlled outcome
+assessment; even an edge present in every trace may be nonessential.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 
 from app.engine.workflow_dependency_modeling.trace_reader import Span
 
@@ -58,16 +57,19 @@ class TraceInteraction:
     broken_parent_count: int = 0
     """Spans whose declared parent was absent from the trace export."""
 
+    linked_edges: list[ServiceEdge] = field(default_factory=list)
+    """Explicit span-link associations, never proof of an asynchronous call."""
+
+    call_counts: dict[tuple[str, str], int] = field(default_factory=dict)
+    """Distinct remote call attempts per edge before per-trace deduplication."""
+
 
 @dataclass
 class ObservedEdge:
     """A service edge aggregated across all trace runs.
 
-    ``frequency`` is the primary signal consumed by the dependency
-    classifier in Part 3:
-
-    - ``frequency == 1.0`` → edge present in every trace → likely mandatory
-    - ``frequency < 1.0``  → edge absent from some traces → likely optional
+    ``frequency`` measures the share of traces containing an edge.
+    It does not by itself establish mandatory or optional dependency status.
     """
 
     source: str
@@ -76,6 +78,37 @@ class ObservedEdge:
     """Number of trace runs that contain this edge."""
     frequency: float
     """``occurrence_count / total_traces`` in the range ``[0.0, 1.0]``."""
+    total_call_count: int = 0
+    """Distinct observed remote call attempts across all traces."""
+    max_calls_per_trace: int = 0
+    """Largest attempt count in one trace; values above one indicate retry/loop use."""
+    repeated_trace_count: int = 0
+    """Number of traces containing more than one attempt for this edge."""
+
+
+def _client_peer(span: Span) -> str | None:
+    """Resolve a standards-based client peer without guessing from span names."""
+    if span.tags.get("span.kind", "").lower() != "client":
+        return None
+    raw_target = span.tags.get("server.address") or span.tags.get("net.peer.name")
+    if not raw_target:
+        return None
+    host = raw_target.strip().lower().rstrip(".")
+    if host.startswith("[") and "]" in host:
+        host = host[1:host.index("]")]
+    elif host.count(":") == 1 and host.rsplit(":", 1)[1].isdigit():
+        host = host.rsplit(":", 1)[0]
+    try:
+        ip_address(host)
+    except ValueError:
+        pass
+    else:
+        # An address identifies an endpoint, not a stable logical service.
+        return None
+    target = host.split(".", 1)[0]
+    if not target or target == "localhost":
+        return None
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -106,20 +139,46 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
     """
     # Group spans by trace_id -------------------------------------------
     by_trace: dict[str, list[Span]] = defaultdict(list)
+    global_span_index: dict[tuple[str, str], Span] = {}
     for span in spans:
         by_trace[span.trace_id].append(span)
+        global_span_index[(span.trace_id, span.span_id)] = span
 
     interactions: list[TraceInteraction] = []
 
     for trace_id, trace_spans in by_trace.items():
         # Build a fast span_id → Span lookup for parent resolution -------
         span_index: dict[str, Span] = {s.span_id: s for s in trace_spans}
+        remote_children: dict[str, list[Span]] = defaultdict(list)
+        for child in trace_spans:
+            parent = span_index.get(child.parent_span_id)
+            if parent is not None and child.service_name != parent.service_name:
+                remote_children[parent.span_id].append(child)
 
         # Collect unique (source, target) pairs as a set to deduplicate --
         edge_set: set[tuple[str, str]] = set()
+        linked_edge_set: set[tuple[str, str]] = set()
+        edge_call_tokens: dict[tuple[str, str], set[str]] = defaultdict(set)
         broken_parent_count = 0
 
         for span in trace_spans:
+            # Linked server instrumentation is authoritative. A DNS hostname
+            # may differ from service.name and must not create a phantom service.
+            peer = None if remote_children.get(span.span_id) else _client_peer(span)
+            if peer is not None and peer != span.service_name.lower():
+                # A client span explicitly identifies both caller (its process)
+                # and callee (OpenTelemetry server.address/net.peer.name). This
+                # remains valid observed-call evidence when the callee does not
+                # emit a corresponding server span.
+                edge_set.add((span.service_name, peer))
+                edge_call_tokens[(span.service_name, peer)].add(span.span_id)
+
+            for link in span.links:
+                linked = global_span_index.get((link.trace_id, link.span_id))
+                if linked is None or linked.service_name == span.service_name:
+                    continue
+                linked_edge_set.add((linked.service_name, span.service_name))
+
             if span.parent_span_id is None:
                 continue  # root span — has no caller
 
@@ -136,6 +195,12 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
                 continue
 
             edge_set.add((parent.service_name, span.service_name))
+            token = (
+                parent.span_id
+                if parent.tags.get("span.kind", "").lower() == "client"
+                else span.span_id
+            )
+            edge_call_tokens[(parent.service_name, span.service_name)].add(token)
 
         edges = [
             ServiceEdge(source=src, target=tgt)
@@ -145,8 +210,24 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
             TraceInteraction(
                 trace_id=trace_id,
                 edges=edges,
+                linked_edges=[
+                    ServiceEdge(source=src, target=tgt)
+                    for src, tgt in sorted(linked_edge_set)
+                ],
+                call_counts={
+                    edge: len(tokens)
+                    for edge, tokens in sorted(edge_call_tokens.items())
+                },
                 observed_services=sorted(
-                    {span.service_name for span in trace_spans if span.service_name}
+                    {
+                        service
+                        for span in trace_spans
+                        for service in (
+                            span.service_name,
+                            None if remote_children.get(span.span_id) else _client_peer(span),
+                        )
+                        if service
+                    }
                 ),
                 broken_parent_count=broken_parent_count,
             )
@@ -177,9 +258,12 @@ def aggregate_edges(
 
     # Count occurrences per (source, target) pair -----------------------
     counts: dict[tuple[str, str], int] = defaultdict(int)
+    call_counts: dict[tuple[str, str], list[int]] = defaultdict(list)
     for interaction in interactions:
         for edge in interaction.edges:
-            counts[(edge.source, edge.target)] += 1
+            key = (edge.source, edge.target)
+            counts[key] += 1
+            call_counts[key].append(interaction.call_counts.get(key, 1))
 
     observed: list[ObservedEdge] = [
         ObservedEdge(
@@ -187,6 +271,11 @@ def aggregate_edges(
             target=tgt,
             occurrence_count=count,
             frequency=count / total_traces,
+            total_call_count=sum(call_counts[(src, tgt)]),
+            max_calls_per_trace=max(call_counts[(src, tgt)], default=0),
+            repeated_trace_count=sum(
+                value > 1 for value in call_counts[(src, tgt)]
+            ),
         )
         for (src, tgt), count in counts.items()
     ]
@@ -194,3 +283,14 @@ def aggregate_edges(
     # Sort: highest frequency first; alphabetical tie-break -------------
     observed.sort(key=lambda e: (-e.frequency, e.source, e.target))
     return observed
+
+
+def aggregate_linked_edges(
+    interactions: list[TraceInteraction],
+) -> list[ObservedEdge]:
+    """Aggregate explicit span-link relationships without calling them RPC edges."""
+    projected = [
+        TraceInteraction(trace_id=item.trace_id, edges=item.linked_edges)
+        for item in interactions
+    ]
+    return aggregate_edges(projected)

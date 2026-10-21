@@ -1,5 +1,7 @@
 """Trace-quality gating and broken-parent provenance tests."""
 
+import pytest
+
 from app.engine.workflow_dependency_modeling.interaction_extractor import extract_interactions
 from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
 from app.engine.workflow_dependency_modeling.trace_validator import (
@@ -88,3 +90,60 @@ def test_client_target_without_server_process_is_partial_evidence() -> None:
     assert result.quality is TraceQuality.PARTIAL
     assert result.missing_service_identities == ("paymentservice",)
     assert "paymentservice" in result.reasons[-1]
+
+
+@pytest.mark.parametrize("address", ["0.0.0.0", "127.0.0.1", "10.0.0.25", "::1", "[::1]:8080", "127.0.0.1:8080"])
+@pytest.mark.parametrize("linked_server", [True, False])
+def test_ip_peer_requires_linked_server_identity(address: str, linked_server: bool) -> None:
+    client = _span("client")
+    client["tags"] = [
+        {"key": "span.kind", "value": "client"},
+        {"key": "server.address", "value": address},
+    ]
+    server = _span("server", "client" if linked_server else "other", "p2")
+    server["tags"] = [{"key": "span.kind", "value": "server"}]
+    spans = [client, server] if linked_server else [client, _span("other", "client"), server]
+    result = validate_trace_quality([_trace("ip-peer", spans, {
+        "p1": {"serviceName": "frontend"}, "p2": {"serviceName": "payment"},
+    })]).results[0]
+
+    assert result.quality is (TraceQuality.VALID if linked_server else TraceQuality.PARTIAL)
+    expected_address = "::1" if address.startswith("[") else address.removesuffix(":8080")
+    assert result.missing_service_identities == (() if linked_server else (expected_address,))
+
+
+def test_ip_peer_internal_child_does_not_prove_server_identity() -> None:
+    client = _span("client")
+    client["tags"] = [
+        {"key": "span.kind", "value": "client"},
+        {"key": "server.address", "value": "127.0.0.1"},
+    ]
+    result = validate_trace_quality([
+        _trace("internal-child", [client, _span("internal", "client")])
+    ]).results[0]
+    assert result.quality is TraceQuality.PARTIAL
+    assert result.missing_service_identities == ("127.0.0.1",)
+
+
+def test_client_target_recovers_observed_edge_without_inventing_server_span() -> None:
+    client = _span("client")
+    client["tags"] = [
+        {"key": "span.kind", "value": "client"},
+        {"key": "rpc.system", "value": "grpc"},
+        {"key": "server.address", "value": "paymentservice.default.svc.cluster.local"},
+    ]
+
+    interaction = extract_interactions(
+        parse_spans([_trace("missing-server", [client])])
+    )[0]
+
+    assert [(edge.source, edge.target) for edge in interaction.edges] == [
+        ("frontend", "paymentservice")
+    ]
+    assert interaction.observed_services == ["frontend", "paymentservice"]
+
+    client["tags"][2]["value"] = "10.0.0.25"
+    ip_interaction = extract_interactions(
+        parse_spans([_trace("ip-only-peer", [client])])
+    )[0]
+    assert ip_interaction.edges == []

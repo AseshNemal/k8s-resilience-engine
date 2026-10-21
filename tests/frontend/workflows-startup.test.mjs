@@ -1,77 +1,43 @@
-// The Workflows page must never be left on "Loading…" when it starts, and must find observed workflows by itself.
-// The page script runs against a fake page, a fake clock and a stubbed network; the guided form's trace-service
-// address is a required field, as in the real page, so an empty address makes reportValidity() fail.
-// Run with: node --test tests/frontend/
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { test } from "node:test";
-import vm from "node:vm";
-
-const script = readFileSync(new URL("../../app/static/js/components/workflows.js", import.meta.url), "utf8");
-const pollerScript = readFileSync(new URL("../../app/static/js/workflow-discovery-poller.js", import.meta.url), "utf8");
-
-const flush = () => new Promise((resolve) => setImmediate(resolve));
-const DISCOVERY = "/api/workflows/discovery";
-
-function makeEnvironment({ status, discover, hidden = false, evidence = null, traceService = null }) {
+// The merged workspace discovers only from user-supplied connection settings.
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {test} from 'node:test';
+import vm from 'node:vm';
+const script = readFileSync(new URL('../../app/static/js/components/workflows.js', import.meta.url), 'utf8');
+const pollerScript = readFileSync(new URL('../../app/static/js/workflow-discovery-poller.js', import.meta.url), 'utf8');
+const flush = () => new Promise(resolve => setImmediate(resolve));
+function makeEnvironment({discover, hidden = false, traceService} = {}) {
     const registry = new Map();
-    const element = (key) => {
+    const element = key => {
         if (registry.has(key)) return registry.get(key);
-        const node = {
-            key, children: [], attributes: {}, className: "", textContent: "", style: {}, listeners: {}, dataset: {},
-            disabled: false, hidden: false, value: "", checked: false,
-            classList: { add() {}, remove() {}, toggle() { return false; }, contains() { return false; } },
-            setAttribute(name, value) { this.attributes[name] = value; },
-            removeAttribute(name) { delete this.attributes[name]; },
-            getAttribute: () => null,
-            append(...nodes) { this.children.push(...nodes); },
-            appendChild(child) { this.children.push(child); return child; },
-            replaceChildren(...nodes) { this.children = [...nodes]; },
-            addEventListener(type, fn) { this.listeners[type] = fn; },
-            removeEventListener() {},
-            querySelector: (selector) => element(selector),
-            querySelectorAll: () => [],
-            closest: () => null,
-            focus() {},
-            scrollIntoView() {},
-        };
+        const node = {children: [], value: '', textContent: '', disabled: false, hidden: false, checked: false,
+            dataset: {}, listeners: {}, classList: {toggle() {}},
+            setAttribute() {}, addEventListener(type, fn) {this.listeners[type] = fn;},
+            replaceChildren(...children) {this.children = children; this.value = '';},
+            append(...children) {this.children.push(...children);}, focus() {},
+            querySelector: selector => element(selector), querySelectorAll: () => []};
         registry.set(key, node);
         return node;
     };
-
-    // The guided form's required address field, as in the real page.
-    const guidedAddress = element("#guided-jaeger-url");
-    const guidedForm = element('[data-role="guided-analysis-form"]');
-    guidedForm.reportValidity = () => guidedAddress.value.trim() !== "";
-    guidedForm.fields = () => ({ environmentId: "local", evidenceTier: "experimental", jaegerUrl: guidedAddress.value,
-        lookback: element("#guided-lookback").value || "1h" });
-
-    const listeners = {};
-    const document = {
-        hidden,
-        querySelector: (selector) => element(selector),
-        querySelectorAll: () => [],
-        getElementById: (id) => element(`#${id}`),
-        createElement: (tag) => ({ ...element(`new:${tag}:${Math.random()}`), tag }),
-        createTextNode: (text) => ({ textContent: text }),
-        addEventListener: (type, fn) => { listeners[type] = fn; },
-    };
-
+    const field = name => element('field:' + name);
+    const form = element('[data-role="guided-analysis-form"]');
+    const offline = element('[data-role="offline-analysis-form"]');
+    form.elements = offline.elements = new Proxy({namedItem: field}, {get: (target, key) => target[key] || field(key)});
+    form.reportValidity = () => ['traceEndpoint', 'environmentId', 'evidenceTier'].every(key => field(key).value);
+    field('traceSourceType').value = 'jaeger';
+    field('traceAuthentication').value = 'none';
+    field('lookback').value = '1h';
+    const listeners = {}, windowListeners = {};
+    const document = {hidden, querySelector: element, querySelectorAll: () => [],
+        createElement: tag => element('new:' + tag + ':' + Math.random()),
+        addEventListener(type, fn) {listeners[type] = fn;}};
     const calls = [];
-    const json = (code, body) => ({ ok: code < 400, status: code, json: async () => body, headers: { get: () => null } });
-    const fetch = async (url, init = {}) => {
-        const method = init.method || "GET";
-        calls.push([method, url, init.body]);
-        if (url.startsWith("/api/workflows/jaeger/status")) return status();
-        if (url === DISCOVERY) return discover();
-        if (evidence && url.startsWith("/api/workflows/live/evidence")) return evidence();
+    const json = (code, body) => ({ok: code < 400, status: code, json: async () => body});
+    const fetch = async (url, options = {}) => {
+        calls.push([options.method || 'GET', url, options.body]);
+        if (url === '/api/workflows/discovery') return discover();
         return json(200, []);
     };
-    class FormData {
-        constructor(form) { this.values = form.fields(); }
-        get(name) { return this.values[name] ?? null; }
-    }
-
     // A fake clock: timers run only when a test advances it.
     const timers = [];
     let clock = 0;
@@ -90,632 +56,172 @@ function makeEnvironment({ status, discover, hidden = false, evidence = null, tr
         clock = end;
     };
 
-    const windowListeners = {};
-    const window = {
-        ...(traceService ? { __resilienceTraceService: traceService } : {}),
-        addEventListener: (type, fn) => { windowListeners[type] = fn; },
-        ResilienceApi: { fetchJson: async (url) => {
-            const response = await fetch(url);
-            if (!response.ok) {
-                // As app/static/js/api.js: a structured {code, message} detail becomes the error's message.
-                const detail = (await response.json().catch(() => ({}))).detail;
-                const structured = detail && typeof detail === "object" && typeof detail.code === "string";
-                throw Object.assign(new Error(structured ? detail.message : `Request failed with HTTP ${response.status}`),
-                    { status: response.status });
-            }
-            return response.json();
-        } },
-        ResilienceUi: { setError() {}, formatRatioAsPercentage: (r) => String(r), initJsonPanel() {}, updateLastRefreshed() {} },
-    };
-    // The poller's focus rate limit reads the clock, so the page's Date follows the same fake time.
-    class FakeDate extends Date { static now() { return clock; } }
-    // A browser alert blocks the whole page; the page must never raise one.
-    const alerts = [];
-    const sandbox = { window, document, fetch, FormData, console, setTimeout, clearTimeout, URLSearchParams, AbortController,
-        Date: FakeDate, JSON, Math, alert: (message) => alerts.push(message) };
+    element('[data-role="trace-start-prompt"]').hidden = true;
+    element('[data-role="trace-stop-button"]').hidden = true;
+    const window = {__resilienceTraceService: traceService, addEventListener(type, fn) {windowListeners[type] = fn;}};
+    const sandbox = {window, document, fetch, console, setTimeout, clearTimeout,
+        URL, location: {href: 'http://localhost/components/workflows'}, history: {replaceState() {}},
+        localStorage: {getItem: () => null, setItem() {}},
+        Option: class {constructor(text, value) {this.textContent = text; this.value = value;}},
+        Date: class extends Date {static now() {return clock;}}};
     vm.createContext(sandbox);
-    vm.runInContext(pollerScript, sandbox, { filename: "workflow-discovery-poller.js" });
-    vm.runInContext(script, sandbox, { filename: "workflows.js" });
-    return { element, listeners, windowListeners, document, calls, json, guidedAddress, advance, timers, alerts };
+    vm.runInContext(pollerScript, sandbox);
+    vm.runInContext(script, sandbox);
+    return {element, field, calls, json, advance, document, listeners, windowListeners};
 }
+const discoverCalls = env => env.calls.filter(([, url]) => url === '/api/workflows/discovery');
+const find = env => env.element('[data-role="guided-auto-discover"]').listeners.click();
+const select = env => env.element('[data-role="guided-operation"]');
+const status = env => env.element('[data-role="guided-analysis-status"]').textContent;
+const workflow = (rootService, operationName, traceCount = 3) => ({rootService, operationName, traceCount});
+const report = (state = 'discovered', workflows = [workflow('gateway', 'GET /orders')], extra = {}) =>
+    ({state, workflows, message: state, fingerprint: state, truncated: false, ...extra});
+const configure = env => {
+    env.field('traceEndpoint').value = 'http://localhost:16686';
+    env.field('environmentId').value = 'operator-environment';
+    env.field('evidenceTier').value = 'experimental';
+};
 
-const options = (env) => env.element('[data-role="guided-operation"]').children.map((child) => child.textContent);
-const observed = (env) => env.element('[data-role="guided-observed"]');
-const stateLabel = (env) => env.element('[data-role="guided-observed-state"]').textContent;
-const discoveryCalls = (env) => env.calls.filter(([method, url]) => method === "POST" && url === DISCOVERY);
-const healthCalls = (env) => env.calls.filter(([, url]) => url.startsWith("/api/workflows/jaeger/status"));
-const ADDRESS = "http://host.docker.internal:16686";
-const healthy = (env) => env.json(200, { healthy: true, jaegerUrl: ADDRESS });
-const down = (env) => env.json(200, { healthy: false, jaegerUrl: ADDRESS });
-
-const workflow = (operationName, extra = {}) => ({
-    operationName, workflowId: operationName, rootService: "frontend", traceCount: 3,
-    participatingServices: ["frontend", "backend"], sampleTraceIds: ["t"], status: "candidate",
-    evidenceStatus: "complete", traceQuality: { validCount: 3, partialCount: 0, invalidCount: 0 }, ...extra,
-});
-const report = (state, workflows = [], extra = {}) => ({
-    state, message: `message for ${state}`, retryable: state !== "discovered", jaegerUrl: ADDRESS, lookback: "1h",
-    limits: { maxServices: 12, tracesPerService: 50, maxTraces: 500 },
-    servicesRecorded: ["backend", "frontend"], servicesScanned: ["backend", "frontend"], servicesSkipped: [],
-    servicesUnexamined: [], servicesCalledByOthers: [], entryDetection: "scan_all",
-    tracesFetched: workflows.length * 3, tracesWithCompleteEvidence: workflows.length * 3, truncated: false,
-    workflows, ...extra,
-});
-
-async function open(env) {
-    await env.listeners.DOMContentLoaded();
+test('startup loads saved workflows without inventing a connection or starting discovery', async () => {
+    const env = makeEnvironment();
     await flush();
-}
-
-test("the address the server uses is filled in before workflows are discovered", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [workflow("POST /cart/checkout")])),
-    });
-
-    await open(env);
-
-    assert.equal(env.guidedAddress.value, ADDRESS);
-    assert.ok(discoveryCalls(env).length === 1, "discovery was requested once the address was known");
-    assert.equal(JSON.parse(discoveryCalls(env)[0][2]).jaegerUrl, ADDRESS);
-    assert.notEqual(env.element('[data-role="guided-inspect-button"]').textContent, "Loading…");
+    assert.equal(env.field('traceEndpoint').value, '');
+    assert.equal(discoverCalls(env).length, 0);
+    assert.equal(env.calls[0][1], '/api/workflows/experiment-campaigns');
+    assert.match(env.element('[data-role="saved-status"]').textContent, /No saved workflows/);
 });
-
-test("when the server cannot say which address to use the page says so instead of loading forever", async () => {
-    const env = makeEnvironment({
-        status: () => env.json(500, {}),
-        discover: () => { throw new Error("discovery must not run without an address"); },
-    });
-
-    await open(env);
-
-    assert.deepEqual(options(env), ["Enter the trace service address to load workflows"]);
-    assert.ok(env.element('[data-role="guided-analysis-status"]').textContent.includes("trace service address"));
-    assert.notEqual(env.element('[data-role="guided-inspect-button"]').textContent, "Loading…");
-    assert.equal(discoveryCalls(env).length, 0);
+test('automatic discovery requires the user connection and does not require an entry service', async () => {
+    const env = makeEnvironment({discover: () => env.json(200, report())});
+    find(env); await flush(); assert.equal(discoverCalls(env).length, 0);
+    configure(env); find(env); await flush();
+    const payload = JSON.parse(discoverCalls(env)[0][2]);
+    assert.deepEqual(Object.keys(payload).sort(), ['lookback', 'traceSource']);
+    assert.equal(payload.traceSource.endpoint, 'http://localhost:16686');
+    assert.match(select(env).children[1].textContent, /GET \/orders.*gateway.*3 traces/);
 });
-
-test("an unreachable trace service shows Waiting for trace service… instead of an error or a Docker command", async () => {
-    const env = makeEnvironment({ status: () => down(env), discover: () => { throw new Error("must not run"); } });
-
-    await open(env);
-
-    assert.equal(stateLabel(env), "Waiting for trace service…");
-    assert.equal(observed(env).dataset.state, "waiting");
-    assert.deepEqual(options(env), ["Waiting for trace service…"]);
-    assert.notEqual(env.element('[data-role="guided-inspect-button"]').textContent, "Loading…");
-    const everythingShown = [stateLabel(env), env.element('[data-role="guided-observed-detail"]').textContent,
-        env.element('[data-role="guided-analysis-status"]').textContent].join(" ");
-    assert.ok(!/docker|compose|boutique/i.test(everythingShown));
-});
-
-test("the page retries a lightweight health check every 10 seconds and loads workflows when the service recovers", async () => {
-    let up = false;
-    const env = makeEnvironment({
-        status: () => (up ? healthy(env) : down(env)),
-        discover: () => env.json(200, report("discovered", [workflow("GET /orders")])),
-    });
-    await open(env);
-    const before = healthCalls(env).length;
-
-    await env.advance(9999);
-    assert.equal(healthCalls(env).length, before, "no retry before 10 seconds");
-    await env.advance(1);
-    assert.equal(healthCalls(env).length, before + 1);
-    assert.equal(discoveryCalls(env).length, 0);
-
-    up = true;
-    await env.advance(10000);
-
-    assert.equal(discoveryCalls(env).length, 1, "discovery started without a reload or a click");
-    assert.equal(stateLabel(env), "Observed workflows found");
-    assert.ok(options(env)[0].startsWith("GET /orders"));
-});
-
-test("connected with zero traces is its own state, and workflows appear by themselves once traces arrive", async () => {
-    let current = report("no_traces");
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, current) });
-    await open(env);
-
-    assert.equal(stateLabel(env), "Trace service connected · no traces yet");
-    assert.equal(observed(env).dataset.state, "no_traces");
-    assert.deepEqual(options(env), ["No traces recorded in the last 1h yet"]);
-
-    current = report("discovered", [workflow("GET /orders")]);
-    await env.advance(10000);
-    assert.equal(stateLabel(env), "Observed workflows found");
-    assert.equal(env.element('[data-role="guided-candidates"]').children.length, 1);
-});
-
-test("incomplete tracing evidence is reported as its own state, not as discovered workflows", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("incomplete_traces", [workflow("GET /orders", {
-            evidenceStatus: "unusable", traceQuality: { validCount: 0, partialCount: 3, invalidCount: 0 } })])),
-    });
-    await open(env);
-
-    assert.equal(observed(env).dataset.state, "incomplete_traces");
-    assert.equal(stateLabel(env), "Traces recorded · tracing evidence incomplete");
-    const rows = env.element('[data-role="guided-candidates"]').children;
-    assert.equal(rows.length, 1);
-    assert.ok(rows[0].children[2].textContent.startsWith("Trace evidence incomplete"));
-});
-
-test("discovered workflows show the root operation, entry service, trace count and participating services", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [
-            workflow("POST /pay", { rootService: "api-gateway", traceCount: 7, participatingServices: ["api-gateway", "payments"] }),
-        ])),
-    });
-    await open(env);
-
-    const [row] = env.element('[data-role="guided-candidates"]').children;
-    const [head, services, evidence] = row.children;
-    assert.equal(head.children[0].textContent, "POST /pay");
-    assert.equal(head.children[1].textContent, "enters at api-gateway · 7 traces");
-    assert.deepEqual(services.children.map((chip) => chip.textContent), ["api-gateway", "payments"]);
-    assert.ok(evidence.textContent.includes("observed only, dependency class not determined"));
-    assert.ok(!/mandatory|optional|critical/i.test(row.children.map((c) => c.textContent).join(" ")));
-});
-
-test("any entry service name works: inspecting a candidate sends that candidate's own entry service", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [workflow("GET /home", { rootService: "istio-ingressgateway" })])),
-    });
-    await open(env);
-    env.element('[data-role="guided-operation"]').value = "istio-ingressgateway GET /home";
-    env.listeners.DOMContentLoaded = null;
-
-    await env.element('[data-role="guided-inspect-button"]').listeners.click();
-
-    const session = env.calls.find(([method, url]) => method === "POST" && url === "/api/workflows/analysis-sessions");
-    assert.ok(session, "an analysis was requested");
-    const body = JSON.parse(session[2]);
-    assert.equal(body.entryService, "istio-ingressgateway");
-    assert.equal(body.operationName, "GET /home");
-});
-
-test("the discovery request carries no entry service, and no application name is assumed", async () => {
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, report("no_traces")) });
-    await open(env);
-
-    const body = JSON.parse(discoveryCalls(env)[0][2]);
-    assert.deepEqual(Object.keys(body).sort(), ["jaegerUrl", "lookback"]);
-    assert.equal(body.lookback, "1h");
-});
-
-test("an unchanged refresh leaves the operator's selection alone and a changed one keeps it when still present", async () => {
-    let current = report("discovered", [workflow("GET /a", { traceCount: 9 }), workflow("GET /b")]);
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, current) });
-    await open(env);
-    const select = env.element('[data-role="guided-operation"]');
-    select.value = "frontend GET /b";
-
-    await env.advance(30000);
-    assert.equal(select.value, "frontend GET /b", "same evidence: nothing re-rendered");
-
-    current = report("discovered", [workflow("GET /a", { traceCount: 12 }), workflow("GET /b")]);
-    await env.advance(30000);
-    assert.equal(select.value, "frontend GET /b", "new evidence: the choice survives the re-render");
-    assert.ok(options(env)[0].includes("12 traces"));
-});
-
-test("a refresh while connected is controlled: 30 seconds, not a tight loop", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [workflow("GET /a")])),
-    });
-    await open(env);
-    assert.equal(discoveryCalls(env).length, 1);
-
-    await env.advance(29999);
-    assert.equal(discoveryCalls(env).length, 1);
-    await env.advance(1);
-    assert.equal(discoveryCalls(env).length, 2);
-});
-
-test("a hidden tab makes no requests, and showing it runs discovery", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [workflow("GET /a")])),
-        hidden: true,
-    });
-    await open(env);
-    await env.advance(5 * 60 * 1000);
-    assert.equal(healthCalls(env).filter(([, url]) => url.includes("jaeger_url")).length, 0, "no polling while hidden");
-    assert.equal(discoveryCalls(env).length, 0);
-
-    env.document.hidden = false;
-    env.listeners.visibilitychange();
-    await flush();
-    assert.equal(discoveryCalls(env).length, 1);
-});
-
-test("hiding the tab pauses the retry loop and returning to it resumes it", async () => {
-    const env = makeEnvironment({ status: () => down(env), discover: () => { throw new Error("must not run"); } });
-    await open(env);
-    const before = healthCalls(env).length;
-
-    env.document.hidden = true;
-    env.listeners.visibilitychange();
-    await env.advance(60000);
-    assert.equal(healthCalls(env).length, before, "paused while hidden");
-
-    env.document.hidden = false;
-    env.windowListeners.focus();
-    await flush();
-    assert.equal(healthCalls(env).length, before + 1, "window focus resumes the check");
-});
-
-test("repeated clicks on Refresh while a request is in flight never run two discoveries at once", async () => {
-    let release;
-    const gate = new Promise((resolve) => { release = resolve; });
-    let active = 0;
-    let peak = 0;
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: async () => {
-            active += 1;
-            peak = Math.max(peak, active);
-            await gate;
-            active -= 1;
-            return env.json(200, report("discovered", [workflow("GET /a")]));
-        },
-    });
-    const starting = env.listeners.DOMContentLoaded();
-    await flush();
-    const form = env.element('[data-role="guided-analysis-form"]');
-    for (let i = 0; i < 5; i += 1) form.listeners.submit({ preventDefault() {} });
-    await flush();
-    assert.equal(discoveryCalls(env).length, 1);
-
-    release();
-    await starting;
-    await flush();
-    await flush();
-    assert.equal(peak, 1, "never two requests at the same time");
-    assert.equal(discoveryCalls(env).length, 2, "the five clicks became a single follow-up");
-});
-
-test("changing the time window asks again with the new window", async () => {
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, report("no_traces")) });
-    await open(env);
-
-    env.element("#guided-lookback").value = "6h";
-    env.element("#guided-lookback").listeners.change();
-    await flush();
-
-    assert.equal(JSON.parse(discoveryCalls(env).at(-1)[2]).lookback, "6h");
-});
-
-test("a rejected connection setting stops the retries and says why", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(422, { detail: "Jaeger host is not approved; configure WORKFLOW_JAEGER_ALLOWED_HOSTS" }),
-    });
-    await open(env);
-    assert.equal(observed(env).dataset.state, "error");
-    assert.ok(env.element('[data-role="guided-observed-detail"]').textContent.includes("not approved"));
-
-    await env.advance(5 * 60 * 1000);
-    assert.equal(discoveryCalls(env).length, 1, "a setting that will not fix itself is not retried");
-});
-
-test("a discovery failure after a healthy check ends the loading state with a clear message", async () => {
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(503, { detail: "Jaeger server unreachable" }) });
-    await open(env);
-
-    assert.deepEqual(options(env), ["No workflows available — check advanced settings"]);
-    assert.notEqual(env.element('[data-role="guided-inspect-button"]').textContent, "Loading…");
-});
-
-test("a trace-service address the server refuses is explained, with the server's reason, and not retried", async () => {
-    const reason = "Jaeger host 'jaeger.local' is not approved; configure WORKFLOW_JAEGER_ALLOWED_HOSTS";
-    let first = true;
-    const env = makeEnvironment({
-        // The server's own setting is trusted, so the prefill succeeds; the address the page then checks is refused.
-        status: () => {
-            if (first) { first = false; return healthy(env); }
-            return env.json(422, { detail: { code: "JAEGER_ADDRESS_NOT_APPROVED", message: reason, retryable: false } });
-        },
-        discover: () => { throw new Error("discovery must not run for a refused address"); },
-    });
-    await open(env);
-
-    assert.equal(observed(env).dataset.state, "error");
-    assert.equal(env.element('[data-role="guided-observed-detail"]').textContent, reason);
-    const checks = healthCalls(env).length;
-    await env.advance(5 * 60 * 1000);
-    assert.equal(healthCalls(env).length, checks, "a refused address is not retried");
-    assert.equal(discoveryCalls(env).length, 0);
-});
-
-test("services the discovery limit kept from being read are named, never hidden", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [workflow("GET /a")], {
-            entryDetection: "call_graph", servicesScanned: ["frontend"], servicesCalledByOthers: ["backend"],
-            servicesSkipped: ["batch-reporter"], servicesUnexamined: ["batch-reporter"], truncated: true,
-        })),
-    });
-    await open(env);
-
-    const detail = env.element('[data-role="guided-observed-detail"]').textContent;
-    assert.ok(detail.includes("batch-reporter"), detail);
-    assert.ok(detail.includes("WORKFLOW_DISCOVERY_MAX_SERVICES"), detail);
-    assert.ok(detail.includes("1 entry service"), detail);
-});
-
-test("without a call graph the page says every recorded service was read", async () => {
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, report("discovered", [workflow("GET /a")])) });
-    await open(env);
-
-    assert.ok(env.element('[data-role="guided-observed-detail"]').textContent.includes("2 of 2 recorded services read"));
-});
-
-// The manual discovery and extraction buttons (Research audit controls) report problems in a message under the
-// buttons. A browser alert would block the page, and the automatic checking with it, until it was dismissed.
-const manualStatus = (env) => env.element('[data-role="live-config-status"]');
-
-test("manual discovery with the trace service down shows a message, not a browser alert", async () => {
-    const env = makeEnvironment({ status: () => down(env), discover: () => env.json(200, report("jaeger_unavailable")) });
-    await open(env);
-
-    await env.element('[data-role="discover-button"]').listeners.click();
-
-    assert.deepEqual(env.alerts, []);
-    assert.equal(manualStatus(env).textContent, "Could not discover workflows: message for jaeger_unavailable");
-    assert.equal(env.element('[data-role="discover-button"]').disabled, false, "the button is usable again");
-    assert.equal(env.element('[data-role="discover-button"]').textContent, "Discover Candidate Operations");
-});
-
-test("manual discovery reports how many candidates it found", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [workflow("GET /a"), workflow("GET /b")])),
-    });
-    await open(env);
-
-    await env.element('[data-role="discover-button"]').listeners.click();
-
-    assert.equal(manualStatus(env).textContent, "Found 2 candidate operations.");
-    assert.deepEqual(env.alerts, []);
-});
-
-test("extracting with nothing selected says what to do, without an alert", async () => {
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, report("no_traces")) });
-    await open(env);
-
-    await env.element('[data-role="extract-live-button"]').listeners.click();
-
-    assert.deepEqual(env.alerts, []);
-    assert.equal(manualStatus(env).textContent, "Select a candidate operation from the dropdown first.");
-});
-
-test("a failed live extraction shows the reason in the message, without an alert", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("discovered", [workflow("GET /a")])),
-        evidence: () => env.json(404, { detail: "No matching traces in this window. Refresh discovery or widen the lookback." }),
-    });
-    await open(env);
-    await env.element('[data-role="discover-button"]').listeners.click();
-    env.element('[data-role="discovered-workflow-select"]').value = "frontend GET /a";
-
-    await env.element('[data-role="extract-live-button"]').listeners.click();
-
-    assert.deepEqual(env.alerts, []);
-    assert.match(manualStatus(env).textContent, /^Live extraction failed: /);
-    assert.equal(env.element('[data-role="extract-live-button"]').disabled, false);
-});
-
-// ---- "Find workflows": check the trace service, offer to start it (never without a yes), show what it recorded ----
-
-const findStatus = (env) => env.element('[data-role="find-workflows-status"]').textContent;
-const promptShown = (env) => env.element('[data-role="trace-start-prompt"]').hidden === false;
-const click = (env, role) => env.element(`[data-role="${role}"]`).listeners.click();
-
-// A fake bridge to the host helper, recording what the page asks of it.
-function bridge({ available = true, state = "trace-stopped", start = { ok: true, state: "trace-running", message: "The trace service is running." },
-    stop = { ok: true, state: "trace-stopped", message: "The trace service is stopped." } } = {}) {
-    const b = { available, calls: [] };
-    b.status = async () => { b.calls.push("status"); return { ok: true, state, message: "" }; };
-    b.start = async () => { b.calls.push("start"); return start; };
-    b.stop = async () => { b.calls.push("stop"); return stop; };
-    return b;
-}
-
-test("Find workflows with the trace service running goes straight to discovery and asks nothing", async () => {
-    const trace = bridge({ state: "trace-running" });
-    const env = makeEnvironment({
-        status: () => healthy(env), traceService: trace,
-        discover: () => env.json(200, report("discovered", [workflow("GET /a")])),
-    });
-    await open(env);
-    const before = discoveryCalls(env).length;
-
-    await click(env, "find-workflows-button");
-    await flush();
-
-    assert.equal(promptShown(env), false);
-    assert.ok(!trace.calls.includes("start"), "nothing was started");
-    assert.equal(discoveryCalls(env).length, before + 1, "discovery ran again");
-    assert.match(findStatus(env), /Looking for workflows/);
-});
-
-test("with the trace service down and the helper available, it ASKS first and starts nothing until the person says yes", async () => {
-    const trace = bridge();
-    const env = makeEnvironment({ status: () => down(env), discover: () => { throw new Error("no discovery while down"); }, traceService: trace });
-    await open(env);
-
-    await click(env, "find-workflows-button");
-
-    assert.equal(promptShown(env), true);
-    assert.equal(findStatus(env), "The trace service is not running.");
-    assert.ok(!trace.calls.includes("start"), "the helper was not asked to start anything");
-});
-
-test("saying yes starts the trace service once, then looks for workflows", async () => {
-    const trace = bridge();
-    let up = false;
-    const env = makeEnvironment({
-        status: () => (up ? healthy(env) : down(env)), traceService: trace,
-        discover: () => env.json(200, report("no_traces")),
-    });
-    await open(env);
-    await click(env, "find-workflows-button");
-
-    trace.start = async () => { trace.calls.push("start"); up = true; return { ok: true, state: "trace-running", message: "The trace service is running." }; };
-    await click(env, "trace-start-confirm");
-    await flush();
-
-    assert.equal(trace.calls.filter((c) => c === "start").length, 1);
-    assert.equal(promptShown(env), false);
-    assert.match(findStatus(env), /The trace service is running\. Looking for workflows/);
-    assert.equal(env.element('[data-role="trace-stop-button"]').hidden, false, "Stop is offered for a service the extension started");
-    assert.ok(discoveryCalls(env).length >= 1, "discovery ran once the service was up");
-});
-
-test("saying no starts nothing", async () => {
-    const trace = bridge();
-    const env = makeEnvironment({ status: () => down(env), discover: () => { throw new Error("unused"); }, traceService: trace });
-    await open(env);
-    await click(env, "find-workflows-button");
-
-    await click(env, "trace-start-cancel");
-
-    assert.equal(promptShown(env), false);
-    assert.equal(findStatus(env), "Nothing was started.");
-    assert.ok(!trace.calls.includes("start"));
-});
-
-test("a start that fails shows the reason and does not pretend to look for workflows", async () => {
-    const trace = bridge({ start: { ok: false, state: "trace-port-in-use", message: "Another program is using the trace service's ports (16686, 4317 or 4318). Stop it, then try again." } });
-    const env = makeEnvironment({ status: () => down(env), discover: () => { throw new Error("must not run"); }, traceService: trace });
-    await open(env);
-    await click(env, "find-workflows-button");
-
-    await click(env, "trace-start-confirm");
-
-    assert.match(findStatus(env), /Another program is using the trace service's ports/);
-    assert.equal(env.element('[data-role="find-workflows-status"]').style.color, "var(--color-danger, #b91c1c)");
-    assert.equal(discoveryCalls(env).length, 0);
-    assert.equal(env.element('[data-role="trace-stop-button"]').hidden, true);
-});
-
-test("without the host helper (a plain browser) it explains how to start the trace service by hand", async () => {
-    const env = makeEnvironment({ status: () => down(env), discover: () => { throw new Error("unused"); } });
-    await open(env);
-
-    await click(env, "find-workflows-button");
-
-    assert.equal(promptShown(env), false);
-    assert.match(findStatus(env), /docker compose -f deploy\/docker-compose\.jaeger\.yml up -d/);
-});
-
-test("an address the server refuses is explained once, with no prompt and no start", async () => {
-    const trace = bridge();
-    let first = true;
-    const env = makeEnvironment({
-        traceService: trace,
-        status: () => {
-            if (first) { first = false; return healthy(env); }
-            return env.json(422, { detail: { code: "JAEGER_ADDRESS_NOT_APPROVED", message: "Jaeger host 'x' is not approved; configure WORKFLOW_JAEGER_ALLOWED_HOSTS" } });
-        },
-        discover: () => env.json(200, report("no_traces")),
-    });
-    await open(env);
-
-    await click(env, "find-workflows-button");
-
-    assert.equal(promptShown(env), false);
-    assert.ok(!trace.calls.includes("start"));
-    assert.equal(findStatus(env), "");
-    assert.equal(observed(env).dataset.state, "error");
-});
-
-test("Stop is offered only for a trace service the extension started, and stops only that", async () => {
-    for (const [state, hidden] of [["trace-running", false], ["trace-running-external", true], ["trace-stopped", true]]) {
-        const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, report("no_traces")), traceService: bridge({ state }) });
-        await open(env);
-        assert.equal(env.element('[data-role="trace-stop-button"]').hidden, hidden, state);
+test('empty and incomplete evidence retain the backend state and do not invent workflows', async () => {
+    for (const state of ['no_traces', 'no_candidates', 'incomplete_traces', 'jaeger_unavailable']) {
+        const env = makeEnvironment({discover: () => env.json(200, report(state, []))});
+        configure(env); find(env); await flush();
+        assert.equal(status(env), state);
+        assert.equal(select(env).children.length, 1);
+        assert.equal(env.element('[data-role="guided-inspect-button"]').disabled, true);
     }
 });
-
-test("Stop asks the helper to stop, reports the result and goes back to waiting", async () => {
-    const trace = bridge({ state: "trace-running" });
-    const env = makeEnvironment({ status: () => healthy(env), discover: () => env.json(200, report("no_traces")), traceService: trace });
-    await open(env);
-
-    await click(env, "trace-stop-button");
-
-    assert.equal(trace.calls.filter((c) => c === "stop").length, 1);
-    assert.equal(findStatus(env), "The trace service is stopped.");
-    assert.equal(env.element('[data-role="trace-stop-button"]').hidden, true);
+test('no-trace discovery retries and picks up newly arriving evidence', async () => {
+    let current = report('no_traces', []);
+    const env = makeEnvironment({discover: () => env.json(200, current)});
+    configure(env); find(env); await flush();
+    current = report();
+    await env.advance(9999); assert.equal(discoverCalls(env).length, 1);
+    await env.advance(1); assert.equal(discoverCalls(env).length, 2);
+    assert.equal(status(env), 'discovered');
 });
-
-test("clicking Find workflows repeatedly while it works is one check, not many", async () => {
+test('refresh preserves the chosen entry service even when candidate order changes', async () => {
+    let current = report('discovered', [workflow('one', 'GET /orders'), workflow('two', 'GET /orders')]);
+    const env = makeEnvironment({discover: () => env.json(200, current)});
+    configure(env); find(env); await flush(); select(env).value = '1';
+    current = report('discovered', [workflow('two', 'GET /orders', 5), workflow('one', 'GET /orders')]);
+    await env.advance(30000);
+    assert.equal(select(env).value, '0');
+    assert.match(select(env).children[1].textContent, /two.*5 traces/);
+});
+test('hidden pages do not poll and resume when visible', async () => {
+    const env = makeEnvironment({hidden: true, discover: () => env.json(200, report())});
+    configure(env); find(env); await flush(); assert.equal(discoverCalls(env).length, 0);
+    env.document.hidden = false; env.listeners.visibilitychange(); await flush();
+    assert.equal(discoverCalls(env).length, 1);
+});
+test('changing settings cancels a delayed discovery and discards its stale result', async () => {
     let release;
-    const gate = new Promise((resolve) => { release = resolve; });
-    const trace = bridge();
-    const env = makeEnvironment({
-        traceService: trace, discover: () => env.json(200, report("no_traces")),
-        status: async () => { if (env.calls.length > 6) await gate; return down(env); },
-    });
-    await open(env);
-    const before = healthCalls(env).length;
-
-    const first = click(env, "find-workflows-button");
-    click(env, "find-workflows-button");
-    click(env, "find-workflows-button");
-    await flush();
-    assert.equal(healthCalls(env).length, before + 1, "only the first click checked");
-    release();
-    await first;
+    const pending = new Promise(resolve => release = resolve);
+    const env = makeEnvironment({discover: () => pending});
+    configure(env); find(env); await flush();
+    env.element('[data-role="guided-analysis-form"]').listeners.input({target: {name: 'traceEndpoint'}});
+    release(env.json(200, report())); await flush(); await env.advance(120000);
+    assert.equal(discoverCalls(env).length, 1);
+    assert.match(status(env), /settings changed/);
+    assert.equal(env.element('[data-role="guided-discovery"]').hidden, true);
+});
+test('rejected settings show the server message and stop retries', async () => {
+    const env = makeEnvironment({discover: () => env.json(422, {detail: {code: 'REJECTED', message: 'Address is not approved'}})});
+    configure(env); find(env); await flush(); await env.advance(120000);
+    assert.equal(status(env), 'Address is not approved');
+    assert.equal(discoverCalls(env).length, 1);
+});
+test('bounded discovery tells the user that additional workflows may exist', async () => {
+    const env = makeEnvironment({discover: () => env.json(200, report('discovered', [], {truncated: true}))});
+    configure(env); find(env); await flush(); assert.match(status(env), /scan reached its limit/);
 });
 
-test("a running trace service that nothing has sent traces to says what is missing", async () => {
-    const env = makeEnvironment({
-        status: () => healthy(env),
-        discover: () => env.json(200, report("no_traces", [], { servicesRecorded: [], servicesScanned: [] })),
-    });
-    await open(env);
-
-    const detail = env.element('[data-role="guided-observed-detail"]').textContent;
-    assert.match(detail, /Nothing has sent traces to it yet/);
-    assert.match(detail, /4317 or 4318/);
+const click = (env, role) => env.element(`[data-role="${role}"]`).listeners.click();
+const shown = (env, role) => !env.element(`[data-role="${role}"]`).hidden;
+const bridge = (known = 'trace-stopped') => ({available: true, starts: 0, stops: 0, known,
+    async status() {return {ok: true, state: this.known, message: this.known};},
+    async start() {this.starts++; return {ok: true, state: 'trace-running', message: 'Running'};},
+    async stop() {this.stops++; return {ok: true, state: 'trace-stopped', message: 'Stopped'};}});
+test('ordinary browsers explain unavailable local tracing without offering container controls', async () => {
+    const env = makeEnvironment({discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush();
+    assert.match(env.element('[data-role="find-workflows-status"]').textContent, /Docker Desktop extension/);
+    assert.equal(shown(env, 'trace-start-prompt'), false);
+    assert.equal(shown(env, 'trace-stop-button'), false);
 });
-
-test("a 'not running' message under the button is cleared once the trace service is answering", async () => {
-    let up = false;
-    const env = makeEnvironment({
-        status: () => (up ? healthy(env) : down(env)), discover: () => env.json(200, report("no_traces")),
-    });
-    await open(env);
-    await click(env, "find-workflows-button");
-    assert.match(findStatus(env), /docker compose/);
-
-    up = true;
-    await env.advance(10000);
-
-    assert.equal(findStatus(env), "", "the page no longer says the service is not running");
-    assert.equal(observed(env).dataset.state, "no_traces");
+test('extension discovery offers a start without starting anything; declining stays declined across retries', async () => {
+    const helper = bridge();
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush();
+    assert.equal(shown(env, 'trace-start-prompt'), true); assert.equal(helper.starts, 0);
+    await env.advance(10000); assert.equal(shown(env, 'trace-start-prompt'), true);
+    click(env, 'trace-start-cancel'); await env.advance(10000);
+    assert.equal(shown(env, 'trace-start-prompt'), false); assert.equal(helper.starts, 0);
 });
-
-test("the 'not running' prompt is also closed when the service comes up on its own", async () => {
-    let up = false;
-    const env = makeEnvironment({
-        status: () => (up ? healthy(env) : down(env)), discover: () => env.json(200, report("no_traces")), traceService: bridge(),
-    });
-    await open(env);
-    await click(env, "find-workflows-button");
-    assert.equal(promptShown(env), true);
-
-    up = true;
-    await env.advance(10000);
-
-    assert.equal(promptShown(env), false);
+test('only explicit confirmation starts tracing and concurrent clicks do not duplicate it', async () => {
+    const helper = bridge();
+    let release; helper.start = async () => {helper.starts++; return new Promise(resolve => release = resolve);};
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush();
+    const pending = click(env, 'trace-start-confirm'); click(env, 'trace-start-confirm');
+    assert.equal(helper.starts, 1);
+    helper.known = 'trace-running'; release({ok: true, state: 'trace-running', message: 'Running'}); await pending; await flush();
+    assert.equal(shown(env, 'trace-stop-button'), true);
+    assert.equal(env.element('[data-role="guided-auto-discover"]').disabled, false);
+});
+test('the stop control is available only for tracing owned by the extension', async () => {
+    for (const state of ['trace-running', 'trace-running-external']) {
+        const helper = bridge(state);
+        const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report())});
+        configure(env); find(env); await flush();
+        assert.equal(shown(env, 'trace-stop-button'), state === 'trace-running');
+        await click(env, 'trace-stop-button'); await flush();
+        assert.equal(helper.stops, state === 'trace-running' ? 1 : 0);
+    }
+});
+test('helper failures remain recoverable and restore the Find control', async () => {
+    const helper = bridge(); helper.start = async () => {throw new Error('private docker diagnostic');};
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush(); await click(env, 'trace-start-confirm');
+    assert.match(env.element('[data-role="find-workflows-status"]').textContent, /did not complete/);
+    assert.equal(env.element('[data-role="guided-auto-discover"]').disabled, false);
+    assert.equal(shown(env, 'trace-start-prompt'), false);
+});
+test('remote trace connections never offer to start a local collector', async () => {
+    const helper = bridge();
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); env.field('traceEndpoint').value = 'https://tracing.example'; find(env); await flush();
+    assert.equal(shown(env, 'trace-start-prompt'), false); assert.equal(helper.starts, 0);
+});
+test('a different local tracing port cannot accidentally start the fixed extension collector', async () => {
+    const helper = bridge();
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); env.field('traceEndpoint').value = 'http://localhost:9999'; find(env); await flush();
+    assert.equal(shown(env, 'trace-start-prompt'), false); assert.equal(helper.starts, 0);
+});
+test('recovery closes a start prompt and clears the unavailable message', async () => {
+    let current = report('jaeger_unavailable', []);
+    const env = makeEnvironment({traceService: bridge(), discover: () => env.json(200, current)});
+    configure(env); find(env); await flush(); assert.equal(shown(env, 'trace-start-prompt'), true);
+    current = report('no_traces', []); await env.advance(10000);
+    assert.equal(shown(env, 'trace-start-prompt'), false);
+    assert.equal(env.element('[data-role="find-workflows-status"]').textContent, '');
 });

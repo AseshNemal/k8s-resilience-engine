@@ -184,9 +184,16 @@ def _execute_probe_step(
     form_body = {
         key: _render_text(value, variables) for key, value in step.form_body.items()
     }
+    rendered_path = _render_text(step.path, variables)
+    rendered_url = urlsplit(rendered_path)
+    if (
+        rendered_url.scheme or rendered_url.netloc
+        or not rendered_path.startswith("/") or rendered_path.startswith("//")
+    ):
+        raise ValueError("Rendered request path must remain relative to the application URL")
     response = client.request(
         method=step.method,
-        url=_render_text(step.path, variables),
+        url=rendered_path,
         params={
             key: _render_text(value, variables) for key, value in step.query.items()
         },
@@ -222,7 +229,7 @@ def run_http_workflow_probe(
     secrets: Mapping[str, str] | None = None,
     allowed_hosts: set[str] | None = None,
 ) -> WorkflowRunResult:
-    """Execute a reviewed multi-step workflow using one distributed trace ID."""
+    """Trace each request and report the terminal or first failing step's trace."""
     approved_url = approved_application_url(base_url, allowed_hosts=allowed_hosts)
     if not 1 <= timeout_seconds <= 60:
         raise ValueError("timeoutSeconds must be between 1 and 60")
@@ -232,6 +239,7 @@ def run_http_workflow_probe(
     variables = dict(definition.initial_variables)
     resolved_secrets = _secret_headers(definition, secrets or os.environ)
     results: list[WorkflowRunStepResult] = []
+    step_trace_ids: set[str] = {resolved_trace_id}
 
     with httpx.Client(
         base_url=approved_url,
@@ -240,17 +248,23 @@ def run_http_workflow_probe(
         transport=transport,
     ) as client:
         for step in definition.steps:
+            # Each HTTP request is a separate trace root. Reusing one trace ID
+            # would create disconnected roots and invalidate trace quality.
+            step_trace_id = resolved_trace_id if step.name == definition.measured_step else uuid4().hex
+            while step_trace_id in step_trace_ids and step.name != definition.measured_step:
+                step_trace_id = uuid4().hex
+            step_trace_ids.add(step_trace_id)
             result = _execute_probe_step(
                 client,
                 step,
                 variables,
                 resolved_secrets[step.name],
-                resolved_trace_id if step.name == definition.measured_step else None,
+                step_trace_id,
             )
             results.append(result)
             if not result.succeeded:
                 return WorkflowRunResult(
-                    trace_id=resolved_trace_id,
+                    trace_id=step_trace_id,
                     started_at=start,
                     finished_at=datetime.now(timezone.utc),
                     business_success=False,
