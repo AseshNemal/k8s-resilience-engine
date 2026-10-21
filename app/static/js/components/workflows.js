@@ -26,7 +26,7 @@
         element.textContent = value;
         return element;
     }
-    function field(label, type = 'text', value = '') {
+    function field(label, type = 'text', value = '', help = '') {
         const wrapper = guidedText('div', 'workspace-field', '');
         const caption = guidedText('label', '', label);
         const input = document.createElement(type === 'textarea' ? 'textarea' : 'input');
@@ -35,7 +35,23 @@
         input.id = `workflow-field-${++fieldCounter}`;
         caption.htmlFor = input.id;
         wrapper.append(caption, input);
+        if (help) {
+            const hint = guidedText('small', 'workspace-help', help);
+            hint.id = `${input.id}-help`;
+            input.setAttribute('aria-describedby', hint.id);
+            if (type === 'checkbox') {
+                const copy = guidedText('div', '', '');
+                copy.append(caption, hint);
+                wrapper.append(copy);
+            } else wrapper.append(hint);
+        }
         return {label: wrapper, input};
+    }
+    function describeOperation(operation) {
+        const match = /^(GET|POST|PUT|PATCH|DELETE)\s+(\/\S*)$/i.exec(operation);
+        if (!match) return {direct: false, text: `${operation} is an internal or custom operation. To run it, provide an HTTP execution definition, or choose an HTTP request from the service that receives user traffic.`};
+        const method = match[1].toUpperCase();
+        return {direct: true, text: `The runner will send ${method} ${match[2]} to your application. ${method === 'GET' ? 'Supply request parameters if this page needs them.' : 'Supply the request data and any required session details before running. Repeating this request may change application data.'} Selecting a trace does not copy its request body, cookies or earlier steps.`};
     }
     function button(label, action, secondary = false) {
         const item = guidedText('button', secondary ? 'secondary-button' : 'experiment-button', label);
@@ -209,7 +225,7 @@
             workflows.forEach((item, index) => guidedOperation.append(new Option(`${item.operationName} · ${item.traceCount} traces`, String(index))));
             guidedDiscovery.hidden = false;
             guidedInspectButton.disabled = true;
-            setGuidedStatus(workflows.length ? 'Choose the operation to inspect.' : 'No operations were recorded for this service in the selected time window. Try a wider window.');
+            setGuidedStatus(workflows.length ? 'Choose the recorded request for the action you want to test, then inspect its traces. HTTP methods such as GET and POST describe how that request is sent.' : 'No operations were recorded for this service in the selected time window. Try a wider window.');
         } catch (error) { if (version === guidedConnectionVersion) setGuidedStatus(error.message, true); }
     }
     async function inspectGuidedWorkflow() {
@@ -265,28 +281,30 @@
             return;
         }
         const form = guidedText('form', 'workspace-form', '');
-        const name = field('Workflow name', 'text', session.operationName);
-        const outcome = field('Successful result');
-        const status = field('Expected HTTP statuses');
+        const requestDescription = describeOperation(session.operationName);
+        guidedResult.append(guidedText('p', 'workspace-help', requestDescription.text));
+        const name = field('Workflow name', 'text', session.operationName, 'Give this action a name you will recognise in your saved workflows.');
+        const outcome = field('What should a successful run achieve?', 'text', '', 'Describe the business result. This description does not configure the automated checks below.');
+        const status = field('HTTP response codes that count as success', 'text', '', 'Enter the codes your application should return, separated by commas. A matching trace is also required for a run to count.');
         status.input.placeholder = 'e.g. 200, 201';
-        const marker = field('Required response text (optional)');
-        const criticality = field('Business importance (0–1)', 'number');
+        const marker = field('Text that must appear in the response (optional)', 'text', '', 'Add text from a successful response to check its content as well as its HTTP code. Leave empty to skip this check.');
+        const criticality = field('Business importance (0–1)', 'number', '', 'Choose how important this workflow is to your application: 0 is lowest and 1 is highest. This is your assessment, not a measured score.');
         Object.assign(criticality.input, {min: '0', max: '1', step: '0.01'});
-        const trials = field('Normal runs required', 'number');
+        const trials = field('Baseline runs to collect', 'number', '', 'Choose 3–30 runs with services available. Each run must match a trace; failures are recorded and can block baseline readiness.');
         Object.assign(trials.input, {min: '3', max: '30', step: '1'});
-        trials.label.append(guidedText('small', '', 'Choose between 3 and 30 runs.'));
         [name, outcome, status, criticality, trials].forEach(item => item.input.required = true);
-        const request = field('Request options (JSON)', 'textarea');
+        const request = field('Request data (JSON, optional)', 'textarea', '', 'For requests needing input, supply query, formBody, jsonBody, headers or pathVariables. Recorded traces do not supply this data automatically. Leave empty only if the request needs none.');
         request.input.placeholder = 'Optional body, query, headers or pathVariables';
         request.label.append(guidedText('small', '', 'Use secretHeaders to reference server environment variables for authentication.'));
-        const imported = field('Execution definition JSON', 'textarea');
-        const useImported = field('Use a multi-step execution definition', 'checkbox');
+        const imported = field('Execution definition JSON', 'textarea', '', 'Provide an execution definition with the HTTP steps and success checks required for this workflow. Needed when one request cannot reproduce the action.');
+        const useImported = field('Use a multi-step execution definition', 'checkbox', '', 'Use this for actions that need earlier steps, such as creating a session or preparing a cart.');
         useImported.label.className = 'checkbox-label';
-        const advanced = details('Request and execution options', request.label, useImported.label, imported.label);
+        const advanced = details('Request data and multi-step setup', request.label, useImported.label, imported.label);
         advanced.className = 'full-width';
         imported.input.disabled = true;
         imported.label.hidden = true;
-        const httpSupported = /^(GET|POST|PUT|PATCH|DELETE)\s+\/\S*$/i.test(session.operationName);
+        const httpSupported = requestDescription.direct;
+        if (httpSupported && !/^GET\s/i.test(session.operationName)) advanced.open = true;
         const syncMode = () => {
             const enabled = useImported.input.checked;
             imported.input.disabled = !enabled;
@@ -300,10 +318,10 @@
         const confirm = field('I reviewed the success checks for this workflow.', 'checkbox');
         confirm.label.className = 'checkbox-label full-width';
         confirm.input.required = true;
-        const submit = guidedText('button', 'experiment-button', 'Save workflow');
+        const submit = guidedText('button', 'experiment-button', 'Save and continue to baseline runs');
         submit.type = 'submit';
         const notice = guidedText('p', 'workspace-status full-width', '');
-        const title = guidedText('h4', 'full-width', 'Define a successful run');
+        const title = guidedText('h4', 'full-width', 'Set up the workflow and success checks');
         form.append(title, name.label, outcome.label, status.label, marker.label, criticality.label, trials.label, advanced, confirm.label, submit, notice);
         revealInvalidFields(form);
         form.addEventListener('input', event => { if (event.target !== confirm.input) confirm.input.checked = false; });
@@ -412,7 +430,7 @@
         guidedResult.append(guidedText('h4', '', 'Ready to collect normal runs'), guidedText('p', '', 'Confirm the saved workflow settings before running the application.'), save, notice);
     }
     function applicationField(campaign) {
-        const item = field('Application base URL', 'url', stored(`workflow-application:${campaign.campaignId}`) || '');
+        const item = field('Application base URL', 'url', stored(`workflow-application:${campaign.campaignId}`) || '', 'Enter the address of the application being tested, including http:// or https://. Use its base address, not the tracing server or a page path.');
         item.input.required = true;
         item.input.addEventListener('change', () => { if (item.input.checkValidity()) remember(`workflow-application:${campaign.campaignId}`, item.input.value.trim()); });
         return item;
@@ -420,10 +438,10 @@
     function renderBaseline(campaign, progress) {
         const form = guidedText('form', 'baseline-console workspace-form', '');
         const app = applicationField(campaign);
-        const submit = guidedText('button', 'experiment-button', 'Run workflow');
+        const submit = guidedText('button', 'experiment-button', 'Run one baseline test');
         submit.type = 'submit';
         const notice = guidedText('p', 'workspace-status full-width', '');
-        form.append(guidedText('h4', 'full-width', 'Check normal behavior'), guidedText('p', 'full-width', 'Run the workflow with its services available. Only runs matched to a trace count toward this check.'), app.label, submit, notice);
+        form.append(guidedText('h4', 'full-width', 'Collect a baseline with services available'), guidedText('p', 'full-width', `Each click executes the configured workflow once. Collect ${progress.baseline.requiredTrials} runs matched to traces. The baseline must also pass the stability checks before service availability tests.`), app.label, submit, notice);
         if (progress.baseline.blockers.length) form.append(details('What is still needed', ...progress.baseline.blockers.map(text => guidedText('p', '', text))));
         if (progress.baseline.excludedReasons?.length) form.append(details('Excluded runs', ...progress.baseline.excludedReasons.map(text => guidedText('p', '', text))));
         form.addEventListener('submit', async event => {
@@ -906,7 +924,13 @@
         setGuidedStatus('Connection settings changed. Connect to load services.');
     });
     guidedService.addEventListener('change', () => { if (guidedService.value) discoverGuidedWorkflows(); else { guidedDiscovery.hidden = true; guidedResult.hidden = true; } });
-    guidedOperation.addEventListener('change', () => { guidedConnectionVersion += 1; guidedInspectButton.disabled = !selectedGuidedWorkflow(guidedWorkflows, guidedOperation.value); });
+    guidedOperation.addEventListener('change', () => {
+        guidedConnectionVersion += 1;
+        const selected = selectedGuidedWorkflow(guidedWorkflows, guidedOperation.value);
+        guidedInspectButton.disabled = !selected;
+        const help = $('guided-operation-help');
+        if (help) help.textContent = selected ? describeOperation(selected.operationName).text : 'Choose the action you want to test. Prefer a request from the service that receives user traffic.';
+    });
     guidedInspectButton.addEventListener('click', inspectGuidedWorkflow);
     $('new-workflow').addEventListener('click', openSource);
     $('refresh-saved').addEventListener('click', () => loadSavedWorkflows());

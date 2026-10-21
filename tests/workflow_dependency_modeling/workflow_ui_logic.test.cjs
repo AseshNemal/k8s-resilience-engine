@@ -10,7 +10,7 @@ const context = {
     document: {querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {}},
 };
 vm.createContext(context);
-vm.runInContext(source.replace('    if (!guidedForm) return;', 'globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; globalThis.observedGraphModel = observedGraphModel; globalThis.stageLabel = stageLabel; return;'), context);
+vm.runInContext(source.replace('    if (!guidedForm) return;', 'globalThis.describeOperation = describeOperation; globalThis.buildSetup = buildObservedWorkflowSetup; globalThis.selectWorkflow = selectedGuidedWorkflow; globalThis.observedGraphModel = observedGraphModel; globalThis.stageLabel = stageLabel; return;'), context);
 const build = (...args) => JSON.parse(JSON.stringify(context.buildSetup(...args)));
 
 test('workflow stage labels distinguish every persisted lifecycle state', () => {
@@ -70,4 +70,20 @@ test('observed graph uses recorded edges without inventing mandatory dependencie
         mandatoryServices: [],
         optionalServices: [],
     });
+});
+
+
+test('operation guidance distinguishes HTTP replay from internal operations', () => {
+    for (const operation of ['GET /items/{id}', 'post /orders', 'PATCH /profile']) {
+        const description = context.describeOperation(operation);
+        assert.equal(description.direct, true);
+        assert.match(description.text, /does not copy its request body, cookies or earlier steps/);
+    }
+    assert.match(context.describeOperation('POST /orders').text, /may change application data/);
+    assert.doesNotMatch(context.describeOperation('GET /items').text, /may change application data/);
+    for (const operation of ['PlaceOrder', '/shop.Checkout/PlaceOrder', 'GET', 'HEAD /items']) {
+        const description = context.describeOperation(operation);
+        assert.equal(description.direct, false);
+        assert.match(description.text, /provide an HTTP execution definition/);
+    }
 });

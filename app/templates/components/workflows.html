@@ -71,7 +71,8 @@
                                 <label for="workflow-input-2">
                                     Trace query URL
                                 </label>
-                                <input id="workflow-input-2" name="traceEndpoint" type="url" required autocomplete="url">
+                                <input id="workflow-input-2" name="traceEndpoint" type="url" required autocomplete="url" aria-describedby="trace-url-help">
+                                <small id="trace-url-help">Base URL of your tracing query service. This is different from the application you want to test.</small>
                             </div>
                             <div>
                                 <label for="workflow-input-3">
@@ -156,23 +157,25 @@
                                 <label for="workflow-input-8">
                                     Entry service
                                 </label>
-                                <select id="workflow-input-8" name="entryService" disabled>
+                                <select id="workflow-input-8" name="entryService" disabled aria-describedby="entry-service-help">
                                     <option value="">
                                         Connect to load services
                                     </option>
                                 </select>
+                                <small id="entry-service-help">Choose the service that first receives the user request, such as your frontend or API gateway.</small>
                             </div>
                         </form>
                         <div data-role="guided-discovery" hidden>
                             <div>
                                 <label for="workflow-input-9">
-                                    Recorded operation
+                                    Request or operation to test
                                 </label>
-                                <select id="workflow-input-9" data-role="guided-operation">
+                                <select id="workflow-input-9" data-role="guided-operation" aria-describedby="operation-help">
                                 </select>
+                                <small id="operation-help" data-role="guided-operation-help" aria-live="polite">Choose the action you want to test. Prefer a request from the service that receives user traffic.</small>
                             </div>
                             <button type="button" class="experiment-button" data-role="guided-inspect-button" disabled>
-                                Open workflow
+                                Inspect traces and set up workflow
                             </button>
                         </div>
                         <p data-role="guided-analysis-status" class="workspace-status" role="status" aria-live="polite" tabindex="-1">
@@ -291,6 +294,6 @@
     </div>
 {% endblock %}
 {% block page_js %}
-    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=workspace-1" defer>
+    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=workspace-2" defer>
     </script>
 {% endblock %}
