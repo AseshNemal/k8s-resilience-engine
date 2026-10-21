@@ -331,6 +331,16 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         return best ? best.name : null;
     }
 
+    // A transition record is one pair of nodes and the number of pods that moved between them, so the pods that
+    // moved are the sum of pod_count; the number of records would count three pods moving between the same two
+    // nodes as one. A record without a usable count adds nothing.
+    function podsMoved(transitions) {
+        return (transitions || []).reduce((total, record) => {
+            const count = Number(record && record.pod_count);
+            return total + (Number.isFinite(count) && count > 0 ? count : 0);
+        }, 0);
+    }
+
     function renderSimulationRows(parts, payload) {
         parts.body.replaceChildren();
         const results = payload.scenario_results || [];
@@ -339,7 +349,11 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             row.appendChild(el("td", null, String(result.scenario_name || result.scenario_id).replace(" (live topology)", "")));
             const outcome = el("td");
             outcome.appendChild(el("span", `status-badge status-badge--${OUTCOME_VARIANT[result.status] || "muted"}`, result.status));
-            if (result.error_message) outcome.appendChild(el("div", null, result.error_message)).style.fontSize = "12px";
+            if (result.error_message) {
+                const reason = el("div", null, result.error_message);
+                reason.style.fontSize = "12px";
+                outcome.appendChild(reason);
+            }
             row.appendChild(outcome);
             row.appendChild(el("td", null, pct(result.d_rate)));
             const exposure = el("td");
@@ -352,7 +366,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             }
             row.appendChild(exposure);
             row.appendChild(el("td", null, (result.drifted_services || []).join(", ") || "none"));
-            row.appendChild(el("td", null, String((result.transitions || []).length)));
+            row.appendChild(el("td", null, String(podsMoved(result.transitions))));
             parts.body.appendChild(row);
         });
         parts.results.hidden = results.length === 0;

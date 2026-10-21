@@ -204,3 +204,36 @@ test("clicks during a run never run alongside it; they become a single follow-up
     assert.equal(peak, 1, "never two simulations at the same time");
     assert.equal(env.calls.filter((url) => url.includes("chaos/benchmarks")).length, 2);
 });
+
+// "Pod moves" is the number of PODS that moved. A transition record is one pair of nodes with a pod_count, so
+// several pods moving between the same two nodes are one record: counting records undercounts them.
+const podMoves = (env, row = 0) => env.parts.body.children[row].children[5].textContent;
+const transition = (podCount, from = "w1", to = "w2") => ({ from_node: from, to_node: to, pod_count: podCount });
+
+test("pod moves counts the pods, not the pairs of nodes they moved between", async () => {
+    const env = makeEnvironment({
+        overview: () => ok({ namespaces: [ns("shop", 3)] }),
+        benchmarks: () => ok(benchmark("live", [
+            scenario("07_node_drain_eviction", { transitions: [transition(3, "w1", "w2")] }),
+            scenario("05_pod_deletion_chaos", { transitions: [transition(2, "w1", "w2"), transition(1, "w1", "w3")] }),
+            scenario("01_initial_deployment", { transitions: [] }),
+        ])),
+    });
+    await env.widget.loadSimulationNamespaces();
+
+    assert.equal(podMoves(env, 0), "3", "three pods between one pair of nodes is three, not one record");
+    assert.equal(podMoves(env, 1), "3", "two records of 2 and 1 pods are three pods");
+    assert.equal(podMoves(env, 2), "0");
+});
+
+test("a transition record without a usable pod_count adds nothing instead of producing NaN", async () => {
+    const env = makeEnvironment({
+        overview: () => ok({ namespaces: [ns("shop", 3)] }),
+        benchmarks: () => ok(benchmark("live", [
+            scenario("07_node_drain_eviction", { transitions: [{ from_node: "w1", to_node: "w2" }, transition(2), { pod_count: "x" }] }),
+        ])),
+    });
+    await env.widget.loadSimulationNamespaces();
+
+    assert.equal(podMoves(env, 0), "2");
+});
