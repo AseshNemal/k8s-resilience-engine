@@ -121,3 +121,11 @@ def test_the_backend_has_a_memory_limit_that_leaves_room_above_the_measured_peak
     assert limit, "extension/compose.yaml should set mem_limit"
     mebibytes = int(limit.group(1)) * (1024 if limit.group(2) == "g" else 1)
     assert 256 <= mebibytes <= 1024
+
+
+def test_windows_gets_a_console_less_helper_for_the_background_task():
+    """The Windows renewal task runs resilience-helper-bg.exe; without a GUI-subsystem build it would flash a window."""
+    assert re.search(r'-H=windowsgui" -o /out/windows/resilience-helper-bg\.exe', DOCKERFILE)
+    assert "COPY --from=helper --chmod=0755 /out/windows/resilience-helper-bg.exe /windows/resilience-helper-bg.exe" in DOCKERFILE
+    metadata = (ROOT / "extension" / "metadata.json").read_text(encoding="utf-8")
+    assert "/windows/resilience-helper-bg.exe" in metadata

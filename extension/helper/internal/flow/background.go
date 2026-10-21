@@ -21,6 +21,14 @@ import (
 //   - removing access removes the job, and removing the job needs no dialog because it only reduces
 //     what the helper can do.
 
+// backgroundNote is the paragraph for the setup dialog, or "" when this system has no background job.
+func (d Deps) backgroundNote() string {
+	if !d.agentSupported() {
+		return ""
+	}
+	return d.backgroundParagraph()
+}
+
 // agentSupported reports whether this system has a verified background job.
 func (d Deps) agentSupported() bool { return d.Agent != nil && d.Agent.Supported() }
 
@@ -58,9 +66,9 @@ func (d Deps) stopBackground(ctx context.Context, r Result) Result {
 	return r
 }
 
-func enableDialog(c clusters.Context) approve.Request {
+func enableDialog(c clusters.Context, paragraph string) approve.Request {
 	name := approve.Sanitize(c.Name, 80)
-	body := fmt.Sprintf("Cluster: %s\n\nThe extension's read-only token is renewed automatically while the extension is open.\n\n%s", name, backgroundParagraph)
+	body := fmt.Sprintf("Cluster: %s\n\nThe extension's read-only token is renewed automatically while the extension is open.\n\n%s", name, paragraph)
 	return approve.Request{Title: "Resilience Engine: keep access renewed in the background?", Body: capText(body, 1800), Timeout: 90 * time.Second}
 }
 
@@ -84,7 +92,7 @@ func EnableBackground(ctx context.Context, d Deps, name string) Result {
 		return fail(cmd, StateNotAuthorized, "the extension is not set up for this cluster; approve it first")
 	}
 
-	decision, err := d.Prompter.Confirm(ctx, enableDialog(c))
+	decision, err := d.Prompter.Confirm(ctx, enableDialog(c, d.backgroundParagraph()))
 	switch {
 	case errors.Is(err, approve.ErrNoApprovalChannel), errors.Is(err, approve.ErrUnsupportedPlatform):
 		return fail(cmd, StateApprovalUnavailable, "no approval dialog is available on this system")
@@ -100,7 +108,7 @@ func EnableBackground(ctx context.Context, d Deps, name string) Result {
 	}
 
 	if err := d.Agent.Install(ctx); err != nil {
-		r := fail(cmd, StateError, "the background renewal could not be set up on this Mac")
+		r := fail(cmd, StateError, "the background renewal could not be set up on this computer")
 		r.Background = string(agent.Off)
 		return r
 	}

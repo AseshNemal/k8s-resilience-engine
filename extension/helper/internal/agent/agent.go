@@ -11,8 +11,12 @@
 // dialog, and removed when they remove the access. The plist holds a path and an interval; it never
 // holds a credential.
 //
-// Verification status: macOS only. Windows (Task Scheduler) and Linux (systemd user timer) are
-// refused until they have been written and tried on those systems.
+// Each operating system has its own per-user job with the same rules: a LaunchAgent on macOS
+// (this file), a Task Scheduler task on Windows (taskscheduler.go) and a systemd user timer on Linux
+// (systemd.go). New picks the one for the host.
+//
+// Verification status: macOS is the only one tried on a real machine. The Windows and Linux jobs are
+// covered by tests against a fake runner and compile for their systems, but have not been run there.
 package agent
 
 import (
@@ -57,9 +61,37 @@ var (
 // Controller is what the flows need, so tests never touch launchd.
 type Controller interface {
 	Supported() bool
+	// Describe says, in one phrase, what the job is and where it lives, for the approval dialog.
+	Describe() string
 	Install(ctx context.Context) error
 	Uninstall(ctx context.Context) error
 	Status(ctx context.Context) (State, error)
+}
+
+// Options describes the host the job is for. Fields an operating system does not use are ignored.
+type Options struct {
+	GOOS    string
+	Home    string
+	UID     int               // macOS: the launchd domain
+	User    string            // Windows: DOMAIN\name the task runs as
+	Exe     string            // absolute path of the helper binary the job runs
+	Quiet   string            // Windows: a copy of Exe built without a console window, preferred when set
+	Env     map[string]string // only an absolute KUBECONFIG (or XDG_CONFIG_HOME) is ever used
+	Systemd bool              // Linux: a systemd user session is available
+	Runner  execx.Runner
+}
+
+// New returns the background job for the host in o. Any other system gets a LaunchAgent that reports
+// itself unsupported, so callers never need a nil check.
+func New(o Options) Controller {
+	switch o.GOOS {
+	case "windows":
+		return &ScheduledTask{GOOS: o.GOOS, User: o.User, Exe: o.Exe, Quiet: o.Quiet, Runner: o.Runner}
+	case "linux":
+		return &SystemdTimer{GOOS: o.GOOS, Home: o.Home, Exe: o.Exe, Env: o.Env, HasSystemd: o.Systemd, Runner: o.Runner}
+	default:
+		return &LaunchAgent{GOOS: o.GOOS, Home: o.Home, UID: o.UID, Exe: o.Exe, Env: o.Env, Runner: o.Runner}
+	}
 }
 
 // LaunchAgent is the macOS implementation.
@@ -73,6 +105,10 @@ type LaunchAgent struct {
 }
 
 func (a *LaunchAgent) Supported() bool { return a.GOOS == "darwin" }
+
+func (a *LaunchAgent) Describe() string {
+	return "a macOS LaunchAgent in your user account, in ~/Library/LaunchAgents"
+}
 
 func (a *LaunchAgent) plistPath() string {
 	return filepath.Join(a.Home, "Library", "LaunchAgents", Label+".plist")
@@ -91,6 +127,27 @@ func plain(p string) bool {
 		return false
 	}
 	return !strings.ContainsFunc(p, unicode.IsControl)
+}
+
+// writeFileAtomic writes content next to path and renames it into place, so a reader never sees a
+// half-written file.
+func writeFileAtomic(path, content string, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".renew-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 func xmlEscape(s string) string {

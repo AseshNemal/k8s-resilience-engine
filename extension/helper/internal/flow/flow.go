@@ -169,8 +169,11 @@ func backendFailure(cmd string, err error) Result {
 }
 
 // backgroundParagraph is shown wherever the person is asked to allow the background job, so the same
-// facts are disclosed every time: what it is, how often it runs, and what it can never do.
-const backgroundParagraph = "To keep it renewed when Docker Desktop is closed or this Mac was asleep, a small background job (a macOS LaunchAgent in your user account, in ~/Library/LaunchAgents) checks every 15 minutes and renews the token when it is nearly due. It only issues read-only tokens: it never changes the cluster, never asks you anything and never recreates removed access. Removing the access removes the job."
+// facts are disclosed every time: what it is, how often it runs, and what it can never do. The agent
+// says what the job is called on this operating system.
+func (d Deps) backgroundParagraph() string {
+	return "To keep it renewed when Docker Desktop is closed or this computer was asleep, a small background job (" + d.Agent.Describe() + ") checks every 15 minutes and renews the token when it is nearly due. It only issues read-only tokens: it never changes the cluster, never asks you anything and never recreates removed access. Removing the access removes the job."
+}
 
 const slowMessage = "Docker Desktop is responding very slowly, so this ran out of time; it will try again by itself. Closing other containers or giving Docker more memory makes it faster."
 
@@ -207,9 +210,9 @@ func describe(changes []rbac.Change) []string {
 	return out
 }
 
-// authorizeDialog is composed only from facts the helper read itself, and every value that came from
+// authorizeDialog takes the background-job paragraph (empty when this system has no job) and is composed only from facts the helper read itself, and every value that came from
 // the user's kubeconfig is sanitised, so nothing the extension UI sends can appear in it.
-func authorizeDialog(c clusters.Context, version string, plan []rbac.Change, background bool) approve.Request {
+func authorizeDialog(c clusters.Context, version string, plan []rbac.Change, background string) approve.Request {
 	name := approve.Sanitize(c.Name, 80)
 	server := approve.Sanitize(clusters.HostPort(c.Server), 60)
 	var b strings.Builder
@@ -226,8 +229,8 @@ func authorizeDialog(c clusters.Context, version string, plan []rbac.Change, bac
 		b.WriteString(bullet(describe(plan)))
 	}
 	fmt.Fprintf(&b, "\nA read-only token (valid for up to %d days) is then issued and renewed automatically. You can remove this access at any time.", int(token.RequestedLifetime.Hours()/24))
-	if background {
-		b.WriteString("\n\n" + backgroundParagraph)
+	if background != "" {
+		b.WriteString("\n\n" + background)
 	}
 	return approve.Request{Title: "Resilience Engine: approve read-only access?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
 }

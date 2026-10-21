@@ -8,7 +8,7 @@
     "binaries": [
       {
         "darwin": [ { "path": "/darwin/resilience-helper" } ],
-        "windows": [ { "path": "/windows/resilience-helper.exe" } ],
+        "windows": [ { "path": "/windows/resilience-helper.exe" }, { "path": "/windows/resilience-helper-bg.exe" } ],
         "linux": [ { "path": "/linux/resilience-helper" } ]
       }
     ]

@@ -261,7 +261,8 @@ type fakeAgent struct {
 	uninstalls int
 }
 
-func (a *fakeAgent) Supported() bool { return a.supported }
+func (a *fakeAgent) Supported() bool  { return a.supported }
+func (a *fakeAgent) Describe() string { return "a test background job" }
 func (a *fakeAgent) Install(context.Context) error {
 	if a.installErr != nil {
 		return a.installErr
