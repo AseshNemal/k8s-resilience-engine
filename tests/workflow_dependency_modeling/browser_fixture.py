@@ -5,7 +5,6 @@ This is engineering evidence, not an empirical failure experiment.
 """
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import json
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -54,14 +53,14 @@ for configure, repository in (
     configure(repository)
 
 scenario = WorkflowScenario.from_mapping({
-    "workflowId": "pp1_fixture_checkout", "description": "CONTROLLED FIXTURE: no real outage",
+    "workflowId": "browser_fixture_checkout", "description": "CONTROLLED FIXTURE: no real outage",
     "criticality": .8, "entryService": "fixture-gateway",
     "successCondition": {"protocol": "http", "terminalService": "fixture-gateway",
                          "operationName": "POST /fixture-checkout", "httpStatusCodes": [200]},
 })
 scenarios.create(scenario)
 analyses.create(WorkflowAnalysisSession.from_mapping({
-    "sessionId": "analysis:pp1-controlled-fixture", "environmentId": "CONTROLLED-FIXTURE-ONLY",
+    "sessionId": "analysis:browser-controlled-fixture", "environmentId": "CONTROLLED-FIXTURE-ONLY",
     "evidenceTier": "experimental", "jaegerUrl": "http://localhost:16686",
     "entryService": "fixture-gateway", "operationName": "POST /fixture-checkout",
     "lookback": "1h", "workflowId": scenario.workflow_id,
@@ -76,7 +75,7 @@ analyses.create(WorkflowAnalysisSession.from_mapping({
     "requiredActions": [], "createdAt": NOW.isoformat(), "createdBy": "fixture-generator",
 }))
 campaign = service.create_experiment_campaign({
-    "analysisSessionId": "analysis:pp1-controlled-fixture",
+    "analysisSessionId": "analysis:browser-controlled-fixture",
     "successContractConfirmed": True, "requiredBaselineTrials": 3,
     "criticality": .65,
     "workflowName": "[CONTROLLED FIXTURE] Checkout lifecycle",
@@ -132,9 +131,10 @@ async def evidence_label(request, call_next):
     return response
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
-    out = Path("experiments/component-1/progress-1-2026-10-20")
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "fixture-campaign.json").write_text(json.dumps(campaign.to_mapping(), indent=2), encoding="utf-8")
-    print("CONTROLLED FIXTURE ONLY; no Docker or Kubernetes changes", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=8019)
+
+    parser = argparse.ArgumentParser(description="Run the isolated browser-test fixture server.")
+    parser.add_argument("--port", type=int, default=8001)
+    arguments = parser.parse_args()
+    uvicorn.run(app, host="127.0.0.1", port=arguments.port)

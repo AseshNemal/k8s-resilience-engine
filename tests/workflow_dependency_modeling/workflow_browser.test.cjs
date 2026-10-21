@@ -1,21 +1,30 @@
 // Real Chrome checks against the application and a separate controlled-fixture server.
+// Start browser_fixture.py on a fresh port and set WORKFLOW_TEST_URL / WORKFLOW_FIXTURE_URL.
+// Set WORKFLOW_RUN_LIVE=1 to include live Jaeger discovery and real workflow runs.
 // No container, Kubernetes, or service outage actions are performed.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const base = process.env.WORKFLOW_TEST_URL || 'http://127.0.0.1:8018';
-const fixtureBase = process.env.WORKFLOW_FIXTURE_URL || 'http://127.0.0.1:8020';
-async function main() {
-    const out = path.resolve('tmp/component1-workspace-browser');
-    await fs.mkdir(out, {recursive:true});
-    const browser = await chromium.launch({channel:'chrome', headless:false});
-    const context = await browser.newContext({viewport:{width:1440,height:1050}, acceptDownloads:true});
+const base = process.env.WORKFLOW_TEST_URL;
+const fixtureBase = process.env.WORKFLOW_FIXTURE_URL;
+const runLive = process.env.WORKFLOW_RUN_LIVE === '1';
+const out = path.resolve(process.env.WORKFLOW_BROWSER_OUTPUT || 'tmp/workflow-browser');
+
+async function openTestPage() {
+    await fs.mkdir(out, {recursive: true});
+    const browser = await chromium.launch({channel: 'chrome', headless: false});
+    const context = await browser.newContext({viewport: {width: 1440, height: 1050}, acceptDownloads: true});
     const page = await context.newPage();
     page.setDefaultTimeout(15000);
     const errors = [], checks = [];
-    const check = text => {checks.push(text); console.log('PASS', text);};
-    page.on('pageerror', e => errors.push(e.message));
+    const check = text => { checks.push(text); console.log('PASS', text); };
+    page.on('pageerror', error => errors.push(error.message));
+    return {browser, page, errors, checks, check};
+}
+
+async function runWorkflowLifecycle() {
+    const {browser, page, errors, checks, check} = await openTestPage();
     const clickPost = async (locator, suffix, expected=200, timeout=60000) => {
         const pending = page.waitForResponse(r=>r.url().endsWith(suffix)&&r.request().method()==='POST',{timeout});
         pending.catch(()=>{});
@@ -48,64 +57,68 @@ async function main() {
         await connection.getByLabel('Trace query URL',{exact:true}).fill('http://localhost:16687');
         await clickPost(connection.getByRole('button',{name:'Connect',exact:true}),'/analysis-sessions/services',503);
         check('Unavailable tracing source shows an error without invented services');
-        await connection.getByLabel('Trace query URL',{exact:true}).fill('http://localhost:16686');
-        const services = await clickPost(connection.getByRole('button',{name:'Connect',exact:true}),'/analysis-sessions/services');
-        assert(services.includes('frontend'));
-        const discovery = page.waitForResponse(r=>r.url().endsWith('/analysis-sessions/discover'));
-        await connection.getByLabel('Entry service',{exact:true}).selectOption('frontend');
-        const operations = await (await discovery).json();
-        const selected = operations.findIndex(item=>item.operationName==='POST /cart/checkout');
-        assert(selected>=0,JSON.stringify(operations));
-        await page.locator('[data-role="guided-operation"]').selectOption(String(selected));
-        let session = await clickPost(page.getByRole('button',{name:'Open workflow',exact:true}),'/analysis-sessions',201);
-        if (session.traceQuality.excludedCount || session.traceQuality.inputInvalidCount) {
-            await page.getByRole('button',{name:'Choose another operation',exact:true}).waitFor();
-            check('Live incomplete evidence is blocked with trace issues rather than accepted');
-            const saved = await (await page.request.get(base+'/api/workflows/analysis-sessions')).json();
-            session=saved.find(item=>item.operationName==='POST /cart/checkout' && !item.traceQuality.excludedCount && !item.traceQuality.inputInvalidCount);
-            assert(session,'A complete saved checkout observation is needed for the live baseline check');
-            await page.goto(base+'/components/workflows?inspection='+encodeURIComponent(session.sessionId),{waitUntil:'networkidle'});
-            check('A saved complete inspection resumes setup through its URL');
+        if (runLive) {
+            await connection.getByLabel('Trace query URL',{exact:true}).fill('http://localhost:16686');
+            const services = await clickPost(connection.getByRole('button',{name:'Connect',exact:true}),'/analysis-sessions/services');
+            assert(services.includes('frontend'));
+            const discovery = page.waitForResponse(r=>r.url().endsWith('/analysis-sessions/discover'));
+            await connection.getByLabel('Entry service',{exact:true}).selectOption('frontend');
+            const operations = await (await discovery).json();
+            const selected = operations.findIndex(item=>item.operationName==='POST /cart/checkout');
+            assert(selected>=0,JSON.stringify(operations));
+            await page.locator('[data-role="guided-operation"]').selectOption(String(selected));
+            let session = await clickPost(page.getByRole('button',{name:'Open workflow',exact:true}),'/analysis-sessions',201);
+            if (session.traceQuality.excludedCount || session.traceQuality.inputInvalidCount) {
+                await page.getByRole('button',{name:'Choose another operation',exact:true}).waitFor();
+                check('Live incomplete evidence is blocked with trace issues rather than accepted');
+                const saved = await (await page.request.get(base+'/api/workflows/analysis-sessions')).json();
+                session=saved.find(item=>item.operationName==='POST /cart/checkout' && !item.traceQuality.excludedCount && !item.traceQuality.inputInvalidCount);
+                assert(session,'A complete saved checkout observation is needed for the live baseline check');
+                await page.goto(base+'/components/workflows?inspection='+encodeURIComponent(session.sessionId),{waitUntil:'networkidle'});
+                check('A saved complete inspection resumes setup through its URL');
+            }
+            await page.getByRole('heading',{name:'Define a successful run',exact:true}).waitFor();
+            check('Live Jaeger services and operations populate from recorded data');
+            const setup = page.locator('[data-role="guided-result"]');
+            assert.equal(await setup.getByLabel('Business importance (0–1)',{exact:true}).inputValue(),'');
+            assert.equal(await setup.getByLabel('Normal runs required',{exact:true}).inputValue(),'');
+            await setup.getByRole('button',{name:'Save workflow',exact:true}).click();
+            assert.equal(await setup.locator('form').evaluate(el=>el.checkValidity()),false);
+            check('Workflow setup requires explicit success checks, importance, run count and review');
+            await setup.getByLabel('Workflow name',{exact:true}).fill('Checkout availability UI check');
+            await setup.getByLabel('Successful result',{exact:true}).fill('Checkout confirmation is returned');
+            await setup.getByLabel('Expected HTTP statuses',{exact:true}).fill('200');
+            await setup.getByLabel('Business importance (0–1)',{exact:true}).fill('0.27');
+            await setup.getByLabel('Normal runs required',{exact:true}).fill('3');
+            await setup.getByText('Request and execution options',{exact:true}).click();
+            await setup.getByLabel('Use a multi-step execution definition',{exact:true}).check();
+            const executionDefinition=await (await page.request.get(base+'/api/workflows/execution-templates/online-boutique-checkout')).json();
+            await setup.getByLabel('Execution definition JSON',{exact:true}).fill(JSON.stringify(executionDefinition));
+            await setup.getByLabel('I reviewed the success checks for this workflow.',{exact:true}).check();
+            const campaign = await clickPost(setup.getByRole('button',{name:'Save workflow',exact:true}),'/experiment-campaigns',201);
+            assert.equal(campaign.criticality,.27);
+            assert.equal(campaign.workloadProfile,'reviewed_imported_definition');
+            await setup.getByRole('button',{name:'Run workflow',exact:true}).waitFor();
+            assert.equal(await setup.getByLabel('Application base URL',{exact:true}).inputValue(),'');
+            check('User configuration is saved and test settings are recorded without demo templates');
+            await setup.getByRole('button',{name:'Run workflow',exact:true}).click();
+            assert.equal(await setup.locator('form').evaluate(el=>el.checkValidity()),false);
+            check('Running a workflow requires the user-supplied application address');
+            await setup.getByLabel('Application base URL',{exact:true}).fill('http://localhost:8080');
+            const baseline = await clickPost(setup.getByRole('button',{name:'Run workflow',exact:true}),'/baseline-runs',201,120000);
+            assert.equal(baseline.status,'succeeded',JSON.stringify(baseline));
+            assert.equal(baseline.correlationStatus,'matched');
+            await setup.getByText('1/3',{exact:true}).waitFor();
+            check('A real user-defined workflow run is executed, correlated and reflected as 1/3');
+            await page.reload({waitUntil:'networkidle'});
+            await setup.getByText('1/3',{exact:true}).waitFor();
+            assert.equal(await setup.getByLabel('Application base URL',{exact:true}).inputValue(),'http://localhost:8080');
+            assert.equal(await page.locator('[data-role="source-panel"]').isVisible(),false);
+            check('Reload restores the selected saved workflow and its actual progress');
+            await page.screenshot({path:path.join(out,'live-baseline.png'),fullPage:true});
+        } else {
+            console.log('SKIP Live Jaeger discovery and workflow execution: set WORKFLOW_RUN_LIVE=1 when those services are available.');
         }
-        await page.getByRole('heading',{name:'Define a successful run',exact:true}).waitFor();
-        check('Live Jaeger services and operations populate from recorded data');
-        const setup = page.locator('[data-role="guided-result"]');
-        assert.equal(await setup.getByLabel('Business importance (0–1)',{exact:true}).inputValue(),'');
-        assert.equal(await setup.getByLabel('Normal runs required',{exact:true}).inputValue(),'');
-        await setup.getByRole('button',{name:'Save workflow',exact:true}).click();
-        assert.equal(await setup.locator('form').evaluate(el=>el.checkValidity()),false);
-        check('Workflow setup requires explicit success checks, importance, run count and review');
-        await setup.getByLabel('Workflow name',{exact:true}).fill('Checkout availability UI check');
-        await setup.getByLabel('Successful result',{exact:true}).fill('Checkout confirmation is returned');
-        await setup.getByLabel('Expected HTTP statuses',{exact:true}).fill('200');
-        await setup.getByLabel('Business importance (0–1)',{exact:true}).fill('0.27');
-        await setup.getByLabel('Normal runs required',{exact:true}).fill('3');
-        await setup.getByText('Request and execution options',{exact:true}).click();
-        await setup.getByLabel('Use a multi-step execution definition',{exact:true}).check();
-        const executionDefinition=await (await page.request.get(base+'/api/workflows/execution-templates/online-boutique-checkout')).json();
-        await setup.getByLabel('Execution definition JSON',{exact:true}).fill(JSON.stringify(executionDefinition));
-        await setup.getByLabel('I reviewed the success checks for this workflow.',{exact:true}).check();
-        const campaign = await clickPost(setup.getByRole('button',{name:'Save workflow',exact:true}),'/experiment-campaigns',201);
-        assert.equal(campaign.criticality,.27);
-        assert.equal(campaign.workloadProfile,'reviewed_imported_definition');
-        await setup.getByRole('button',{name:'Run workflow',exact:true}).waitFor();
-        assert.equal(await setup.getByLabel('Application base URL',{exact:true}).inputValue(),'');
-        check('User configuration is saved and test settings are recorded without demo templates');
-        await setup.getByRole('button',{name:'Run workflow',exact:true}).click();
-        assert.equal(await setup.locator('form').evaluate(el=>el.checkValidity()),false);
-        check('Running a workflow requires the user-supplied application address');
-        await setup.getByLabel('Application base URL',{exact:true}).fill('http://localhost:8080');
-        const baseline = await clickPost(setup.getByRole('button',{name:'Run workflow',exact:true}),'/baseline-runs',201,120000);
-        assert.equal(baseline.status,'succeeded',JSON.stringify(baseline));
-        assert.equal(baseline.correlationStatus,'matched');
-        await setup.getByText('1/3',{exact:true}).waitFor();
-        check('A real user-defined workflow run is executed, correlated and reflected as 1/3');
-        await page.reload({waitUntil:'networkidle'});
-        await setup.getByText('1/3',{exact:true}).waitFor();
-        assert.equal(await setup.getByLabel('Application base URL',{exact:true}).inputValue(),'http://localhost:8080');
-        assert.equal(await page.locator('[data-role="source-panel"]').isVisible(),false);
-        check('Reload restores the selected saved workflow and its actual progress');
-        await page.screenshot({path:path.join(out,'live-baseline.png'),fullPage:true});
         await page.getByRole('button',{name:'New workflow',exact:true}).click();
         await page.getByRole('button',{name:'Upload traces',exact:true}).click();
         const form=page.locator('[data-role="offline-analysis-form"]');
@@ -196,8 +209,154 @@ async function main() {
         check('Approved results and evidence remain usable on mobile');
         assert.deepEqual(errors,[]);
         check('No browser JavaScript errors throughout the tested flows');
-        await fs.writeFile(path.join(out,'checks.json'),JSON.stringify({checks,errors,recordedAt:new Date().toISOString(),realServiceOutages:0},null,2));
+        await fs.writeFile(path.join(out,'checks.json'),JSON.stringify({checks,errors,recordedAt:new Date().toISOString(),liveChecksIncluded:runLive,realServiceOutages:0},null,2));
     } catch(error) {await page.screenshot({path:path.join(out,'failure.png'),fullPage:true});await fs.writeFile(path.join(out,'checks.json'),JSON.stringify({checks,errors,failure:error.message},null,2));throw error;}
     finally {await browser.close();}
 }
-main().catch(error=>{console.error(error);process.exit(1)});
+
+async function runWorkspaceStateChecks() {
+    const {browser, page: p, errors, checks, check} = await openTestPage();
+ try{
+  await p.goto(base+'/components/workflows',{waitUntil:'networkidle'});
+  const connection=p.locator('[data-role="guided-analysis-form"]');
+  await p.getByText('Authentication',{exact:true}).click();
+  await connection.getByLabel('Authentication method',{exact:true}).selectOption('bearer_env');
+  assert(await connection.getByLabel('Token environment variable',{exact:true}).isEnabled());
+  assert(await connection.getByLabel('Token environment variable',{exact:true}).evaluate(e=>e.required));
+  await connection.getByLabel('Authentication method',{exact:true}).selectOption('none');
+  assert.equal(await connection.getByLabel('Token environment variable',{exact:true}).isVisible(),false);
+  check('Authentication inputs follow the selected method without storing token values');
+  await connection.getByLabel('Trace query URL',{exact:true}).fill('http://localhost:16686');
+  await connection.getByLabel('Environment name',{exact:true}).fill('CONTROLLED-UI-STATE');
+  await connection.getByLabel('Environment type',{exact:true}).selectOption('experimental');
+  let releaseSource;
+  const gate=new Promise(resolve=>releaseSource=resolve);
+  let intercepted;
+  const started=new Promise(resolve=>intercepted=resolve);
+  await p.route('**/api/workflows/analysis-sessions/services',async route=>{intercepted();await gate;await route.fulfill({status:200,json:['fixture-obsolete-service']})});
+  const lateResponse=p.waitForResponse(r=>r.url().endsWith('/analysis-sessions/services'));
+  await connection.getByRole('button',{name:'Connect',exact:true}).click();await started;
+  assert(await connection.getByRole('button',{name:'Connect',exact:true}).isDisabled());
+  await p.getByRole('button',{name:'New workflow',exact:true}).click();releaseSource();await lateResponse;
+  assert.equal(await connection.getByLabel('Entry service',{exact:true}).isVisible(),false);
+  assert(await connection.getByRole('button',{name:'Connect',exact:true}).isEnabled());
+  assert(!/fixture-obsolete-service/.test(await p.locator('main').innerText()));
+  await p.unroute('**/api/workflows/analysis-sessions/services');
+  check('Starting over discards a late connection response and leaves Connect usable');
+  await p.getByRole('button',{name:'Upload traces',exact:true}).click();
+  const form=p.locator('[data-role="offline-analysis-form"]'),result=p.locator('[data-role="offline-analysis-result"]'),status=p.locator('[data-role="offline-analysis-status"]');
+  for(const [label,value] of [['Workflow name','Dispatch'],['Entry service','gateway-x'],['Root operation','POST /deliveries'],['Successful result','Delivery is dispatched'],['Expected HTTP statuses','201'],['Business importance (0–1)','0.65']]) await form.getByLabel(label,{exact:true}).fill(value);
+  const upload=data=>form.getByLabel('Trace export file',{exact:true}).setInputFiles({name:'fixture.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
+  const trace=(id,worker,code)=>({traceID:id,processes:{p1:{serviceName:'gateway-x'},p2:{serviceName:'worker-x'}},spans:[{spanID:'root',processID:'p1',operationName:'POST /deliveries',duration:1500,references:[],tags:[{key:'http.status_code',value:code}]},...(worker?[{spanID:'child',processID:'p2',operationName:'dispatch',references:[{refType:'CHILD_OF',spanID:'root'}]}]:[])]});
+  const analyze=async(expected=200)=>{const pending=p.waitForResponse(r=>r.url().endsWith('/analyze'));pending.catch(()=>{});await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();const response=await pending;const report=await response.json();assert.equal(response.status(),expected,JSON.stringify(report));return report;};
+  await upload([trace('a',true,201),trace('b',false,201)]);
+  await form.getByLabel('Expected HTTP statuses',{exact:true}).fill('201,abc');
+  await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
+  await status.filter({hasText:'HTTP status'}).waitFor();
+  assert.equal(await result.isVisible(),false);
+  await form.getByLabel('Expected HTTP statuses',{exact:true}).fill('201');
+  check('Partially valid status lists are rejected without producing a graph');
+  await form.getByText('Advanced analysis settings',{exact:true}).click();
+  await form.getByLabel('Mandatory candidate frequency',{exact:true}).fill('0.5');
+  await form.getByLabel('Minimum edge frequency',{exact:true}).fill('0.75');
+  let report=await analyze();
+  assert.deepEqual(report.candidateGraph.mandatoryServices,['gateway-x','worker-x']);assert.deepEqual(report.candidateGraph.edges,[]);
+  check('Changing frequency thresholds changes the actual computed graph');
+  await form.getByLabel('Mandatory candidate frequency',{exact:true}).fill('2');
+  await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
+  assert.equal(await form.evaluate(e=>e.checkValidity()),false);
+  await form.getByLabel('Mandatory candidate frequency',{exact:true}).fill('1');
+  await form.getByLabel('Minimum edge frequency',{exact:true}).fill('0');
+  check('Out-of-range analysis settings are blocked by the input constraints');
+  await form.getByLabel('Export format',{exact:true}).selectOption('zipkin');
+  await upload([[{traceId:'a'.repeat(32),id:'b'.repeat(16),name:'POST /deliveries',kind:'SERVER',timestamp:1,duration:1500,localEndpoint:{serviceName:'gateway-x'},tags:{'http.status_code':'201'}}]]);
+  report=await analyze();assert.equal(report.successfulTraceCount,1);assert.equal(report.candidateGraph.criticality,.65);
+  check('Zipkin export files are normalized through the same user input flow');
+  await form.getByLabel('Export format',{exact:true}).selectOption('vendor_tracing');
+  await upload({resourceSpans:[{resource:{attributes:[{key:'service.name',value:{stringValue:'gateway-x'}}]},scopeSpans:[{spans:[{traceId:'a'.repeat(32),spanId:'b'.repeat(16),name:'POST /deliveries',kind:2,startTimeUnixNano:'1000000',endTimeUnixNano:'2500000',status:{code:1},attributes:[{key:'http.response.status_code',value:{intValue:'201'}}]}]}]}]});
+  report=await analyze();assert.equal(report.successfulTraceCount,1);
+  check('OpenTelemetry export files are normalized through the upload form');
+  await form.getByLabel('Export format',{exact:true}).selectOption('offline_jaeger');
+  await upload([trace('failure',true,503)]);report=await analyze();assert.equal(report.failedTraceCount,1);assert.equal(report.candidateGraph,null);
+  check('A failed-only trace set produces no invented dependency graph');
+  const partial=trace('broken',true,201);partial.spans[1].references[0].spanID='missing';
+  await upload([trace('good',true,201),partial]);report=await analyze();assert.equal(report.successfulTraceCount,1);assert.equal(report.traceQuality.excludedCount,1);
+  check('Incomplete trace evidence is excluded from service frequencies');
+  await form.getByLabel('Use an existing workflow definition',{exact:true}).check();
+  const definition={workflowId:'dispatch',description:'Delivery is dispatched',criticality:.65,entryService:'gateway-x',successCondition:{protocol:'http',terminalService:'gateway-x',operationName:'POST /deliveries',httpStatusCodes:[201]},mandatoryServices:['injected-answer']};
+  await form.getByLabel('Workflow definition JSON',{exact:true}).fill(JSON.stringify(definition));
+  await analyze(422);await status.filter({hasText:'mandatoryServices'}).waitFor();assert.equal(await result.isVisible(),false);
+  check('Predefined dependency answers are rejected by the backend and shown as input errors');
+  await form.getByLabel('Use an existing workflow definition',{exact:true}).uncheck();
+  await upload([trace('valid',true,201)]);
+  let releaseAnalysis;const analysisGate=new Promise(resolve=>releaseAnalysis=resolve);let analysisStarted;const startAnalysis=new Promise(resolve=>analysisStarted=resolve);
+  await p.route('**/api/workflows/analyze',async route=>{const response=await route.fetch();analysisStarted();await analysisGate;await route.fulfill({response});});
+  const lateAnalysis=p.waitForResponse(r=>r.url().endsWith('/analyze'));
+  await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();await startAnalysis;
+  await form.getByLabel('Root operation',{exact:true}).fill('POST /changed');releaseAnalysis();await lateAnalysis;
+  assert.equal(await result.isVisible(),false);assert(await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).isEnabled());
+  await p.unroute('**/api/workflows/analyze');
+  check('Editing inputs during analysis discards the stale result and restores the action');
+  await p.goto(fixtureBase+'/components/workflows',{waitUntil:'networkidle'});
+  const campaigns=await (await p.request.get(fixtureBase+'/api/workflows/experiment-campaigns')).json();const campaign=campaigns[0];
+  const api=fixtureBase+'/api/workflows/experiment-campaigns/'+encodeURIComponent(campaign.campaignId);
+  await p.locator(`[data-campaign="${campaign.campaignId}"]`).click();
+  await p.getByRole('heading',{name:'Approved dependency graph',exact:true}).waitFor();
+  await p.getByText('Normal run results',{exact:true}).click();
+  await p.getByText('3 recorded runs',{exact:true}).waitFor();
+  assert.match(await p.locator('[data-role="guided-result"]').innerText(),/succeeded.*trace matched/);
+  check('Saved run history displays actual results and trace matches from its execution batch');
+  const progress=await(await p.request.get(api+'/progress')).json();
+  const interventions=await(await p.request.get(api+'/intervention-status')).json();
+  const assessment=await(await p.request.get(api+'/assessment')).json();
+  await p.route('**/experiment-campaigns/*/progress',route=>route.fulfill({status:200,json:{...progress,stage:'interventions_required'}}));
+  const active=interventions.services[0].targetService;
+  await p.route('**/experiment-campaigns/*/intervention-status',route=>route.fulfill({status:200,json:{...interventions,services:interventions.services.map((s,i)=>({...s,state:i===0?'active':'planned',evidenceReady:false,eligibleTrials:0,excludedTrials:0}))}}));
+  await p.locator(`[data-campaign="${campaign.campaignId}"]`).click();
+  await p.getByRole('button',{name:'Record recovery',exact:true}).waitFor();
+  assert(await p.getByRole('button',{name:'Record recovery',exact:true}).isEnabled());
+  const other=p.locator('.intervention-service').nth(1);await other.locator(':scope > summary').click();
+  assert(await other.getByRole('button',{name:'Record outage',exact:true}).isDisabled());
+  assert.match(await other.innerText(),new RegExp(active));
+  check('Only one fixture outage can be recorded at a time; recovery stays available even with zero trials');
+  await p.unroute('**/experiment-campaigns/*/intervention-status');await p.unroute('**/experiment-campaigns/*/progress');
+  await p.route('**/experiment-campaigns/*/progress',route=>route.fulfill({status:200,json:{...progress,stage:'reviewed'}}));
+  await p.route('**/experiment-campaigns/*/approval',route=>route.fulfill({status:404,json:{detail:'Controlled fixture: not approved'}}));
+  const unresolved={...assessment,services:assessment.services.map((s,i)=>i===0?{...s,classification:'insufficient_evidence',reasons:['Controlled fixture: insufficient runs']}:s)};
+  await p.route('**/experiment-campaigns/*/assessment',route=>route.fulfill({status:200,json:unresolved}));
+  await p.getByRole('button',{name:'Refresh status',exact:true}).click();
+  await p.getByRole('heading',{name:'Review dependencies',exact:true}).waitFor();
+  assert(await p.getByRole('button',{name:'Approve graph',exact:true}).isDisabled());
+  assert.equal(await p.getByRole('button',{name:'Download graph JSON',exact:true}).count(),0);
+  check('Unresolved fixture dependencies cannot be approved or exported as an approved graph');
+  await p.unrouteAll({behavior:'wait'});
+  await p.reload({waitUntil:'networkidle'});
+  await p.getByRole('heading',{name:'Approved dependency graph',exact:true}).waitFor();
+  await p.getByText('View test results',{exact:true}).click();
+  await p.setViewportSize({width:375,height:812});
+  await p.waitForFunction(()=>getComputedStyle(document.querySelector('.content')).marginLeft==='0px');
+  assert(await p.locator('.workspace-main').evaluate(e=>e.clientWidth>=300));
+  assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await p.screenshot({path:path.join(out,'mobile-approved.png'),fullPage:true});
+  check('Mobile approval evidence has a full-width content area after navigation transitions');
+  await p.getByRole('button',{name:'Toggle navigation',exact:true}).click();
+  assert.equal(await p.getByRole('button',{name:'Toggle navigation',exact:true}).getAttribute('aria-expanded'),'true');
+  await p.keyboard.press('Escape');
+  assert.equal(await p.getByRole('button',{name:'Toggle navigation',exact:true}).getAttribute('aria-expanded'),'false');
+  check('Mobile navigation opens with the keyboard-accessible control and closes with Escape');
+  assert.deepEqual(errors,[]);
+  await fs.writeFile(path.join(out,'additional-checks.json'),JSON.stringify({checks,errors,simulatedStates:'controlled fixture only',realServiceOutages:0},null,2));
+ }catch(e){await fs.writeFile(path.join(out,'additional-checks.json'),JSON.stringify({checks,errors,failure:e.message},null,2));await p.screenshot({path:path.join(out,'additional-failure.png'),fullPage:true});throw e}
+ finally{await browser.close()}
+}
+
+async function main() {
+    if (!base || !fixtureBase) {
+        throw new Error('Set WORKFLOW_TEST_URL to the running app and WORKFLOW_FIXTURE_URL to browser_fixture.py on a fresh port.');
+    }
+    const selection = process.env.WORKFLOW_BROWSER_TESTS || 'all';
+    if (!['all', 'lifecycle', 'state'].includes(selection)) throw new Error('WORKFLOW_BROWSER_TESTS must be all, lifecycle or state.');
+    if (selection !== 'state') await runWorkflowLifecycle();
+    if (selection !== 'lifecycle') await runWorkspaceStateChecks();
+}
+main().catch(error => { console.error(error); process.exit(1); });
