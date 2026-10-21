@@ -29,6 +29,7 @@ from app.engine.workflow_dependency_modeling.online_boutique_workload import (
 )
 from app.engine.workflow_dependency_modeling.workflow_onboarding import (
     build_workflow_probe,
+    workflow_setup_requirements,
 )
 from app.engine.workflow_dependency_modeling.workflow_probe_models import (
     WorkflowProbeDefinition,
@@ -54,6 +55,8 @@ _SERVER_FIELDS = {
 }
 
 _default_repository: ExperimentCampaignRepository | None = None
+_MINIMUM_BASELINE_TRIALS = 3
+_MAXIMUM_BASELINE_TRIALS = 30
 
 
 def configure_experiment_campaign_repository(
@@ -197,7 +200,7 @@ def _required_baseline_trials(data: Mapping[str, Any]) -> int:
     value = data.get("requiredBaselineTrials", 5)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("requiredBaselineTrials must be an integer")
-    if not 3 <= value <= 30:
+    if not _MINIMUM_BASELINE_TRIALS <= value <= _MAXIMUM_BASELINE_TRIALS:
         raise ValueError("requiredBaselineTrials must be between 3 and 30")
     return value
 
@@ -321,6 +324,33 @@ def preview_workflow_probe(
         "workflowId": analysis.workflow_id,
         "observedOperation": analysis.operation_name,
         "executionDefinition": definition.to_mapping(),
+        "summary": [
+            {
+                "position": index + 1,
+                "method": step.method,
+                "path": step.path,
+                "successStatuses": list(step.expected_status_codes),
+                "measured": step.name == definition.measured_step,
+                "capturedValues": list(step.extract),
+            }
+            for index, step in enumerate(definition.steps)
+        ],
+    }
+
+
+def get_workflow_setup_requirements(
+    session_id: str,
+    *,
+    analysis_repository: AnalysisSessionRepository | None = None,
+) -> dict[str, Any]:
+    """Expose request requirements without issuing requests to the target application."""
+    analysis = get_workflow_analysis(session_id, analysis_repository)
+    return {
+        "analysisSessionId": analysis.session_id,
+        "entryService": analysis.entry_service,
+        "operationName": analysis.operation_name,
+        **workflow_setup_requirements(analysis.operation_name),
+        "baselineLimits": {"minimum": _MINIMUM_BASELINE_TRIALS, "maximum": _MAXIMUM_BASELINE_TRIALS},
     }
 
 

@@ -77,6 +77,7 @@ from app.engine.workflow_dependency_modeling.experiment_campaign_service import 
     configure_experiment_campaign_repository,
     create_experiment_campaign,
     get_experiment_campaign,
+    get_workflow_setup_requirements,
     list_experiment_campaigns,
     preview_workflow_probe,
 )
@@ -458,6 +459,7 @@ __all__ = [
     "create_experiment_campaign",
     "create_experiment_manifest",
     "preview_workflow_probe",
+    "get_workflow_setup_requirements",
     "discover_live_workflows",
     "discover_analysis_workflows",
     "list_analysis_services",

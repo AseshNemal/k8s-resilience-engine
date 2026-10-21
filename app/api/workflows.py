@@ -32,6 +32,7 @@ from app.engine.workflow_dependency_modeling.service import (
     freeze_workflow_graph,
     get_live_workflow,
     get_workflow_analysis,
+    get_workflow_setup_requirements,
     get_live_evidence,
     get_boutique_demo_execution_template,
     get_experiment_progress,
@@ -692,6 +693,17 @@ def discover_workflow_analysis_operations(
 def read_workflow_analysis_session(session_id: str) -> dict[str, Any]:
     try:
         return get_workflow_analysis(session_id).to_mapping()
+    except AnalysisSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get(
+    "/analysis-sessions/{session_id}/workflow-setup",
+    responses={404: {"description": "Analysis session was not found"}},
+)
+def read_analysis_workflow_setup(session_id: str) -> dict[str, Any]:
+    try:
+        return get_workflow_setup_requirements(session_id)
     except AnalysisSessionNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
