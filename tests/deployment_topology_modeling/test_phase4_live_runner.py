@@ -186,3 +186,31 @@ def test_every_kubectl_command_is_pinned_to_the_context():
     assert scale_cmd[:5] == ["kubectl", "--context", "kind-research", "--namespace", "exp"]
     assert uncordon_cmd[:3] == ["kubectl", "--context", "kind-research"]
     assert "--namespace" not in uncordon_cmd  # node commands are cluster-scoped
+
+
+def test_pinned_kubeconfig_holds_only_the_experiment_context():
+    kube = Kubectl("kind-research", "exp")
+    with patch("experiments.placement_drift.live.kubectl.subprocess.run") as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "current-context: kind-research\n"
+        path = kube.write_pinned_kubeconfig()
+    try:
+        cmd = run.call_args.args[0]
+        assert cmd == ["kubectl", "--context", "kind-research", "config", "view", "--minify", "--flatten"]
+        assert path.read_text(encoding="utf-8") == "current-context: kind-research\n"
+    finally:
+        path.unlink()
+
+
+def test_runner_points_the_collector_at_the_experiment_cluster(tmp_path, monkeypatch):
+    # The collector reads the kubeconfig's current context, so the runner must hand it a kubeconfig that
+    # holds only the experiment context; otherwise T0/T1 would be observed on the user's current cluster.
+    pinned = tmp_path / "pinned.yaml"
+    pinned.write_text("current-context: kind-test\n", encoding="utf-8")
+    kube = FakeKube()
+    kube.write_pinned_kubeconfig = lambda: pinned
+    monkeypatch.setenv("KUBECONFIG", "user-kubeconfig")
+
+    LiveExperimentRunner(kube, {"A": "a.yaml"}, ["paymentservice"], tmp_path)
+
+    assert service.os.environ["KUBECONFIG"] == str(pinned)
