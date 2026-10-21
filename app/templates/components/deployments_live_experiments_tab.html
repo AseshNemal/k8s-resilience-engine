@@ -17,6 +17,42 @@
         </ul>
     </details>
 
+    <div class="card card--glass ensemble-card" data-role="live-sim-card" style="margin-bottom: var(--space-lg);">
+        <div style="margin-bottom: var(--space-md);">
+            <span class="status-badge status-badge--warning">Simulated on your connected cluster — a prediction, not an observation</span>
+            <h4 style="font-size: 1.15rem; font-weight: 700; margin: 6px 0 2px 0;">Eight disruptions on your cluster's real topology</h4>
+            <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 0;">
+                The nodes and pods are read from the cluster you are connected to; the disruption and the resulting placement come from a simple fixed rule
+                (a displaced pod goes to the least-loaded worker), not from the Kubernetes scheduler. Nothing in the cluster is changed.
+            </p>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-bottom: var(--space-md);">
+            <div class="form-group" style="min-width: 220px;">
+                <label for="live-sim-namespace" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Namespace</label>
+                <select id="live-sim-namespace" data-role="live-sim-namespace" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" disabled>
+                    <option value="">Loading namespaces…</option>
+                </select>
+            </div>
+            <button type="button" class="action-button" data-role="live-sim-run" disabled>Run simulation</button>
+        </div>
+        <output data-role="live-sim-status" aria-live="polite" style="display: block; min-height: 20px; font-size: 12px; color: var(--color-text-muted);"></output>
+        <div class="table-scroll" data-role="live-sim-results" hidden style="margin-top: var(--space-md);">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Scenario</th>
+                        <th scope="col">Outcome</th>
+                        <th scope="col">D_rate</th>
+                        <th scope="col">ΔE (exposure change)</th>
+                        <th scope="col">Services that changed status</th>
+                        <th scope="col">Pod moves</th>
+                    </tr>
+                </thead>
+                <tbody data-role="live-sim-body"></tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="card card--glass ensemble-card">
         <div style="margin-bottom: var(--space-md);">
             <span class="status-badge status-badge--success">Live cluster observations</span>
