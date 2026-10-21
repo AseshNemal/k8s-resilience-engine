@@ -128,3 +128,73 @@ def test_cli_rejects_non_object_json(tmp_path) -> None:
                 "invalid-cli-validation",
             ]
         )
+
+
+def test_cli_writes_artifact_and_preserves_stdout(tmp_path, capsys) -> None:
+    prediction_path = tmp_path / "prediction.json"
+    evidence_path = tmp_path / "evidence.json"
+    output_path = tmp_path / "results" / "validation.json"
+    prediction_path.write_text(
+        json.dumps(_prediction_payload()),
+        encoding="utf-8",
+    )
+    evidence_path.write_text(
+        json.dumps(_evidence_payload()),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "--prediction",
+            str(prediction_path),
+            "--evidence",
+            str(evidence_path),
+            "--batch-id",
+            "saved-cli-validation",
+            "--output",
+            str(output_path),
+        ]
+    )
+    stdout_artifact = json.loads(capsys.readouterr().out)
+    saved_artifact = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert saved_artifact == stdout_artifact
+    assert saved_artifact["validation"]["batchId"] == (
+        "saved-cli-validation"
+    )
+
+
+def test_cli_refuses_to_overwrite_validation_artifact(
+    tmp_path,
+) -> None:
+    prediction_path = tmp_path / "prediction.json"
+    evidence_path = tmp_path / "evidence.json"
+    output_path = tmp_path / "validation.json"
+    prediction_path.write_text(
+        json.dumps(_prediction_payload()),
+        encoding="utf-8",
+    )
+    evidence_path.write_text(
+        json.dumps(_evidence_payload()),
+        encoding="utf-8",
+    )
+    output_path.write_text("keep-existing-result", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        main(
+            [
+                "--prediction",
+                str(prediction_path),
+                "--evidence",
+                str(evidence_path),
+                "--batch-id",
+                "protected-cli-validation",
+                "--output",
+                str(output_path),
+            ]
+        )
+
+    assert output_path.read_text(encoding="utf-8") == (
+        "keep-existing-result"
+    )

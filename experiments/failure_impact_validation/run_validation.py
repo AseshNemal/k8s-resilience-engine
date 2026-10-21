@@ -148,6 +148,30 @@ def _batch_manifest_inputs(
     return batch_id, tuple(pairs)
 
 
+def write_validation_artifact(
+    path: Path,
+    artifact: Mapping[str, object],
+) -> Path:
+    """Write one new UTF-8 artifact without replacing prior evidence."""
+
+    created = False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", encoding="utf-8", newline="\n") as stream:
+            created = True
+            json.dump(artifact, stream, indent=2)
+            stream.write("\n")
+    except FileExistsError as error:
+        raise ValueError(
+            f"refusing to overwrite existing validation artifact: {path}"
+        ) from error
+    except Exception:
+        if created:
+            path.unlink(missing_ok=True)
+        raise
+    return path
+
+
 def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -171,6 +195,11 @@ def _argument_parser() -> argparse.ArgumentParser:
             "JSON file containing batchId and prediction/evidence paths for "
             "repeated experiments"
         ),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Write the validation JSON to a new file without overwriting",
     )
     return parser
 
@@ -220,6 +249,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             prediction_payload=_read_json_object(arguments.prediction),
             evidence_payload=_read_json_object(arguments.evidence),
         )
+    if arguments.output is not None:
+        write_validation_artifact(arguments.output, artifact)
     print(json.dumps(artifact, indent=2))
     return 0
 
