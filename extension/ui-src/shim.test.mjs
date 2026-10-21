@@ -61,6 +61,25 @@ test("GET /api/... goes through the SDK and returns a JSON Response", async () =
     assert.equal(calls[0].url, "/api/health");
 });
 
+test("on Windows (file:///C:/... page) backend calls still go through the SDK without the drive letter", async () => {
+    const href = "file:///C:/Users/HP/AppData/Roaming/Docker/extensions/k8s-resilience-engine/ui/ui/index.html";
+    const { window, calls, nativeCalls } = load(() => ({ status: "healthy" }), { href });
+
+    await window.fetch("/_extension/cluster");
+    await window.fetch("/api/deployments/discovery/all?namespace=bookinfo");
+
+    assert.deepEqual(calls.map((c) => c.url), ["/_extension/cluster", "/api/deployments/discovery/all?namespace=bookinfo"]);
+    assert.equal(nativeCalls.length, 0);
+});
+
+test("on a macOS file:// page backend paths are unchanged", async () => {
+    const { window, calls } = load(() => ({}), { href: "file:///Users/me/ext/ui/index.html" });
+
+    await window.fetch("/api/health");
+
+    assert.equal(calls[0].url, "/api/health");
+});
+
 test("query strings are preserved", async () => {
     const { window, calls } = load(() => ({}));
 
