@@ -3,7 +3,7 @@
 {% set show_project_metadata = false %}
 {% set source_label = "No workflow selected" %}
 {% block page_css %}
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=workspace-1">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=guided-setup-2">
 {% endblock %}
 {% block content %}
     <div class="workflow-workspace">
@@ -294,6 +294,6 @@
     </div>
 {% endblock %}
 {% block page_js %}
-    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=workspace-2" defer>
+    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=guided-setup-2" defer>
     </script>
 {% endblock %}

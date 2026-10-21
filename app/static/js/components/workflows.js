@@ -261,8 +261,71 @@
         if (marker.trim()) request.responseContains = [...(request.responseContains || []), marker.trim()];
         return {mode: 'observed_entry', expectedStatusCodes: [...new Set(codes.map(Number))], request};
     }
-    function renderGuidedSession(session) {
-        renderVersion += 1;
+    function selectField(label, choices) {
+        const item = field(label);
+        const select = document.createElement('select');
+        select.id = item.input.id;
+        choices.forEach(([value, text]) => {
+            const option = guidedText('option', '', text);
+            option.value = value;
+            select.append(option);
+        });
+        item.input.replaceWith(select);
+        return {label: item.label, input: select};
+    }
+    // Collect user values only. Type conversion, validation and execution planning belong to the API.
+    function inputRows(title, columns, changed) {
+        const root = guidedText('div', 'request-inputs', '');
+        const rows = [];
+        const list = guidedText('div', 'request-rows', '');
+        const add = button(`Add ${title}`, () => {
+            const element = guidedText('div', 'request-row', '');
+            const controls = columns.map(column => column.choices ? selectField(column.label, column.choices) : field(column.label));
+            const row = {element, controls};
+            element.append(...controls.map(item => item.label), button(`Remove ${title}`, () => {
+                rows.splice(rows.indexOf(row), 1);
+                element.remove();
+                changed();
+                add.focus();
+            }, true));
+            rows.push(row);
+            list.append(element);
+            controls[0].input.focus();
+            changed();
+        }, true);
+        root.append(list, add);
+        return {root, read: () => rows.map(row => Object.fromEntries(columns.map((column, index) => [column.key, row.controls[index].input.value])))};
+    }
+    function requestInputs(requirements, changed, pathNames = null) {
+        const root = guidedText('div', 'request-editor', '');
+        const pairs = [{key: 'name', label: 'Field name'}, {key: 'value', label: 'Value'}];
+        let path;
+        if (pathNames === null) {
+            path = inputRows('path parameter', pairs, changed);
+            root.append(details('Path parameters (if the path contains {name})', path.root));
+        } else {
+            const parameters = pathNames.map(name => ({name, ...field(`Value for {${name}}`)}));
+            parameters.forEach(item => item.input.required = true);
+            root.append(...parameters.map(item => item.label));
+            path = {read: () => parameters.map(item => ({name: item.name, value: item.input.value}))};
+        }
+        const format = selectField('Request body', requirements.bodyFormats.map(value => [value, {none: 'No body', form: 'Form fields', json: 'JSON fields'}[value]]));
+        const body = inputRows('body field', [...pairs, {key: 'type', label: 'Value type', choices: requirements.jsonValueTypes.map(value => [value, {text: 'Text', number: 'Number', boolean: 'True / false', null: 'Null', json: 'Object or list (JSON)'}[value]])}], changed);
+        const syncBody = () => {
+            body.root.hidden = format.input.value === 'none';
+            body.root.querySelectorAll('select').forEach(item => { item.closest('.workspace-field').hidden = format.input.value !== 'json'; });
+        };
+        // Newly inserted rows also need the current body's type-selector visibility.
+        body.root.addEventListener('click', syncBody);
+        format.input.addEventListener('change', syncBody);
+        syncBody();
+        const query = inputRows('query parameter', pairs, changed);
+        const headers = inputRows('header', [...pairs, {key: 'source', label: 'Value source', choices: [['literal', 'Entered value'], ['environment', 'Server environment variable']]}], changed);
+        root.append(format.label, body.root, details('Query parameters (optional)', query.root), details('Headers and authentication (optional)', guidedText('p', 'workspace-help', 'For sensitive headers, choose Server environment variable and enter its variable name. Cookies are shared automatically between steps.'), headers.root));
+        return {root, read: () => ({pathParameters: path.read(), queryParameters: query.read(), headers: headers.read(), bodyFormat: format.input.value, bodyFields: format.input.value === 'none' ? [] : body.read().map(row => ({...row, type: format.input.value === 'form' ? 'text' : row.type}))})};
+    }
+    async function renderGuidedSession(session) {
+        const version = ++renderVersion;
         activeCampaign = null;
         setSelection(null, session.sessionId);
         $('source-panel').hidden = true;
@@ -280,66 +343,174 @@
             if (reasons.length) guidedResult.append(details('Trace issues', ...reasons.map(reason => guidedText('p', '', reason))));
             return;
         }
+        const loading = guidedText('p', 'workspace-status', 'Loading request setup…');
+        guidedResult.append(loading);
+        let requirements;
+        try {
+            requirements = await requestScenario(`/api/workflows/analysis-sessions/${encodeURIComponent(session.sessionId)}/workflow-setup`);
+        } catch (error) {
+            if (version === renderVersion) {
+                message(loading, error.message, true);
+                guidedResult.append(button('Retry setup', () => renderGuidedSession(session), true));
+            }
+            return;
+        }
+        if (version !== renderVersion) return;
+        loading.remove();
         const form = guidedText('form', 'workspace-form', '');
-        const requestDescription = describeOperation(session.operationName);
-        guidedResult.append(guidedText('p', 'workspace-help', requestDescription.text));
-        const name = field('Workflow name', 'text', session.operationName, 'Give this action a name you will recognise in your saved workflows.');
-        const outcome = field('What should a successful run achieve?', 'text', '', 'Describe the business result. This description does not configure the automated checks below.');
-        const status = field('HTTP response codes that count as success', 'text', '', 'Enter the codes your application should return, separated by commas. A matching trace is also required for a run to count.');
-        status.input.placeholder = 'e.g. 200, 201';
-        const marker = field('Text that must appear in the response (optional)', 'text', '', 'Add text from a successful response to check its content as well as its HTTP code. Leave empty to skip this check.');
-        const criticality = field('Business importance (0–1)', 'number', '', 'Choose how important this workflow is to your application: 0 is lowest and 1 is highest. This is your assessment, not a measured score.');
+        const name = field('Workflow name', 'text', session.operationName);
+        const outcome = field('What should a successful run achieve?', 'text', '', 'Describe the result the user should receive. Configure its automated checks below.');
+        const status = field('HTTP response codes that count as success', 'text', '', 'Use the codes your application returns, separated by commas. A matching trace is also required.');
+        const marker = field('Text that must appear in the response (optional)');
+        const criticality = field('Business importance (0–1)', 'number', '', 'Your assessment: 0 is lowest and 1 is highest.');
         Object.assign(criticality.input, {min: '0', max: '1', step: '0.01'});
-        const trials = field('Baseline runs to collect', 'number', '', 'Choose 3–30 runs with services available. Each run must match a trace; failures are recorded and can block baseline readiness.');
-        Object.assign(trials.input, {min: '3', max: '30', step: '1'});
+        const limits = requirements.baselineLimits;
+        const trials = field('Baseline runs to collect', 'number', '', `Choose ${limits.minimum}–${limits.maximum} runs with services available.`);
+        Object.assign(trials.input, {min: String(limits.minimum), max: String(limits.maximum), step: '1'});
         [name, outcome, status, criticality, trials].forEach(item => item.input.required = true);
-        const request = field('Request data (JSON, optional)', 'textarea', '', 'For requests needing input, supply query, formBody, jsonBody, headers or pathVariables. Recorded traces do not supply this data automatically. Leave empty only if the request needs none.');
-        request.input.placeholder = 'Optional body, query, headers or pathVariables';
-        request.label.append(guidedText('small', '', 'Use secretHeaders to reference server environment variables for authentication.'));
-        const imported = field('Execution definition JSON', 'textarea', '', 'Provide an execution definition with the HTTP steps and success checks required for this workflow. Needed when one request cannot reproduce the action.');
-        const useImported = field('Use a multi-step execution definition', 'checkbox', '', 'Use this for actions that need earlier steps, such as creating a session or preparing a cart.');
+        const confirm = field('I reviewed the success checks for this workflow.', 'checkbox');
+        confirm.label.className = 'checkbox-label full-width';
+        confirm.input.required = true;
+        confirm.input.disabled = true;
+        const submit = guidedText('button', 'experiment-button', 'Save and continue to baseline runs');
+        submit.type = 'submit';
+        submit.disabled = true;
+        const notice = guidedText('p', 'workspace-status full-width', '');
+        const preview = guidedText('section', 'execution-preview full-width', '');
+        preview.hidden = true;
+        let revision = 0, checkedRevision = -1, checking = false;
+        const invalidate = () => {
+            revision += 1;
+            checkedRevision = -1;
+            confirm.input.checked = false;
+            confirm.input.disabled = true;
+            submit.disabled = true;
+            preview.hidden = true;
+            message(notice, 'Check the execution plan after editing your inputs.');
+        };
+        const action = requestInputs(requirements, invalidate, requirements.action?.pathParameters || []);
+        const actionSection = guidedText('section', 'request-section full-width', '');
+        actionSection.append(guidedText('h4', '', 'Request to measure'), guidedText('p', 'request-operation', requirements.action ? `${requirements.action.method} ${requirements.action.path}` : session.operationName), guidedText('p', 'workspace-help', 'The request comes from your selected operation. Add only the inputs your application needs.'), action.root, status.label, marker.label);
+        const preparation = [];
+        const stepList = guidedText('div', 'preparation-steps', '');
+        const refreshSteps = () => preparation.forEach((item, index) => {
+            item.title.textContent = `Preparation step ${index + 1}`;
+            item.up.disabled = index === 0;
+            item.down.disabled = index === preparation.length - 1;
+            stepList.append(item.root);
+        });
+        const addStep = button('Add preparation step', () => {
+            const root = guidedText('section', 'request-section', '');
+            const title = guidedText('h5', '', '');
+            const operation = field('Request (method and path)', 'text', '', 'Enter the HTTP method followed by an application path, such as GET /session.');
+            const codes = field('Preparation success codes');
+            operation.input.required = codes.input.required = true;
+            const inputs = requestInputs(requirements, invalidate);
+            const captures = inputRows('captured value', [{key: 'name', label: 'Variable name'}, {key: 'source', label: 'Read from', choices: requirements.captureSources.map(value => [value, value === 'json_field' ? 'JSON response field' : 'Response header'])}, {key: 'selector', label: 'Field path or header name'}], invalidate);
+            const item = {root, title, read: () => ({operation: operation.input.value, successStatuses: codes.input.value, inputs: inputs.read(), captures: captures.read()})};
+            const move = offset => {
+                const index = preparation.indexOf(item);
+                [preparation[index], preparation[index + offset]] = [preparation[index + offset], preparation[index]];
+                refreshSteps();
+                invalidate();
+            };
+            item.up = button('Move earlier', () => move(-1), true);
+            item.down = button('Move later', () => move(1), true);
+            const controls = guidedText('div', 'workspace-actions', '');
+            controls.append(item.up, item.down, button('Remove step', () => {
+                preparation.splice(preparation.indexOf(item), 1);
+                root.remove();
+                addStep.disabled = false;
+                refreshSteps();
+                invalidate();
+                addStep.focus();
+            }, true));
+            root.append(title, operation.label, codes.label, inputs.root, details('Use a response value in a later step (optional)', guidedText('p', 'workspace-help', 'Capture a value here, then enter {{variableName}} in a later request. JSON field paths use dot notation.'), captures.root), controls);
+            preparation.push(item);
+            refreshSteps();
+            addStep.disabled = preparation.length >= requirements.maximumPreparationSteps;
+            invalidate();
+            operation.input.focus();
+        }, true);
+        const preparationSection = details('Preparation steps (optional)', guidedText('p', 'workspace-help', 'Add steps only when this action needs earlier requests. They run in order before the measured request. The backend carries cookies between steps.'), stepList, addStep);
+        preparationSection.className = 'full-width';
+        const imported = field('Execution definition JSON', 'textarea', '', 'Import an existing reviewed definition. Ordinary requests and multi-step workflows can use the guided fields above.');
+        const useImported = field('Import an execution definition (advanced)', 'checkbox');
         useImported.label.className = 'checkbox-label';
-        const advanced = details('Request data and multi-step setup', request.label, useImported.label, imported.label);
+        const advanced = details('Import existing settings (advanced)', useImported.label, imported.label);
         advanced.className = 'full-width';
-        imported.input.disabled = true;
-        imported.label.hidden = true;
-        const httpSupported = requestDescription.direct;
-        if (httpSupported && !/^GET\s/i.test(session.operationName)) advanced.open = true;
         const syncMode = () => {
             const enabled = useImported.input.checked;
             imported.input.disabled = !enabled;
             imported.input.required = enabled;
             imported.label.hidden = !enabled;
-            [status, marker, request].forEach(item => { item.input.disabled = enabled; item.label.hidden = enabled; });
-            status.input.required = !enabled;
+            [actionSection, preparationSection].forEach(section => {
+                section.hidden = enabled || !requirements.guidedSupported;
+                section.querySelectorAll('input, select, textarea, button').forEach(input => input.disabled = enabled || !requirements.guidedSupported);
+            });
+            if (!enabled) { refreshSteps(); addStep.disabled = preparation.length >= requirements.maximumPreparationSteps; }
+            invalidate();
         };
         useImported.input.addEventListener('change', syncMode);
-        if (!httpSupported) { useImported.input.checked = true; advanced.open = true; useImported.input.disabled = true; syncMode(); }
-        const confirm = field('I reviewed the success checks for this workflow.', 'checkbox');
-        confirm.label.className = 'checkbox-label full-width';
-        confirm.input.required = true;
-        const submit = guidedText('button', 'experiment-button', 'Save and continue to baseline runs');
-        submit.type = 'submit';
-        const notice = guidedText('p', 'workspace-status full-width', '');
+        if (!requirements.guidedSupported) {
+            useImported.input.checked = true;
+            advanced.open = true;
+            guidedResult.append(guidedText('p', 'workspace-help', 'This is an internal operation. Choose the HTTP request that starts this action, or import a reviewed execution definition.'), button('Choose another operation', openSource, true));
+        }
+        syncMode();
+        const readSetup = () => useImported.input.checked ? {mode: 'imported_definition', executionDefinition: JSON.parse(imported.input.value)} : {mode: 'guided_sequence', successStatuses: status.input.value, actionInputs: {...action.read(), responseText: marker.input.value}, preparationSteps: preparation.map(item => item.read())};
+        const check = button('Check execution plan', async () => {
+            if (checking || !form.reportValidity()) return;
+            const requestedRevision = revision;
+            checking = true;
+            check.disabled = true;
+            message(notice, 'Checking request inputs and execution order…');
+            try {
+                const result = await postCampaignAction(`/api/workflows/analysis-sessions/${encodeURIComponent(session.sessionId)}/workflow-probe-preview`, readSetup());
+                if (version !== renderVersion || requestedRevision !== revision) return;
+                const list = guidedText('ol', 'execution-steps', '');
+                result.summary.forEach(step => list.append(guidedText('li', '', `${step.method} ${step.path} · success: ${step.successStatuses.join(', ')}${step.measured ? ' · measured action' : ' · preparation'}${step.capturedValues.length ? ` · saves: ${step.capturedValues.join(', ')}` : ''}`)));
+                preview.replaceChildren(guidedText('h4', '', 'Execution plan'), list, guidedText('p', 'workspace-help', 'Inputs are valid. No application requests have been sent. Review the plan, then save to start baseline collection.'));
+                preview.hidden = false;
+                checkedRevision = revision;
+                confirm.input.disabled = false;
+                message(notice, 'Plan checked. Confirm the success checks to continue.');
+                confirm.input.focus();
+            } catch (error) { if (version === renderVersion && requestedRevision === revision) message(notice, error.message, true); }
+            finally { checking = false; check.disabled = false; }
+        });
+        form.addEventListener('input', event => { if (event.target !== confirm.input) invalidate(); });
+        form.addEventListener('change', event => {
+            if (event.target === confirm.input) submit.disabled = !confirm.input.checked || checkedRevision !== revision;
+            else invalidate();
+        });
         const title = guidedText('h4', 'full-width', 'Set up the workflow and success checks');
-        form.append(title, name.label, outcome.label, status.label, marker.label, criticality.label, trials.label, advanced, confirm.label, submit, notice);
+        form.append(title, name.label, outcome.label, preparationSection, actionSection, criticality.label, trials.label, advanced, check, preview, confirm.label, submit, notice);
         revealInvalidFields(form);
-        form.addEventListener('input', event => { if (event.target !== confirm.input) confirm.input.checked = false; });
         form.addEventListener('submit', async event => {
             event.preventDefault();
-            if (!form.reportValidity()) return;
+            if (checkedRevision !== revision || !confirm.input.checked || !form.reportValidity()) return;
             submit.disabled = true;
+            // Lock the reviewed values while the backend saves them.
+            const payload = {analysisSessionId: session.sessionId, successContractConfirmed: true, requiredBaselineTrials: Number(trials.input.value), criticality: Number(criticality.input.value), workflowName: name.input.value.trim(), businessOutcome: outcome.input.value.trim(), workflowSetup: readSetup()};
+            const controls = [...form.querySelectorAll('input, select, textarea, button')];
+            const disabled = controls.map(input => input.disabled);
+            controls.forEach(input => input.disabled = true);
             message(notice, 'Saving workflow…');
             try {
-                const setup = useImported.input.checked ? {executionDefinition: JSON.parse(imported.input.value)} : {workflowSetup: buildObservedWorkflowSetup(status.input.value, request.input.value, marker.input.value)};
-                const setupVersion = renderVersion;
-                const campaign = await postCampaignAction('/api/workflows/experiment-campaigns', {analysisSessionId: session.sessionId, successContractConfirmed: true, requiredBaselineTrials: Number(trials.input.value), criticality: Number(criticality.input.value), workflowName: name.input.value.trim(), businessOutcome: outcome.input.value.trim(), ...setup});
-                if (setupVersion !== renderVersion) { await loadSavedWorkflows(); return; }
+                const campaign = await postCampaignAction('/api/workflows/experiment-campaigns', payload);
+                if (version !== renderVersion) { await loadSavedWorkflows(); return; }
                 try { await postCampaignAction(`${campaignUrl(campaign)}/manifest`, {}); }
                 catch { /* The saved workflow offers a retry without creating a duplicate. */ }
-                if (setupVersion === renderVersion) await renderCampaign(campaign);
+                if (version === renderVersion) await renderCampaign(campaign);
                 await loadSavedWorkflows();
-            } catch (error) { message(notice, error.message, true); submit.disabled = false; }
+            } catch (error) {
+                if (version === renderVersion) {
+                    message(notice, error.message, true);
+                    controls.forEach((input, index) => input.disabled = disabled[index]);
+                    submit.disabled = false;
+                }
+            }
         });
         guidedResult.append(form);
         title.tabIndex = -1;
