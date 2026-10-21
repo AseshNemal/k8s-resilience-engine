@@ -60,3 +60,11 @@ def test_page_controller_scopes_discovery_and_lists_namespaces():
 ])
 def test_the_routes_the_page_scopes_accept_a_namespace(client, path):
     assert client.get(path).status_code == 200
+
+
+def test_intent_table_matches_deployments_to_their_live_service():
+    # Bookinfo's Deployment reviews-v1 backs Service reviews: the table matches through the
+    # deploymentNames the backend resolved from owner references, not only by equal names.
+    source = (JS / "deployments_intent_widget.js").read_text(encoding="utf-8")
+    assert "deploymentNames ?? s.deployment_names" in source
+    assert "const liveMap = buildLiveMap(liveServices);" in source

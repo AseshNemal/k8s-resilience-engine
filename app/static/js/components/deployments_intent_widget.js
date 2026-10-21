@@ -82,18 +82,29 @@ window.DeploymentsIntentWidget = (function () {
         return '<span class="status-pill">Not observed</span>';
     }
 
+    // Keyed by namespace + name, like the backend, so a YAML in another namespace that reuses a
+    // service name (e.g. deploy/test-workloads in resilience-test) is never compared with it.
+    const key = (namespace, name) => `${namespace || "default"}/${name}`;
+
+    // A declared Deployment is matched to the live Service that the backend resolved it to through owner
+    // references (deploymentNames), not only by name: Bookinfo's Deployment reviews-v1 backs Service reviews.
+    function buildLiveMap(liveServices) {
+        const liveMap = {};
+        (liveServices || []).forEach((s) => {
+            liveMap[key(s.namespace, s.name)] = s;
+            (s.deploymentNames ?? s.deployment_names ?? []).forEach((deployment) => {
+                liveMap[key(s.namespace, deployment)] = s;
+            });
+        });
+        return liveMap;
+    }
+
     function renderIntentTable(intents, liveServices = []) {
         const tbody = document.getElementById("intent-table-body");
         if (!tbody) return;
 
         tbody.innerHTML = "";
-        // Keyed by namespace + name, like the backend, so a YAML in another namespace that reuses a
-        // service name (e.g. deploy/test-workloads in resilience-test) is never compared with it.
-        const key = (namespace, name) => `${namespace || "default"}/${name}`;
-        const liveMap = {};
-        (liveServices || []).forEach((s) => {
-            liveMap[key(s.namespace, s.name)] = s;
-        });
+        const liveMap = buildLiveMap(liveServices);
 
         let compliantCount = 0;
         let comparedCount = 0;
