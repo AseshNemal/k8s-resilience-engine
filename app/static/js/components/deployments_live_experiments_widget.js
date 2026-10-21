@@ -289,9 +289,191 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         }
     }
 
-    function init() {
-        load().catch((err) => console.warn("Failed to load live experiment results:", err));
+    // ---------------------------------------------------------------------------------------------------------
+    // Simulation on the connected cluster
+    //
+    // Runs the eight disruption scenarios (GET /api/deployments/chaos/benchmarks?source=live) on the real
+    // topology of one namespace of the connected cluster. It is a prediction by a fixed rule, not an
+    // observation, and nothing in the cluster changes. The response is shown as live only when the server
+    // says its topology was live; anything else is refused, never relabelled.
+    // ---------------------------------------------------------------------------------------------------------
+
+    const OUTCOME_VARIANT = { COMPLETED: "success", FAILED: "danger", ABORTED: "danger" };
+    let simulationInFlight = false;
+    let simulationRerun = false;
+
+    const api = () => window.ResilienceApi || { fetchJson: (url) => fetch(url).then((r) => r.json()) };
+
+    function simulationParts() {
+        const root = document.getElementById("tab-live-experiments");
+        if (!root) return null;
+        return {
+            select: root.querySelector("[data-role='live-sim-namespace']"),
+            run: root.querySelector("[data-role='live-sim-run']"),
+            status: root.querySelector("[data-role='live-sim-status']"),
+            results: root.querySelector("[data-role='live-sim-results']"),
+            body: root.querySelector("[data-role='live-sim-body']"),
+        };
     }
 
-    return { init: init, load: load, buildFindings: buildFindings };
+    function setSimulationStatus(parts, message, isError) {
+        parts.status.textContent = message;
+        parts.status.style.color = isError ? "var(--color-danger)" : "var(--color-text-muted)";
+    }
+
+    // The namespace with the most services is the default: it is the one most likely to be the workload.
+    function chooseNamespace(rows) {
+        let best = null;
+        rows.forEach((row) => {
+            const count = (row.graph?.services || []).length;
+            if (count > 0 && (!best || count > best.count)) best = { name: row.namespace, count };
+        });
+        return best ? best.name : null;
+    }
+
+    // A transition record is one pair of nodes and the number of pods that moved between them, so the pods that
+    // moved are the sum of pod_count; the number of records would count three pods moving between the same two
+    // nodes as one. A record without a usable count adds nothing.
+    function podsMoved(transitions) {
+        return (transitions || []).reduce((total, record) => {
+            const count = Number(record && record.pod_count);
+            return total + (Number.isFinite(count) && count > 0 ? count : 0);
+        }, 0);
+    }
+
+    function renderSimulationRows(parts, payload) {
+        parts.body.replaceChildren();
+        const results = payload.scenario_results || [];
+        results.forEach((result) => {
+            const row = el("tr");
+            row.appendChild(el("td", null, String(result.scenario_name || result.scenario_id).replace(" (live topology)", "")));
+            const outcome = el("td");
+            outcome.appendChild(el("span", `status-badge status-badge--${OUTCOME_VARIANT[result.status] || "muted"}`, result.status));
+            if (result.error_message) {
+                const reason = el("div", null, result.error_message);
+                reason.style.fontSize = "12px";
+                outcome.appendChild(reason);
+            }
+            row.appendChild(outcome);
+            row.appendChild(el("td", null, pct(result.d_rate)));
+            const exposure = el("td");
+            if (result.delta_e_rate == null) {
+                exposure.textContent = "n/a";
+            } else {
+                const sign = result.delta_e_rate > 0 ? "+" : "";
+                exposure.appendChild(el("span", `status-badge status-badge--${result.delta_e_rate > 0 ? "danger" : "muted"}`,
+                    `${sign}${(result.delta_e_rate * 100).toFixed(1)}%`));
+            }
+            row.appendChild(exposure);
+            row.appendChild(el("td", null, (result.drifted_services || []).join(", ") || "none"));
+            row.appendChild(el("td", null, String(podsMoved(result.transitions))));
+            parts.body.appendChild(row);
+        });
+        parts.results.hidden = results.length === 0;
+    }
+
+    async function runSimulation() {
+        const parts = simulationParts();
+        if (!parts || !parts.select || !parts.select.value) return;
+        if (simulationInFlight) {
+            // A change made while a run is under way is run straight after it, never alongside it.
+            simulationRerun = true;
+            return;
+        }
+        simulationInFlight = true;
+        parts.run.disabled = true;
+        parts.results.hidden = true;
+        const namespace = parts.select.value;
+        setSimulationStatus(parts, `Simulating on namespace ${namespace}…`, false);
+        try {
+            const payload = await api().fetchJson(
+                `/api/deployments/chaos/benchmarks?source=live&namespace=${encodeURIComponent(namespace)}`
+            );
+            const metrics = payload.aggregate_metrics || {};
+            if (metrics.topology_source !== "live") {
+                setSimulationStatus(parts, "The server did not report a live topology, so these results are not shown as your cluster's.", true);
+                return;
+            }
+            renderSimulationRows(parts, payload);
+            const total = Math.round(metrics.total_scenarios || 0);
+            const done = Math.round(metrics.completed_count || 0);
+            setSimulationStatus(
+                parts,
+                `Namespace ${namespace}: ${done} of ${total} scenarios completed · mean D_rate ${pct(metrics.mean_d_rate)} · ` +
+                `max ${pct(metrics.max_d_rate)}. Simulated on the cluster's real topology; not experimental evidence.`,
+                false
+            );
+        } catch (error) {
+            // The server's own message names the cause: no cluster connected, no workloads in this namespace, ...
+            const hint = error && error.code === "TOPOLOGY_HAS_NO_WORKLOADS" ? " Choose another namespace." : "";
+            setSimulationStatus(parts, `Could not simulate: ${error.message || "request failed"}.${hint}`, true);
+        } finally {
+            simulationInFlight = false;
+            parts.run.disabled = !parts.select.value;
+            if (simulationRerun) {
+                simulationRerun = false;
+                runSimulation();
+            }
+        }
+    }
+
+    async function loadSimulationNamespaces() {
+        const parts = simulationParts();
+        if (!parts || !parts.select) return;
+        try {
+            const overview = await api().fetchJson("/api/deployments/discovery/all");
+            const rows = overview.namespaces || [];
+            parts.select.replaceChildren();
+            rows.forEach((row) => {
+                const option = document.createElement("option");
+                option.value = row.namespace;
+                option.textContent = `${row.namespace} · ${(row.graph?.services || []).length} services`;
+                parts.select.appendChild(option);
+            });
+            const chosen = chooseNamespace(rows);
+            if (!rows.length || !chosen) {
+                parts.select.replaceChildren();
+                const none = document.createElement("option");
+                none.value = "";
+                none.textContent = "No namespace with workloads";
+                parts.select.appendChild(none);
+                parts.select.disabled = true;
+                parts.run.disabled = true;
+                setSimulationStatus(parts, "The connected cluster has no namespace with workloads to simulate.", false);
+                return;
+            }
+            parts.select.value = chosen;
+            parts.select.disabled = false;
+            parts.run.disabled = false;
+            setSimulationStatus(parts, "", false);
+            await runSimulation();
+        } catch (error) {
+            parts.select.replaceChildren();
+            const failed = document.createElement("option");
+            failed.value = "";
+            failed.textContent = "Cluster not available";
+            parts.select.appendChild(failed);
+            parts.select.disabled = true;
+            parts.run.disabled = true;
+            setSimulationStatus(parts, `Could not read the cluster: ${error.message || "request failed"}.`, true);
+        }
+    }
+
+    function initSimulation() {
+        const parts = simulationParts();
+        if (!parts || !parts.select || !parts.run) return;
+        parts.run.addEventListener("click", runSimulation);
+        parts.select.addEventListener("change", runSimulation);
+        loadSimulationNamespaces().catch((err) => console.warn("Failed to start the cluster simulation:", err));
+    }
+
+    function init() {
+        load().catch((err) => console.warn("Failed to load live experiment results:", err));
+        initSimulation();
+    }
+
+    return {
+        init: init, load: load, buildFindings: buildFindings,
+        runSimulation: runSimulation, loadSimulationNamespaces: loadSimulationNamespaces,
+    };
 })();

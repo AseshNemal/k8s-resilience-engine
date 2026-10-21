@@ -44,6 +44,10 @@ PYTHON_ALLOWED: dict[str, set[str]] = {}
 # What the page templates and scripts may still say. The chaos tab names its own dry-run endpoints.
 FRONTEND_ALLOWED = {
     "app/static/js/components/deployments_scenarios_widget.js": {"benchmarks/ensemble", "chaos/benchmarks"},
+    # The Live Experiments tab's "simulate on your cluster" card asks for source=live only, and the script
+    # refuses any response whose aggregate_metrics.topology_source is not "live" (it never shows scripted
+    # placements as the cluster's). It is labelled a dry-run prediction on the page.
+    "app/static/js/components/deployments_live_experiments_widget.js": {"chaos/benchmarks"},
 }
 
 # Declared-state views. They take declared intent from a manifest folder when one exists (named by
