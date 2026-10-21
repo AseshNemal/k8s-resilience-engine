@@ -61,6 +61,27 @@ window.DeploymentsIntentWidget = (function () {
         }
     }
 
+    // Live ready replicas from camelCase, snake_case or the pod list; null when the service was not observed.
+    function liveReadyReplicas(live) {
+        if (live.readyReplicas !== undefined) return live.readyReplicas;
+        if (live.ready_replicas !== undefined) return live.ready_replicas;
+        if (Array.isArray(live.pods)) return live.pods.filter((p) => p.ready).length;
+        return null;
+    }
+
+    function limitsText(item) {
+        if (!item.resource_limits) return "None";
+        return `${item.resource_limits.cpu || "N/A"} / ${item.resource_limits.memory || "N/A"}`;
+    }
+
+    function replicaStatusHtml(comparable, replicaMismatch, declaredRep, readyRep) {
+        if (replicaMismatch) {
+            return `<span class="status-pill status-pill--warning" title="Declared ${declaredRep} vs live ${readyRep} ready">⚠️ Replica drift</span>`;
+        }
+        if (comparable) return '<span class="status-pill status-pill--success">✓ Match</span>';
+        return '<span class="status-pill">Not observed</span>';
+    }
+
     function renderIntentTable(intents, liveServices = []) {
         const tbody = document.getElementById("intent-table-body");
         if (!tbody) return;
@@ -79,25 +100,11 @@ window.DeploymentsIntentWidget = (function () {
 
         intents.forEach((item) => {
             const svcName = item.service_name || "unknown";
-            const live = liveMap[key(item.namespace, svcName)] || {};
             const declaredRep = item.expected_replicas ?? item.declared_replicas ?? null;
-
-            // Live ready replicas from snake_case or camelCase or pod list; null when not observed
-            let readyRep = null;
-            if (live.readyReplicas !== undefined) {
-                readyRep = live.readyReplicas;
-            } else if (live.ready_replicas !== undefined) {
-                readyRep = live.ready_replicas;
-            } else if (live.pods && Array.isArray(live.pods)) {
-                readyRep = live.pods.filter((p) => p.ready).length;
-            }
-
-            const limits = item.resource_limits
-                ? `${item.resource_limits.cpu || "N/A"} / ${item.resource_limits.memory || "N/A"}`
-                : "None";
-
+            const readyRep = liveReadyReplicas(liveMap[key(item.namespace, svcName)] || {});
+            const limits = limitsText(item);
             const hasAffinity = item.has_node_affinity ? "✓ Required" : "None";
-            const hasSpread = (item.spread_constraints && item.spread_constraints.length > 0) ? "✓ Configured" : "None";
+            const hasSpread = item.spread_constraints?.length > 0 ? "✓ Configured" : "None";
 
             // Only compared when both sides are known; otherwise shown as not observed.
             const comparable = declaredRep != null && readyRep != null;
@@ -106,13 +113,7 @@ window.DeploymentsIntentWidget = (function () {
                 comparedCount++;
                 if (!replicaMismatch) compliantCount++;
             }
-
-            let statusHtml = '<span class="status-pill">Not observed</span>';
-            if (replicaMismatch) {
-                statusHtml = `<span class="status-pill status-pill--warning" title="Declared ${declaredRep} vs live ${readyRep} ready">⚠️ Replica drift</span>`;
-            } else if (comparable) {
-                statusHtml = '<span class="status-pill status-pill--success">✓ Match</span>';
-            }
+            const statusHtml = replicaStatusHtml(comparable, replicaMismatch, declaredRep, readyRep);
 
             const tr = document.createElement("tr");
             tr.innerHTML = `

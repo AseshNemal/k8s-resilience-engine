@@ -17,8 +17,9 @@ window.DeploymentsDriftWidget = (function () {
             if (!catResp.ok) {
                 const body = await catResp.json().catch(() => ({}));
                 const container = document.getElementById("spof-workloads-list");
+                const reason = body.detail?.message || body.detail || "HTTP " + catResp.status;
                 if (container) {
-                    container.textContent = `Drift analysis unavailable: ${body.detail?.message || body.detail || `HTTP ${catResp.status}`}`;
+                    container.textContent = `Drift analysis unavailable: ${reason}`;
                 }
                 return;
             }
