@@ -11,6 +11,7 @@ from experiments.failure_impact_validation import capture_validation_inputs
 from experiments.failure_impact_validation.capture_validation_inputs import (
     _result_mapping,
     _runtime_prediction_url,
+    cli,
     fetch_live_prediction,
     prepare_validation_inputs,
 )
@@ -179,3 +180,49 @@ def test_result_mapping_rejects_duplicates_and_malformed_values() -> None:
             ["payment"],
             argument_name="--service-result",
         )
+
+
+def test_capture_command_reports_invalid_backend_without_traceback(
+    tmp_path,
+    capsys,
+) -> None:
+    exit_code = cli(
+        [
+            "--base-url",
+            "not-a-url",
+            "--workflow-id",
+            "checkout",
+            "--failed-node",
+            "node-1",
+            "--namespace",
+            "research",
+            "--experiment-id",
+            "invalid-backend-run",
+            "--observation-source",
+            "connected-cluster probes",
+            "--observed-at",
+            "2026-10-22T01:00:00Z",
+            "--expected-service",
+            "cartservice",
+            "--service-result",
+            "cartservice=SERVICE_UNAVAILABLE",
+            "--expected-workflow",
+            "checkout",
+            "--workflow-result",
+            "checkout=WORKFLOW_FAILED",
+            "--prediction-output",
+            str(tmp_path / "prediction.json"),
+            "--evidence-output",
+            str(tmp_path / "evidence.json"),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "error: base_url must be an absolute HTTP or HTTPS URL" in (
+        captured.err
+    )
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+    assert not (tmp_path / "prediction.json").exists()
+    assert not (tmp_path / "evidence.json").exists()

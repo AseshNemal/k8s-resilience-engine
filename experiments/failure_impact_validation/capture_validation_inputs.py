@@ -333,5 +333,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def cli(argv: Sequence[str] | None = None) -> int:
+    """Return a concise command-line error for expected capture failures."""
+
+    try:
+        return main(argv)
+    except (ValueError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(cli())

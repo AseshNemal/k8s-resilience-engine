@@ -10,6 +10,7 @@ from app.engine.failure_impact_prediction.captured_evidence_combiner import (
 from experiments.failure_impact_validation.run_validation import (
     ARTIFACT_TYPE,
     EVIDENCE_STATUS,
+    cli,
     evaluate_saved_experiment,
     main,
 )
@@ -198,3 +199,29 @@ def test_cli_refuses_to_overwrite_validation_artifact(
     assert output_path.read_text(encoding="utf-8") == (
         "keep-existing-result"
     )
+
+
+def test_command_reports_missing_file_without_traceback(
+    tmp_path,
+    capsys,
+) -> None:
+    missing_prediction = tmp_path / "missing-prediction.json"
+    missing_evidence = tmp_path / "missing-evidence.json"
+
+    exit_code = cli(
+        [
+            "--prediction",
+            str(missing_prediction),
+            "--evidence",
+            str(missing_evidence),
+            "--batch-id",
+            "missing-input-validation",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "error: Could not read" in captured.err
+    assert str(missing_prediction) in captured.err
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
