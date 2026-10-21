@@ -8,17 +8,25 @@ to the terminal, and exports publication-grade Markdown and JSON benchmark artif
 """
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List
 
-from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
-from experiments.placement_drift.disruption_reporter import DisruptionReporter
-from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix
-from experiments.placement_drift.scenario_models import ScenarioResult
-from experiments.placement_drift.snapshot_repository import SnapshotRepository
+# Running this file directly puts only its own folder on sys.path; add the project root.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator  # noqa: E402
+from experiments.placement_drift.disruption_reporter import DisruptionReporter  # noqa: E402
+from experiments.placement_drift.drift_transition_matrix import DriftTransitionMatrix  # noqa: E402
+from experiments.placement_drift.scenario_models import ScenarioResult  # noqa: E402
+from experiments.placement_drift.snapshot_repository import SnapshotRepository  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _pct(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.2%}"
 
 
 def _print_scenario_banner(result: ScenarioResult) -> None:
@@ -27,8 +35,8 @@ def _print_scenario_banner(result: ScenarioResult) -> None:
     status_icon = "[PASS]" if result.rollback_successful else "[FAIL]"
     print(
         f"  {status_icon} Scenario: {result.scenario_id:<28} | "
-        f"D_rate: {result.d_rate:.2%} | "
-        f"Delta_E: {result.delta_e_rate:+.2%} | "
+        f"D_rate: {_pct(result.d_rate)} | "
+        f"Delta_E: {_pct(result.delta_e_rate)} | "
         f"Migrated: {total_migrated:>2} pods | "
         f"Latency: {result.runtime_ms:.1f}ms"
     )
@@ -69,13 +77,17 @@ def _write_artifact_files(
     return md_file, json_file
 
 
-def run_benchmarks() -> Dict[str, float]:
+def run_benchmarks(output_dir: Path | None = None) -> Dict[str, float]:
     """
     Executes all 8 Section 10 disruption scenarios, outputs live matrices,
     and saves academic artifacts.
+
+    ``output_dir`` is where the Markdown and JSON artifacts are written. It defaults to this folder, which
+    is what the command-line run (``python -m experiments.placement_drift.run_benchmarks``) uses to refresh
+    the committed results; tests pass a temporary folder so they never touch the tracked evidence.
     """
     print("=" * 80)
-    print("COMPONENT 2: CONTROLLED CHAOS & PLACEMENT DRIFT BENCHMARK RUNNER")
+    print("COMPONENT 2: PLACEMENT DRIFT SCENARIO RUNNER (DRY-RUN SIMULATION)")
     print("Author: P.A.M. Minara (IT23154476) | Research Component 2")
     print("=" * 80 + "\n")
 
@@ -93,7 +105,8 @@ def run_benchmarks() -> Dict[str, float]:
             _render_transition_matrix(repo, r.scenario_id)
 
     # Output directory
-    output_dir = Path(__file__).parent
+    output_dir = Path(__file__).resolve().parent if output_dir is None else Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     md_path, json_path = _write_artifact_files(results, metrics, output_dir)
 
     print("=" * 80)
@@ -101,11 +114,12 @@ def run_benchmarks() -> Dict[str, float]:
     print("=" * 80)
     print(f"Total Scenarios Evaluated: {int(metrics['total_scenarios'])}")
     print(f"Scenarios Completed:      {int(metrics['completed_count'])}")
-    print(f"Mean Placement Drift Rate: {metrics['mean_d_rate']:.2%}")
-    print(f"Max Placement Drift Rate:  {metrics['max_d_rate']:.2%}")
+    print(f"Execution Mode:            {metrics['execution_mode']} (scripted placements)")
+    print(f"Mean Placement Drift Rate: {_pct(metrics['mean_d_rate'])}")
+    print(f"Max Placement Drift Rate:  {_pct(metrics['max_d_rate'])}")
     print(f"Total Execution Latency:   {metrics['total_runtime_ms']:.2f} ms")
     print("-" * 80)
-    print(f"Saved Academic Markdown:   {md_path}")
+    print(f"Saved Markdown report:     {md_path}")
     print(f"Saved Machine JSON Data:   {json_path}")
     print("=" * 80)
 

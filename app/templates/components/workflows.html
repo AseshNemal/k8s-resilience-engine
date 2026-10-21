@@ -3,7 +3,7 @@
 {% set show_project_metadata = false %}
 {% set source_label = "No workflow selected" %}
 {% block page_css %}
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=guided-setup-2">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=guided-setup-3">
 {% endblock %}
 {% block content %}
     <div class="workflow-workspace">
@@ -152,6 +152,9 @@
                                 <button type="submit" class="experiment-button" data-role="guided-discover-button">
                                     Connect
                                 </button>
+                                <button type="button" class="secondary-button" data-role="guided-auto-discover">
+                                    Find workflows automatically
+                                </button>
                             </div>
                             <div data-role="guided-service-field" class="full-width" hidden>
                                 <label for="workflow-input-8">
@@ -294,6 +297,7 @@
     </div>
 {% endblock %}
 {% block page_js %}
-    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=guided-setup-2" defer>
+    <script src="{{ url_for('static', path='/js/workflow-discovery-poller.js') }}" defer></script>
+    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=guided-setup-3" defer>
     </script>
 {% endblock %}

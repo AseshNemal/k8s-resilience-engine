@@ -1,5 +1,6 @@
 .git
 .claude
+.superpowers
 .venv
 .env
 .kube
@@ -10,3 +11,10 @@ data/*.db*
 tests
 docs
 *.pdf
+# Never copied into an image (a test enforces it), so keep them out of the build context too.
+sample_data
+deploy
+# Test files are not needed to build anything. Excluding them means editing a test does not
+# invalidate the layer that compiles the Go helper or the one that copies the page scripts.
+extension/helper/**/*_test.go
+extension/ui-src/*.test.mjs

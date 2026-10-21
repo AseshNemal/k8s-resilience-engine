@@ -7,6 +7,7 @@ or log credentials).
 
 import base64
 import json
+import os
 import stat
 from datetime import datetime, timedelta, timezone
 
@@ -78,12 +79,13 @@ def test_an_expired_token_is_reported_as_expired(client):
     assert client.get("/_extension/cluster").json()["expired"] is True
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no Unix file modes")
 def test_stored_file_is_private_and_minimal(client, tmp_path):
     put(client, kubeconfig(cluster_extra={"extensions": [{"name": "x"}]}))
 
     path = tmp_path / "kube" / "config"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    stored = yaml.safe_load(path.read_text())
+    stored = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert set(stored["users"][0]["user"]) == {"token"}
     assert set(stored["clusters"][0]["cluster"]) <= {"server", "certificate-authority-data", "tls-server-name"}
 
@@ -107,7 +109,9 @@ def test_responses_never_contain_the_credential(client):
         (kubeconfig(user={"auth-provider": {"name": "gcp"}}), "bearer tokens"),
         ("not: a kubeconfig", "current-context"),
         (":\n - [", "valid YAML"),
-        ("a: " + "x" * 70000, "too large"),
+        # An explicit id: pytest keeps the test id in an environment variable, and Windows refuses one that is
+        # longer than 32767 characters, which this 70000-character value would make it.
+        pytest.param("a: " + "x" * 70000, "too large", id="oversized-file"),
     ],
 )
 def test_unsafe_or_malformed_kubeconfigs_are_rejected(client, tmp_path, text, message):
@@ -134,18 +138,26 @@ def test_disconnect_deletes_the_stored_credential(client, tmp_path):
     assert not (tmp_path / "kube" / "config").exists()
 
 
-class StubAuthz:
-    """Pretends to be the Kubernetes authorization API for a credential with given rights."""
+class StubHttp:
+    """Pretends to be an open connection to a cluster for a credential with given rights."""
 
     def __init__(self, allowed):
         self.allowed = allowed
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
 
 def verify_with(monkeypatch, allowed_pairs):
-    monkeypatch.setattr(cc.config, "new_client_from_config_dict", lambda document: type("C", (), {"close": lambda self: None})())
-    monkeypatch.setattr(cc.client, "AuthorizationV1Api", lambda api_client: StubAuthz(allowed_pairs))
-    monkeypatch.setattr(cc, "_allowed", lambda authz, verb, resource, group: (verb, resource) in authz.allowed)
-    return cc._verify_read_only({})
+    http = StubHttp(allowed_pairs)
+    monkeypatch.setattr(cc.rest, "connection_from_documents", lambda documents: object())
+    monkeypatch.setattr(cc.rest, "RestClient", lambda connection, timeout: http)
+    monkeypatch.setattr(cc, "_allowed", lambda http, verb, resource, group: (verb, resource) in http.allowed)
+    try:
+        return cc._verify_read_only({})
+    finally:
+        assert http.closed, "the connection must always be closed"
 
 
 READ_ONLY = {("list", "nodes"), ("list", "pods"), ("list", "deployments")}
@@ -169,3 +181,87 @@ def test_a_credential_missing_required_reads_is_refused(monkeypatch):
         verify_with(monkeypatch, {("list", "nodes")})
 
     assert "cannot list nodes, pods and deployments" in refused.value.detail
+
+
+# ---- the real request the verification makes ------------------------------------------------------
+
+def open_with(handler):
+    import httpx
+
+    from app.integrations.kubernetes.rest import Connection, RestClient
+
+    return RestClient(Connection(server="https://127.0.0.1:1", token="t"), 5, transport=httpx.MockTransport(handler))
+
+
+def test_the_access_review_is_posted_to_the_authorization_api_with_the_right_attributes():
+    import httpx
+
+    sent = []
+
+    def handler(request):
+        sent.append((request.method, request.url.path, request.read()))
+        return httpx.Response(201, json={"status": {"allowed": True}})
+
+    assert cc._allowed(open_with(handler), "list", "deployments", "apps") is True
+
+    import json
+
+    method, path, body = sent[0]
+    assert (method, path) == ("POST", "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
+    assert json.loads(body) == {
+        "apiVersion": "authorization.k8s.io/v1",
+        "kind": "SelfSubjectAccessReview",
+        "spec": {"resourceAttributes": {"verb": "list", "resource": "deployments", "group": "apps"}},
+    }
+
+
+@pytest.mark.parametrize("reply", [
+    {"status": {"allowed": False}}, {"status": {}}, {"status": {"allowed": "true"}}, {"status": None}, {}, [], "yes",
+])
+def test_anything_but_an_explicit_true_is_not_allowed(reply):
+    import httpx
+
+    assert cc._allowed(open_with(lambda request: httpx.Response(201, json=reply)), "get", "secrets", "") is False
+
+
+class Failing:
+    def __init__(self, error):
+        self.error, self.closed = error, False
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.mark.parametrize(("error", "status", "words"), [
+    (cc.rest.HttpStatusError(401), 401, "rejected the credential"),
+    (cc.rest.HttpStatusError(403), 401, "rejected the credential"),
+    (cc.rest.HttpStatusError(500), 502, "HTTP 500"),
+    (cc.rest.TransportFailure("ConnectError"), 502, "ConnectError"),
+])
+def test_cluster_failures_while_verifying_are_reported_without_detail_and_the_connection_is_closed(
+        monkeypatch, error, status, words):
+    http = Failing(error)
+
+    monkeypatch.setattr(cc.rest, "connection_from_documents", lambda documents: object())
+    monkeypatch.setattr(cc.rest, "RestClient", lambda connection, timeout: http)
+
+    def raise_it(*args):
+        raise error
+
+    monkeypatch.setattr(cc, "_allowed", raise_it)
+    with pytest.raises(cc.HTTPException) as refused:
+        cc._verify_read_only({})
+
+    assert refused.value.status_code == status and words in refused.value.detail
+    assert http.closed
+
+
+def test_an_unusable_kubeconfig_is_a_422_that_names_the_problem(monkeypatch):
+    def refuse(documents):
+        raise cc.rest.KubeconfigError("the certificate authority or client certificate is not valid")
+
+    monkeypatch.setattr(cc.rest, "connection_from_documents", refuse)
+    with pytest.raises(cc.HTTPException) as refused:
+        cc._verify_read_only({})
+
+    assert refused.value.status_code == 422 and "certificate authority" in refused.value.detail

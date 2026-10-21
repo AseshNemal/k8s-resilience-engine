@@ -24,7 +24,7 @@ function setEmpty(container, message) {
     container.innerHTML = `
         <div class="state empty-state" role="status">
             <p class="state__title">No data available</p>
-            <p>${escapeHtml(message || "There is no sample data to display yet.")}</p>
+            <p>${escapeHtml(message || "There is nothing to display yet.")}</p>
         </div>
     `;
 }

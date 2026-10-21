@@ -12,6 +12,7 @@ from app.engine.workflow_dependency_modeling.models import (
     WorkflowEvidenceSource,
     WorkflowScenario,
 )
+from app.engine.workflow_dependency_modeling.reference_source import ReferenceSource
 from app.engine.workflow_dependency_modeling.trace_reader import load_traces_from_file
 from app.shared.sample_loader import SAMPLE_DATA_DIR
 
@@ -100,3 +101,11 @@ def list_fixture_workflows() -> list[dict[str, Any]]:
             }
         )
     return workflows
+
+
+# The synthetic engineering references are for research runs and tests only. Nothing in the application
+# configures this source; a caller has to pass it (or configure it) deliberately.
+FIXTURE_REFERENCE_SOURCE = ReferenceSource(
+    name="sample_data/workflow_references (synthetic engineering fixtures)",
+    load=get_reference,
+)

@@ -2,45 +2,36 @@
  * Recommendation Evaluation and Validation page script.
  * Owned by: Member 4 (L.A. Nemal).
  *
- * Fetches recommendation, validation, deployment, and failure-impact
- * samples and formats/combines them for display. Simple aggregations
- * (min/filter/count over already-returned fields) are presentation only —
- * no blast radius, risk-reduction, confidence, or score is calculated here;
- * those values come straight from the RecommendationReport/ValidationReport
- * API responses. The "Sample Virtual Placement" panel illustrates the
- * round-robin idea the real simulator already implements server-side
- * (app/engine/recommendation_evaluation_validation/simulator.py); no
- * DeploymentGraph is exposed with simulated placement yet, so this view is
- * explicitly labelled as a sample demonstration, not live simulator output.
+ * Reads /api/recommendations/live: the recommendation report generated from the connected cluster's live
+ * evidence, or an explicit error saying none exists. It never displays sample recommendations, placements
+ * or validation results; all scoring and simulation happen in the Python engine. The display components
+ * live in recommendation-render.js and render exactly the evidence passed to them. Evidence that has no
+ * producer yet (baseline blast radius, validation results, simulated placement) is passed as null, and each
+ * panel then shows an explicit missing-evidence state. See docs/RECOMMENDATION_LIVE_DATA.md.
+ *
+ * Approval gate: an approval is requested for, and recorded against, the live recommendation shown here.
+ * The server refuses to approve a record that has no verified link to live evidence.
  */
 
 (function () {
-    const ENDPOINTS = {
-        recommendation: "/api/recommendations/sample",
-        validation: "/api/validations/sample",
-        deployment: "/api/deployments/sample",
-        failureImpact: "/api/failure-impacts/sample",
-        approvalBase: "/api/recommendations",
-    };
-
-    const { fetchAll } = window.ResilienceApi;
-    const {
-        setError,
-        formatPercentage,
-        formatRatioAsPercentage,
-        formatCodeLabel,
-        initJsonPanel,
-        updateLastRefreshed,
-    } = window.ResilienceUi;
+    const { fetchJson } = window.ResilienceApi;
+    const { formatCodeLabel, initJsonPanel, updateLastRefreshed } = window.ResilienceUi;
+    const view = window.ResilienceRecommendations;
+    const { describeError, renderStateCard, applyBadge } = window.ResilienceConnection;
 
     const region = document.querySelector('[data-role="page-region"]');
     const template = document.querySelector('[data-role="page-template"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
+    const sourceBadge = document.querySelector('[data-role="source-badge"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
+    // What to recommend for: the recommendation is computed from the connected cluster and this frozen workflow.
+    const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
+    const failedNodeInput = document.querySelector('[data-role="failed-node"]');
+    const namespaceInput = document.querySelector('[data-role="namespace"]');
+
+    const APPROVAL_BASE = "/api/recommendations";
+    const PROPOSAL_VERSION = "v1.0";
     const approvalModal = document.getElementById("approval-modal");
-    
-    let currentRecommendationId = null;
-    let currentProposalVersion = "v1.0";
     let currentRecommendation = null;
 
     function setMetric(root, name, value) {
@@ -48,328 +39,168 @@
         if (element) element.textContent = value;
     }
 
-    function buildStat(label, value) {
-        const wrapper = document.createElement("div");
-        const labelEl = document.createElement("div");
-        labelEl.className = "candidate-card__stat-label";
-        labelEl.textContent = label;
-        const valueEl = document.createElement("div");
-        valueEl.className = "candidate-card__stat-value";
-        valueEl.textContent = value;
-        wrapper.append(labelEl, valueEl);
-        return wrapper;
+    // ---- Approval gate -------------------------------------------------------------------------------
+
+    // The filled-in inputs as a query string, or "" when none is filled in. Only the filled ones are sent, so
+    // the server (not this page) decides what a missing workflow means.
+    function inputQuery() {
+        const params = new URLSearchParams();
+        [["workflow_id", workflowIdInput], ["failed_node", failedNodeInput], ["namespace", namespaceInput]]
+            .forEach(([name, input]) => {
+                const value = input && typeof input.value === "string" ? input.value.trim() : "";
+                if (value) params.set(name, value);
+            });
+        const text = params.toString();
+        return text ? `?${text}` : "";
     }
 
-    function renderCandidateCards(container, recommendation, failureImpact) {
-        container.innerHTML = "";
-
-        recommendation.recommendations.forEach((candidate) => {
-            const isSelected = candidate.id === recommendation.selectedRecommendationId;
-
-            const card = document.createElement("div");
-            card.className = `candidate-card${isSelected ? " candidate-card--selected" : ""}`;
-
-            const header = document.createElement("div");
-            header.className = "candidate-card__header";
-
-            const titleBlock = document.createElement("div");
-            const title = document.createElement("div");
-            title.className = "candidate-card__title";
-            title.textContent = formatCodeLabel(candidate.type);
-            const target = document.createElement("div");
-            target.className = "candidate-card__target";
-            target.textContent = `Target: ${candidate.service}`;
-            titleBlock.append(title, target);
-
-            const badges = document.createElement("div");
-            badges.className = "stack-sm";
-            const feasibleBadge = document.createElement("span");
-            feasibleBadge.className = `status-badge status-badge--${
-                candidate.feasible ? "success" : "danger"
-            }`;
-            feasibleBadge.textContent = candidate.feasible ? "Feasible" : "Not Feasible";
-            badges.appendChild(feasibleBadge);
-            if (isSelected) {
-                const selectedBadge = document.createElement("span");
-                selectedBadge.className = "status-badge status-badge--info";
-                selectedBadge.style.marginLeft = "6px";
-                selectedBadge.textContent = "Selected Recommendation";
-                badges.appendChild(selectedBadge);
-            }
-
-            header.append(titleBlock, badges);
-
-            const stats = document.createElement("div");
-            stats.className = "candidate-card__stats";
-            stats.appendChild(
-                buildStat("Before", formatPercentage(failureImpact.blastRadius))
-            );
-            stats.appendChild(
-                buildStat(
-                    "Predicted After",
-                    formatPercentage(candidate.predictedBlastRadius)
-                )
-            );
-            stats.appendChild(
-                buildStat(
-                    "Risk Reduction",
-                    `${candidate.riskReduction} pp`
-                )
-            );
-
-            const secondaryStats = document.createElement("div");
-            secondaryStats.className = "candidate-card__stats";
-            secondaryStats.appendChild(buildStat("Resource Cost", candidate.resourceCost));
-            secondaryStats.appendChild(
-                buildStat("Confidence", formatRatioAsPercentage(candidate.confidence))
-            );
-            secondaryStats.appendChild(
-                buildStat("Score", formatRatioAsPercentage(candidate.score))
-            );
-
-            card.append(header, stats, secondaryStats);
-            container.appendChild(card);
+    async function callApproval(method, path, body) {
+        // Requesting an approval recomputes the recommendation on the server, so it needs the same inputs.
+        const query = path === "/request-approval" ? inputQuery() : "";
+        const response = await fetch(`${APPROVAL_BASE}/${encodeURIComponent(currentRecommendation.id)}${path}${query}`, {
+            method,
+            headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
+            body: body ? JSON.stringify(body) : undefined,
         });
-    }
-
-    function renderCandidateTable(tbody, recommendation) {
-        tbody.innerHTML = "";
-
-        recommendation.recommendations.forEach((candidate) => {
-            const row = document.createElement("tr");
-
-            const nameCell = document.createElement("td");
-            nameCell.textContent = formatCodeLabel(candidate.type);
-
-            const feasibleCell = document.createElement("td");
-            feasibleCell.textContent = candidate.feasible ? "Yes" : "No";
-
-            const predictedCell = document.createElement("td");
-            predictedCell.textContent = formatPercentage(candidate.predictedBlastRadius);
-
-            const reductionCell = document.createElement("td");
-            reductionCell.textContent = `${candidate.riskReduction} pp`;
-
-            const costCell = document.createElement("td");
-            costCell.textContent = candidate.resourceCost;
-
-            const confidenceCell = document.createElement("td");
-            confidenceCell.textContent = formatRatioAsPercentage(candidate.confidence);
-
-            const scoreCell = document.createElement("td");
-            scoreCell.textContent = formatRatioAsPercentage(candidate.score);
-
-            row.append(
-                nameCell,
-                feasibleCell,
-                predictedCell,
-                reductionCell,
-                costCell,
-                confidenceCell,
-                scoreCell
-            );
-            tbody.appendChild(row);
-        });
-    }
-
-    function renderPlacement(currentContainer, simulatedContainer, deployment, candidate) {
-        currentContainer.innerHTML = "";
-        simulatedContainer.innerHTML = "";
-
-        if (!candidate) return;
-
-        const service = deployment.services.find(
-            (item) => item.name === candidate.service
-        );
-        if (!service) return;
-
-        service.pods.forEach((pod) => {
-            const row = document.createElement("div");
-            row.className = "placement-row";
-            const name = document.createElement("span");
-            name.textContent = pod.name;
-            const node = document.createElement("span");
-            node.textContent = pod.node;
-            row.append(name, node);
-            currentContainer.appendChild(row);
-        });
-
-        // Sample Virtual Placement: illustrates the round-robin spread the
-        // real simulator performs server-side. Presentation only.
-        service.pods.forEach((pod, index) => {
-            const targetNode = deployment.nodes[index % deployment.nodes.length];
-            const row = document.createElement("div");
-            row.className = "placement-row";
-            const name = document.createElement("span");
-            name.textContent = pod.name;
-            const node = document.createElement("span");
-            node.textContent = targetNode.name;
-            row.append(name, node);
-            simulatedContainer.appendChild(row);
-        });
-    }
-
-    function initYamlPanelToggle(region) {
-        const panel = region.querySelector("#rec-raw-yaml");
-        if (!panel) return;
-        const toggle = panel.querySelector('[data-role="json-toggle"]');
-        if (!toggle) return;
-
-        toggle.addEventListener("click", () => {
-            const isOpen = panel.classList.toggle("is-open");
-            toggle.setAttribute("aria-expanded", String(isOpen));
-            const label = toggle.querySelector('[data-role="json-toggle-label"]');
-            if (label) {
-                label.textContent = isOpen ? "Hide Generated YAML" : "View Generated YAML";
-            }
-        });
-    }
-    
-    // Approval UI Logic
-    async function loadApprovalState(recommendationId) {
+        let payload = null;
         try {
-            const response = await fetch(`${ENDPOINTS.approvalBase}/${recommendationId}/approval`);
-            if (response.status === 404) {
-                renderApprovalState(null);
-                return;
-            }
-            if (!response.ok) throw new Error("Failed to load approval state");
-            const data = await response.json();
-            renderApprovalState(data);
-        } catch (error) {
-            console.error(error);
+            payload = await response.json();
+        } catch (_error) {
+            payload = null;
         }
+        return { ok: response.ok, status: response.status, payload, provenance: response.headers.get("X-Evidence-Provenance") };
     }
 
-    function renderApprovalState(approval) {
+    function errorText(result, fallback) {
+        const detail = result.payload && result.payload.detail;
+        // Coded evidence errors carry a sanitised message. A plain string detail is shown only for client
+        // errors (for example "Approval already pending"); server errors get the fallback, never raw text.
+        if (detail && typeof detail === "object") return detail.message || fallback;
+        return typeof detail === "string" && result.status < 500 ? detail : fallback;
+    }
+
+    function approvalBadge(text, variant) {
+        const badge = document.createElement("span");
+        badge.className = `status-badge status-badge--${variant}`;
+        badge.textContent = text;
+        return badge;
+    }
+
+    function button(label, className, id, onClick) {
+        const element = document.createElement("button");
+        element.type = "button";
+        element.className = className;
+        element.id = id;
+        element.textContent = label;
+        element.addEventListener("click", onClick);
+        return element;
+    }
+
+    function renderApprovalState(approval, provenance, message) {
         const stateContainer = region.querySelector('[data-role="approval-state-container"]');
         const actionsContainer = region.querySelector('[data-role="approval-actions"]');
         if (!stateContainer || !actionsContainer) return;
-        
+        stateContainer.replaceChildren();
+        actionsContainer.replaceChildren();
+
         if (!approval) {
-            stateContainer.innerHTML = `<span class="status-badge status-badge--muted">No Approval Requested</span>`;
-            actionsContainer.innerHTML = `<button type="button" class="primary-button" id="btn-request-approval">Request Approval</button>`;
-            
-            const reqBtn = actionsContainer.querySelector("#btn-request-approval");
-            if (reqBtn && currentRecommendation && currentRecommendation.feasible) {
-                reqBtn.addEventListener("click", () => requestApproval(currentRecommendationId));
-            } else if (reqBtn) {
-                reqBtn.disabled = true;
-                reqBtn.title = "Recommendation must be feasible";
+            stateContainer.append(approvalBadge("No Approval Requested", "muted"));
+            const request = button("Request Approval", "primary-button", "btn-request-approval", requestApproval);
+            if (!currentRecommendation.feasible) {
+                request.disabled = true;
+                request.title = "Recommendation must be feasible";
             }
-            return;
-        }
-
-        let badgeClass = "status-badge--muted";
-        if (approval.status === "PENDING_APPROVAL") badgeClass = "status-badge--warning";
-        if (approval.status === "APPROVED") badgeClass = "status-badge--success";
-        if (approval.status === "REJECTED") badgeClass = "status-badge--danger";
-
-        let html = `<div class="stack-sm">
-            <div><span class="status-badge ${badgeClass}">${approval.status}</span></div>
-            <div class="text-sm text-muted">Proposal Version: ${approval.proposalVersion}</div>
-        `;
-        
-        if (approval.decisionNote) {
-            html += `<div class="approval-note"><strong>Note:</strong> ${approval.decisionNote}</div>`;
-        }
-        
-        html += `</div>`;
-        stateContainer.innerHTML = html;
-
-        if (approval.status === "PENDING_APPROVAL") {
-            actionsContainer.innerHTML = `
-                <button type="button" class="danger-button" id="btn-show-reject">Reject</button>
-                <button type="button" class="success-button" id="btn-show-approve">Approve</button>
-            `;
-            actionsContainer.querySelector("#btn-show-approve").addEventListener("click", () => showApprovalModal('approve'));
-            actionsContainer.querySelector("#btn-show-reject").addEventListener("click", () => showApprovalModal('reject'));
+            actionsContainer.append(request);
         } else {
-            actionsContainer.innerHTML = "";
+            const variant = { PENDING_APPROVAL: "warning", APPROVED: "success", REJECTED: "danger" }[approval.status] || "muted";
+            const stack = document.createElement("div");
+            stack.className = "stack-sm";
+            const version = document.createElement("div");
+            version.className = "text-sm text-muted";
+            version.textContent = `Proposal Version: ${approval.proposalVersion}`;
+            stack.append(approvalBadge(approval.status, variant), version);
+            if (provenance === "unverified") {
+                const warning = document.createElement("div");
+                warning.className = "approval-note";
+                warning.textContent =
+                    "This request has no verifiable link to live cluster evidence. It can be rejected but not approved.";
+                stack.append(warning);
+            }
+            if (approval.decisionNote) {
+                const note = document.createElement("div");
+                note.className = "approval-note";
+                const label = document.createElement("strong");
+                label.textContent = "Note: ";
+                note.append(label, document.createTextNode(approval.decisionNote));
+                stack.append(note);
+            }
+            stateContainer.append(stack);
+
+            if (approval.status === "PENDING_APPROVAL") {
+                const reject = button("Reject", "danger-button", "btn-show-reject", () => showApprovalModal("reject"));
+                const approve = button("Approve", "success-button", "btn-show-approve", () => showApprovalModal("approve"));
+                if (provenance === "unverified") approve.disabled = true;
+                actionsContainer.append(reject, approve);
+            }
+        }
+
+        if (message) {
+            const problem = document.createElement("div");
+            problem.className = "approval-note";
+            problem.setAttribute("role", "alert");
+            problem.textContent = message;
+            stateContainer.append(problem);
         }
     }
 
-    async function requestApproval(recommendationId) {
-        try {
-            const response = await fetch(`${ENDPOINTS.approvalBase}/${recommendationId}/request-approval`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    recommendationId: recommendationId,
-                    proposalVersion: currentProposalVersion,
-                }),
-            });
-            if (!response.ok) {
-                const err = await response.json();
-                alert(`Error: ${err.detail || 'Could not request approval'}`);
-                return;
-            }
-            const data = await response.json();
-            renderApprovalState(data);
-        } catch (error) {
-            console.error(error);
-            alert("Failed to request approval");
+    async function loadApprovalState() {
+        const result = await callApproval("GET", "/approval");
+        if (result.status === 404) {
+            renderApprovalState(null);
+            return null;
         }
+        if (!result.ok) {
+            renderApprovalState(null, null, errorText(result, "Could not load the approval state."));
+            return null;
+        }
+        renderApprovalState(result.payload, result.provenance);
+        return result.payload;
+    }
+
+    async function requestApproval() {
+        const result = await callApproval("POST", "/request-approval", {
+            recommendationId: currentRecommendation.id,
+            proposalVersion: PROPOSAL_VERSION,
+        });
+        if (!result.ok) {
+            return renderApprovalState(null, null, errorText(result, "Could not request approval."));
+        }
+        renderApprovalState(result.payload, result.provenance);
     }
 
     function showApprovalModal(action) {
         if (!approvalModal || !currentRecommendation) return;
-        
-        const typeEl = approvalModal.querySelector("#modal-context-type");
-        const serviceEl = approvalModal.querySelector("#modal-context-service");
-        const msgEl = approvalModal.querySelector("#modal-message");
-        
-        typeEl.textContent = formatCodeLabel(currentRecommendation.type);
-        serviceEl.textContent = currentRecommendation.service;
-        
-        const btnApprove = approvalModal.querySelector("#modal-confirm-approve");
-        const btnReject = approvalModal.querySelector("#modal-confirm-reject");
-        
-        btnApprove.style.display = "none";
-        btnReject.style.display = "none";
-        
-        if (action === 'approve') {
-            msgEl.innerHTML = `Approve this recommendation? <br><br>
-                This approval does NOT apply the change automatically.
-                It only authorizes this exact proposal for a future controlled test-environment application.`;
-            btnApprove.style.display = "inline-flex";
-            btnApprove.onclick = () => submitApprovalDecision('approve');
+        approvalModal.querySelector("#modal-context-type").textContent = formatCodeLabel(currentRecommendation.type);
+        approvalModal.querySelector("#modal-context-service").textContent = currentRecommendation.service;
+        const message = approvalModal.querySelector("#modal-message");
+        const approve = approvalModal.querySelector("#modal-confirm-approve");
+        const reject = approvalModal.querySelector("#modal-confirm-reject");
+        approve.style.display = "none";
+        reject.style.display = "none";
+        if (action === "approve") {
+            message.textContent =
+                "Approve this recommendation? This approval does NOT apply the change automatically. " +
+                "It only authorizes this exact proposal for a future controlled test-environment application.";
+            approve.style.display = "inline-flex";
+            approve.onclick = () => submitApprovalDecision("approve");
         } else {
-            msgEl.innerHTML = `Reject this recommendation proposal?`;
-            btnReject.style.display = "inline-flex";
-            btnReject.onclick = () => submitApprovalDecision('reject');
+            message.textContent = "Reject this recommendation proposal?";
+            reject.style.display = "inline-flex";
+            reject.onclick = () => submitApprovalDecision("reject");
         }
-        
         approvalModal.querySelector("#approval-note").value = "";
         approvalModal.classList.add("is-visible");
         approvalModal.setAttribute("aria-hidden", "false");
-    }
-    
-    async function submitApprovalDecision(action) {
-        const note = approvalModal.querySelector("#approval-note").value;
-        const endpoint = `${ENDPOINTS.approvalBase}/${currentRecommendationId}/${action}`;
-        
-        try {
-            const response = await fetch(endpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    note: note,
-                    expectedProposalVersion: currentProposalVersion,
-                }),
-            });
-            if (!response.ok) {
-                const err = await response.json();
-                alert(`Error: ${err.detail || 'Decision failed'}`);
-                return;
-            }
-            const data = await response.json();
-            renderApprovalState(data);
-            hideApprovalModal();
-        } catch (error) {
-            console.error(error);
-            alert("Failed to submit decision");
-        }
     }
 
     function hideApprovalModal() {
@@ -378,128 +209,91 @@
         approvalModal.setAttribute("aria-hidden", "true");
     }
 
+    async function submitApprovalDecision(action) {
+        const note = approvalModal.querySelector("#approval-note").value;
+        const result = await callApproval("POST", `/${action}`, {
+            note,
+            expectedProposalVersion: PROPOSAL_VERSION,
+        });
+        hideApprovalModal();
+        if (!result.ok) {
+            return renderApprovalState(null, null, errorText(result, "The decision could not be recorded."));
+        }
+        renderApprovalState(result.payload, result.provenance);
+    }
+
     if (approvalModal) {
-        const cancelBtn = approvalModal.querySelector("#modal-cancel");
-        if (cancelBtn) cancelBtn.addEventListener("click", hideApprovalModal);
+        const cancel = approvalModal.querySelector("#modal-cancel");
+        if (cancel) cancel.addEventListener("click", hideApprovalModal);
+    }
+
+    function initYamlToggle() {
+        const panel = region.querySelector("#rec-raw-yaml");
+        const toggle = panel && panel.querySelector('[data-role="json-toggle"]');
+        if (!toggle) return;
+        toggle.addEventListener("click", () => {
+            const isOpen = panel.classList.toggle("is-open");
+            toggle.setAttribute("aria-expanded", String(isOpen));
+            const label = toggle.querySelector('[data-role="json-toggle-label"]');
+            if (label) label.textContent = isOpen ? "Hide Generated YAML" : "View Generated YAML";
+        });
+    }
+
+    function showMetrics(summary) {
+        const percent = (value) => (value === null || value === undefined ? "—" : `${Number(value).toFixed(0)}%`);
+        setMetric(region, "rec-baseline-blast-radius", percent(summary.baseline));
+        setMetric(region, "rec-best-predicted-blast-radius", percent(summary.bestPredicted));
+        setMetric(
+            region,
+            "rec-risk-reduction",
+            summary.selectedRiskReduction === null ? "—" : `${summary.selectedRiskReduction} pp`
+        );
+        setMetric(region, "rec-feasible-count", String(summary.feasibleCount));
     }
 
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
+        region.replaceChildren();
+        applyBadge(sourceBadge, { variant: "muted", text: "Loading…" });
 
         try {
-            // approvalBase is a URL prefix for the approval calls below, not an endpoint to fetch:
-            // fetching it requested GET /api/recommendations (404) and failed the whole page.
-            const { approvalBase, ...dataEndpoints } = ENDPOINTS;
-            const data = await fetchAll(dataEndpoints);
-            const { recommendation, validation, deployment, failureImpact } = data;
-
-            region.innerHTML = "";
+            const report = await fetchJson(`/api/recommendations/live${inputQuery()}`);
+            applyBadge(sourceBadge, { variant: "success", text: "Live evidence" });
             region.appendChild(template.content.cloneNode(true));
 
-            const feasibleCandidates = recommendation.recommendations.filter(
-                (candidate) => candidate.feasible
-            );
-            const bestPredicted = recommendation.recommendations.reduce(
-                (best, candidate) =>
-                    !best || candidate.predictedBlastRadius < best.predictedBlastRadius
-                        ? candidate
-                        : best,
-                null
-            );
-            const selectedCandidate =
-                recommendation.recommendations.find(
-                    (candidate) => candidate.id === recommendation.selectedRecommendationId
-                ) || recommendation.recommendations[0];
+            // Evidence next to the report. Only existing producers are used; anything without one is null,
+            // and the matching panel renders an explicit missing-evidence state.
+            const context = {
+                baselineBlastRadius: null,   // producer: a failure-impact result for the same topology (not wired here)
+                validation: null,            // producer: none yet (post-deployment validation)
+                yaml: null,                  // producer: the proposal stored with an approval request
+                currentDeployment: null,     // producer: the topology the candidates were evaluated on (not exposed)
+                simulatedDeployment: null,   // producer: the engine's virtual result (not exposed over HTTP)
+            };
 
-            currentRecommendationId = selectedCandidate.id;
-            currentRecommendation = selectedCandidate;
+            currentRecommendation = view.selectedCandidate(report);
+            if (currentRecommendation) {
+                const approval = await loadApprovalState();
+                context.yaml = (approval && approval.yamlSnapshot) || null;
+            }
 
-            setMetric(
-                region,
-                "rec-baseline-blast-radius",
-                formatPercentage(failureImpact.blastRadius)
-            );
-            setMetric(
-                region,
-                "rec-best-predicted-blast-radius",
-                bestPredicted ? formatPercentage(bestPredicted.predictedBlastRadius) : "—"
-            );
-            setMetric(
-                region,
-                "rec-risk-reduction",
-                selectedCandidate ? `${selectedCandidate.riskReduction} pp` : "—"
-            );
-            setMetric(region, "rec-feasible-count", String(feasibleCandidates.length));
-
-            renderCandidateCards(
-                region.querySelector('[data-role="rec-candidate-list"]'),
-                recommendation,
-                failureImpact
-            );
-            renderCandidateTable(
-                region.querySelector('[data-role="rec-candidate-table-body"]'),
-                recommendation
-            );
-            renderPlacement(
+            showMetrics(view.summarise(report, context));
+            view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context);
+            view.renderPlacement(
                 region.querySelector('[data-role="rec-placement-current"]'),
-                region.querySelector('[data-role="rec-placement-simulated"]'),
-                deployment,
-                selectedCandidate
+                region.querySelector('[data-role="rec-placement-predicted"]'),
+                currentRecommendation,
+                context
             );
-
-            setMetric(
-                region,
-                "rec-predicted-blast-radius",
-                formatPercentage(validation.predictedBlastRadius)
-            );
-            setMetric(
-                region,
-                "rec-observed-blast-radius",
-                formatPercentage(validation.observedBlastRadius)
-            );
-
-            const predictedBar = region.querySelector('[data-role="rec-predicted-bar"]');
-            if (predictedBar) {
-                predictedBar.style.width = formatPercentage(validation.predictedBlastRadius);
-            }
-            const observedBar = region.querySelector('[data-role="rec-observed-bar"]');
-            if (observedBar) {
-                observedBar.style.width = formatPercentage(validation.observedBlastRadius);
-            }
-
-            setMetric(
-                region,
-                "rec-validation-explanation",
-                `The observed result differs from the prediction by ${validation.predictionError} percentage points.`
-            );
-
-            const statusBadge = region.querySelector('[data-role="rec-validation-status"]');
-            if (statusBadge) {
-                statusBadge.className = `status-badge status-badge--${
-                    validation.validated ? "success" : "danger"
-                }`;
-                statusBadge.textContent = `Validation ${
-                    validation.validated ? "Passed" : "Failed"
-                }`;
-            }
-
-            initJsonPanel(
-                region.querySelector("#rec-raw-recommendation"),
-                recommendation
-            );
-            initJsonPanel(region.querySelector("#rec-raw-validation"), validation);
-            initYamlPanelToggle(region);
-            
-            await loadApprovalState(currentRecommendationId);
-
+            view.renderRankingTable(region.querySelector('[data-role="rec-candidate-table-body"]'), report);
+            view.renderValidation(region.querySelector('[data-role="rec-validation"]'), context.validation);
+            view.renderYaml(region.querySelector('[data-role="rec-yaml"]'), context.yaml);
+            initYamlToggle();
+            initJsonPanel(region.querySelector("#rec-raw-recommendation"), report);
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
-            setError(region, {
-                endpoint: ENDPOINTS.recommendation,
-                message: error.message,
-                onRetry: loadPage,
-            });
-            console.error("Failed to load recommendation sample data:", error);
+            applyBadge(sourceBadge, { variant: "muted", text: "No live recommendation" });
+            renderStateCard(region, describeError(error), { onRetry: loadPage });
         } finally {
             if (reloadButton) reloadButton.disabled = false;
         }
@@ -508,6 +302,9 @@
     if (reloadButton) {
         reloadButton.addEventListener("click", loadPage);
     }
+    [workflowIdInput, failedNodeInput, namespaceInput].forEach((input) => {
+        if (input) input.addEventListener("change", loadPage);
+    });
 
     document.addEventListener("DOMContentLoaded", loadPage);
 })();

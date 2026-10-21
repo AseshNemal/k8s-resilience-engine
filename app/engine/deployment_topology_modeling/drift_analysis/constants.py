@@ -6,11 +6,21 @@ class DriftType(str, Enum):
     SCALE_DRIFT = "SCALE_DRIFT"
     AFFINITY_DRIFT = "AFFINITY_DRIFT"
     TOPOLOGY_SPREAD_DRIFT = "TOPOLOGY_SPREAD_DRIFT"
+    # Informational only: missing resource limits are not a placement rule, so this type never
+    # affects constraint compliance or drift_detected.
     RESOURCE_CONTENTION_DRIFT = "RESOURCE_CONTENTION_DRIFT"
 
 
+# Violation types that represent declared placement rules (Study Guide section 12,
+# "constraint compliance rate": topology or affinity rules).
+PLACEMENT_RULE_DRIFT_TYPES = frozenset({DriftType.AFFINITY_DRIFT, DriftType.TOPOLOGY_SPREAD_DRIFT})
+
+# Violation types that compare declared intent with runtime state.
+INTENT_DRIFT_TYPES = PLACEMENT_RULE_DRIFT_TYPES | {DriftType.SCALE_DRIFT}
+
+
 class DriftSeverity(str, Enum):
-    """Mathematical severity tier for resilience vulnerabilities."""
+    """Severity tier of an individual violation (hard rule vs soft rule)."""
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -25,19 +35,13 @@ class FailureDomainType(str, Enum):
 
 
 class ExposureLevel(str, Enum):
-    """Classification of service vulnerability to a single-node failure."""
-    FULL_EXPOSURE = "FULL_EXPOSURE"                  # 0 surviving ready replicas if failed node lost
-    SINGLE_REPLICA_EXPOSURE = "SINGLE_REPLICA_EXPOSURE"  # Only 1 replica exists by design, hosted on node
-    PARTIAL_EXPOSURE = "PARTIAL_EXPOSURE"            # >0 survive, but lost >= 50% capacity
-    RESILIENT = "RESILIENT"                          # Replicas safely spread across failure domains
+    """Descriptive label derived from placement_metrics.ExposureStatus and the ready count."""
+    FULL_EXPOSURE = "FULL_EXPOSURE"                      # >1 ready replica, all on one node
+    SINGLE_REPLICA_EXPOSURE = "SINGLE_REPLICA_EXPOSURE"  # exactly 1 ready replica
+    RESILIENT = "RESILIENT"                              # ready replicas on >1 node
+    UNAVAILABLE = "UNAVAILABLE"                          # 0 ready replicas before any failure
 
 
-# Default Scoring Weights for 0.0 - 1.0 Severity Calculation
-SEVERITY_WEIGHT_FULL_EXPOSURE = 0.50
-SEVERITY_WEIGHT_CONCENTRATION = 0.25
-SEVERITY_WEIGHT_SCALE_MISMATCH = 0.15
-SEVERITY_WEIGHT_RESOURCE_UNBOUNDED = 0.10
-
-# Academic Target Baselines
-TARGET_MAPPING_ACCURACY = 0.95
+# Self-chosen targets for the validation panel; not defined by the TAF, proposal or Study Guide.
+TARGET_MAPPING_ACCURACY = 0.98
 TARGET_CONCENTRATION_ACCURACY = 0.95

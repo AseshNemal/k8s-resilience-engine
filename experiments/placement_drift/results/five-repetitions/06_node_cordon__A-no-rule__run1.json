@@ -1,0 +1,213 @@
+{
+  "scenario_id": "06_node_cordon",
+  "config": "A-no-rule",
+  "repetition": 1,
+  "started_at": "2026-10-20T07:00:37.604714+00:00",
+  "action": {
+    "action": "kubectl cordon resilience-research-worker; kubectl rollout restart deployment/paymentservice",
+    "node": "resilience-research-worker"
+  },
+  "stable_after_disruption": true,
+  "wait_seconds": 14.14,
+  "d_rate": 0.0,
+  "exposure_rate_t0": 0.0,
+  "exposure_rate_t1": 0.0,
+  "delta_e_rate": 0.0,
+  "compliance_rate_t1": null,
+  "changed_services": [],
+  "transitions": {},
+  "target_status_t0": "NOT_EXPOSED",
+  "target_status_t1": "NOT_EXPOSED",
+  "moved_pods": 0,
+  "observation_ms_t0": 859.81,
+  "observation_ms_t1": 365.28,
+  "t0": {
+    "cartservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "cartservice-7dcf569f97-27cbh",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "cartservice-7dcf569f97-cqv9k",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "cartservice-7dcf569f97-t7cs6",
+          "resilience-research-worker2",
+          true
+        ]
+      ]
+    },
+    "catalogservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "catalogservice-bbf99d7f7-lxlbb",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "catalogservice-bbf99d7f7-prsc7",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "catalogservice-bbf99d7f7-vhvkl",
+          "resilience-research-worker",
+          true
+        ]
+      ]
+    },
+    "checkoutservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "checkoutservice-c76cdcd5c-gnb4q",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "checkoutservice-c76cdcd5c-pr8kk",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "checkoutservice-c76cdcd5c-rgvdq",
+          "resilience-research-worker2",
+          true
+        ]
+      ]
+    },
+    "paymentservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "paymentservice-97f68b9-2hn7n",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "paymentservice-97f68b9-8vtrl",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "paymentservice-97f68b9-9vln8",
+          "resilience-research-worker3",
+          true
+        ]
+      ]
+    }
+  },
+  "t1": {
+    "cartservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "cartservice-7dcf569f97-27cbh",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "cartservice-7dcf569f97-cqv9k",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "cartservice-7dcf569f97-t7cs6",
+          "resilience-research-worker2",
+          true
+        ]
+      ]
+    },
+    "catalogservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "catalogservice-bbf99d7f7-lxlbb",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "catalogservice-bbf99d7f7-prsc7",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "catalogservice-bbf99d7f7-vhvkl",
+          "resilience-research-worker",
+          true
+        ]
+      ]
+    },
+    "checkoutservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "checkoutservice-c76cdcd5c-gnb4q",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "checkoutservice-c76cdcd5c-pr8kk",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "checkoutservice-c76cdcd5c-rgvdq",
+          "resilience-research-worker2",
+          true
+        ]
+      ]
+    },
+    "paymentservice": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.6667,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "paymentservice-7d7c8d94fd-fbhp4",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "paymentservice-7d7c8d94fd-l7htz",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "paymentservice-7d7c8d94fd-mgmmk",
+          "resilience-research-worker3",
+          true
+        ]
+      ]
+    }
+  },
+  "error": null
+}

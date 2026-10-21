@@ -20,6 +20,7 @@
     let activeCampaign = null;
     let offlineVersion = 0;
     let fieldCounter = 0;
+    let discoveryPoller = null;
     function guidedText(tag, className, value) {
         const element = document.createElement(tag);
         if (className) element.className = className;
@@ -90,7 +91,7 @@
         if (!response.ok) {
             let detail = data.detail;
             if (Array.isArray(detail)) detail = detail.map(item => `${(item.loc || []).filter(x => x !== 'body').join(' → ')}: ${item.msg}`).join('; ');
-            else if (detail && typeof detail === 'object') detail = JSON.stringify(detail);
+            else if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
             const error = new Error(detail || `Request failed (${response.status}). Try again.`);
             error.status = response.status;
             throw error;
@@ -171,6 +172,7 @@
         return {environmentId: input('environmentId'), evidenceTier: input('evidenceTier'), traceSource: {type: input('traceSourceType'), endpoint: input('traceEndpoint'), authentication}, entryService: input('entryService'), lookback: input('lookback')};
     }
     function resetGuidedDiscovery() {
+        discoveryPoller?.stop();
         guidedConnectionVersion += 1;
         guidedWorkflows = [];
         guidedService.replaceChildren(new Option('Connect to load services', ''));
@@ -211,7 +213,47 @@
         } catch (error) { if (version === guidedConnectionVersion) setGuidedStatus(`Could not connect: ${error.message}`, true); }
         finally { if (version === guidedConnectionVersion) submit.disabled = false; }
     }
+    function findWorkflowsAutomatically() {
+        if (!guidedForm.reportValidity()) return;
+        if (discoveryPoller?.isRunning()) { discoveryPoller.refresh(); return; }
+        resetGuidedDiscovery();
+        const version = guidedConnectionVersion;
+        const {traceSource, lookback} = guidedConnectionPayload();
+        const payload = {traceSource, lookback};
+        const render = report => {
+            if (version !== guidedConnectionVersion) return;
+            const previous = selectedGuidedWorkflow(guidedWorkflows, guidedOperation.value);
+            guidedWorkflows = report.workflows;
+            guidedOperation.replaceChildren(new Option(report.workflows.length ? 'Choose an operation' : report.message, ''));
+            report.workflows.forEach((item, index) => {
+                guidedOperation.append(new Option(`${item.operationName} · ${item.rootService} · ${item.traceCount} traces`, String(index)));
+                if (previous?.rootService === item.rootService && previous?.operationName === item.operationName) guidedOperation.value = String(index);
+            });
+            guidedDiscovery.hidden = false;
+            guidedInspectButton.disabled = !selectedGuidedWorkflow(guidedWorkflows, guidedOperation.value);
+            const coverage = report.truncated ? ' The scan reached its limit; other workflows may exist.' : '';
+            setGuidedStatus(`${report.message}${coverage}`);
+            const help = $('guided-operation-help');
+            if (help) help.textContent = 'Entry services and recorded operations were found by the backend. Choose the action you want to test; observed calls are not yet validated dependencies.';
+        };
+        discoveryPoller = window.WorkflowDiscoveryPoller.create({
+            // The discovery API handles availability for every configured trace backend.
+            checkHealth: async () => true,
+            discover: () => postCampaignAction('/api/workflows/discovery', payload),
+            onChecking: () => setGuidedStatus('Finding recorded workflows across services…'),
+            onWaiting: () => setGuidedStatus('Waiting for the trace service…'),
+            onReport: render,
+            onError: error => {
+                if (version !== guidedConnectionVersion) return;
+                setGuidedStatus(error.message, true);
+                if (error.status === 422) discoveryPoller.stop();
+            },
+            isHidden: () => document.hidden,
+        });
+        discoveryPoller.start();
+    }
     async function discoverGuidedWorkflows() {
+        discoveryPoller?.stop();
         if (!guidedService.value) return;
         const version = ++guidedConnectionVersion;
         guidedResult.hidden = true;
@@ -229,6 +271,7 @@
         } catch (error) { if (version === guidedConnectionVersion) setGuidedStatus(error.message, true); }
     }
     async function inspectGuidedWorkflow() {
+        discoveryPoller?.stop();
         const selected = selectedGuidedWorkflow(guidedWorkflows, guidedOperation.value);
         if (!selected) return;
         const version = ++guidedConnectionVersion;
@@ -325,6 +368,7 @@
         return {root, read: () => ({pathParameters: path.read(), queryParameters: query.read(), headers: headers.read(), bodyFormat: format.input.value, bodyFields: format.input.value === 'none' ? [] : body.read().map(row => ({...row, type: format.input.value === 'form' ? 'text' : row.type}))})};
     }
     async function renderGuidedSession(session) {
+        discoveryPoller?.stop();
         const version = ++renderVersion;
         activeCampaign = null;
         setSelection(null, session.sessionId);
@@ -519,6 +563,7 @@
     const stageLabels = {baseline_required: 'Normal runs needed', interventions_required: 'Service tests needed', ready_for_assessment: 'Ready to review', reviewed: 'Awaiting approval', approved: 'Approved'};
     function stageLabel(stage) { return stageLabels[stage] || 'Checking status'; }
     async function renderCampaign(campaign) {
+        discoveryPoller?.stop();
         guidedConnectionVersion += 1;
         offlineVersion += 1;
         const version = ++renderVersion;
@@ -1088,6 +1133,9 @@
 
     if (!guidedForm) return;
     guidedForm.addEventListener('submit', connectGuidedSource);
+    $('guided-auto-discover').addEventListener('click', findWorkflowsAutomatically);
+    document.addEventListener('visibilitychange', () => discoveryPoller?.pageVisibilityChanged());
+    window.addEventListener('focus', () => discoveryPoller?.pageVisibilityChanged());
     guidedForm.addEventListener('input', event => {
         if (event.target.name === 'entryService') return;
         resetGuidedDiscovery();
@@ -1096,7 +1144,7 @@
     });
     guidedService.addEventListener('change', () => { if (guidedService.value) discoverGuidedWorkflows(); else { guidedDiscovery.hidden = true; guidedResult.hidden = true; } });
     guidedOperation.addEventListener('change', () => {
-        guidedConnectionVersion += 1;
+        if (!discoveryPoller?.isRunning()) guidedConnectionVersion += 1;
         const selected = selectedGuidedWorkflow(guidedWorkflows, guidedOperation.value);
         guidedInspectButton.disabled = !selected;
         const help = $('guided-operation-help');

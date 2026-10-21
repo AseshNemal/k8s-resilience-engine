@@ -3,19 +3,31 @@ Deployment Topology Modeling API Endpoints (Member 2).
 Categorized into 6 distinct research topics for Swagger documentation:
 - Topic 1: Topology & Live Cluster State (Nodes, Zones, Services, Placements)
 - Topic 2: Declared Manifest Intent (YAML parsing, Replicas, Constraints, Compliance)
-- Topic 3: Resilience Drift & Failure Domain Exposure (HHI Concentration, SPOFs, 5 Detectors, Baseline B2)
-- Topic 4: Chaos Engineering (8 Section 10 Disruption Scenarios, Markov Pod Migrations, Safety Guards)
-- Topic 5: Cluster Snapshots & Cryptographic Provenance (SHA-256 Immutable State Freezing)
-- Topic 6: Academic Benchmarks & Publications (>=98% Accuracy Certificate, LaTeX Tables, Markdown Reports)
+- Topic 3: Resilience Drift & Failure Domain Exposure (replica concentration, exposed services, drift detectors, Baseline B2)
+- Topic 4: Dry-run Disruption Scenarios (8 scripted Section 10 scenarios, pod move counts, safety guards)
+- Topic 5: Cluster Snapshots (content-hashed placement snapshots)
+- Topic 6: Validation & Results (accuracy vs kubectl ground truth, live experiment results, dry-run reports)
 """
-from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Response
+from typing import Any, Dict, List, Literal, Optional
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from pydantic import ValidationError
 
+# Our additions: the discovery status envelope and the all-namespaces overview used by the extension.
+from app.engine.deployment_topology_modeling.discovery import DiscoveryResult
+from app.engine.deployment_topology_modeling.discovery_all import AllNamespacesDiscovery, discover_all
+from app.shared.evidence_errors import EvidenceError, unavailable
 from app.engine.deployment_topology_modeling.service import (
-    get_sample_deployment,
+    ClusterUnavailableError,
+    chaos_topology,
+    discover_live,
+    get_ground_truth_evaluation,
+    get_live_experiment_results,
     get_live_deployment_graph,
     get_manifest_intent,
     get_manifest_service_detail,
+    get_manifest_source,
     analyze_resilience_drift,
     diff_cluster_snapshots,
     run_chaos_benchmark_pipeline,
@@ -44,33 +56,49 @@ from experiments.placement_drift.drift_transition_matrix import DriftTransitionM
 from experiments.placement_drift.snapshot_repository import SnapshotRepository
 
 
-router = APIRouter(prefix="/api/deployments")
+class ClusterAwareRoute(APIRoute):
+    """Answers 503 when no Kubernetes cluster is reachable, instead of returning substitute data."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def route_handler(request: Request):
+            try:
+                return await handler(request)
+            except ClusterUnavailableError as exc:
+                if isinstance(exc, EvidenceError):
+                    # A coded error (CLUSTER_NOT_CONNECTED, ...): the app-level handler answers it with
+                    # its stable code, which the extension's pages switch on.
+                    raise
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": str(exc), "data_source": "live"},
+                )
+
+        return route_handler
+
+
+router = APIRouter(prefix="/api/deployments", route_class=ClusterAwareRoute)
 
 TAG_TOPOLOGY = "1. Topology & Live Cluster State"
 TAG_MANIFEST = "2. Declared Manifest Intent"
 TAG_DRIFT = "3. Resilience Drift & Failure Domain Exposure"
-TAG_CHAOS = "4. Chaos Engineering (Disruption Scenarios)"
-TAG_SNAPSHOTS = "5. Cluster Snapshots & Cryptographic Provenance"
-TAG_BENCHMARKS = "6. Academic Benchmarks & Publications"
+TAG_CHAOS = "4. Dry-run Disruption Scenarios"
+TAG_SNAPSHOTS = "5. Cluster Snapshots"
+TAG_BENCHMARKS = "6. Validation & Results"
 
 DESC_K8S_NAMESPACE = "Target Kubernetes namespace"
 DESC_TARGET_NAMESPACE = "Target namespace"
+DESC_CHAOS_SOURCE = (
+    "Where the scenario placements come from: 'live' (default) is the connected cluster's real nodes and "
+    "pods, disrupted by a deterministic rule on a copy, so the cluster is never changed; 'scripted' is the "
+    "made-up placements written in the scenario code, labelled as such in every result"
+)
 
 
 # =====================================================================
 # Topic 1: Topology & Live Cluster State
 # =====================================================================
-
-@router.get(
-    "/sample",
-    response_model_by_alias=True,
-    tags=[TAG_TOPOLOGY],
-    summary="[Phase 1] Retrieve baseline static sample deployment graph",
-)
-def read_sample_deployment() -> DeploymentGraph:
-    """Returns static golden reference topology model for offline testing."""
-    return get_sample_deployment()
-
 
 @router.get(
     "/live",
@@ -83,6 +111,44 @@ def read_live_deployment(
 ) -> DeploymentGraph:
     """Queries live Kubernetes API (Docker Desktop / KinD) and compiles topology graph."""
     return get_live_deployment_graph(namespace=namespace)
+
+
+# ---------------------------------------------------------------------------------------------
+# Live discovery for the Docker Desktop extension.
+#
+# /live above returns the bare DeploymentGraph. These two routes return it wrapped in a status
+# envelope (ok / empty / partial) so a page can say how much of the cluster was actually resolved
+# and what could not be, instead of showing an incomplete graph as if it were complete. They read the
+# connected cluster only; when it cannot be read they fail with an explicit EvidenceError code.
+# ---------------------------------------------------------------------------------------------
+
+@router.get(
+    "/discovery",
+    response_model_by_alias=True,
+    tags=[TAG_TOPOLOGY],
+    summary="[Phase 1] Live topology with discovery status, warnings and unresolved relationships",
+)
+def read_discovery(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> DiscoveryResult:
+    """The DeploymentGraph wrapped with: status (ok/empty/partial), capture time, connection fingerprint
+    (not proof of cluster identity), warnings, unresolved relationships and per-service evidence."""
+    return discover_live(namespace=namespace)
+
+
+@router.get(
+    "/discovery/all",
+    response_model_by_alias=True,
+    tags=[TAG_TOPOLOGY],
+    summary="[Phase 1] Live discovery of every namespace with workloads, for the Overview",
+)
+def read_discovery_all(
+    include_system: bool = Query(False, description="Also include system namespaces such as kube-system"),
+) -> AllNamespacesDiscovery:
+    """One discovery result per namespace that holds workloads, plus cluster-wide totals. System namespaces
+    are left out unless asked for and are named in ``excludedNamespaces``. Fails explicitly when the cluster
+    cannot be read; there is never a partial or substituted overview."""
+    return discover_all(include_system=include_system)
 
 
 @router.get(
@@ -138,7 +204,7 @@ def list_topology_zones(
 @router.get(
     "/topology/services",
     tags=[TAG_TOPOLOGY],
-    summary="[Phase 1] List active microservices with replica counts & concentration index",
+    summary="[Phase 1] List services with ready replicas and replica concentration (largest share on one node)",
 )
 def list_topology_services(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
@@ -151,8 +217,10 @@ def list_topology_services(
             "declared_replicas": s.declared_replicas,
             "ready_replicas": s.ready_replicas,
             "replica_concentration": s.replica_concentration,
+            "concentrated": s.concentrated,
+            "exposed_failure_domains": s.exposed_failure_domains,
             "total_pods": len(s.pods),
-            "hosting_nodes": list({p.node for p in s.pods}),
+            "hosting_nodes": s.hosting_nodes,
         }
         for s in graph.services
     ]
@@ -199,9 +267,23 @@ def get_service_topology_detail(
     tags=[TAG_MANIFEST],
     summary="[Phase 2] Parse declared YAML intent from deployment manifests",
 )
-def read_manifest_intent() -> List[Dict[str, Any]]:
-    """Parses deploy/kubernetes/ manifests and extracts declared replicas, limits, and topology spread."""
-    return get_manifest_intent()
+def read_manifest_intent(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> List[Dict[str, Any]]:
+    """Declared replicas, limits and topology spread: from named manifests, else the connected cluster's own
+    Deployment specs (see service.py for the order)."""
+    return get_manifest_intent(namespace=namespace)
+
+
+@router.get(
+    "/manifests/source",
+    tags=[TAG_MANIFEST],
+    summary="[Phase 2] Which manifest file the declared intent is read from",
+)
+def read_manifest_source() -> Dict[str, Any]:
+    """A named manifest (RESILIENCE_MANIFEST_PATH), else the repository's manifests, else the connected cluster's
+    Deployment specs. Drift analysis reads declared intent in the same order."""
+    return get_manifest_source()
 
 
 @router.get(
@@ -209,9 +291,11 @@ def read_manifest_intent() -> List[Dict[str, Any]]:
     tags=[TAG_MANIFEST],
     summary="[Phase 2] List declared microservice deployment constraints",
 )
-def list_manifest_service_constraints() -> List[Dict[str, Any]]:
+def list_manifest_service_constraints(
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
+) -> List[Dict[str, Any]]:
     """Extracts declared constraints (limits, nodeAffinity, topologySpreadConstraints) per service."""
-    intent_data = get_manifest_intent()
+    intent_data = get_manifest_intent(namespace=namespace)
     services_raw = intent_data.get("declared_services", intent_data.get("services", [])) if isinstance(intent_data, dict) else intent_data
     if isinstance(services_raw, dict):
         return [
@@ -229,9 +313,10 @@ def list_manifest_service_constraints() -> List[Dict[str, Any]]:
 )
 def get_manifest_service_detail_endpoint(
     service_name: str,
+    namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> Dict[str, Any]:
     """Retrieves declared replica count, resource limits, and spread constraints for a service."""
-    detail = get_manifest_service_detail(service_name=service_name)
+    detail = get_manifest_service_detail(service_name=service_name, namespace=namespace)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Service '{service_name}' not found in manifests.")
     return detail
@@ -247,10 +332,20 @@ def get_manifest_compliance_rate(
 ) -> Dict[str, Any]:
     """Calculates percentage of live workloads strictly meeting their declared intent constraints."""
     report, _ = analyze_resilience_drift(namespace=namespace)
+    if report.declared_state == "unavailable":
+        # Compliance is a comparison with declared intent. With nothing declared there is no rate to report.
+        raise unavailable(
+            "DECLARED_STATE_UNAVAILABLE",
+            "No declared-state source (deployment manifests) is available, so compliance cannot be computed.",
+            "deployment_topology",
+        )
     return {
         "constraint_compliance_rate": report.constraint_compliance_rate,
+        "services_with_placement_rules": report.services_with_placement_rules,
         "total_services": report.total_services,
+        "evaluated_services": report.evaluated_services,
         "exposed_service_count": report.exposed_service_count,
+        "exposure_rate": report.exposure_rate,
         "mean_concentration": report.mean_concentration,
     }
 
@@ -275,12 +370,12 @@ def get_resilience_drift(
 @router.get(
     "/drift/violations",
     tags=[TAG_DRIFT],
-    summary="[Phase 3] List all active resilience drift violations across all 5 detectors",
+    summary="[Phase 3] List all active resilience drift violations across the 4 detectors",
 )
 def list_drift_violations(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
-    """Extracts all active violations from scale, resource, affinity, contention, and spread detectors."""
+    """All violations from the scale, affinity, topology-spread and missing-limits (informational) detectors."""
     report, _ = analyze_resilience_drift(namespace=namespace)
     violations: List[Dict[str, Any]] = []
     for svc in report.services:
@@ -294,7 +389,7 @@ def list_drift_violations(
 @router.get(
     "/drift/categories",
     tags=[TAG_DRIFT],
-    summary="[Phase 3] Categorical breakdown of violations across all 5 detectors",
+    summary="[Phase 3] Categorical breakdown of violations across the 4 detectors",
 )
 def get_drift_categories(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
@@ -306,7 +401,7 @@ def get_drift_categories(
 @router.get(
     "/drift/spofs",
     tags=[TAG_DRIFT],
-    summary="[Phase 3] Identify Single Points of Failure (SPOF) with 100% replica colocation",
+    summary="[Phase 3] Exposed services: one node failure would leave 0 ready replicas",
 )
 def list_drift_spofs(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
@@ -318,19 +413,19 @@ def list_drift_spofs(
 @router.get(
     "/drift/concentration",
     tags=[TAG_DRIFT],
-    summary="[Phase 3] Rank microservices by Herfindahl-Hirschman Concentration Index (HHI)",
+    summary="[Phase 3] Rank services by replica concentration (largest share of ready replicas on one node)",
 )
 def list_concentration_rankings(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
 ) -> List[Dict[str, Any]]:
-    """Sorts all microservices descending by replica concentration index (0.0=perfect spread, 1.0=colocated)."""
+    """Services sorted by replica concentration, highest first (1.0 = all ready replicas on one node)."""
     return get_concentration_rankings(namespace=namespace)
 
 
 @router.get(
     "/drift/nodes/risk",
     tags=[TAG_DRIFT],
-    summary="[Phase 3] Rank cluster worker nodes by failure blast radius and workload density",
+    summary="[Phase 3] Worker nodes ranked by how many services depend only on them",
 )
 def list_node_risk_rankings(
     namespace: str = Query("default", description=DESC_K8S_NAMESPACE),
@@ -374,28 +469,33 @@ def get_baseline_b2(
     "/diff",
     tags=[TAG_DRIFT],
     summary="[Phase 3] Diff two cluster snapshots to calculate Placement Drift Rate (D_rate)",
+    responses={422: {"description": "Snapshots are not ClusterExposureReport payloads with exposure_status per service"}},
 )
 def diff_snapshots(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Calculates placement drift transition dynamics and Drate between baseline and target states."""
-    baseline = payload.get("baseline", {})
-    target = payload.get("target", {})
-    diff_report = diff_cluster_snapshots(baseline, target)
+    try:
+        diff_report = diff_cluster_snapshots(payload.get("baseline", {}), payload.get("target", {}))
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Snapshots must be ClusterExposureReport payloads with exposure_status per service: {exc}",
+        ) from exc
     return diff_report.model_dump()
 
 
 # =====================================================================
-# Topic 4: Chaos Engineering (Disruption Scenarios)
+# Topic 4: Dry-run Disruption Scenarios
 # =====================================================================
 
 @router.get(
     "/chaos/scenarios",
     tags=[TAG_CHAOS],
-    summary="[Phase 4] Catalog of all 8 Section 10 controlled disruption scenarios",
+    summary="[Dry-run] List the 8 scripted Section 10 scenarios",
 )
 def list_chaos_scenarios() -> List[Dict[str, Any]]:
-    """Returns metadata for all 8 controlled Kubernetes disruption scenarios from the Study Guide."""
+    """Metadata of the 8 scripted scenarios. Their T0/T1 placements are written in code; no cluster is touched. Live runs: /benchmarks/live-experiments."""
     scenarios = []
     for cls in DisruptionOrchestrator.ALL_SCENARIO_CLASSES:
         dummy = cls()
@@ -412,13 +512,13 @@ def list_chaos_scenarios() -> List[Dict[str, Any]]:
 @router.get(
     "/chaos/scenarios/{scenario_id}",
     tags=[TAG_CHAOS],
-    summary="[Phase 4] Inspect scenario specification, parameters, and rollback design",
+    summary="[Dry-run] Details of one scripted scenario",
     responses={404: {"description": "Scenario not found"}},
 )
 def get_chaos_scenario_detail(
     scenario_id: str,
 ) -> Dict[str, Any]:
-    """Retrieves target parameters and lifecycle specifications for a single chaos scenario."""
+    """Target, namespace and execution mode of one scripted scenario."""
     for cls in DisruptionOrchestrator.ALL_SCENARIO_CLASSES:
         dummy = cls()
         if dummy.scenario_id == scenario_id:
@@ -437,15 +537,17 @@ def get_chaos_scenario_detail(
 @router.post(
     "/chaos/run/{scenario_id}",
     tags=[TAG_CHAOS],
-    summary="[Phase 4] Execute a single designated disruption scenario by ID",
+    summary="[Dry-run] Replay one scripted scenario and compute its metrics (no cluster change)",
     responses={404: {"description": "Scenario not found"}},
 )
 def run_chaos_scenario(
     scenario_id: str,
     namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
-    """Injects a specific disruption fault (e.g. node drain, pod crash) and calculates placement drift."""
-    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace)
+    """Simulates a specific disruption (e.g. node drain, pod crash) and calculates placement drift. A dry run:
+    the cluster is never changed. With source=live it starts from the connected cluster's real topology."""
+    result = run_single_chaos_scenario(scenario_id=scenario_id, namespace=namespace, topology_source=source)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
     return result.model_dump()
@@ -454,7 +556,7 @@ def run_chaos_scenario(
 @router.get(
     "/chaos/matrix/{scenario_id}",
     tags=[TAG_CHAOS],
-    summary="[Phase 4] Get Markov pod migration transition matrix for a scenario",
+    summary="[Dry-run] Pod move count matrix T[i, j] for a scripted scenario",
     responses={
         400: {"description": "Snapshot data missing for scenario"},
         404: {"description": "Scenario not found"},
@@ -462,10 +564,14 @@ def run_chaos_scenario(
 )
 def get_scenario_transition_matrix(
     scenario_id: str,
+    namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
-    """Builds and formats the Markov pod transition grid T[i, j] between T0 and T1 snapshots."""
+    """Counts pods (matched by name) on node i at T0 and node j at T1."""
     repo = SnapshotRepository()
-    orchestrator = DisruptionOrchestrator(repository=repo)
+    orchestrator = DisruptionOrchestrator(
+        namespace=namespace, repository=repo, topology=chaos_topology(source, namespace)
+    )
     result = orchestrator.run_scenario(scenario_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
@@ -486,6 +592,7 @@ def get_scenario_transition_matrix(
         "ascii_table": ascii_table,
         "latex_table": latex_table,
         "migration_records": [r.model_dump() for r in records],
+        "execution_mode": result.execution_mode.value,
         "d_rate": result.d_rate,
         "delta_e_rate": result.delta_e_rate,
     }
@@ -494,7 +601,7 @@ def get_scenario_transition_matrix(
 @router.get(
     "/chaos/safety/status",
     tags=[TAG_CHAOS],
-    summary="[Phase 4] Inspect pre-flight safety guard status and protected namespaces",
+    summary="[Phase 4] Safety guard status and protected namespaces",
 )
 def get_safety_status() -> Dict[str, Any]:
     """Returns protected system namespaces, active execution mode, and multi-node feasibility."""
@@ -504,7 +611,7 @@ def get_safety_status() -> Dict[str, Any]:
 @router.post(
     "/chaos/safety/validate",
     tags=[TAG_CHAOS],
-    summary="[Phase 4] Validate proposed chaos fault against safety guardrails",
+    summary="[Phase 4] Check whether a proposed disruption is allowed by the safety guard",
 )
 def validate_proposed_chaos_action(
     namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
@@ -515,7 +622,7 @@ def validate_proposed_chaos_action(
 
 
 # =====================================================================
-# Topic 5: Cluster Snapshots & Cryptographic Provenance
+# Topic 5: Cluster Snapshots
 # =====================================================================
 
 @router.get(
@@ -531,14 +638,14 @@ def list_snapshots() -> List[str]:
 @router.get(
     "/snapshots/{scenario_id}/{phase_tag}",
     tags=[TAG_SNAPSHOTS],
-    summary="[Phase 4] Retrieve an immutable cluster snapshot with SHA-256 verification",
+    summary="[Phase 4] Get a stored snapshot and check it against its SHA-256 content hash",
     responses={404: {"description": "Snapshot not found in repository"}},
 )
 def get_snapshot_detail(
     scenario_id: str,
     phase_tag: str,
 ) -> Dict[str, Any]:
-    """Retrieves snapshot and cryptographically validates that placement matches the SHA-256 hash."""
+    """Retrieves a snapshot and checks that its placement still matches its SHA-256 content hash."""
     snapshot = get_cluster_snapshot(scenario_id=scenario_id, phase_tag=phase_tag)
     if snapshot is None:
         raise HTTPException(
@@ -551,7 +658,7 @@ def get_snapshot_detail(
 @router.post(
     "/snapshots/freeze",
     tags=[TAG_SNAPSHOTS],
-    summary="[Phase 4] Freeze current live cluster placement into an immutable SHA-256 snapshot",
+    summary="[Phase 4] Store the current live placement as a snapshot (in memory, SHA-256 content hash)",
 )
 def freeze_live_snapshot(
     snapshot_id: str = Query("manual_snapshot", description="Identifier for this snapshot"),
@@ -564,7 +671,7 @@ def freeze_live_snapshot(
 @router.delete(
     "/snapshots",
     tags=[TAG_SNAPSHOTS],
-    summary="[Phase 4] Reset and clear in-memory cluster snapshot cache",
+    summary="[Phase 4] Clear the in-memory snapshots",
 )
 def clear_snapshots_cache() -> Dict[str, Any]:
     """Clears in-memory snapshots cache."""
@@ -572,39 +679,64 @@ def clear_snapshots_cache() -> Dict[str, Any]:
 
 
 # =====================================================================
-# Topic 6: Academic Benchmarks & Publications
+# Topic 6: Validation & Results
 # =====================================================================
 
 @router.get(
     "/chaos/benchmarks",
     tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Run all 8 disruption scenarios and compile benchmark metrics",
+    summary="[Dry-run] Run the 8 scripted scenarios and compile their metrics",
 )
 def get_chaos_benchmarks(
     namespace: str = Query("default", description=f"{DESC_TARGET_NAMESPACE} for chaos simulation"),
+    source: Literal["live", "scripted"] = Query("live", description=DESC_CHAOS_SOURCE),
 ) -> Dict[str, Any]:
-    """Executes all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions."""
-    return run_chaos_benchmark_pipeline(namespace=namespace)
+    """Simulates all 8 Section 10 disruption scenarios and returns D_rate, delta_E_rate, and transitions.
+    source=live starts from the connected cluster's real topology; source=scripted uses made-up placements."""
+    return run_chaos_benchmark_pipeline(namespace=namespace, topology_source=source)
 
 
 @router.get(
     "/benchmarks/accuracy",
     tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Model Accuracy Certificate (>=98% Mapping, >=95% Concentration)",
+    summary="[Validation] Model accuracy against kubectl ground truth (self-chosen targets: 98% mapping, 95% concentration)",
 )
 def get_accuracy_certificate() -> Dict[str, Any]:
-    """Evaluates ground-truth accuracy metrics required by the viva evaluation panel."""
-    cert = get_academic_accuracy_certificate()
-    return cert.model_dump() if hasattr(cert, "model_dump") else dict(cert)
+    """Accuracy measured on the stored KinD snapshot; see /benchmarks/ground-truth for sample sizes."""
+    return get_academic_accuracy_certificate().model_dump()
+
+
+@router.get(
+    "/benchmarks/ground-truth",
+    tags=[TAG_BENCHMARKS],
+    summary="[Validation] Model output vs kubectl ground truth for the stored KinD snapshot",
+)
+def get_ground_truth_report() -> Dict[str, Any]:
+    """Accuracies with their sample sizes and the per-failure exposure checks."""
+    return get_ground_truth_evaluation()
+
+
+@router.get(
+    "/benchmarks/live-experiments",
+    tags=[TAG_BENCHMARKS],
+    summary="[Validation] Stored results of the live placement-drift runs on KinD",
+    responses={404: {"description": "No live experiment results have been stored yet"}},
+)
+def get_live_experiments() -> Dict[str, Any]:
+    """Per scenario and configuration: runs, unsettled runs, D_rate, exposure rates and target status."""
+    results = get_live_experiment_results()
+    if results is None:
+        raise HTTPException(status_code=404, detail="No live experiment results found. Run experiments/placement_drift/run_live_experiments.py first.")
+    return results
 
 
 @router.get(
     "/benchmarks/report/markdown",
     tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export publication-grade Markdown benchmark report",
+    summary="[Dry-run] Markdown report of the scripted scenarios",
 )
 def get_markdown_benchmark_report() -> Response:
-    """Returns formatted Markdown benchmark table with dissertation defense observations."""
+    """Markdown table of the dry-run scenario metrics (not experimental evidence)."""
     orchestrator = DisruptionOrchestrator()
     results = orchestrator.run_all()
     metrics = orchestrator.compute_aggregate_metrics(results)
@@ -615,7 +747,7 @@ def get_markdown_benchmark_report() -> Response:
 @router.get(
     "/benchmarks/report/json",
     tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export full publication-grade JSON benchmark dataset",
+    summary="[Dry-run] JSON dataset of the scripted scenarios",
 )
 def get_json_benchmark_report(
     namespace: str = Query("default", description=DESC_TARGET_NAMESPACE),
@@ -627,13 +759,13 @@ def get_json_benchmark_report(
 @router.get(
     "/benchmarks/latex/{scenario_id}",
     tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export publication-ready LaTeX transition matrix table",
+    summary="[Dry-run] LaTeX table of pod moves for one scripted scenario",
     responses={404: {"description": "Scenario not found or snapshot missing"}},
 )
 def get_latex_transition_table(
     scenario_id: str,
 ) -> Dict[str, Any]:
-    """Returns LaTeX table code snippet for the Markov transition grid T[i, j] of a scenario."""
+    """Returns a LaTeX table of the pod move counts T[i, j] of a scripted scenario."""
     res = get_scenario_latex_table(scenario_id=scenario_id)
     if res is None:
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found or snapshot missing.")
@@ -643,7 +775,7 @@ def get_latex_transition_table(
 @router.get(
     "/benchmarks/ensemble",
     tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Multi-Service Parametric Ensemble Evaluation (Mean, Std Dev, 95% CI)",
+    summary="[Dry-run] Statistics over the scripted scenarios (mean, std dev, 95% CI)",
 )
 def get_parametric_ensemble_dataset() -> Dict[str, Any]:
     """Executes a 12-trial multi-workload parametric sweep and returns statistical ensemble metrics."""
@@ -653,9 +785,9 @@ def get_parametric_ensemble_dataset() -> Dict[str, Any]:
 @router.get(
     "/benchmarks/ensemble/markdown",
     tags=[TAG_BENCHMARKS],
-    summary="[Academic Defense] Export publication-grade Markdown report for Multi-Service Ensemble",
+    summary="[Dry-run] Markdown report of the scripted-scenario statistics",
 )
 def get_parametric_ensemble_markdown() -> Response:
-    """Returns formatted Markdown report with statistical summary and sensitivity tables for publication."""
+    """Markdown report with the statistical summary and breakdown tables of the dry-run scenarios."""
     md_content = get_parametric_ensemble_markdown_report()
     return Response(content=md_content, media_type="text/markdown")

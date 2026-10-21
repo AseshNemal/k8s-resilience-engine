@@ -4,6 +4,7 @@ from app.engine.deployment_topology_modeling.drift_analysis.ground_truth_validat
 )
 from app.engine.deployment_topology_modeling.drift_analysis.drift_models import ServiceExposureResult
 from app.engine.deployment_topology_modeling.drift_analysis.constants import ExposureLevel
+from app.engine.deployment_topology_modeling.placement_metrics import ExposureStatus
 
 
 def test_ground_truth_validator_perfect_accuracy():
@@ -22,6 +23,8 @@ def test_ground_truth_validator_perfect_accuracy():
         total_replicas=2,
         ready_replicas=2,
         replica_concentration=0.5,
+        exposure_status=ExposureStatus.NOT_EXPOSED,
+        concentrated=False,
         exposure_level=ExposureLevel.RESILIENT,
         exposed_failure_domains=[],
     )
@@ -30,6 +33,8 @@ def test_ground_truth_validator_perfect_accuracy():
         total_replicas=1,
         ready_replicas=1,
         replica_concentration=1.0,
+        exposure_status=ExposureStatus.EXPOSED,
+        concentrated=True,
         exposure_level=ExposureLevel.SINGLE_REPLICA_EXPOSURE,
         exposed_failure_domains=["node-1"],
     )
@@ -49,6 +54,7 @@ def test_ground_truth_validator_perfect_accuracy():
     assert cert.pod_node_mapping_accuracy == pytest.approx(1.0)
     assert cert.owner_resolution_accuracy == pytest.approx(1.0)
     assert cert.concentration_detection_accuracy == pytest.approx(1.0)
+    assert cert.exposure_detection_accuracy == pytest.approx(1.0)
     assert cert.is_statistically_sound is True
 
 
@@ -69,4 +75,19 @@ def test_ground_truth_validator_degraded_accuracy():
     )
 
     assert cert.service_pod_mapping_accuracy == pytest.approx(0.50)
-    assert cert.is_statistically_sound is False  # 0.50 < 0.95 threshold
+    assert cert.is_statistically_sound is False  # 0.50 below the target
+    # Nothing labelled -> not measured (None), never a substituted 0 or 1.
+    assert cert.pod_node_mapping_accuracy is None
+    assert cert.concentration_detection_accuracy is None
+
+
+def test_ground_truth_validator_missing_and_extra_predictions_count_as_errors():
+    cert = GroundTruthValidator.evaluate_mapping_accuracies(
+        predicted_pod_service_map={"p1": "a", "extra": "a"},   # p2 missing, 'extra' invented
+        ground_truth_pod_service_map={"p1": "a", "p2": "a"},
+        predicted_pod_node_map={}, ground_truth_pod_node_map={},
+        predicted_owner_map={}, ground_truth_owner_map={},
+        predicted_exposures=[], ground_truth_exposed_services=set(),
+    )
+    # union {p1, p2, extra}: only p1 correct -> 1/3
+    assert cert.service_pod_mapping_accuracy == pytest.approx(1 / 3, abs=1e-4)

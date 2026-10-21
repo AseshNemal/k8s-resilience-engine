@@ -1,13 +1,12 @@
 import pytest
+from app.engine.deployment_topology_modeling.drift_analysis import constants
 from app.engine.deployment_topology_modeling.drift_analysis.constants import (
     DriftType,
     DriftSeverity,
     FailureDomainType,
     ExposureLevel,
-    SEVERITY_WEIGHT_FULL_EXPOSURE,
-    SEVERITY_WEIGHT_CONCENTRATION,
-    SEVERITY_WEIGHT_SCALE_MISMATCH,
-    SEVERITY_WEIGHT_RESOURCE_UNBOUNDED,
+    PLACEMENT_RULE_DRIFT_TYPES,
+    INTENT_DRIFT_TYPES,
     TARGET_MAPPING_ACCURACY,
     TARGET_CONCENTRATION_ACCURACY,
 )
@@ -21,12 +20,15 @@ def test_drift_type_enum_members():
     assert len(DriftType) == 4
 
 
+def test_compliance_counts_only_placement_rules():
+    # Study Guide section 12: compliance is about "intended topology or affinity rules".
+    assert PLACEMENT_RULE_DRIFT_TYPES == {DriftType.AFFINITY_DRIFT, DriftType.TOPOLOGY_SPREAD_DRIFT}
+    assert DriftType.RESOURCE_CONTENTION_DRIFT not in INTENT_DRIFT_TYPES
+    assert DriftType.SCALE_DRIFT in INTENT_DRIFT_TYPES
+
+
 def test_drift_severity_tiers():
-    assert DriftSeverity.LOW.value == "LOW"
-    assert DriftSeverity.MEDIUM.value == "MEDIUM"
-    assert DriftSeverity.HIGH.value == "HIGH"
-    assert DriftSeverity.CRITICAL.value == "CRITICAL"
-    assert len(DriftSeverity) == 4
+    assert [s.value for s in DriftSeverity] == ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 
 def test_failure_domain_keys():
@@ -35,23 +37,19 @@ def test_failure_domain_keys():
     assert FailureDomainType.REGION.value == "topology.kubernetes.io/region"
 
 
-def test_exposure_levels():
-    assert ExposureLevel.FULL_EXPOSURE.value == "FULL_EXPOSURE"
-    assert ExposureLevel.SINGLE_REPLICA_EXPOSURE.value == "SINGLE_REPLICA_EXPOSURE"
-    assert ExposureLevel.PARTIAL_EXPOSURE.value == "PARTIAL_EXPOSURE"
-    assert ExposureLevel.RESILIENT.value == "RESILIENT"
+def test_exposure_levels_have_no_undefined_partial_level():
+    assert {e.value for e in ExposureLevel} == {
+        "FULL_EXPOSURE", "SINGLE_REPLICA_EXPOSURE", "RESILIENT", "UNAVAILABLE",
+    }
 
 
-def test_scoring_weights_sum_to_one():
-    total_weight = (
-        SEVERITY_WEIGHT_FULL_EXPOSURE
-        + SEVERITY_WEIGHT_CONCENTRATION
-        + SEVERITY_WEIGHT_SCALE_MISMATCH
-        + SEVERITY_WEIGHT_RESOURCE_UNBOUNDED
-    )
-    assert total_weight == pytest.approx(1.0)
+def test_no_arbitrary_severity_weights_remain():
+    # Proposal sections 7.6 and 12.2 argue against arbitrary weighted scores.
+    assert not [name for name in dir(constants) if name.startswith("SEVERITY_WEIGHT")]
 
 
-def test_academic_target_baselines():
-    assert TARGET_MAPPING_ACCURACY == pytest.approx(0.95)
-    assert TARGET_CONCENTRATION_ACCURACY == pytest.approx(0.95)
+def test_self_chosen_targets_match_validation_panel():
+    from pathlib import Path
+    panel = (Path(__file__).resolve().parents[2] / "app/templates/components/deployments_academic_panel.html").read_text(encoding="utf-8")
+    assert f"Self-chosen target ≥ {round(TARGET_MAPPING_ACCURACY * 100)}%" in panel
+    assert f"Self-chosen target ≥ {round(TARGET_CONCENTRATION_ACCURACY * 100)}%" in panel

@@ -75,7 +75,13 @@ def test_disruption_reporter():
     metrics = orchestrator.compute_aggregate_metrics(results)
 
     md_report = DisruptionReporter.generate_markdown_report(results, metrics)
-    assert "# Component 2: Controlled Chaos & Placement Drift Benchmark Report" in md_report
+    assert "# Component 2: Placement Drift Scenario Report" in md_report
+    # Dry-run output must say so, and observations must match the table (scenario 02 has D_rate 0).
+    assert "DRY-RUN SIMULATION" in md_report
+    assert metrics["is_experimental_evidence"] is False
+    top = max(r.d_rate for r in results if r.d_rate is not None)
+    assert f"Highest D_rate ({top:.2%})" in md_report
+    assert next(r for r in results if r.scenario_id == "02_scale_up_stress").d_rate == 0.0
     assert "01_initial_deployment" in md_report
     assert "07_node_drain_eviction" in md_report
 

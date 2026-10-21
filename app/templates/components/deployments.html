@@ -1,238 +1,102 @@
-{# Deployment Topology Modeling page. Owned by: Member 2 (P.A.M. Minara). #}
+{# Deployment Topology Modeling Master Dashboard. Owned by: Member 2 (P.A.M. Minara). #}
 {% extends "base.html" %}
 {% from "partials/metric_card.html" import metric_card %}
 {% from "partials/loading_state.html" import loading_state %}
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.11">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.11">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.11">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.11">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.11">
 {% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2 class="page-header__title">Deployment Topology Modeling</h2>
+    <h2 class="page-header__title">Deployment Topology Modeling & Resilience Drift</h2>
     <p class="page-header__subtitle">
-        Inspect actual pod placement and identify service exposure across worker nodes and zones.
+        Where the replicas really run, how that differs from the declared YAML, which services one node failure would take down, and what live disruption experiments showed.
     </p>
     <div class="page-header__meta">
         <span class="component-owner">Owner: <strong>Member 2</strong></span>
         <span class="contract-chip">In: Kubernetes Manifests</span>
         <span class="contract-chip">In: Live Cluster State</span>
         <span class="contract-chip contract-chip--out">Out: DeploymentGraph</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Sample Data</span>
-        <button type="button" class="secondary-button" data-role="toggle-source-button">
-            Switch to Live Cluster (KinD)
-        </button>
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Reading the connected cluster…</span>
         <button type="button" class="secondary-button" data-role="reload-button">
             Reload Data
         </button>
     </div>
 </div>
 
-<div data-role="page-region">
-    {{ loading_state("Loading sample DeploymentGraph…") }}
+{# Failure and status messages for the live source (explicit error states, see connection-state.js) #}
+<div data-role="page-region"></div>
+
+{# Headline metrics #}
+<section class="metric-grid" aria-label="Deployment metrics">
+    {{ metric_card("deployment-node-count", "Total Nodes", icon_name="server", icon_color="blue") }}
+    {{ metric_card("deployment-service-count", "Total Services", icon_name="topology", icon_color="teal") }}
+    {{ metric_card("deployment-ready-pods", "Ready Pods", icon_name="check-circle", icon_color="green") }}
+    {{ metric_card("deployment-exposed-services", "Exposed Services (one node failure = 0 ready)", icon_name="gauge", icon_color="red") }}
+</section>
+
+{# Tab navigation #}
+<div class="dashboard-tabs-wrapper">
+    <nav class="dashboard-tabs-nav" role="tablist" aria-label="Deployment Dashboard Tabs">
+        <button type="button" class="tab-nav-btn active" id="tab-btn-topology" role="tab" aria-selected="true" aria-controls="tab-topology" data-target="tab-topology">
+            <span class="tab-icon">🌐</span> Physical Topology Map
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-intent" role="tab" aria-selected="false" aria-controls="tab-intent" data-target="tab-intent">
+            <span class="tab-icon">📋</span> Declared Intent Compliance
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-drift" role="tab" aria-selected="false" aria-controls="tab-drift" data-target="tab-drift">
+            <span class="tab-icon">⚠️</span> Resilience Drift & SPOFs
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-live-experiments" role="tab" aria-selected="false" aria-controls="tab-live-experiments" data-target="tab-live-experiments">
+            <span class="tab-icon">🧪</span> Live Experiments
+        </button>
+    </nav>
 </div>
 
-<template data-role="page-template">
-    <section class="metric-grid" aria-label="Deployment metrics">
-        {{ metric_card("deployment-node-count", "Total Nodes", icon_name="server", icon_color="blue") }}
-        {{ metric_card("deployment-service-count", "Total Services", icon_name="topology", icon_color="teal") }}
-        {{ metric_card("deployment-ready-pods", "Ready Pods", icon_name="check-circle", icon_color="green") }}
-        {{ metric_card("deployment-highest-concentration", "Highest Replica Concentration", icon_name="gauge", icon_color="red") }}
-    </section>
+<div class="dashboard-tab-content-area">
+    {# Tab 1: Topology Map #}
+    {% include "components/deployments_topology_tab.html" %}
 
-    <div class="section-header">
-        <h3 class="section-header__title">Zone Topology</h3>
-        <span class="section-header__note">Nodes grouped by zone, with assigned pods</span>
-    </div>
-    <div class="zone-grid" data-role="deployment-zone-grid"></div>
+    {# Tab 2: Declared Intent vs Live Compliance #}
+    {% include "components/deployments_intent_tab.html" %}
 
-    <div class="section-header">
-        <h3 class="section-header__title">Placement Concentration</h3>
-    </div>
-    <div class="card">
-        <div class="concentration-panel" data-role="deployment-concentration-panel"></div>
-        <p class="ui-note" style="margin-top: var(--space-md);">
-            These are interface display thresholds and not final research classification thresholds.
-        </p>
-    </div>
+    {# Tab 3: Resilience Drift & Failure Domain Exposure #}
+    {% include "components/deployments_drift_tab.html" %}
 
-    <div class="section-header">
-        <h3 class="section-header__title">Service Placement</h3>
-    </div>
-    <div class="card">
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Service</th>
-                        <th scope="col">Declared</th>
-                        <th scope="col">Ready</th>
-                        <th scope="col">Nodes Used</th>
-                        <th scope="col">Concentration</th>
-                        <th scope="col">Exposure</th>
-                        <th scope="col">Drift</th>
-                    </tr>
-                </thead>
-                <tbody data-role="deployment-service-table-body"></tbody>
-            </table>
-        </div>
-    </div>
+    {# Tab 4: Live KinD experiment results #}
+    {% include "components/deployments_live_experiments_tab.html" %}
+</div>
 
-    <div data-role="deployment-warning-region"></div>
+{# Model validation against kubectl ground truth #}
+<div class="section-header" style="margin-top: var(--space-xl);">
+    <h3 class="section-header__title">How accurate is the model?</h3>
+</div>
+{% include "components/deployments_academic_panel.html" %}
 
-    <div class="section-header" style="margin-top: var(--space-xl);">
-        <h3 class="section-header__title">Multi-Service Chaos Resilience Ensemble (28 Symmetrical Trials)</h3>
-        <span class="section-header__note">
-            Empirical placement drift benchmarks across 6 core microservices and 3 cluster nodes under chaos perturbations.
-        </span>
-    </div>
-    <div class="card ensemble-card">
-        <div class="ensemble-summary-grid" data-role="ensemble-summary-grid"></div>
+{# Service exposure drill-down #}
+{% include "components/deployments_modal_violation.html" %}
 
-        <div class="ensemble-breakdown-grid">
-            <div class="ensemble-breakdown-card">
-                <div class="ensemble-breakdown-card__header">
-                    <div>
-                        <h4 class="ensemble-breakdown-card__title">Microservice Sensitivity Breakdown</h4>
-                        <span class="ensemble-breakdown-card__sub">Workload resilience ranking across 28 chaos trials</span>
-                    </div>
-                </div>
-                <div class="table-scroll">
-                    <table class="data-table data-table--compact">
-                        <thead>
-                            <tr>
-                                <th scope="col">Microservice</th>
-                                <th scope="col">Trials</th>
-                                <th scope="col">Mean Drift</th>
-                                <th scope="col">Resilience Tier</th>
-                            </tr>
-                        </thead>
-                        <tbody data-role="ensemble-service-sensitivity-body"></tbody>
-                    </table>
-                </div>
-            </div>
+{# Raw Data Panel #}
+<div class="section-header" style="margin-top: var(--space-xl);">
+    <h3 class="section-header__title">Raw Data Export</h3>
+</div>
+{{ raw_json_panel("deployment-raw-json", "View Raw DeploymentGraph JSON") }}
 
-            <div class="ensemble-breakdown-card">
-                <div class="ensemble-breakdown-card__header">
-                    <div>
-                        <h4 class="ensemble-breakdown-card__title">Disruption Category Sensitivity Breakdown</h4>
-                        <span class="ensemble-breakdown-card__sub">Failure domain perturbation impact ranking</span>
-                    </div>
-                </div>
-                <div class="table-scroll">
-                    <table class="data-table data-table--compact">
-                        <thead>
-                            <tr>
-                                <th scope="col">Disruption Category</th>
-                                <th scope="col">Trials</th>
-                                <th scope="col">Mean Drift</th>
-                                <th scope="col">Scheduling Impact</th>
-                            </tr>
-                        </thead>
-                        <tbody data-role="ensemble-category-sensitivity-body"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Phase 4 Formal Markov Transition Matrix Visualizer -->
-        <div class="markov-matrix-card" data-role="markov-matrix-panel">
-            <div class="markov-matrix-header">
-                <div>
-                    <div class="markov-matrix-title-row">
-                        <span class="status-badge status-badge--primary">Phase 4 Mathematical Model</span>
-                        <h4 class="markov-matrix-title">Markov Pod Migration Transition Matrix ($T[i, j]$)</h4>
-                    </div>
-                    <p class="markov-matrix-desc">
-                        Quantifies stochastic pod migrations across physical nodes: \( T[i,j] \) represents pod replicas relocated from source node \( n_i \) to destination node \( n_j \) upon disruption.
-                    </p>
-                </div>
-                <div class="markov-matrix-actions">
-                    <label for="markov-scenario-select" class="markov-label">Disruption Scenario:</label>
-                    <select id="markov-scenario-select" class="markov-select" data-role="markov-scenario-select">
-                        <option value="07_node_drain_eviction" selected>Scenario 07: Node Drain & Eviction (High Displacement)</option>
-                        <option value="05_pod_deletion_chaos">Scenario 05: Involuntary Pod Deletion (Reschedule Drift)</option>
-                        <option value="04_rolling_update">Scenario 04: Rolling Update (Surge Churn)</option>
-                        <option value="02_scale_up_stress">Scenario 02: Scale Up Stress (Bin-packing)</option>
-                        <option value="03_scale_down_loss">Scenario 03: Scale Down Loss (Redundancy)</option>
-                        <option value="06_node_cordon">Scenario 06: Node Cordon (Unschedulable)</option>
-                        <option value="08_resource_contention">Scenario 08: Resource Contention (Constrained)</option>
-                        <option value="01_initial_deployment">Scenario 01: Initial Baseline (Control)</option>
-                    </select>
-                    <button type="button" class="secondary-button" data-role="markov-toggle-latex-btn">
-                        View LaTeX Table
-                    </button>
-                </div>
-            </div>
-
-            <div class="markov-matrix-content" data-role="markov-matrix-content">
-                <div class="loading-state">Loading Markov Transition Matrix…</div>
-            </div>
-
-            <div class="markov-latex-preview" data-role="markov-latex-preview" style="display: none;">
-                <div class="markov-latex-header">
-                    <span>LaTeX Table Code (Overleaf / Dissertation Ready):</span>
-                    <button type="button" class="secondary-button" data-role="markov-copy-latex-btn">Copy LaTeX</button>
-                </div>
-                <pre class="markov-latex-code" data-role="markov-latex-code"></pre>
-            </div>
-        </div>
-
-        <div class="ensemble-filter-bar">
-            <div class="filter-group" data-role="ensemble-category-filters">
-                <button type="button" class="filter-btn filter-btn--active" data-cat="ALL">All (28)</button>
-                <button type="button" class="filter-btn" data-cat="BASELINE">Baseline (1)</button>
-                <button type="button" class="filter-btn" data-cat="SCALE_UP_STRESS">Scale Up (6)</button>
-                <button type="button" class="filter-btn" data-cat="SCALE_DOWN_LOSS">Scale Down (6)</button>
-                <button type="button" class="filter-btn" data-cat="ROLLING_UPDATE">Rolling Update (6)</button>
-                <button type="button" class="filter-btn" data-cat="POD_DELETION">Pod Deletion (6)</button>
-                <button type="button" class="filter-btn" data-cat="NODE_CORDON">Node Cordon (1)</button>
-                <button type="button" class="filter-btn" data-cat="NODE_DRAIN">Node Drain (3)</button>
-                <button type="button" class="filter-btn" data-cat="RESOURCE_CONTENTION">Resource Contention (1)</button>
-            </div>
-            <input type="text" class="ensemble-search-input" data-role="ensemble-search" placeholder="Search service, category, or trial..." aria-label="Search trials" />
-        </div>
-
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Trial ID</th>
-                        <th scope="col">Category</th>
-                        <th scope="col">Workload</th>
-                        <th scope="col">Chaos Specification</th>
-                        <th scope="col">Placement Drift (D_rate)</th>
-                        <th scope="col">Failure Exposure (ΔE)</th>
-                        <th scope="col">Displaced</th>
-                        <th scope="col">Status</th>
-                    </tr>
-                </thead>
-                <tbody data-role="ensemble-table-body"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Raw Data</h3>
-    </div>
-    {{ raw_json_panel("deployment-raw-json", "View Raw DeploymentGraph") }}
-
-    <div class="section-header">
-        <h3 class="section-header__title">Future Work</h3>
-    </div>
-    <div class="card">
-        <ul class="future-work-list">
-            <li>Connect to a live Kubernetes cluster</li>
-            <li>Compare declared versus actual placement over time</li>
-            <li>Placement drift timeline across deploys and reschedules</li>
-            <li>Failure-domain labels beyond zone (rack, region)</li>
-            <li>Scaling event history</li>
-        </ul>
-    </div>
-</template>
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.11"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.11"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.11"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.11"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.11"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.11"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.11"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.11"></script>
 {% endblock %}

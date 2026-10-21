@@ -157,6 +157,9 @@ class OfflineJaegerTraceSource:
             raise ComponentDataError("Offline Jaeger traces must be objects")
         return cls(tuple(dict(item) for item in payload))
 
+    def list_services(self) -> list[str]:
+        return self.get_services()
+
     def fetch_workflow_traces(
         self,
         *,
@@ -190,6 +193,12 @@ class OfflineJaegerTraceSource:
 
     def fetch_trace(self, trace_id: str) -> list[dict[str, Any]]:
         return [trace for trace in self.traces if trace.get("traceID") == trace_id]
+
+
+class ServiceListingTraceSource(TraceSource, Protocol):
+    """A trace source that can also say which services it has recorded."""
+
+    def list_services(self) -> list[str]: ...
 
 
 @dataclass(frozen=True)
@@ -240,6 +249,14 @@ class JaegerTraceSource:
     def fetch_trace(self, trace_id: str) -> list[dict[str, Any]]:
         """Return only evidence addressed by the registered trace ID."""
         return self.client.fetch_trace(trace_id)
+
+    def list_services(self) -> list[str]:
+        """Names of the services the backend has recorded spans for."""
+        return self.client.get_services()
+
+    def list_call_edges(self, lookback_ms: int) -> list[tuple[str, str]]:
+        """(caller, callee) service pairs seen within the window; an empty list means not known."""
+        return self.client.get_dependencies(lookback_ms)
 
 
 def _lookback_milliseconds(value: str) -> int:
@@ -302,6 +319,9 @@ class ZipkinTraceSource:
             transport=self.transport,
         )
         return sorted(str(item) for item in (payload or []) if str(item).strip())
+
+    def list_services(self) -> list[str]:
+        return self.get_services()
 
     def fetch_workflow_traces(
         self,
@@ -379,6 +399,9 @@ class TempoTraceSource:
         ]
         return sorted(str(item) for item in services if str(item or "").strip())
 
+    def list_services(self) -> list[str]:
+        return self.get_services()
+
     def fetch_workflow_traces(
         self,
         *,
@@ -434,9 +457,7 @@ def create_trace_source(
     """Construct the configured live adapter without persisting credentials."""
     headers = _configuration_headers(configuration, secrets)
     if configuration.kind is TraceSourceKind.JAEGER:
-        return JaegerTraceSource(
-            JaegerClient(base_url=configuration.endpoint, headers=headers)
-        )
+        return JaegerTraceSource.from_configuration(configuration, secrets=secrets)
     if configuration.kind is TraceSourceKind.ZIPKIN:
         return ZipkinTraceSource(configuration.endpoint, headers=headers)
     if configuration.kind is TraceSourceKind.TEMPO:

@@ -13,6 +13,7 @@
     <h2 class="page-header__title">Recommendation Evaluation and Validation</h2>
     <p class="page-header__subtitle">
         Compare deployment improvements through virtual simulation before applying them to Kubernetes.
+        Nothing is ever applied automatically, and every approval is bound to live cluster evidence.
     </p>
     <div class="page-header__meta">
         <span class="component-owner">Owner: <strong>Member 4</strong></span>
@@ -20,15 +21,33 @@
         <span class="contract-chip">In: FailureImpactReport</span>
         <span class="contract-chip contract-chip--out">Out: RecommendationReport</span>
         <span class="contract-chip contract-chip--out">Out: ValidationReport</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot">Sample Data</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Not loaded</span>
         <button type="button" class="secondary-button" data-role="reload-button">
-            Reload Sample Data
+            Check for recommendations
         </button>
     </div>
 </div>
 
+<div class="rec-inputs" role="group" aria-label="What to recommend for">
+    <label class="rec-inputs__field" for="rec-workflow-id">
+        <span>Frozen workflow ID</span>
+        <input class="rec-inputs__input" id="rec-workflow-id" data-role="workflow-id" type="text"
+               autocomplete="off" placeholder="ID of an approved, frozen workflow graph">
+    </label>
+    <label class="rec-inputs__field" for="rec-failed-node">
+        <span>Failed node (optional)</span>
+        <input class="rec-inputs__input" id="rec-failed-node" data-role="failed-node" type="text"
+               autocomplete="off" placeholder="Default: the node whose loss hurts most">
+    </label>
+    <label class="rec-inputs__field" for="rec-namespace">
+        <span>Namespace</span>
+        <input class="rec-inputs__input" id="rec-namespace" data-role="namespace" type="text"
+               autocomplete="off" value="default">
+    </label>
+</div>
+
 <div data-role="page-region">
-    {{ loading_state("Loading sample recommendation and validation data…") }}
+    {{ loading_state("Asking for the current live recommendation…") }}
 </div>
 
 <template data-role="page-template">
@@ -41,12 +60,15 @@
 
     <div class="section-header">
         <h3 class="section-header__title">Recommendation Candidates</h3>
+        <span class="section-header__note">
+            Predicted values come from virtual simulation of the live topology; they are not observed results.
+        </span>
     </div>
     <div data-role="rec-candidate-list"></div>
 
     <div class="section-header">
-        <h3 class="section-header__title">Current vs. Simulated Placement</h3>
-        <span class="section-header__note">Sample Virtual Placement — a UI demonstration, not guaranteed scheduler output</span>
+        <h3 class="section-header__title">Current vs. Predicted Placement</h3>
+        <span class="section-header__note">Placement is shown only when the recommendation engine supplies it.</span>
     </div>
     <div class="card placement-compare">
         <div>
@@ -54,19 +76,21 @@
             <div data-role="rec-placement-current"></div>
         </div>
         <div>
-            <div class="placement-compare__column-title">Sample Virtual Placement</div>
-            <div data-role="rec-placement-simulated"></div>
+            <div class="placement-compare__column-title">Predicted Placement</div>
+            <div data-role="rec-placement-predicted"></div>
         </div>
     </div>
 
     <div class="section-header">
-        <h3 class="section-header__title">Candidate Comparison</h3>
+        <h3 class="section-header__title">Candidate Ranking</h3>
+        <span class="section-header__note">Ranked by the reported score; infeasible candidates are not ranked.</span>
     </div>
     <div class="card">
         <div class="table-scroll">
             <table class="data-table">
                 <thead>
                     <tr>
+                        <th scope="col">Rank</th>
                         <th scope="col">Candidate</th>
                         <th scope="col">Feasible</th>
                         <th scope="col">Predicted Impact</th>
@@ -83,27 +107,9 @@
 
     <div class="section-header">
         <h3 class="section-header__title">Validation</h3>
+        <span class="section-header__note">Predicted versus observed, after an approved change is measured.</span>
     </div>
-    <div class="card">
-        <div class="validation-compare">
-            <div class="impact-stat">
-                <div class="impact-stat__value" data-metric="rec-predicted-blast-radius" style="color: var(--color-info);"></div>
-                <div class="impact-stat__label">Predicted Blast Radius</div>
-                <div class="progress-bar" style="margin-top: var(--space-sm);">
-                    <div class="progress-bar__fill" data-role="rec-predicted-bar"></div>
-                </div>
-            </div>
-            <div class="impact-stat">
-                <div class="impact-stat__value" data-metric="rec-observed-blast-radius" style="color: var(--color-warning);"></div>
-                <div class="impact-stat__label">Observed Blast Radius</div>
-                <div class="progress-bar" style="margin-top: var(--space-sm);">
-                    <div class="progress-bar__fill progress-bar__fill--warning" data-role="rec-observed-bar"></div>
-                </div>
-            </div>
-        </div>
-        <p style="margin-top: var(--space-md);" data-metric="rec-validation-explanation"></p>
-        <span class="status-badge" data-role="rec-validation-status"></span>
-    </div>
+    <div class="card" data-role="rec-validation"></div>
 
     <div class="section-header">
         <h3 class="section-header__title">Approval Gate</h3>
@@ -122,35 +128,13 @@
     </div>
     <div class="stack-md">
         {{ raw_json_panel("rec-raw-recommendation", "View Raw RecommendationReport") }}
-        {{ raw_json_panel("rec-raw-validation", "View Raw ValidationReport") }}
         <div class="json-panel" id="rec-raw-yaml">
             <button type="button" class="json-panel__toggle" data-role="json-toggle" aria-expanded="false">
                 <span data-role="json-toggle-label">View Generated YAML</span>
                 <span aria-hidden="true">▾</span>
             </button>
-            <div class="json-panel__body">
-                <div class="yaml-placeholder">
-                    Generated Kubernetes YAML will appear here after YAML generation is implemented.
-                    <br><br>
-                    Developer approval will be required before application.
-                </div>
-            </div>
+            <div class="json-panel__body" data-role="rec-yaml"></div>
         </div>
-    </div>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Future Work</h3>
-    </div>
-    <div class="card">
-        <ul class="future-work-list">
-            <li>Multiple recommendation candidates beyond the first</li>
-            <li>Pod anti-affinity candidate</li>
-            <li>Member 3 evaluator integration for blast-radius recalculation</li>
-            <li>Candidate ranking across benefit, feasibility, cost, and confidence</li>
-            <li>Kubernetes YAML generation</li>
-            <li>Approval workflow — <strong>Review for Approval</strong>, never automatic apply</li>
-            <li>Post-deployment validation against real cluster outcomes</li>
-        </ul>
     </div>
 </template>
 
@@ -182,9 +166,9 @@
         </div>
     </div>
 </div>
-
 {% endblock %}
 
 {% block page_js %}
+<script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/recommendations.js') }}" defer></script>
 {% endblock %}

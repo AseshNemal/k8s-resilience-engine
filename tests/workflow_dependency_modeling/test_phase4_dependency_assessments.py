@@ -33,6 +33,7 @@ from app.engine.workflow_dependency_modeling.execution_models import (
 from app.engine.workflow_dependency_modeling.execution_repository import (
     InMemoryExecutionRepository,
 )
+from app.engine.workflow_dependency_modeling.fixture_repository import FIXTURE_REFERENCE_SOURCE
 from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
     InMemoryGraphFreezeRepository,
 )
@@ -349,9 +350,11 @@ def test_explicit_edge_interventions_create_independent_edge_labels(
         (edge.source, edge.target) for edge in approval.approved_graph.edges
     }
 
+    # The synthetic engineering references are supplied explicitly: the application has no built-in reference.
     evaluation = evaluate_approved_dependency_assessment(
         created.assessment_id,
         repository=assessments,
+        reference_source=FIXTURE_REFERENCE_SOURCE,
     )
     assert evaluation.mandatory_edge_evaluation_status == "evaluated"
     assert evaluation.mandatory_edge_metrics is not None
@@ -365,8 +368,13 @@ def test_explicit_edge_interventions_create_independent_edge_labels(
     monkeypatch.setattr(
         dependency_assessment_service, "_default_repository", assessments
     )
+    monkeypatch.setattr(
+        dependency_assessment_service, "_default_reference_source", FIXTURE_REFERENCE_SOURCE
+    )
     api_payload = evaluate_approved_workflow_dependency_graph(created.assessment_id)
     assert api_payload["assessmentId"] == created.assessment_id
+    assert api_payload["referenceProvenance"]["synthetic"] is True
+    assert "synthetic" in api_payload["referenceProvenance"]["source"].lower()
     assert api_payload["mandatoryEdgeEvaluationStatus"] == "evaluated"
     assert api_payload["mandatoryEdgeMetrics"] is not None
     assert api_payload["falsePositiveMandatoryEdges"] == [

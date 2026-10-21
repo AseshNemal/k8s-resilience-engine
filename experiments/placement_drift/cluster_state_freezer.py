@@ -1,5 +1,5 @@
 """
-Cluster State Freezer: Captures immutable, SHA-256 cryptographic snapshots of cluster placement.
+Cluster State Freezer: Captures snapshots of cluster placement with a SHA-256 content hash.
 Component: Component 2 - Deployment Topology Modeling
 """
 import hashlib
@@ -14,8 +14,8 @@ from experiments.placement_drift.scenario_models import (
 
 class ClusterStateFreezer:
     """
-    Freezes cluster placement state into deterministic, immutable snapshots.
-    Generates cryptographic SHA-256 hashes to guarantee experiment auditability.
+    Turns cluster placement into deterministic snapshots with a SHA-256 hash of the sorted
+    placement, so a later change to a stored snapshot can be detected (integrity check only).
     """
 
     @staticmethod
@@ -50,8 +50,8 @@ class ClusterStateFreezer:
                         pod_name=p.get("name", p.get("pod_name", "unknown-pod")),
                         service_name=p.get("service_name", p.get("service", "unknown-service")),
                         node_name=p.get("node_name", p.get("node", "unassigned")),
-                        zone=p.get("zone", "default-zone"),
-                        is_ready=p.get("is_ready", p.get("ready", True)),
+                        zone=p.get("zone"),
+                        is_ready=bool(p.get("is_ready", p.get("ready", False))),
                     )
                 )
             else:
@@ -60,8 +60,8 @@ class ClusterStateFreezer:
                         pod_name=getattr(p, "name", getattr(p, "pod_name", "unknown-pod")),
                         service_name=getattr(p, "service_name", getattr(p, "service", "unknown-service")),
                         node_name=getattr(p, "node_name", getattr(p, "node", "unassigned")),
-                        zone=getattr(p, "zone", "default-zone"),
-                        is_ready=getattr(p, "is_ready", getattr(p, "ready", True)),
+                        zone=getattr(p, "zone", None),
+                        is_ready=bool(getattr(p, "is_ready", getattr(p, "ready", False))),
                     )
                 )
         return records
@@ -74,7 +74,7 @@ class ClusterStateFreezer:
         nodes: List[Dict[str, Any]] | None = None,
         namespace: str = "default",
     ) -> ClusterSnapshot:
-        """Constructs an immutable ClusterSnapshot with cryptographic SHA-256 hash."""
+        """Builds a ClusterSnapshot with the SHA-256 hash of its placement."""
         nodes = nodes or []
         pod_records = cls.normalize_pod_records(raw_pods)
         state_hash = cls.compute_placement_hash(pod_records)

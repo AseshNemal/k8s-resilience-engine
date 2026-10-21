@@ -4,7 +4,7 @@ Component: Component 2 - Deployment Topology Modeling
 """
 import logging
 import time
-from typing import Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from experiments.placement_drift.base_scenario import BaseScenario
 from experiments.placement_drift.constants import (
@@ -48,24 +48,37 @@ class DisruptionOrchestrator:
         namespace: str = DEFAULT_CHAOS_NAMESPACE,
         execution_mode: ScenarioExecutionMode = ScenarioExecutionMode.DRY_RUN_SIMULATION,
         repository: Optional[SnapshotRepository] = None,
+        topology: Optional[Any] = None,
     ):
+        """``topology`` is a real DeploymentGraph. Given one, every scenario starts from its real nodes and
+        pods (see live_topology_scenarios.py); without one the scripted placements are used."""
         self.namespace = namespace
         self.execution_mode = execution_mode
         self.repository = repository or SnapshotRepository()
+        self.topology = topology
+
+    def _instances(self) -> List[BaseScenario]:
+        scripted = [
+            cls(namespace=self.namespace, execution_mode=self.execution_mode, repository=self.repository)
+            for cls in self.ALL_SCENARIO_CLASSES
+        ]
+        if self.topology is None:
+            return scripted
+        from experiments.placement_drift.live_topology_scenarios import LiveTopologyScenario
+
+        return [
+            LiveTopologyScenario(template, self.topology, self.namespace, self.execution_mode, self.repository)
+            for template in scripted
+        ]
 
     def run_all(self) -> List[ScenarioResult]:
         """Executes all 8 scenarios sequentially."""
         results: List[ScenarioResult] = []
-        for scenario_cls in self.ALL_SCENARIO_CLASSES:
-            instance = scenario_cls(
-                namespace=self.namespace,
-                execution_mode=self.execution_mode,
-                repository=self.repository,
-            )
+        for instance in self._instances():
             result = instance.run()
             results.append(result)
             logger.info(
-                "Completed [%s] status=%s d_rate=%.2f",
+                "Completed [%s] status=%s d_rate=%s",
                 result.scenario_id,
                 result.status.value,
                 result.d_rate,
@@ -74,37 +87,24 @@ class DisruptionOrchestrator:
 
     def run_scenario(self, scenario_id: str) -> Optional[ScenarioResult]:
         """Executes a single specified scenario by ID."""
-        for scenario_cls in self.ALL_SCENARIO_CLASSES:
-            instance = scenario_cls(
-                namespace=self.namespace,
-                execution_mode=self.execution_mode,
-                repository=self.repository,
-            )
+        for instance in self._instances():
             if instance.scenario_id == scenario_id:
                 return instance.run()
         return None
 
     def compute_aggregate_metrics(
         self, results: List[ScenarioResult]
-    ) -> Dict[str, float]:
-        """Calculates aggregate benchmark summary metrics across completed scenarios."""
+    ) -> Dict[str, Any]:
+        """Aggregates completed scenarios; D_rate statistics are None when none were measurable."""
         completed = [r for r in results if r.status == ScenarioStatus.COMPLETED]
-        if not completed:
-            return {
-                "total_scenarios": float(len(results)),
-                "completed_count": 0.0,
-                "mean_d_rate": 0.0,
-                "max_d_rate": 0.0,
-                "total_runtime_ms": 0.0,
-            }
-
-        d_rates = [r.d_rate for r in completed]
-        runtimes = [r.runtime_ms for r in completed]
-
+        d_rates = [r.d_rate for r in completed if r.d_rate is not None]
         return {
             "total_scenarios": float(len(results)),
             "completed_count": float(len(completed)),
-            "mean_d_rate": round(sum(d_rates) / len(d_rates), 4),
-            "max_d_rate": round(max(d_rates), 4),
-            "total_runtime_ms": round(sum(runtimes), 2),
+            "execution_mode": self.execution_mode.value,
+            "topology_source": "live" if self.topology is not None else "scripted",
+            "is_experimental_evidence": self.execution_mode == ScenarioExecutionMode.LIVE_CLUSTER,
+            "mean_d_rate": round(sum(d_rates) / len(d_rates), 4) if d_rates else None,
+            "max_d_rate": round(max(d_rates), 4) if d_rates else None,
+            "total_runtime_ms": round(sum(r.runtime_ms for r in completed), 2),
         }

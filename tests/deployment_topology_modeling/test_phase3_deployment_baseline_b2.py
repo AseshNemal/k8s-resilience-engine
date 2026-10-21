@@ -1,59 +1,47 @@
-import pytest
 from app.engine.deployment_topology_modeling.drift_analysis.deployment_only_baseline_engine import (
     DeploymentOnlyBaselineEngine,
 )
-from app.engine.deployment_topology_modeling.drift_analysis.drift_models import ServiceExposureResult
-from app.engine.deployment_topology_modeling.drift_analysis.constants import ExposureLevel
+from app.engine.deployment_topology_modeling.drift_analysis.failure_domain_exposure_engine import (
+    FailureDomainExposureEngine,
+)
 
 
-def test_deployment_baseline_b2_ranking_and_critical_node():
-    # Setup mock exposures
-    exp_cart = ServiceExposureResult(
-        service_name="cart",
-        total_replicas=2,
-        ready_replicas=2,
-        replica_concentration=1.0,
-        exposure_level=ExposureLevel.FULL_EXPOSURE,
-        exposed_failure_domains=["node-1"],
-        severity_score=0.75,
-    )
-    exp_pay = ServiceExposureResult(
-        service_name="payment",
-        total_replicas=1,
-        ready_replicas=1,
-        replica_concentration=1.0,
-        exposure_level=ExposureLevel.SINGLE_REPLICA_EXPOSURE,
-        exposed_failure_domains=["node-1"],
-        severity_score=0.90,
-    )
-    exp_frontend = ServiceExposureResult(
-        service_name="frontend",
-        total_replicas=3,
-        ready_replicas=3,
-        replica_concentration=0.33,
-        exposure_level=ExposureLevel.RESILIENT,
-        exposed_failure_domains=[],
-        severity_score=0.10,
-    )
+def _exposure(name, placement):
+    """placement: list of (node, ready) tuples."""
+    pods = [{"name": f"{name}-{i}", "node": node, "ready": ready} for i, (node, ready) in enumerate(placement)]
+    return FailureDomainExposureEngine().evaluate_service_exposure(name, pods)
 
-    b2 = DeploymentOnlyBaselineEngine.generate_baseline_b2([exp_cart, exp_pay, exp_frontend])
 
+def test_deployment_baseline_b2_lexicographic_ranking():
+    # Hand-computed:
+    #   payment : 1 ready on node-1          -> EXPOSED,     ratio 1.0, ready 1
+    #   cart    : 2 ready on node-1          -> EXPOSED,     ratio 1.0, ready 2
+    #   frontend: node-1, node-2, node-3     -> NOT_EXPOSED, ratio 1/3
+    #   search  : node-1, node-1, node-2     -> NOT_EXPOSED, ratio 2/3
+    #   report  : 0 ready                    -> UNAVAILABLE
+    # Order: exposed first (fewer ready replicas first), then not exposed by ratio desc,
+    # then unavailable.
+    exposures = [
+        _exposure("frontend", [("node-1", True), ("node-2", True), ("node-3", True)]),
+        _exposure("cart", [("node-1", True), ("node-1", True)]),
+        _exposure("report", [("node-2", False)]),
+        _exposure("payment", [("node-1", True)]),
+        _exposure("search", [("node-1", True), ("node-1", True), ("node-2", True)]),
+    ]
+
+    b2 = DeploymentOnlyBaselineEngine.generate_baseline_b2(exposures)
+
+    assert [r["service_name"] for r in b2.service_rankings] == ["payment", "cart", "search", "frontend", "report"]
+    assert [r["rank"] for r in b2.service_rankings] == [1, 2, 3, 4, 5]
     assert b2.most_vulnerable_service == "payment"
+    assert b2.exposed_services_by_node == {"node-1": ["payment", "cart"]}
     assert b2.most_critical_worker_node == "node-1"
     assert b2.total_single_points_of_failure == 2
-    assert len(b2.service_rankings) == 3
 
-    # Rank 1 must be payment (highest severity score 0.90)
-    assert b2.service_rankings[0]["service_name"] == "payment"
-    assert b2.service_rankings[0]["rank"] == 1
 
-    # Rank 2 must be cart (severity score 0.75)
-    assert b2.service_rankings[1]["service_name"] == "cart"
-    assert b2.service_rankings[1]["rank"] == 2
-
-    # Rank 3 must be frontend (severity score 0.10)
-    assert b2.service_rankings[2]["service_name"] == "frontend"
-    assert b2.service_rankings[2]["rank"] == 3
+def test_most_critical_node_tie_breaks_by_name():
+    exposures = [_exposure("a", [("node-2", True)]), _exposure("b", [("node-1", True)])]
+    assert DeploymentOnlyBaselineEngine.generate_baseline_b2(exposures).most_critical_worker_node == "node-1"
 
 
 def test_deployment_baseline_b2_empty():

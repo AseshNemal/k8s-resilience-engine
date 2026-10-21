@@ -21,7 +21,7 @@ from app.engine.workflow_dependency_modeling.execution_service import (
 )
 from app.engine.workflow_dependency_modeling.models import WorkflowScenario
 from app.engine.workflow_dependency_modeling.outcome_evaluator import evaluate_execution
-from app.main import app
+from tests.support.research_app import app  # research-only routes are not served by app.main
 from app.shared.persistence.models import Base
 
 

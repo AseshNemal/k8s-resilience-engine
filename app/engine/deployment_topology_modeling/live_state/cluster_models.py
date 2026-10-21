@@ -1,19 +1,10 @@
-from dataclasses import dataclass
-from typing import Dict
+"""Live-cluster data classes. They are defined by the Kubernetes integration and re-exported here.
 
-@dataclass
-class ClusterNode:
-    name: str
-    zone: str
-    cpu_available: str
-    memory_available: str
+Member 2's parser and Service resolver keep importing them from this module. The single definition
+lives in app/integrations/kubernetes/models.py so the REST client and the live-state parser share
+one shape, and carries the union of both sides' fields (ready, schedulable, phase, owner_uid, ...).
+"""
 
-@dataclass
-class ClusterPod:
-    name: str
-    node: str
-    ready: bool
-    owner_kind: str | None
-    owner_name: str | None
-    app_label: str
-    labels: Dict[str, str]
+from app.integrations.kubernetes.models import ClusterDeployment, ClusterNode, ClusterPod
+
+__all__ = ["ClusterDeployment", "ClusterNode", "ClusterPod"]

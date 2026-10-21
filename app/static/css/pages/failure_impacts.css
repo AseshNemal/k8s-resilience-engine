@@ -134,6 +134,45 @@
     font-size: 13px;
 }
 
+.workflow-outcome-list {
+    display: grid;
+    gap: var(--space-sm);
+}
+
+.workflow-outcome {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.workflow-outcome:last-child {
+    border-bottom: 0;
+}
+
+.workflow-outcome__identity {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.workflow-outcome__explanation {
+    text-align: right;
+}
+
+@media (max-width: 640px) {
+    .workflow-outcome {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .workflow-outcome__explanation {
+        text-align: left;
+    }
+}
+
 @media (max-width: 768px) {
     .impact-compare {
         grid-template-columns: 1fr;

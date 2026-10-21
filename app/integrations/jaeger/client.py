@@ -7,13 +7,18 @@ to retrieve services, operations, and raw distributed traces.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any, Mapping
 import httpx
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_JAEGER_URL = "http://localhost:16686"
+# Where the backend looks for Jaeger when the caller names no address. It is the backend's own setting
+# (WORKFLOW_JAEGER_URL), because "localhost" means a different machine depending on where the backend runs:
+# on your computer it is Jaeger on your computer, inside the Docker Desktop extension it is the container
+# itself, and there Jaeger on the host is reached as host.docker.internal.
+DEFAULT_JAEGER_URL = (os.environ.get("WORKFLOW_JAEGER_URL") or "").strip() or "http://localhost:16686"
 SERVICE_NAME_KEY = "service.name"
 TRACE_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{16,32}$")
 
@@ -33,7 +38,8 @@ class JaegerClient:
             base_url: Base URL of the Jaeger query service (e.g. http://localhost:16686).
             timeout_seconds: HTTP request timeout in seconds.
         """
-        self.base_url = base_url.rstrip("/")
+        # An empty address means "not given", so it falls back to the backend's own setting.
+        self.base_url = (base_url or DEFAULT_JAEGER_URL).rstrip("/")
         self.timeout = timeout_seconds
         self.headers = dict(headers or {})
 
@@ -91,6 +97,33 @@ class JaegerClient:
             raise ConnectionError(
                 f"Could not fetch operations for '{service_name}' from Jaeger: {err}"
             ) from err
+
+    def get_dependencies(self, lookback_ms: int) -> list[tuple[str, str]]:
+        """Fetch which service calls which, over the last ``lookback_ms`` milliseconds.
+
+        Returns (caller, callee) pairs. Jaeger builds this from stored traces; some storage backends only fill
+        it with a separate batch job, so an empty answer means "not known", not "no calls".
+        """
+        import time
+
+        try:
+            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+                response = client.get(
+                    f"{self.base_url}/api/dependencies",
+                    params={"endTs": int(time.time() * 1000), "lookback": int(lookback_ms)},
+                )
+                response.raise_for_status()
+                data = response.json().get("data", []) or []
+        except Exception as err:
+            logger.warning("Failed to fetch dependencies from Jaeger at %s: %s", self.base_url, err)
+            raise ConnectionError(
+                f"Could not fetch service dependencies from Jaeger at {self.base_url}: {err}"
+            ) from err
+        return [
+            (str(edge["parent"]), str(edge["child"]))
+            for edge in data
+            if isinstance(edge, dict) and edge.get("parent") and edge.get("child")
+        ]
 
     def fetch_traces(
         self,

@@ -6,10 +6,10 @@
     "node_names": ["node-1", "node-2", "node-3"]
   },
   "validation": {
-    "service_pod_mapping_accuracy": 1.0,
-    "pod_node_mapping_accuracy": 1.0,
-    "concentration_detection_accuracy": 1.0,
-    "runtime_overhead_ms": 134.5
+    "service_pod_mapping_accuracy": null,
+    "pod_node_mapping_accuracy": null,
+    "concentration_detection_accuracy": null,
+    "runtime_overhead_ms": null
   },
   "nodes": [
     {
@@ -37,6 +37,9 @@
       "declaredReplicas": 3,
       "readyReplicas": 3,
       "replicaConcentration": 0.67,
+      "concentrated": false,
+      "exposedFailureDomains": [],
+      "hostingNodes": ["node-1", "node-2"],
       "pods": [
         {
           "name": "payment-1",

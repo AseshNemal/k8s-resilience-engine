@@ -582,7 +582,9 @@ app/shared/schemas/
 ```
 
 `app/shared/sample_loader.py` loads fixture JSON from `sample_data/` and validates it
-against these schemas for the mock API routes.
+against these schemas. It exists for automated tests and research runs only: no route, page or
+runtime analysis uses it (enforced by `tests/test_no_sample_runtime.py` and
+`tests/test_runtime_fixture_reachability.py`).
 
 No member should independently change these shared schemas without team agreement.
 
@@ -781,6 +783,10 @@ All members work together.
 
 Each member develops using mock inputs.
 
+> Mock inputs are for tests and research runs only. The running application never serves mock or
+> sample data: it reads the connected cluster, or fails with an explicit error code. See
+> [`docs/REAL_DATA_PHASE1.md`](docs/REAL_DATA_PHASE1.md).
+
 ```text
 Member 1 → Workflow Discovery
 Member 2 → Deployment Graph
@@ -936,6 +942,22 @@ Prompt instead with `.venv\Scripts\activate.bat`.
 Stop the server with `Ctrl+C`. Deactivate the virtual environment with `deactivate` (same
 command on macOS and Windows).
 
+### Windows and the Docker Desktop extension
+
+Every script in `scripts/` that you run by hand is Python behind a launcher, so Windows does not need WSL or
+bash. Use the `.cmd` launcher where this README shows the `.sh` one:
+
+| macOS / Linux | Windows |
+|---|---|
+| `./scripts/cluster-up.sh` | `scripts\cluster-up.cmd` |
+| `./scripts/extension-cluster-access.sh` | `scripts\extension-cluster-access.cmd` |
+| `./scripts/extension-manage.sh update` | `scripts\extension-manage.cmd update` |
+
+They need Python 3.9 or newer (the `py` launcher is preferred on Windows) and `docker`, `kind` and `kubectl` on
+`PATH`. What is checked: their logic is covered by tests that run on every platform. What is not: they have been
+run on macOS, not on a real Windows machine. One real difference: automatic background renewal of the cluster
+credential is a LaunchAgent on macOS, a Task Scheduler task on Windows and a systemd user timer on Linux. Only the macOS one has been tried on a real machine.
+
 ## Deployment
 
 There is no deployment pipeline yet — `deploy/kubernetes/` is currently an empty placeholder
@@ -955,9 +977,9 @@ read-only cluster access). Quick start (details, updating, removal and troublesh
    docker extension install k8s-resilience-engine:0.1.4
    ```
 
-3. Open **Resilience Engine** in Docker Desktop's left sidebar. It works straight away with the
-   built-in sample data; no cluster is needed to look around.
-4. Optional, to see a real cluster (requires `kind` and `kubectl`):
+3. Open **Resilience Engine** in Docker Desktop's left sidebar. Until a cluster is connected every
+   page says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never shows sample data in its place.
+4. To analyse a real cluster (requires `kind` and `kubectl`):
 
    ```bash
    ./scripts/cluster-up.sh                  # create or reuse the local kind test cluster
@@ -968,11 +990,134 @@ read-only cluster access). Quick start (details, updating, removal and troublesh
 5. After changing code or pulling `main`, rebuild with a new tag and run
    `docker extension update k8s-resilience-engine:<new tag>`. Your data is kept.
 
+Steps 2 and 5 are also one command each: `./scripts/extension-manage.sh install` and
+`./scripts/extension-manage.sh update` run the tests, build the next unused version and install or
+update it. The same script offers `uninstall`, `status`, `check` and `clean`, and `--dry-run` prints
+what it would do (see [`docs/EXTENSION.md`](docs/EXTENSION.md)).
+
 Recommendations are never applied to Kubernetes automatically; approving one only records the approval.
+
+For the full walkthrough of the extension and every script, see
+[Using the Docker Desktop Extension and Scripts](#using-the-docker-desktop-extension-and-scripts).
 
 Writing real Kubernetes manifests for `deploy/kubernetes/` is future work — see
 [Development Phases](#development-phases) and the per-member "First" checklists earlier in
 this document.
+
+---
+
+# Using the Docker Desktop Extension and Scripts
+
+This is the step-by-step guide. Deeper detail, limits and a verification checklist are in
+[`docs/EXTENSION.md`](docs/EXTENSION.md).
+
+## What you need
+
+- Docker Desktop, with **Settings → Extensions → "Allow only extensions distributed through the Docker
+  Marketplace"** unticked (the extension is installed from a local image).
+- `kind` and `kubectl` if you want a real test cluster ([`docs/DOCKER.md`](docs/DOCKER.md)).
+- Nothing else: running the extension needs no Python or Node install.
+
+All commands below are run from the repository root.
+
+## First-time setup
+
+1. **Create the test cluster** (three workers, one control plane; an existing cluster is kept):
+
+   ```bash
+   ./scripts/cluster-up.sh
+   ```
+
+2. **Install the extension.** This runs the tests, builds the image and installs it:
+
+   ```bash
+   ./scripts/extension-manage.sh install
+   ```
+
+3. **Open Resilience Engine** in Docker Desktop's left sidebar and choose **Connect cluster**.
+4. **Approve read-only access.** Under *Set up automatically*, click **Find clusters**, pick your kind
+   cluster and click **Set up access**. A system dialog lists the exact cluster, permissions and changes;
+   nothing happens until you approve. The extension then holds only a read-only token (valid for up to
+   7 days) that renews itself with no button to press: while the extension is open, and from a
+   small background job (a LaunchAgent, a scheduled task or a systemd timer, named in the same dialog) that checks every 15 minutes even when
+   Docker Desktop is closed or the computer was asleep. Your own kubeconfig never leaves your computer.
+   *(Manual alternative: run `./scripts/extension-cluster-access.sh`, then pick
+   `.kube/extension-readonly.kubeconfig` under *Advanced: use a kubeconfig file*.)*
+5. **Use the pages.** Every page reads your connected cluster; if it cannot, the page says so with an
+   explicit error and never shows placeholder figures.
+
+   | Page | What it shows |
+   |---|---|
+   | Overview | Every namespace in the connected cluster that runs workloads (system namespaces are listed as not shown): totals for worker nodes, services and unresolved items, then each namespace's services with their replicas and nodes. *Refresh from cluster* re-reads it |
+   | Deployment topology | Where each service's pods run, and replica concentration |
+   | Workflow dependencies | Business workflows and their service dependencies (needs trace evidence from Jaeger) |
+   | Failure impact | Which workflows survive a worker-node failure (needs a frozen workflow and a complete topology) |
+   | Recommendations | No live source yet, so it reports that explicitly |
+
+6. **Optional: try it on a deliberately concentrated workload.** These two commands change your
+   cluster, so they are yours to run:
+
+   ```bash
+   kubectl create namespace resilience-test
+   kubectl apply -f deploy/test-workloads/concentrated-paymentservice.yaml
+   ```
+
+   `resilience-test` then appears on Overview on its own. `paymentservice` has three replicas pinned to one
+   worker, so it shows replica concentration.
+
+## Scripts
+
+| Script | What it does |
+|---|---|
+| `scripts/cluster-up.sh` | Creates or reuses the local kind cluster `resilience-research` (`KIND_CLUSTER_NAME`, `CLUSTER_READY_TIMEOUT` override the defaults). Restarts stopped node containers after Docker Desktop restarts, keeping data. Never recreates the cluster or deploys workloads. |
+| `scripts/extension-manage.sh` | Installs, updates, uninstalls, inspects and cleans the extension. See below. |
+| `scripts/extension-cluster-access.sh` | The manual way to get a read-only credential: asks first, then creates the `resilience-engine` namespace, service account and role, and writes `.kube/extension-readonly.kubeconfig`. `--duration 24h` shortens the token, `--revoke` removes the access, `--yes` skips the prompt. The only script that changes the cluster. |
+| `scripts/setup_local.py` | `python scripts/setup_local.py` applies database migrations for local development (safe to repeat). |
+| `scripts/report_unverified_approvals.py` | Read-only audit of stored approval records: `DATABASE_URL=... python scripts/report_unverified_approvals.py`. |
+| `scripts/docker-entrypoint.sh` | The container's entrypoint. Not run by hand. |
+
+`extension-manage.sh` commands (add `--dry-run` to any of them to print instead of run; it never touches
+your cluster or its access objects). On Windows run `scripts\extension-manage.cmd` with the same commands:
+both launchers start `scripts/extension_manage.py`, which needs only Python 3.9 or newer and the Docker CLI
+(plus Go and Node for `check`). It warns when Docker Desktop has less than 3 GB of memory
+(`RESILIENCE_MIN_DOCKER_MEMORY_GB` changes the threshold) and stops with a clear message when Docker does not
+answer:
+
+| Command | What it does |
+|---|---|
+| `install [--version X.Y.Z]` | Run the tests, build and install. Refuses if already installed. |
+| `update [--version X.Y.Z]` | Run the tests, build the next unused version and replace the installed one. Your data is kept. |
+| `uninstall` | Remove the extension after asking. |
+| `status` | Installed version, VM state and local image tags. |
+| `check` | Run the Python, Go and Node test suites without building. |
+| `clean` | Delete old local image tags after asking. The installed one is never removed. |
+
+Other options: `--skip-checks` builds without running the tests first, and `--yes` skips prompts.
+
+## Everyday tasks
+
+| I want to | Run |
+|---|---|
+| Pick up code changes or a `git pull` | `./scripts/extension-manage.sh update` |
+| See what is installed | `./scripts/extension-manage.sh status` |
+| Preview what a command would do | add `--dry-run` |
+| Bring the cluster back after Docker Desktop restarted | `./scripts/cluster-up.sh` |
+| Remove the extension's access from the cluster | **Remove access…** on Connect cluster, or `./scripts/extension-cluster-access.sh --revoke` |
+| Uninstall the extension | `./scripts/extension-manage.sh uninstall` |
+| Free disk space from old builds | `./scripts/extension-manage.sh clean` |
+
+## Troubleshooting
+
+| You see | Why | Fix |
+|---|---|---|
+| Pages say `CLUSTER_NOT_CONNECTED` | No credential is stored | Connect cluster → *Set up access* |
+| `CLUSTER_CONNECTION_FAILED`, or `kubectl` says "connection refused" | The kind node containers stopped (Docker Desktop restarted) | `./scripts/cluster-up.sh` |
+| `CLUSTER_AUTH_FAILED` | The credential expired or was revoked | Nothing to click while it is renewing: the page shows "Renewing…" and retries by itself. If it says the access was removed or changed, *Set up access* again |
+| `CLUSTER_FORBIDDEN`, or Connect cluster says "Access needs updating" | The stored role is older than this version expects | *Set up access* and approve once |
+| An update changed nothing | The same image tag was reused | Use `extension-manage.sh update`; it always picks a new tag |
+| Failure impact says `TOPOLOGY_INCOMPLETE` | Some pods could not be attributed to a service | Expected for apps like Istio Bookinfo until Service resolution lands (see Current Status) |
+| Failure impact says `WORKFLOW_EVIDENCE_UNAVAILABLE` | No frozen workflow exists yet | Build and approve a workflow graph on the Workflow dependencies page (only an approved graph reaches Failure impact) |
+| The browser cannot open `127.0.0.1:<port>` | That port is the cluster's API, not a web page | Use the extension, or `kubectl` |
 
 ---
 
@@ -987,9 +1132,15 @@ this document.
 | POST | `/api/recommendations` | Member 4 |
 | GET | `/api/validations` | Member 4 |
 
-Currently these are served as `/api/workflows/sample`, `/api/deployments/sample`, etc. — the
-`/sample` suffix will drop once each component returns request-driven output instead of a
-fixture.
+The `/sample`, demo, fixture-simulation and Jaeger-seeding routes have been removed from the application.
+Member 2's scripted chaos and benchmark routes (`/api/deployments/chaos/*`, `/benchmarks/*`) remain: they
+run dry-run scenarios on their own scripted placements, are labelled as such, and are the only routes
+allowed to serve non-cluster data (`tests/support/labelled_research_routes.py`).
+The routes that serve live evidence today include `GET /api/deployments/discovery` and `/live`
+(Member 2), `GET /api/failure-impacts/runtime` (Member 3), `GET /api/recommendations/live` and the
+approval routes (Member 4), and the workflow scenario, assessment and Jaeger-evidence routes
+(Member 1). When live evidence is missing they answer with a coded error, never a substitute. The
+codes are listed in [`docs/REAL_DATA_PHASE1.md`](docs/REAL_DATA_PHASE1.md).
 
 # Web Page Routes
 
@@ -1001,8 +1152,10 @@ fixture.
 | `GET /components/failure-impacts` | Failure Impact Prediction |
 | `GET /components/recommendations` | Recommendation Evaluation and Validation |
 
-Each page fetches its component's `/sample` endpoint client-side and renders it into cards,
-tables, and visualizations — raw JSON stays available behind a collapsible panel. See
+Each page fetches its component's live endpoint client-side and renders it into cards, tables,
+and visualizations — raw JSON stays available behind a collapsible panel. A page whose evidence is
+missing shows why (not connected, access denied, partial topology, no live recommendation) instead
+of placeholder content. See
 `docs/COMPONENT_INTERFACE_OWNERSHIP.md` for which files each member owns in this UI layer.
 
 ---
@@ -1027,7 +1180,8 @@ Shared changes should be reviewed before merging.
 - Do not change shared schemas without team agreement.
 - Keep integration code separate from research algorithms.
 - Add unit tests for each major function.
-- Use mock data when another component is incomplete.
+- Use mock data when another component is incomplete — in tests only. Runtime analysis uses live
+  evidence or fails explicitly; it never falls back to sample data.
 - Keep thresholds configurable.
 - Document assumptions.
 - Record all experiment configurations.
@@ -1047,7 +1201,7 @@ Shared changes should be reviewed before merging.
 - [x] Mock API routes completed
 - [x] Dashboard prototype completed
 - [x] Full research-dashboard UI completed (Overview + 4 component pages, shared
-      design system, icon library, collapsible sidebar) — still rendering sample data only
+      design system, icon library, collapsible sidebar) — now renders live evidence only (see below)
 - [ ] Member 1 component completed (engine service is still a fixture loader)
 - [ ] Member 2 component completed (engine service is still a fixture loader)
 - [ ] Member 3 component completed (engine service is still a fixture loader)
@@ -1057,6 +1211,29 @@ Shared changes should be reviewed before merging.
 - [ ] Full integration completed
 - [ ] Controlled experiments completed
 - [ ] Final validation completed
+
+### Runtime data status
+
+The checklist above predates the real-data-only work and was not re-audited. As of this change:
+
+- [x] The running application serves live cluster evidence only. Cluster failures, incomplete
+      topology, missing workflow evidence and missing recommendations are explicit coded errors.
+- [x] Unknown facts (zone, capacity, restart counts, accuracy) stay unknown (`null`); nothing is
+      defaulted to a perfect or zero value.
+- [x] Kubernetes Service/ownership resolution follows Kubernetes: a Service owns the pods its selector
+      matches and each pod's Deployment comes from its owner references (pod → ReplicaSet → Deployment),
+      so applications whose Deployments are named differently from their `app` label (Istio Bookinfo:
+      `productpage-v1` with `app: productpage`) resolve completely. Pods that no Service selects are named
+      in a warning. Not yet verified against a real Bookinfo cluster: the tests use a Bookinfo-shaped fake.
+- [x] **Live recommendations exist.** `GET /api/recommendations/live?workflow_id=…` computes a
+      `RecommendationReport` from the connected cluster and a frozen workflow (topology-spread candidates,
+      simulated on a copy of the live graph, blast radius before and after from Component 3). `confidence` is
+      evidence coverage, not model accuracy. An approval can be requested for it and is bound to that live
+      evidence; nothing is applied.
+- [ ] **Still missing in Component 4:** a Kubernetes YAML proposal and a `ValidationReport` (predicted versus
+      observed improvement after an approved change). Candidate types other than topology spread are skipped.
+      Not yet run against a real cluster. See [`docs/RECOMMENDATION_LIVE_DATA.md`](docs/RECOMMENDATION_LIVE_DATA.md).
+- [ ] Controlled read-only validation against the kind cluster has not been run yet.
 
 ---
 

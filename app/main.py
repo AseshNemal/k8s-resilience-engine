@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
@@ -8,9 +9,9 @@ from app.api import (
     failure_impacts,
     health,
     recommendations,
-    validations,
     workflows,
 )
+from app.shared.evidence_errors import EvidenceError
 from app.web import (
     dashboard,
     deployments as web_deployments,
@@ -31,6 +32,14 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
+
+@app.exception_handler(EvidenceError)
+async def evidence_unavailable(_request: Request, error: EvidenceError) -> JSONResponse:
+    """Missing live evidence is an explicit, machine-readable error, never a substituted answer."""
+    return JSONResponse(status_code=error.http_status, content={"detail": error.detail()})
+
+
 app.mount(
     "/static",
     StaticFiles(directory=str(BASE_DIR / "static")),
@@ -43,7 +52,6 @@ app.include_router(workflows.router)
 app.include_router(deployments.router)
 app.include_router(failure_impacts.router)
 app.include_router(recommendations.router)
-app.include_router(validations.router)
 
 # HTML page routers (app/web/) — render templates only, no research logic.
 app.include_router(dashboard.router)

@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
+from tests.support.research_app import app  # research-only routes are not served by app.main
 
 client = TestClient(app)
 
@@ -77,6 +77,7 @@ def test_approved_graph_evaluation_route_is_documented() -> None:
     ]["get"]
     assert operation["responses"]["200"]
     assert operation["responses"]["404"]
+    assert operation["responses"]["409"]  # no reference graph available: insufficient evidence
 
 
 @pytest.mark.parametrize("threshold", [-0.01, 1.01])

@@ -3,7 +3,7 @@ Data Models for Phase 4: Controlled Chaos & Disruption Drift Experiments.
 Component: Component 2 - Deployment Topology Modeling
 """
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from experiments.placement_drift.constants import (
@@ -18,12 +18,12 @@ class PodPlacementRecord(BaseModel):
     pod_name: str = Field(..., description="Unique name of the pod")
     service_name: str = Field(..., description="Logical microservice owning this pod")
     node_name: str = Field(..., description="Physical worker node hosting the pod")
-    zone: str = Field(default="default-zone", description="Availability zone label")
+    zone: str | None = Field(default=None, description="Availability zone label, if the node has one")
     is_ready: bool = Field(default=True, description="Whether the pod passes readiness probes")
 
 
 class ClusterSnapshot(BaseModel):
-    """Immutable, timestamped, hash-verified snapshot of cluster pod placement."""
+    """Timestamped snapshot of cluster pod placement with a SHA-256 content hash."""
     snapshot_id: str = Field(..., description="Unique snapshot identifier (e.g. T0-baseline)")
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
@@ -67,13 +67,21 @@ class ScenarioResult(BaseModel):
         default=ScenarioExecutionMode.DRY_RUN_SIMULATION,
         description="Whether run against live Kubernetes or dry-run simulation",
     )
+    topology_source: Literal["scripted", "live"] = Field(
+        default="scripted",
+        description="'scripted': placements written in the scenario code. 'live': placements taken from the "
+                    "connected cluster's real topology and disrupted by a deterministic rule (still a dry run)",
+    )
     baseline_snapshot_id: str = Field(..., description="T0 snapshot identifier")
     target_snapshot_id: str = Field(..., description="T1 snapshot identifier")
     baseline_hash: str = Field(default="", description="T0 SHA-256 hash")
     target_hash: str = Field(default="", description="T1 SHA-256 hash")
-    d_rate: float = Field(default=0.0, ge=0.0, le=1.0, description="Placement Drift Rate (0.0 - 1.0)")
-    delta_e_rate: float = Field(default=0.0, description="Change in failure domain exposure rate")
-    drifted_services: List[str] = Field(default_factory=list, description="Services whose placement shifted")
+    d_rate: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Share of services whose exposure status changed; None if nothing was compared",
+    )
+    delta_e_rate: Optional[float] = Field(default=None, description="E_rate(T1) - E_rate(T0)")
+    drifted_services: List[str] = Field(default_factory=list, description="Services whose exposure status changed")
     transitions: List[NodeTransitionRecord] = Field(
         default_factory=list, description="State transition matrix records"
     )

@@ -67,7 +67,9 @@ def _normalized_http_path(path: str) -> str:
     )
 
 
-def operation_key(root: Span) -> str | None:
+def operation_key(
+    root: Span, route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None = None,
+) -> str | None:
     """Group requests by method and route, excluding health and telemetry traffic."""
     method = root.tags.get("http.request.method", root.tags.get("http.method"))
     route = root.tags.get("http.route") or root.tags.get("url.template")
@@ -76,8 +78,11 @@ def operation_key(root: Span) -> str | None:
         path = urlsplit(target).path
         if path in {"/_healthz", "/healthz", "/health", "/readyz", "/metrics"} or path.startswith("/static/"):
             return None
-        if not route:
+        if route_patterns is None and not route:
             path = _normalized_http_path(path)
+        elif route_patterns is not None:
+            for pattern, template in route_patterns:
+                path = pattern.sub(template, path)
         return f"{method.upper()} {path}"
     if "TraceService/Export" in root.operation_name or root.tags.get("span.kind") == "client":
         return None
@@ -86,13 +91,14 @@ def operation_key(root: Span) -> str | None:
 
 def select_workflow_traces(
     traces: list[dict], operation: str, entry_service: str | None = None,
+    route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None = None,
 ) -> list[dict]:
     selected = []
     for trace in traces:
         spans = parse_spans([trace])
         roots = find_root_spans({trace.get("traceID", ""): spans})
         root = next(iter(roots.values()), None)
-        if root and operation_key(root) == operation and (
+        if root and operation in {operation_key(root, route_patterns), operation_key(root, ())} and (
             entry_service is None or root.service_name == entry_service
         ):
             selected.append(trace)
@@ -137,11 +143,15 @@ def find_root_spans(spans_by_trace: dict[str, list[Span]]) -> dict[str, Span]:
     }
 
 
-def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWorkflowSummary]:
+def discover_root_workflows(
+    traces: list[dict[str, Any]],
+    route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None = None,
+) -> list[DiscoveredWorkflowSummary]:
     """Scan raw Jaeger traces and auto-discover all distinct entry workflows.
 
     Args:
         traces: Raw Jaeger trace list (from file or Jaeger REST API).
+        route_patterns: Route templates that merge resource IDs; ``()`` for none.
 
     Returns:
         List of :class:`DiscoveredWorkflowSummary` sorted by trace count descending.
@@ -160,7 +170,7 @@ def discover_root_workflows(traces: list[dict[str, Any]]) -> list[DiscoveredWork
     traces_by_operation: dict[tuple[str, str], list[str]] = defaultdict(list)
 
     for trace_id, root in root_spans.items():
-        op_name = operation_key(root)
+        op_name = operation_key(root, route_patterns)
         if not op_name:
             continue
         traces_by_operation[(root.service_name, op_name)].append(trace_id)

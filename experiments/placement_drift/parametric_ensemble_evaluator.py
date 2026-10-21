@@ -1,442 +1,189 @@
 """
-Multi-Service Parametric Ensemble Evaluator for Kubernetes Placement Drift.
+Ensemble statistics over executed placement-drift scenarios.
 Component: Component 2 - Deployment Topology Modeling
 
-Evaluates resilience drift across multi-workload parameter variations to eliminate
-single-service evaluation bias and compute statistically sound ensemble metrics
-(Mean, Standard Deviation, 95% Confidence Intervals).
+Every trial is a scenario that was actually run through BaseScenario.run(); no trial value is
+typed in by hand. With the current dry-run scenarios the statistics describe the scripted
+fixtures, so `is_experimental_evidence` is False and they must not be reported as findings.
 """
 import math
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from experiments.placement_drift.constants import (
     DEFAULT_CHAOS_NAMESPACE,
-    DisruptionType,
     ScenarioExecutionMode,
     ScenarioStatus,
 )
-from experiments.placement_drift.scenario_models import (
-    ClusterSnapshot,
-    DisruptionEvent,
-    PodPlacementRecord,
-    ScenarioResult,
-)
-from experiments.placement_drift.cluster_state_freezer import ClusterStateFreezer
-from experiments.placement_drift.placement_drift_calculator import PlacementDriftCalculator
+from experiments.placement_drift.disruption_orchestrator import DisruptionOrchestrator
 from experiments.placement_drift.snapshot_repository import SnapshotRepository
+
+# Two-sided 95% Student-t critical values t(0.975, df) for df = 1..30 (standard tables).
+_T_975 = [
+    12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+    2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+    2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
+]
+_Z_975 = 1.960  # normal approximation used for df > 30
+
+DRY_RUN_NOTE = (
+    "Dry-run simulation: T0 and T1 placements are scripted in the scenario code. These statistics "
+    "describe the fixtures and are not observations of the Kubernetes scheduler."
+)
+
+
+def t_critical_95(df: int) -> float:
+    return _T_975[df - 1] if 1 <= df <= len(_T_975) else _Z_975
 
 
 class ParametricTrialResult(BaseModel):
-    """Result of an individual parametric trial configuration."""
-    trial_id: str = Field(..., description="Unique trial identifier")
-    scenario_category: str = Field(..., description="Category of disruption tested")
-    target_service: str = Field(..., description="Target microservice evaluated")
-    parameter_spec: str = Field(..., description="Specific parameter permutation evaluated")
-    d_rate: float = Field(..., ge=0.0, le=1.0, description="Placement drift rate observed")
-    delta_e_rate: float = Field(..., description="Net change in failure domain exposure")
-    migrated_pods: int = Field(default=0, description="Count of displaced pod replicas")
-    status: ScenarioStatus = Field(default=ScenarioStatus.COMPLETED)
-    runtime_ms: float = Field(default=0.0, description="Execution duration in milliseconds")
+    trial_id: str
+    scenario_category: str
+    target_service: str
+    parameter_spec: str
+    execution_mode: ScenarioExecutionMode
+    d_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    delta_e_rate: Optional[float] = None
+    migrated_pods: int = 0
+    status: ScenarioStatus
+    runtime_ms: float = 0.0
 
 
 class EnsembleBenchmarkMetrics(BaseModel):
-    """Statistical summary across multi-service parametric ensemble trials."""
-    total_trials: int = Field(..., description="Total trials executed")
-    successful_trials: int = Field(..., description="Trials successfully completed")
-    mean_d_rate: float = Field(..., description="Sample mean placement drift rate (mu)")
-    std_dev_d_rate: float = Field(..., description="Sample standard deviation (sigma)")
-    min_d_rate: float = Field(..., description="Minimum drift rate observed")
-    max_d_rate: float = Field(..., description="Maximum drift rate observed")
-    mean_delta_e_rate: float = Field(..., description="Mean change in failure domain exposure")
-    confidence_interval_95: List[float] = Field(..., description="95% confidence interval [lower, upper]")
-    per_service_drift: Dict[str, float] = Field(..., description="Average drift per microservice")
-    per_disruption_drift: Dict[str, float] = Field(..., description="Average drift per disruption category")
-    trials: List[ParametricTrialResult] = Field(default_factory=list, description="All trial records")
+    total_trials: int
+    successful_trials: int
+    measured_trials: int = Field(description="Completed trials with a measurable D_rate")
+    execution_mode: ScenarioExecutionMode
+    is_experimental_evidence: bool
+    evidence_note: str
+    mean_d_rate: Optional[float] = None
+    std_dev_d_rate: Optional[float] = Field(default=None, description="Sample standard deviation (n-1)")
+    min_d_rate: Optional[float] = None
+    max_d_rate: Optional[float] = None
+    mean_delta_e_rate: Optional[float] = None
+    confidence_interval_95: Optional[List[float]] = Field(
+        default=None, description="mean +/- t(0.975, n-1) * s / sqrt(n), clipped to [0, 1]; None if n < 2"
+    )
+    ci_method: str = "Student-t, two-sided 95%"
+    per_service_drift: Dict[str, float] = Field(default_factory=dict)
+    per_disruption_drift: Dict[str, float] = Field(default_factory=dict)
+    trials: List[ParametricTrialResult] = Field(default_factory=list)
+
+
+def _mean(values: List[float]) -> Optional[float]:
+    return sum(values) / len(values) if values else None
 
 
 class ParametricEnsembleEvaluator:
-    """
-    Executes a multi-service parametric sweep across Google Boutique microservices,
-    computing statistically rigorous ensemble resilience drift metrics.
-    """
 
-    TRIAL_SPECS: List[Dict[str, Any]] = [
-        # 1. Baseline Control Observation
-        {
-            "trial_id": "trial_01_baseline_steady",
-            "category": "BASELINE",
-            "service": "all_services",
-            "spec": "Steady-state control observation across all 3 nodes",
-            "d_rate": 0.0,
-            "delta_e": 0.0,
-            "migrated": 0,
-        },
-        # 2. Scale-Up Stress Variations (All 6 Core Services)
-        {
-            "trial_id": "trial_02_scale_up_frontend",
-            "category": "SCALE_UP_STRESS",
-            "service": "frontend",
-            "spec": "Scale frontend replicas 1 -> 5 under surge load",
-            "d_rate": 0.0,
-            "delta_e": 0.0,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_03_scale_up_cart",
-            "category": "SCALE_UP_STRESS",
-            "service": "cartservice",
-            "spec": "Scale cartservice replicas 2 -> 6 across 3 worker nodes",
-            "d_rate": 0.25,
-            "delta_e": 0.0,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_04_scale_up_payment",
-            "category": "SCALE_UP_STRESS",
-            "service": "paymentservice",
-            "spec": "Scale paymentservice replicas 1 -> 4 across 3 worker nodes",
-            "d_rate": 0.0,
-            "delta_e": 0.0,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_05_scale_up_catalog",
-            "category": "SCALE_UP_STRESS",
-            "service": "productcatalogservice",
-            "spec": "Scale productcatalogservice replicas 2 -> 5 under browsing spike",
-            "d_rate": 0.20,
-            "delta_e": 0.0,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_06_scale_up_checkout",
-            "category": "SCALE_UP_STRESS",
-            "service": "checkoutservice",
-            "spec": "Scale checkoutservice replicas 1 -> 4 across 3 worker nodes",
-            "d_rate": 0.0,
-            "delta_e": 0.0,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_07_scale_up_shipping",
-            "category": "SCALE_UP_STRESS",
-            "service": "shippingservice",
-            "spec": "Scale shippingservice replicas 1 -> 3 across 3 worker nodes",
-            "d_rate": 0.0,
-            "delta_e": 0.0,
-            "migrated": 0,
-        },
-        # 3. Scale-Down Redundancy Loss Variations (All 6 Core Services)
-        {
-            "trial_id": "trial_08_scale_down_frontend",
-            "category": "SCALE_DOWN_LOSS",
-            "service": "frontend",
-            "spec": "Scale frontend replicas 5 -> 2 across worker nodes",
-            "d_rate": 0.25,
-            "delta_e": 0.0,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_09_scale_down_cart",
-            "category": "SCALE_DOWN_LOSS",
-            "service": "cartservice",
-            "spec": "Scale cartservice replicas 3 -> 1 (zero-redundancy boundary)",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_10_scale_down_payment",
-            "category": "SCALE_DOWN_LOSS",
-            "service": "paymentservice",
-            "spec": "Scale paymentservice replicas 3 -> 1 (financial critical SPOF)",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_11_scale_down_catalog",
-            "category": "SCALE_DOWN_LOSS",
-            "service": "productcatalogservice",
-            "spec": "Scale productcatalogservice replicas 3 -> 1 on single worker node",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_12_scale_down_checkout",
-            "category": "SCALE_DOWN_LOSS",
-            "service": "checkoutservice",
-            "spec": "Scale checkoutservice replicas 2 -> 1 (orchestrator SPOF)",
-            "d_rate": 0.33,
-            "delta_e": 0.33,
-            "migrated": 0,
-        },
-        {
-            "trial_id": "trial_13_scale_down_shipping",
-            "category": "SCALE_DOWN_LOSS",
-            "service": "shippingservice",
-            "spec": "Scale shippingservice replicas 2 -> 1 on single worker node",
-            "d_rate": 0.33,
-            "delta_e": 0.33,
-            "migrated": 0,
-        },
-        # 4. Rolling Update Churn Variations (All 6 Core Services)
-        {
-            "trial_14_rolling_update_frontend": None,
-            "trial_id": "trial_14_rolling_update_frontend",
-            "category": "ROLLING_UPDATE",
-            "service": "frontend",
-            "spec": "Ingress rolling replacement causing zone placement shift",
-            "d_rate": 0.25,
-            "delta_e": 0.0,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_15_rolling_update_cart",
-            "category": "ROLLING_UPDATE",
-            "service": "cartservice",
-            "spec": "Cache tier rolling restart causing pod churn",
-            "d_rate": 0.33,
-            "delta_e": 0.0,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_16_rolling_update_payment",
-            "category": "ROLLING_UPDATE",
-            "service": "paymentservice",
-            "spec": "Zero-downtime rolling restart with financial pod churn",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_17_rolling_update_catalog",
-            "category": "ROLLING_UPDATE",
-            "service": "productcatalogservice",
-            "spec": "Catalog backend rolling update across 2 nodes",
-            "d_rate": 0.33,
-            "delta_e": 0.0,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_18_rolling_update_checkout",
-            "category": "ROLLING_UPDATE",
-            "service": "checkoutservice",
-            "spec": "Order orchestrator rolling update causing node shift",
-            "d_rate": 0.33,
-            "delta_e": 0.33,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_19_rolling_update_shipping",
-            "category": "ROLLING_UPDATE",
-            "service": "shippingservice",
-            "spec": "Logistics tier rolling update with replica churn",
-            "d_rate": 0.25,
-            "delta_e": 0.0,
-            "migrated": 1,
-        },
-        # 5. Pod Deletion Chaos Variations (All 6 Core Services)
-        {
-            "trial_id": "trial_20_pod_delete_frontend",
-            "category": "POD_DELETION",
-            "service": "frontend",
-            "spec": "Ingress edge pod crash and ReplicaSet recreation",
-            "d_rate": 0.25,
-            "delta_e": 0.0,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_21_pod_delete_cart",
-            "category": "POD_DELETION",
-            "service": "cartservice",
-            "spec": "Sudden cart pod crash and reschedule on worker-2",
-            "d_rate": 0.33,
-            "delta_e": 0.33,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_22_pod_delete_payment",
-            "category": "POD_DELETION",
-            "service": "paymentservice",
-            "spec": "Financial critical pod crash causing reschedule on worker-3",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_23_pod_delete_catalog",
-            "category": "POD_DELETION",
-            "service": "productcatalogservice",
-            "spec": "Sudden catalog pod termination and ReplicaSet recreation",
-            "d_rate": 0.50,
-            "delta_e": 0.50,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_24_pod_delete_checkout",
-            "category": "POD_DELETION",
-            "service": "checkoutservice",
-            "spec": "Core orchestrator pod crash causing reschedule on worker-3",
-            "d_rate": 0.33,
-            "delta_e": 0.33,
-            "migrated": 1,
-        },
-        {
-            "trial_id": "trial_25_pod_delete_shipping",
-            "category": "POD_DELETION",
-            "service": "shippingservice",
-            "spec": "Logistics pod crash and reschedule on worker-1",
-            "d_rate": 0.33,
-            "delta_e": 0.33,
-            "migrated": 1,
-        },
-        # 6. Infrastructure Node Eviction Variations (All 3 Worker Nodes)
-        {
-            "trial_id": "trial_26_node_drain_worker1",
-            "category": "NODE_DRAIN",
-            "service": "multi_workload",
-            "spec": "Complete worker-1 eviction (displacing payment-1 & checkout-1)",
-            "d_rate": 0.67,
-            "delta_e": 0.33,
-            "migrated": 2,
-        },
-        {
-            "trial_id": "trial_27_node_drain_worker2",
-            "category": "NODE_DRAIN",
-            "service": "multi_workload",
-            "spec": "Complete worker-2 eviction (displacing cart-1 & frontend-1)",
-            "d_rate": 0.67,
-            "delta_e": 0.33,
-            "migrated": 2,
-        },
-        {
-            "trial_id": "trial_28_node_drain_worker3",
-            "category": "NODE_DRAIN",
-            "service": "multi_workload",
-            "spec": "Complete worker-3 eviction (displacing cart-2 & shipping-1)",
-            "d_rate": 0.67,
-            "delta_e": 0.33,
-            "migrated": 2,
-        },
-    ]
-
-    def __init__(self, repository: Optional[SnapshotRepository] = None):
+    def __init__(
+        self,
+        repository: Optional[SnapshotRepository] = None,
+        execution_mode: ScenarioExecutionMode = ScenarioExecutionMode.DRY_RUN_SIMULATION,
+        namespace: str = DEFAULT_CHAOS_NAMESPACE,
+    ):
         self.repository = repository or SnapshotRepository()
+        self.execution_mode = execution_mode
+        self.namespace = namespace
+
+    def _run_trials(self) -> List[ParametricTrialResult]:
+        trials = []
+        for scenario_cls in DisruptionOrchestrator.ALL_SCENARIO_CLASSES:
+            scenario = scenario_cls(
+                namespace=self.namespace, execution_mode=self.execution_mode, repository=self.repository
+            )
+            result = scenario.run()
+            trials.append(ParametricTrialResult(
+                trial_id=result.scenario_id,
+                scenario_category=result.disruption_type.value,
+                target_service=scenario.target_service,
+                parameter_spec=result.scenario_name,
+                execution_mode=result.execution_mode,
+                d_rate=result.d_rate,
+                delta_e_rate=result.delta_e_rate,
+                migrated_pods=sum(t.pod_count for t in result.transitions),
+                status=result.status,
+                runtime_ms=result.runtime_ms,
+            ))
+        return trials
 
     def run_ensemble(self) -> EnsembleBenchmarkMetrics:
-        """Executes all 28 parametric trials and compiles statistical summary."""
-        trial_results: List[ParametricTrialResult] = []
-
-        for spec in self.TRIAL_SPECS:
-            trial_results.append(
-                ParametricTrialResult(
-                    trial_id=spec["trial_id"],
-                    scenario_category=spec["category"],
-                    target_service=spec["service"],
-                    parameter_spec=spec["spec"],
-                    d_rate=spec["d_rate"],
-                    delta_e_rate=spec["delta_e"],
-                    migrated_pods=spec["migrated"],
-                    status=ScenarioStatus.COMPLETED,
-                    runtime_ms=round(1.0 + (len(spec["spec"]) % 3) * 0.4, 2),
-                )
-            )
-
-        d_rates = [t.d_rate for t in trial_results]
-        delta_es = [t.delta_e_rate for t in trial_results]
+        trials = self._run_trials()
+        completed = [t for t in trials if t.status == ScenarioStatus.COMPLETED]
+        measured = [t for t in completed if t.d_rate is not None]
+        d_rates = [t.d_rate for t in measured]
         n = len(d_rates)
 
-        mean_d = sum(d_rates) / n
-        variance = sum((x - mean_d) ** 2 for x in d_rates) / (n - 1) if n > 1 else 0.0
-        std_dev = math.sqrt(variance)
-        stderr = std_dev / math.sqrt(n) if n > 0 else 0.0
+        mean_d = _mean(d_rates)
+        std_dev = ci = None
+        if n >= 2:
+            std_dev = math.sqrt(sum((x - mean_d) ** 2 for x in d_rates) / (n - 1))
+            half_width = t_critical_95(n - 1) * std_dev / math.sqrt(n)
+            ci = [round(max(0.0, mean_d - half_width), 4), round(min(1.0, mean_d + half_width), 4)]
 
-        ci_lower = max(0.0, round(mean_d - 1.96 * stderr, 4))
-        ci_upper = min(1.0, round(mean_d + 1.96 * stderr, 4))
+        def grouped(key: str) -> Dict[str, float]:
+            groups: Dict[str, List[float]] = {}
+            for t in measured:
+                groups.setdefault(getattr(t, key), []).append(t.d_rate)
+            return {k: round(_mean(v), 4) for k, v in sorted(groups.items())}
 
-        # Per service aggregation
-        service_map: Dict[str, List[float]] = {}
-        for t in trial_results:
-            service_map.setdefault(t.target_service, []).append(t.d_rate)
-        per_service = {k: round(sum(v) / len(v), 4) for k, v in service_map.items()}
-
-        # Per disruption category aggregation
-        category_map: Dict[str, List[float]] = {}
-        for t in trial_results:
-            category_map.setdefault(t.scenario_category, []).append(t.d_rate)
-        per_category = {k: round(sum(v) / len(v), 4) for k, v in category_map.items()}
+        deltas = [t.delta_e_rate for t in measured if t.delta_e_rate is not None]
+        is_live = self.execution_mode == ScenarioExecutionMode.LIVE_CLUSTER
+        r4 = lambda v: round(v, 4) if v is not None else None  # noqa: E731
 
         return EnsembleBenchmarkMetrics(
-            total_trials=n,
-            successful_trials=len(trial_results),
-            mean_d_rate=round(mean_d, 4),
-            std_dev_d_rate=round(std_dev, 4),
-            min_d_rate=round(min(d_rates), 4),
-            max_d_rate=round(max(d_rates), 4),
-            mean_delta_e_rate=round(sum(delta_es) / n, 4),
-            confidence_interval_95=[ci_lower, ci_upper],
-            per_service_drift=per_service,
-            per_disruption_drift=per_category,
-            trials=trial_results,
+            total_trials=len(trials),
+            successful_trials=len(completed),
+            measured_trials=n,
+            execution_mode=self.execution_mode,
+            is_experimental_evidence=is_live,
+            evidence_note="Live-cluster observations." if is_live else DRY_RUN_NOTE,
+            mean_d_rate=r4(mean_d),
+            std_dev_d_rate=r4(std_dev),
+            min_d_rate=r4(min(d_rates)) if d_rates else None,
+            max_d_rate=r4(max(d_rates)) if d_rates else None,
+            mean_delta_e_rate=r4(_mean(deltas)),
+            confidence_interval_95=ci,
+            per_service_drift=grouped("target_service"),
+            per_disruption_drift=grouped("scenario_category"),
+            trials=trials,
         )
 
     @classmethod
     def generate_markdown_report(cls, metrics: EnsembleBenchmarkMetrics) -> str:
-        """Formats the ensemble metrics into an academic publication-ready Markdown table."""
-        lines = [
-            "# Multi-Service Parametric Ensemble Evaluation: Placement Drift",
+        pct = lambda v: "n/a" if v is None else f"{v * 100:.2f}%"  # noqa: E731
+        ci = metrics.confidence_interval_95
+        lines = ["# Placement Drift Ensemble Summary", ""]
+        if not metrics.is_experimental_evidence:
+            lines += [f"> **{metrics.evidence_note}**", ""]
+        lines += [
+            "## 1. Summary",
+            f"- **Execution mode**: {metrics.execution_mode.value}",
+            f"- **Trials executed / completed / with measurable D_rate**: "
+            f"{metrics.total_trials} / {metrics.successful_trials} / {metrics.measured_trials}",
+            f"- **Mean D_rate**: {pct(metrics.mean_d_rate)}",
+            f"- **Sample standard deviation**: {pct(metrics.std_dev_d_rate)}",
+            f"- **95% confidence interval ({metrics.ci_method})**: "
+            + (f"[{pct(ci[0])}, {pct(ci[1])}]" if ci else "n/a (fewer than 2 measured trials)"),
+            f"- **Mean change in exposure rate**: {pct(metrics.mean_delta_e_rate)}",
             "",
-            "## 1. Statistical Executive Summary",
-            f"- **Total Parametric Trials ($N$)**: {metrics.total_trials}",
-            f"- **Sample Mean Placement Drift Rate ($\\mu_D$)**: {metrics.mean_d_rate * 100:.2f}%",
-            f"- **Sample Standard Deviation ($\\sigma_D$)**: {metrics.std_dev_d_rate * 100:.2f}%",
-            f"- **95% Confidence Interval**: [{metrics.confidence_interval_95[0] * 100:.2f}%, {metrics.confidence_interval_95[1] * 100:.2f}%]",
-            f"- **Mean Failure Domain Exposure Delta ($\\Delta E$)**: {metrics.mean_delta_e_rate * 100:+.2f}%",
-            f"- **Observed Drift Range**: [{metrics.min_d_rate * 100:.1f}%, {metrics.max_d_rate * 100:.1f}%]",
-            "",
-            "## 2. Microservice Sensitivity Breakdown",
-            "| Microservice | Trials Evaluated | Mean Drift Rate ($D_{rate}$) | Resilience Tier |",
-            "| :--- | :---: | :---: | :--- |",
+            "## 2. Mean D_rate per target service",
+            "| Service | Trials | Mean D_rate |",
+            "| :--- | :---: | :---: |",
         ]
-
-        for svc, rate in sorted(metrics.per_service_drift.items(), key=lambda x: x[1], reverse=True):
-            if rate >= 0.50:
-                tier = "CRITICAL DRIFT"
-            elif rate >= 0.25:
-                tier = "MODERATE DRIFT"
-            else:
-                tier = "MINIMAL DRIFT"
-            lines.append(f"| `{svc}` | {len([t for t in metrics.trials if t.target_service == svc])} | {rate * 100:.2f}% | {tier} |")
-
-        lines.extend([
-            "",
-            "## 3. Disruption Category Sensitivity Breakdown",
-            "| Disruption Category | Trials | Mean Drift Rate ($D_{rate}$) | Scheduling Impact |",
-            "| :--- | :---: | :---: | :--- |",
-        ])
-
-        for cat, rate in sorted(metrics.per_disruption_drift.items(), key=lambda x: x[1], reverse=True):
-            if rate >= 0.50:
-                impact = "HIGH DISPLACEMENT"
-            elif rate >= 0.25:
-                impact = "BALANCED RE-PLACEMENT"
-            else:
-                impact = "STABLE"
-            lines.append(f"| **{cat}** | {len([t for t in metrics.trials if t.scenario_category == cat])} | {rate * 100:.2f}% | {impact} |")
-
-        lines.extend([
-            "",
-            "## 4. Full Parametric Trial Ledger",
-            "| Trial ID | Category | Target Workload | Permutation Spec | $D_{rate}$ | $\\Delta E$ | Status |",
-            "| :--- | :--- | :--- | :--- | :---: | :---: | :--- |",
-        ])
-
+        for svc, rate in metrics.per_service_drift.items():
+            count = sum(t.target_service == svc for t in metrics.trials if t.d_rate is not None)
+            lines.append(f"| `{svc}` | {count} | {pct(rate)} |")
+        lines += ["", "## 3. Mean D_rate per disruption type", "| Disruption | Trials | Mean D_rate |",
+                  "| :--- | :---: | :---: |"]
+        for cat, rate in metrics.per_disruption_drift.items():
+            count = sum(t.scenario_category == cat for t in metrics.trials if t.d_rate is not None)
+            lines.append(f"| **{cat}** | {count} | {pct(rate)} |")
+        lines += ["", "## 4. Trials", "| Trial | Disruption | Target | D_rate | Delta E | Status |",
+                  "| :--- | :--- | :--- | :---: | :---: | :--- |"]
         for t in metrics.trials:
             lines.append(
-                f"| `{t.trial_id}` | {t.scenario_category} | `{t.target_service}` | {t.parameter_spec} | {t.d_rate * 100:.1f}% | {t.delta_e_rate * 100:+.1f}% | {t.status.value} |"
+                f"| `{t.trial_id}` | {t.scenario_category} | `{t.target_service}` | {pct(t.d_rate)} | "
+                f"{pct(t.delta_e_rate)} | {t.status.value} |"
             )
-
         return "\n".join(lines)

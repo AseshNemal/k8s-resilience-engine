@@ -367,7 +367,39 @@ async function runGuidedSetupChecks() {
     try {
         const campaigns = await (await page.request.get(fixtureBase + '/api/workflows/experiment-campaigns')).json();
         const sessionId = campaigns.find(item => item.workflowName.includes('Checkout lifecycle')).analysisSessionId;
-        await page.goto(fixtureBase + '/components/workflows?inspection=' + encodeURIComponent(sessionId), {waitUntil: 'networkidle'});
+        const session = await (await page.request.get(fixtureBase + '/api/workflows/analysis-sessions/' + encodeURIComponent(sessionId))).json();
+        await page.goto(fixtureBase + '/components/workflows', {waitUntil: 'networkidle'});
+        await page.getByRole('button', {name: 'New workflow', exact: true}).click();
+        await page.getByLabel('Trace query URL', {exact: true}).fill('http://localhost:16686');
+        await page.getByLabel('Environment name', {exact: true}).fill('CONTROLLED-FIXTURE-ONLY');
+        await page.getByLabel('Environment type', {exact: true}).selectOption('experimental');
+        let scans = 0;
+        await page.route('**/api/workflows/discovery', async route => {
+            assert.equal(route.request().postDataJSON().entryService, undefined);
+            scans += 1;
+            await route.fulfill({json: {state: scans === 1 ? 'no_traces' : 'discovered',
+                message: scans === 1 ? 'No traces yet' : 'Recorded workflows found',
+                fingerprint: String(scans), truncated: false,
+                workflows: scans === 1 ? [] : [
+                    {rootService: 'other-gateway', operationName: session.operationName, traceCount: 2},
+                    {rootService: session.entryService, operationName: session.operationName, traceCount: 3},
+                ]}});
+        });
+        await page.getByRole('button', {name: 'Find workflows automatically', exact: true}).click();
+        await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'No traces yet'}).waitFor();
+        assert(await page.getByRole('button', {name: 'Inspect traces and set up workflow', exact: true}).isDisabled());
+        await page.getByRole('button', {name: 'Find workflows automatically', exact: true}).click();
+        await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'Recorded workflows found'}).waitFor();
+        await page.getByLabel('Request or operation to test', {exact: true}).selectOption('1');
+        await page.route('**/api/workflows/analysis-sessions', async route => {
+            if (route.request().method() !== 'POST') return route.continue();
+            const payload = route.request().postDataJSON();
+            assert.equal(payload.entryService, session.entryService);
+            assert.equal(payload.operationName, session.operationName);
+            await route.fulfill({status: 201, json: session});
+        });
+        await page.getByRole('button', {name: 'Inspect traces and set up workflow', exact: true}).click();
+        check('Automatic discovery handles empty evidence, distinguishes equal operation names by entry service, and opens the guided setup for the chosen candidate');
         const form = page.locator('[data-role="guided-result"] form');
         const action = form.locator('.request-section').filter({has: page.getByRole('heading', {name: 'Request to measure', exact: true})});
         const save = form.getByRole('button', {name: 'Save and continue to baseline runs', exact: true});

@@ -19,9 +19,9 @@
 
     // What to do next, for the failures people actually hit. Matched on the backend's own message.
     const HINTS = [
-        [/can change the cluster/, "Run ./scripts/extension-cluster-access.sh and choose the file it writes. It issues a read-only credential."],
-        [/Could not reach the cluster/, "Check that the cluster is running (./scripts/cluster-up.sh), then try again."],
-        [/rejected the credential|expired/, "Run ./scripts/extension-cluster-access.sh to issue a new token, then choose the new file."],
+        [/can change the cluster/, "Run ./scripts/extension-cluster-access.sh (Windows: scripts\\extension-cluster-access.cmd) and choose the file it writes. It issues a read-only credential."],
+        [/Could not reach the cluster/, "Check that the cluster is running (./scripts/cluster-up.sh, or scripts\\cluster-up.cmd on Windows), then try again."],
+        [/rejected the credential|expired/, "Run ./scripts/extension-cluster-access.sh (Windows: scripts\\extension-cluster-access.cmd) to issue a new token, then choose the new file."],
         [/current-context|valid YAML|not a kubeconfig|too large|embedded|https URL|exec|proxy|TLS/, "Choose the file written by ./scripts/extension-cluster-access.sh: .kube/extension-readonly.kubeconfig."],
     ];
 
@@ -47,20 +47,25 @@
     function render(s) {
         const connected = Boolean(s.connected);
         const expired = connected && Boolean(s.expired);
-        status.dataset.state = !connected ? "none" : expired ? "expired" : "connected";
-        title.textContent = !connected ? "Not connected" : expired ? "Credential expired" : "Connected · read-only";
+        // A credential the helper installed renews itself, so it is never shown as expired or with an
+        // expiry date: an expired one is simply being renewed.
+        const managed = connected && Boolean(s.managed);
+        status.dataset.state = !connected ? "none" : expired ? (managed ? "renewing" : "expired") : "connected";
+        title.textContent = !connected ? "Not connected" : expired ? (managed ? "Renewing automatically" : "Credential expired") : "Connected · read-only";
         summary.textContent = !connected
-            ? "Choose a read-only kubeconfig to read your cluster. Until then the app uses sample data."
+            ? "Choose a read-only kubeconfig to read your cluster. Until then pages report that no cluster is connected."
             : expired
-                ? "Renew the credential to keep reading your cluster."
-                : "The app can list nodes, pods and deployments. It cannot change your cluster.";
+                ? (managed
+                    ? "The credential is being renewed automatically. No action is needed; pages show data again as soon as that finishes."
+                    : "Replace the credential to keep reading your cluster.")
+                : "The app can list nodes, pods, services, deployments and replicasets. It cannot change your cluster.";
         details.hidden = !connected;
         disconnect.hidden = !connected;
         submit.textContent = connected ? "Replace credential" : "Connect";
         if (connected) {
             q("connect-server").textContent = s.server;
             q("connect-credential").textContent = s.credential;
-            q("connect-expiry").textContent = expiryText(s.expiresAt);
+            q("connect-expiry").textContent = managed ? "Renews itself automatically" : expiryText(s.expiresAt);
         }
     }
 
@@ -128,5 +133,6 @@
         }
     });
 
+    window.addEventListener("resilience-cluster-changed", refresh);
     refresh();
 })();

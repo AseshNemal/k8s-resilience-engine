@@ -41,8 +41,9 @@ def compare(scenario_id: str = "07_node_drain_eviction"):
     print("=" * 72)
     print(f"T0 SHA-256 Fingerprint: {t0.sha256_hash}")
     print(f"T1 SHA-256 Fingerprint: {t1.sha256_hash}")
-    print(f"Calculated Drift Rate (D_rate): {result.d_rate * 100:.2f}%")
-    print(f"Net Exposure Delta (Delta_E):   {result.delta_e_rate * 100:+.2f}%")
+    fmt = lambda v: "n/a" if v is None else f"{v * 100:.2f}%"  # noqa: E731
+    print(f"Drift Rate (D_rate):            {fmt(result.d_rate)}  [dry-run, scripted placements]")
+    print(f"Exposure Rate Change (Delta_E): {fmt(result.delta_e_rate)}")
     print("=" * 72)
 
 
