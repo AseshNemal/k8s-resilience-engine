@@ -112,7 +112,7 @@ from app.engine.workflow_dependency_modeling.scenario_repository import (
 from app.engine.workflow_dependency_modeling.scenario_service import parse_scenario_etag
 from app.integrations.jaeger.client import DEFAULT_JAEGER_URL, JaegerClient
 from app.shared.schemas.workflow import WorkflowGraph
-from app.engine.workflow_dependency_modeling.analysis_models import (
+from app.engine.workflow_dependency_modeling.offline_analysis import (
     WorkflowAnalysisRequest, WorkflowAnalysisResult,
 )
 
