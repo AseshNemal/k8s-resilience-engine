@@ -1,4 +1,4 @@
-"""Evaluate a saved failure-impact prediction against captured evidence."""
+"""Evaluate one or more saved predictions against captured evidence."""
 
 import argparse
 import json
@@ -35,14 +35,32 @@ def evaluate_saved_experiment(
     prediction_payload: Mapping[str, object],
     evidence_payload: Mapping[str, object],
 ) -> dict[str, object]:
-    """Validate in-memory payloads through Component 3's existing pipeline."""
+    """Validate one in-memory pair through Component 3's existing pipeline."""
 
-    prediction = FailureImpactReport.model_validate(prediction_payload)
-    manifest = parse_captured_experiment_manifest(evidence_payload)
-    evidence = require_complete_manifest_evidence(manifest)
+    return evaluate_saved_experiments(
+        batch_id=batch_id,
+        experiments=[(prediction_payload, evidence_payload)],
+    )
+
+
+def evaluate_saved_experiments(
+    *,
+    batch_id: str,
+    experiments: Sequence[
+        tuple[Mapping[str, object], Mapping[str, object]]
+    ],
+) -> dict[str, object]:
+    """Aggregate complete saved experiments through the metric pipeline."""
+
+    prepared: list[PredictionEvidenceExperiment] = []
+    for prediction_payload, evidence_payload in experiments:
+        prediction = FailureImpactReport.model_validate(prediction_payload)
+        manifest = parse_captured_experiment_manifest(evidence_payload)
+        evidence = require_complete_manifest_evidence(manifest)
+        prepared.append(PredictionEvidenceExperiment(prediction, evidence))
     summary = evaluate_prediction_evidence(
         batch_id,
-        [PredictionEvidenceExperiment(prediction, evidence)],
+        prepared,
     )
     return {
         "artifactType": ARTIFACT_TYPE,
@@ -63,37 +81,145 @@ def _read_json_object(path: Path) -> dict[str, object]:
     return payload
 
 
+def _batch_manifest_inputs(
+    path: Path,
+) -> tuple[str, tuple[tuple[Path, Path], ...]]:
+    payload = _read_json_object(path)
+    expected_fields = {"batchId", "experiments"}
+    unknown_fields = tuple(sorted(set(payload) - expected_fields))
+    missing_fields = tuple(sorted(expected_fields - set(payload)))
+    if missing_fields:
+        raise ValueError(
+            "batch manifest is missing fields: " + ", ".join(missing_fields)
+        )
+    if unknown_fields:
+        raise ValueError(
+            "batch manifest contains unknown fields: "
+            + ", ".join(unknown_fields)
+        )
+
+    batch_id = payload["batchId"]
+    if not isinstance(batch_id, str) or not batch_id.strip():
+        raise ValueError("batch manifest batchId must be a non-empty string")
+    entries = payload["experiments"]
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(
+            "batch manifest experiments must be a non-empty array"
+        )
+
+    pairs: list[tuple[Path, Path]] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            raise ValueError(
+                f"batch manifest experiment {index} must be an object"
+            )
+        entry_fields = set(entry)
+        required_entry_fields = {"prediction", "evidence"}
+        missing_entry_fields = tuple(
+            sorted(required_entry_fields - entry_fields)
+        )
+        unknown_entry_fields = tuple(
+            sorted(entry_fields - required_entry_fields)
+        )
+        if missing_entry_fields:
+            raise ValueError(
+                f"batch manifest experiment {index} is missing fields: "
+                + ", ".join(missing_entry_fields)
+            )
+        if unknown_entry_fields:
+            raise ValueError(
+                f"batch manifest experiment {index} contains unknown fields: "
+                + ", ".join(unknown_entry_fields)
+            )
+
+        resolved_paths: list[Path] = []
+        for field_name in ("prediction", "evidence"):
+            value = entry[field_name]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    f"batch manifest experiment {index} {field_name} "
+                    "must be a non-empty path string"
+                )
+            artifact_path = Path(value)
+            if not artifact_path.is_absolute():
+                artifact_path = path.parent / artifact_path
+            resolved_paths.append(artifact_path)
+        pairs.append((resolved_paths[0], resolved_paths[1]))
+    return batch_id, tuple(pairs)
+
+
 def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--prediction",
-        required=True,
         type=Path,
         help="Path to a saved FailureImpactReport JSON object",
     )
     parser.add_argument(
         "--evidence",
-        required=True,
         type=Path,
         help="Path to a captured experiment manifest JSON object",
     )
     parser.add_argument(
         "--batch-id",
-        required=True,
         help="Traceable identifier for the validation batch",
+    )
+    parser.add_argument(
+        "--batch-manifest",
+        type=Path,
+        help=(
+            "JSON file containing batchId and prediction/evidence paths for "
+            "repeated experiments"
+        ),
     )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Read two artifacts and print validation JSON without writing files."""
+    """Read saved artifacts and print validation JSON without writing files."""
 
-    arguments = _argument_parser().parse_args(argv)
-    artifact = evaluate_saved_experiment(
-        batch_id=arguments.batch_id,
-        prediction_payload=_read_json_object(arguments.prediction),
-        evidence_payload=_read_json_object(arguments.evidence),
+    parser = _argument_parser()
+    arguments = parser.parse_args(argv)
+    single_arguments = (
+        arguments.prediction,
+        arguments.evidence,
+        arguments.batch_id,
     )
+    if arguments.batch_manifest is not None:
+        if any(value is not None for value in single_arguments):
+            parser.error(
+                "--batch-manifest cannot be combined with --prediction, "
+                "--evidence, or --batch-id"
+            )
+        batch_id, artifact_paths = _batch_manifest_inputs(
+            arguments.batch_manifest
+        )
+        artifact = evaluate_saved_experiments(
+            batch_id=batch_id,
+            experiments=[
+                (_read_json_object(prediction), _read_json_object(evidence))
+                for prediction, evidence in artifact_paths
+            ],
+        )
+    else:
+        missing = tuple(
+            name
+            for name, value in (
+                ("--prediction", arguments.prediction),
+                ("--evidence", arguments.evidence),
+                ("--batch-id", arguments.batch_id),
+            )
+            if value is None
+        )
+        if missing:
+            parser.error(
+                "single-experiment validation requires " + ", ".join(missing)
+            )
+        artifact = evaluate_saved_experiment(
+            batch_id=arguments.batch_id,
+            prediction_payload=_read_json_object(arguments.prediction),
+            evidence_payload=_read_json_object(arguments.evidence),
+        )
     print(json.dumps(artifact, indent=2))
     return 0
 
