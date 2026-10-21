@@ -27,6 +27,9 @@ ROUTES = {
     ("GET", "/api/deployments/benchmarks/latex/{scenario_id}"),
     ("GET", "/api/deployments/benchmarks/ensemble"),
     ("GET", "/api/deployments/benchmarks/ensemble/markdown"),
+    # Stored results of Member 2's live KinD placement-drift runs (experiments/placement_drift/results):
+    # recorded observations of a separate research cluster, labelled "[Validation]", not the connected one.
+    ("GET", "/api/deployments/benchmarks/live-experiments"),
 }
 
 PATHS = {path for _, path in ROUTES}

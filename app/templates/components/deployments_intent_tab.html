@@ -5,10 +5,27 @@
             <h3 class="tab-pane__title">Declared Manifest Intent vs Live Placement Compliance</h3>
             <p class="tab-pane__desc">Side-by-side reconciliation between developer YAML specifications and active cluster state.</p>
         </div>
-        <div class="compliance-metric-pill" id="compliance-overall-pill">
-            Compliance Rate: <strong id="compliance-rate-val">100.0%</strong>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <div class="compliance-metric-pill" title="Services whose declared ready-replica count equals the live ready count">
+                Replica match: <strong id="replica-match-val">n/a</strong>
+            </div>
+            <div class="compliance-metric-pill" id="compliance-overall-pill" title="Services that satisfy their declared spread/affinity rules ÷ services that declare such rules (live cluster only)">
+                Placement-rule compliance: <strong id="compliance-rate-val">n/a</strong>
+            </div>
         </div>
     </div>
+
+    <p class="ui-note manifest-source" data-role="manifest-source" aria-live="polite">Checking which manifest is used…</p>
+
+    <details class="tab-help">
+        <summary>ℹ️ What am I looking at?</summary>
+        <ul>
+            <li><strong>Declared</strong> = what the developer wrote in the YAML. <strong>Live</strong> = what is really running now.</li>
+            <li><strong>Replica drift</strong> = the cluster runs a different number of ready copies than the YAML declares.</li>
+            <li><strong>Placement-rule compliance</strong> = of the services that declare a spread/anti-affinity rule, how many actually satisfy it. No rule declared → nothing to check (n/a).</li>
+            <li>Limits are shown for information only; they do not count towards compliance.</li>
+        </ul>
+    </details>
 
     <div class="intent-table-container card card--glass">
         <table class="intent-table" id="intent-comparison-table">
@@ -17,10 +34,10 @@
                     <th>Microservice</th>
                     <th>Declared Replicas (YAML)</th>
                     <th>Live Ready Replicas</th>
-                    <th>CPU / Mem Limits</th>
+                    <th>CPU / Mem Limits (info)</th>
                     <th>Anti-Affinity</th>
                     <th>Topology Spread</th>
-                    <th>Compliance Status</th>
+                    <th>Replicas</th>
                 </tr>
             </thead>
             <tbody id="intent-table-body">

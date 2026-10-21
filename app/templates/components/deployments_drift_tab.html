@@ -2,14 +2,24 @@
 <div class="tab-pane" id="tab-drift" role="tabpanel" aria-labelledby="tab-btn-drift" hidden>
     <div class="tab-pane__header">
         <div>
-            <h3 class="tab-pane__title">Resilience Drift & Failure Exposure Signals</h3>
-            <p class="tab-pane__desc">Real-time detection of Single Points of Failure (SPOF) and 5 core resilience detectors.</p>
+            <h3 class="tab-pane__title">Resilience Drift & Failure Exposure</h3>
+            <p class="tab-pane__desc">Services that one worker-node failure would leave with 0 ready replicas, and differences between the declared YAML and the live cluster (live cluster only).</p>
         </div>
         <div class="spof-alert-badge" id="spof-banner-badge">
             <span class="pulsing-dot"></span>
-            <span id="spof-banner-count">0</span> Active SPOF Exposures Detected
+            <span id="spof-banner-count">0</span> exposed service(s)
         </div>
     </div>
+
+    <details class="tab-help">
+        <summary>ℹ️ What am I looking at?</summary>
+        <ul>
+            <li><strong>Exposed service</strong> = there is one node whose failure would leave the service with 0 ready replicas (a single point of failure).</li>
+            <li>A service with 1 replica is always exposed. A service with 3 replicas is exposed only if all 3 ended up on the same node.</li>
+            <li>The counters show the kinds of difference found between the YAML and the cluster (e.g. <strong>Scale drift</strong>: replica count differs).</li>
+            <li>Click <strong>Drill Down</strong> on a service to see which node it depends on and why.</li>
+        </ul>
+    </details>
 
     <!-- Category Summary Counters -->
     <div class="drift-categories-grid" id="drift-categories-counters">
@@ -22,7 +32,7 @@
             <span class="category-card__count" id="count-affinity-drift">0</span>
         </div>
         <div class="category-card" data-cat="resource">
-            <span class="category-card__label">Resource Bounds</span>
+            <span class="category-card__label">Missing Limits (info)</span>
             <span class="category-card__count" id="count-resource-drift">0</span>
         </div>
         <div class="category-card" data-cat="contention">
@@ -39,7 +49,7 @@
         <!-- SPOF & Exposed Workloads -->
         <div class="card card--glass">
             <div class="card__header">
-                <h4 class="card__title">Single Point of Failure (SPOF) Workloads</h4>
+                <h4 class="card__title">Exposed Services (single point of failure)</h4>
                 <span class="card__badge badge--danger" id="spof-total-badge">SPOF</span>
             </div>
             <div class="spof-list" id="spof-workloads-list">
@@ -47,11 +57,11 @@
             </div>
         </div>
 
-        <!-- Node Failure Blast Radius Rankings -->
+        <!-- Per-node exposure -->
         <div class="card card--glass">
             <div class="card__header">
-                <h4 class="card__title">Worker Node Risk & Density Rankings</h4>
-                <span class="card__badge badge--warning">Blast Radius</span>
+                <h4 class="card__title">Worker Nodes: services that depend on one node</h4>
+                <span class="card__badge badge--warning">Node exposure</span>
             </div>
             <div class="node-risk-list" id="node-risk-rankings-list">
                 <!-- Populated by deployments_drift_widget.js -->

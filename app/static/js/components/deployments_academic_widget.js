@@ -1,6 +1,6 @@
 /**
- * Phase 5 Academic Validation Panel Widget:
- * Fetches ground-truth accuracy metrics and updates viva defense indicators.
+ * Phase 5 Model Validation Panel Widget:
+ * Fetches accuracy measured against kubectl ground truth and shows it with its sample size.
  * Component: Component 2 - Deployment Topology Modeling
  */
 window.DeploymentsAcademicWidget = (function () {

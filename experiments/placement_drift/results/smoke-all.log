@@ -1,0 +1,40 @@
+﻿Running 16 live runs on kind-resilience-research; results -> experiments\placement_drift\results\smoke-all
+[1/16] 01_initial_deployment      A-no-rule  run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[2/16] 02_scale_up                A-no-rule  run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[3/16] 03_scale_down              A-no-rule  run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[4/16] 04_rolling_update          A-no-rule  run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[5/16] 05_pod_deletion            A-no-rule  run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[6/16] 06_node_cordon             A-no-rule  run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[7/16] 07_node_drain              A-no-rule  run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[8/16] 08_constrained_resources   A-no-rule  run 1: D_rate=0.25  target NOT_EXPOSED -> EXPOSED
+[9/16] 01_initial_deployment      B-spread   run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[10/16] 02_scale_up                B-spread   run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED  (did not settle)
+[11/16] 03_scale_down              B-spread   run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[12/16] 04_rolling_update          B-spread   run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED  (did not settle)
+[13/16] 05_pod_deletion            B-spread   run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED
+[14/16] 06_node_cordon             B-spread   run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED  (did not settle)
+[15/16] 07_node_drain              B-spread   run 1: D_rate=0.00  target NOT_EXPOSED -> NOT_EXPOSED  (did not settle)
+[16/16] 08_constrained_resources   B-spread   run 1: D_rate=0.25  target NOT_EXPOSED -> EXPOSED  (did not settle)
+# Live Placement Drift Experiment Results
+
+Observed on a local KinD cluster (nodes are containers on one host). Values are mean [95% Student-t CI] over repetitions of each condition.
+
+| Scenario | Config | Runs (failed / unsettled) | D_rate | Exposure T0 | Exposure T1 | Compliance T1 | Target became exposed | Target status at T1 |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| `01_initial_deployment` | A-no-rule | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | n/a | 0 | NOT_EXPOSED: 1 |
+| `01_initial_deployment` | B-spread | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | 100.0% | 0 | NOT_EXPOSED: 1 |
+| `02_scale_up` | A-no-rule | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | n/a | 0 | NOT_EXPOSED: 1 |
+| `02_scale_up` | B-spread | 1 (0 / 1) | 0.0% | 0.0% | 0.0% | 100.0% | 0 | NOT_EXPOSED: 1 |
+| `03_scale_down` | A-no-rule | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | n/a | 0 | NOT_EXPOSED: 1 |
+| `03_scale_down` | B-spread | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | 100.0% | 0 | NOT_EXPOSED: 1 |
+| `04_rolling_update` | A-no-rule | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | n/a | 0 | NOT_EXPOSED: 1 |
+| `04_rolling_update` | B-spread | 1 (0 / 1) | 0.0% | 0.0% | 0.0% | 100.0% | 0 | NOT_EXPOSED: 1 |
+| `05_pod_deletion` | A-no-rule | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | n/a | 0 | NOT_EXPOSED: 1 |
+| `05_pod_deletion` | B-spread | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | 100.0% | 0 | NOT_EXPOSED: 1 |
+| `06_node_cordon` | A-no-rule | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | n/a | 0 | NOT_EXPOSED: 1 |
+| `06_node_cordon` | B-spread | 1 (0 / 1) | 0.0% | 0.0% | 0.0% | 100.0% | 0 | NOT_EXPOSED: 1 |
+| `07_node_drain` | A-no-rule | 1 (0 / 0) | 0.0% | 0.0% | 0.0% | n/a | 0 | NOT_EXPOSED: 1 |
+| `07_node_drain` | B-spread | 1 (0 / 1) | 0.0% | 0.0% | 0.0% | 100.0% | 0 | NOT_EXPOSED: 1 |
+| `08_constrained_resources` | A-no-rule | 1 (0 / 0) | 25.0% | 0.0% | 25.0% | n/a | 1 | EXPOSED: 1 |
+| `08_constrained_resources` | B-spread | 1 (0 / 1) | 25.0% | 0.0% | 25.0% | 100.0% | 1 | EXPOSED: 1 |
+

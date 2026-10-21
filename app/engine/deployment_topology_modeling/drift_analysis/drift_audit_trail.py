@@ -5,10 +5,10 @@ from app.engine.deployment_topology_modeling.drift_analysis.drift_models import 
 
 class DriftAuditTrail:
     """
-    Immutable, timestamped audit log recorder for drift evaluation runs.
-    
-    Ensures research reproducibility and traceability for each detected 
-    resilience violation and placement state change.
+    In-memory, timestamped log of drift analysis runs and the violations each run found.
+
+    One log per DriftAnalyzer instance; it is not persisted and nothing in the app reads it yet.
+    Use get_records() when debugging or exporting a run.
     """
 
     def __init__(self):

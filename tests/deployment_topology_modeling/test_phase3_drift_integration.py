@@ -7,7 +7,6 @@ Expected values are read from the kubectl output in that folder:
   service-result.txt: SERVICE_UNAVAILABLE
 """
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.engine.deployment_topology_modeling import service
@@ -146,18 +145,16 @@ def test_cluster_unavailable_is_an_error_not_sample_data(monkeypatch):
     assert resp.json()["data_source"] == "live"
 
 
-def test_engine_endpoints_drift_and_baseline():
-    from app.engine.deployment_topology_modeling.endpoints import router as engine_router
-    test_app = FastAPI()
-    test_app.include_router(engine_router)
-    client = TestClient(test_app)
+def test_api_drift_baseline_and_diff():
+    from app.main import app
+    client = TestClient(app)
 
-    data_drift = client.get("/engine/deployment-topology/drift").json()
+    data_drift = client.get("/api/deployments/drift").json()
     assert data_drift["exposure_rate"] == pytest.approx(1.0)
-    data_b2 = client.get("/engine/deployment-topology/baseline-b2").json()
+    data_b2 = client.get("/api/deployments/baseline-b2").json()
     assert data_b2["total_single_points_of_failure"] == 1
 
     report = service.analyze_resilience_drift()[0].model_dump(mode="json")
-    resp = client.post("/engine/deployment-topology/diff", json={"baseline": report, "target": report})
+    resp = client.post("/api/deployments/diff", json={"baseline": report, "target": report})
     assert resp.status_code == 200
     assert resp.json()["placement_drift_rate"] == pytest.approx(0.0)

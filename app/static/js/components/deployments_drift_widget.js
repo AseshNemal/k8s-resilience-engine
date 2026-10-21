@@ -6,22 +6,21 @@
 window.DeploymentsDriftWidget = (function () {
     "use strict";
 
+    // The page reads the connected cluster only, so drift always compares declared intent with that cluster.
     async function loadDriftSignals() {
         try {
             // 1. Categories Breakdown
             const catResp = await fetch("/api/deployments/drift/categories");
-            if (catResp.status === 503) {
+            if (!catResp.ok) {
                 const body = await catResp.json().catch(() => ({}));
                 const container = document.getElementById("spof-workloads-list");
                 if (container) {
-                    container.textContent = `No Kubernetes cluster reachable — live drift analysis unavailable. ${body.detail || ""}`;
+                    container.textContent = `Drift analysis unavailable: ${body.detail?.message || body.detail || `HTTP ${catResp.status}`}`;
                 }
                 return;
             }
-            if (catResp.ok) {
-                const catData = await catResp.json();
-                renderCategoryCounters(catData.summary || {});
-            }
+            const catData = await catResp.json();
+            renderCategoryCounters(catData.summary || {});
 
             // 2. SPOF Workloads
             const spofResp = await fetch("/api/deployments/drift/spofs");
@@ -61,7 +60,7 @@ window.DeploymentsDriftWidget = (function () {
         const totalBadge = document.getElementById("spof-total-badge");
 
         if (bannerCount) bannerCount.textContent = spofs.length;
-        if (totalBadge) totalBadge.textContent = `${spofs.length} SPOFs`;
+        if (totalBadge) totalBadge.textContent = `${spofs.length} exposed`;
         if (!container) return;
 
         container.innerHTML = "";
@@ -98,6 +97,8 @@ window.DeploymentsDriftWidget = (function () {
         });
     }
 
+    const zonePrefix = (zone) => (zone ? "Zone: " + zone + " · " : "");
+
     function renderNodeRisks(nodeRisks) {
         const container = document.getElementById("node-risk-rankings-list");
         if (!container) return;
@@ -114,7 +115,7 @@ window.DeploymentsDriftWidget = (function () {
                 <div>
                     <strong>🖥️ ${n.node_name}</strong>
                     <div style="font-size: 11px; color: var(--color-text-muted); margin-top: 2px;">
-                        Zone: ${n.zone || "unassigned"} · ${n.pod_count || 0} pods · sole host of ${n.exposed_service_count || 0} service(s)
+                        ${zonePrefix(n.zone)}${n.pod_count || 0} pods · only node hosting ${n.exposed_service_count || 0} service(s)
                     </div>
                 </div>
                 <span class="status-badge ${n.risk_level === 'CRITICAL' ? 'status-badge--danger' : 'status-badge--success'}">
@@ -126,7 +127,7 @@ window.DeploymentsDriftWidget = (function () {
     }
 
     function init() {
-        loadDriftSignals().catch((err) => console.warn("Could not load drift signals:", err));
+        // Loaded by deployments.js once the data source is known.
     }
 
     return {

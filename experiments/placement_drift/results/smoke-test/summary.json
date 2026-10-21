@@ -1,0 +1,94 @@
+{
+  "results_dir": "experiments\\placement_drift\\results\\smoke-test",
+  "total_runs": 2,
+  "conditions": [
+    {
+      "scenario_id": "01_initial_deployment",
+      "config": "A-no-rule",
+      "runs": 1,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 1,
+        "mean": 0.0,
+        "sd": null,
+        "ci95": null
+      },
+      "exposure_rate_t0": {
+        "n": 1,
+        "mean": 0.0,
+        "sd": null,
+        "ci95": null
+      },
+      "exposure_rate_t1": {
+        "n": 1,
+        "mean": 0.0,
+        "sd": null,
+        "ci95": null
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 1
+      },
+      "observation_ms": {
+        "n": 2,
+        "mean": 792.67,
+        "sd": 63.6538,
+        "ci95": [
+          220.7729,
+          1.0
+        ]
+      }
+    },
+    {
+      "scenario_id": "05_pod_deletion",
+      "config": "A-no-rule",
+      "runs": 1,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 1,
+        "mean": 0.0,
+        "sd": null,
+        "ci95": null
+      },
+      "exposure_rate_t0": {
+        "n": 1,
+        "mean": 0.0,
+        "sd": null,
+        "ci95": null
+      },
+      "exposure_rate_t1": {
+        "n": 1,
+        "mean": 0.0,
+        "sd": null,
+        "ci95": null
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 1
+      },
+      "observation_ms": {
+        "n": 2,
+        "mean": 664.295,
+        "sd": 57.8201,
+        "ci95": [
+          144.8102,
+          1.0
+        ]
+      }
+    }
+  ]
+}

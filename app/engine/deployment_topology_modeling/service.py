@@ -44,6 +44,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "deploy" / "kubernetes" / "boutique.yaml"
 FALLBACK_MANIFEST_DIR = PROJECT_ROOT / "deploy" / "test-workloads"
 SAMPLE_FILE = PROJECT_ROOT / "sample_data" / "deployment.json"
+LIVE_EXPERIMENT_RESULTS_DIR = PROJECT_ROOT / "experiments" / "placement_drift" / "results" / "five-repetitions"
 HOSTNAME_LABEL = "kubernetes.io/hostname"
 
 
@@ -268,6 +269,18 @@ def _declared_target(manifest_path: str | None) -> Path | None:
     return DEFAULT_MANIFEST_PATH if DEFAULT_MANIFEST_PATH.exists() else None
 
 
+def get_manifest_source() -> dict[str, Any]:
+    """Where declared intent comes from (same order as _declared_target), so the dashboard can say so."""
+    target = _declared_target(None)
+    if target is None:
+        return {"source": "cluster", "path": None, "found": True}
+    try:
+        shown = target.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        shown = target.name
+    return {"source": "manifest", "path": shown, "found": target.exists()}
+
+
 def _cluster_declared_intents(namespace: str) -> list[Any]:
     """Declared intent read from the Deployments of the connected cluster (see the source order above)."""
     if not discovery.NAMESPACE_PATTERN.match((namespace or "").strip()):
@@ -459,7 +472,7 @@ def get_ground_truth_evaluation() -> dict[str, Any]:
     )
     evaluation = evaluate_snapshot()
     return {
-        "ground_truth_source": str(KIND_CONCENTRATED_BASELINE.relative_to(PROJECT_ROOT)),
+        "ground_truth_source": KIND_CONCENTRATED_BASELINE.relative_to(PROJECT_ROOT).as_posix(),
         "pods_evaluated": evaluation.pods_evaluated,
         "services_evaluated": evaluation.services_evaluated,
         "failure_experiments": evaluation.failure_experiments,
@@ -795,6 +808,81 @@ def run_parametric_ensemble_pipeline() -> dict[str, Any]:
 def get_parametric_ensemble_markdown_report() -> str:
     metrics = ParametricEnsembleEvaluator(repository=_GLOBAL_SNAPSHOT_REPO).run_ensemble()
     return ParametricEnsembleEvaluator.generate_markdown_report(metrics)
+
+
+# ---------------------------------------------------------------------------------------------
+# Live KinD experiments (stored results; reading them needs no cluster)
+# ---------------------------------------------------------------------------------------------
+
+def _example_run(results_dir: Path, scenario_id: str, config: str) -> dict[str, Any] | None:
+    """Pod placement at T0 and T1 of the first successful stored run of one condition."""
+    for path in sorted(results_dir.glob(f"{scenario_id}__{config}__run*.json")):
+        run = json.loads(path.read_text(encoding="utf-8"))
+        if run.get("failed"):
+            continue
+        pods = lambda snap: {  # noqa: E731
+            svc: [{"name": p[0], "node": p[1], "ready": p[2]} for p in info["pods"]] for svc, info in snap.items()
+        }
+        # Stored by the run (placement_metrics.concentration_ratio); None when a service had no ready replica.
+        concentration = lambda snap: {  # noqa: E731
+            svc: {"ratio": info["replica_concentration"], "ready_replicas": info["ready_replicas"]}
+            for svc, info in snap.items()
+        }
+        return {
+            "repetition": run["repetition"],
+            "action": run["action"],
+            "stable_after_disruption": run["stable_after_disruption"],
+            "target_status_t0": run["target_status_t0"],
+            "target_status_t1": run["target_status_t1"],
+            "t0": pods(run["t0"]),
+            "t1": pods(run["t1"]),
+            "concentration_t0": concentration(run["t0"]),
+            "concentration_t1": concentration(run["t1"]),
+        }
+    return None
+
+
+def get_live_experiment_results(results_dir: Path | None = None) -> dict[str, Any] | None:
+    """Summary of the stored live placement-drift runs, or None if no summary exists.
+
+    The runs were executed by experiments/placement_drift/run_live_experiments.py; this only reads
+    their summary.json, so the values are observations, not recomputed or simulated.
+    """
+    from experiments.placement_drift.live.generate_workloads import IMAGE, REPLICAS, SERVICES
+    from experiments.placement_drift.live.scenarios import SCENARIOS_BY_ID, TARGET_SERVICE
+
+    results_dir = results_dir or LIVE_EXPERIMENT_RESULTS_DIR
+    summary_file = results_dir / "summary.json"
+    if not summary_file.exists():
+        return None
+    summary = json.loads(summary_file.read_text(encoding="utf-8"))
+    conditions = [
+        {
+            **c,
+            "scenario_name": SCENARIOS_BY_ID[c["scenario_id"]].name if c["scenario_id"] in SCENARIOS_BY_ID else c["scenario_id"],
+            "example_run": _example_run(results_dir, c["scenario_id"], c["config"]),
+        }
+        for c in summary["conditions"]
+    ]
+    try:
+        source = str(results_dir.relative_to(PROJECT_ROOT))
+    except ValueError:
+        source = results_dir.name
+    return {
+        "execution_mode": "LIVE_KIND_CLUSTER",
+        "is_experimental_evidence": True,
+        "evidence_note": (
+            f"Observed on a local KinD cluster (nodes are containers on one host) with stand-in workloads: "
+            f"{len(SERVICES)} services x {REPLICAS} replicas running {IMAGE}. "
+            f"Disruptions target {TARGET_SERVICE}; all services are observed."
+        ),
+        "results_source": source.replace("\\", "/"),
+        "target_service": TARGET_SERVICE,
+        "services": SERVICES,
+        "total_runs": summary["total_runs"],
+        "failed_runs": sum(c["failed_runs"] for c in conditions),
+        "conditions": conditions,
+    }
 
 
 if __name__ == "__main__":

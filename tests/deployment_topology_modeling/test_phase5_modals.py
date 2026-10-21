@@ -25,14 +25,8 @@ def test_modals_markup_presence_in_deployments(client):
     assert 'id="violation-exposure-level"' in html
     assert 'id="violation-rules-list"' in html
 
-    # Modal 2: Snapshot Diff Modal
-    assert 'id="modal-diff-backdrop"' in html
-    assert 'id="modal-diff-title"' in html
-    assert 'id="btn-close-diff-modal"' in html
-    assert 'id="select-diff-scenario"' in html
-    assert 'id="btn-execute-snapshot-diff"' in html
-    assert 'id="diff-d-rate-val"' in html
-    assert 'id="diff-table-body"' in html
+    # The dry-run snapshot diff modal was removed from the dashboard (the /diff API remains).
+    assert 'id="modal-diff-backdrop"' not in html
 
 
 def test_snapshot_diff_api_endpoint(client):

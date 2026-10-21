@@ -1,0 +1,878 @@
+{
+  "results_dir": "five-repetitions",
+  "total_runs": 80,
+  "conditions": [
+    {
+      "scenario_id": "01_initial_deployment",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 444.476,
+        "sd": 185.6354,
+        "ci95": [
+          311.6897,
+          577.2623
+        ]
+      }
+    },
+    {
+      "scenario_id": "01_initial_deployment",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 409.24,
+        "sd": 138.8248,
+        "ci95": [
+          309.9376,
+          508.5424
+        ]
+      }
+    },
+    {
+      "scenario_id": "02_scale_up",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 397.401,
+        "sd": 121.8097,
+        "ci95": [
+          310.2696,
+          484.5324
+        ]
+      }
+    },
+    {
+      "scenario_id": "02_scale_up",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 5,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 454.155,
+        "sd": 144.1358,
+        "ci95": [
+          351.0536,
+          557.2564
+        ]
+      }
+    },
+    {
+      "scenario_id": "03_scale_down",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 345.999,
+        "sd": 49.4456,
+        "ci95": [
+          310.6302,
+          381.3678
+        ]
+      }
+    },
+    {
+      "scenario_id": "03_scale_down",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 398.82,
+        "sd": 65.5888,
+        "ci95": [
+          351.9038,
+          445.7362
+        ]
+      }
+    },
+    {
+      "scenario_id": "04_rolling_update",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 504.337,
+        "sd": 150.9468,
+        "ci95": [
+          396.3637,
+          612.3103
+        ]
+      }
+    },
+    {
+      "scenario_id": "04_rolling_update",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 5,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 426.904,
+        "sd": 145.2789,
+        "ci95": [
+          322.985,
+          530.823
+        ]
+      }
+    },
+    {
+      "scenario_id": "05_pod_deletion",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 492.356,
+        "sd": 164.4559,
+        "ci95": [
+          374.7195,
+          609.9925
+        ]
+      }
+    },
+    {
+      "scenario_id": "05_pod_deletion",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 427.882,
+        "sd": 157.4909,
+        "ci95": [
+          315.2276,
+          540.5364
+        ]
+      }
+    },
+    {
+      "scenario_id": "06_node_cordon",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 532.323,
+        "sd": 205.7,
+        "ci95": [
+          385.1843,
+          679.4617
+        ]
+      }
+    },
+    {
+      "scenario_id": "06_node_cordon",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 5,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 426.225,
+        "sd": 128.2773,
+        "ci95": [
+          334.4673,
+          517.9827
+        ]
+      }
+    },
+    {
+      "scenario_id": "07_node_drain",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 384.431,
+        "sd": 154.2126,
+        "ci95": [
+          274.1216,
+          494.7404
+        ]
+      }
+    },
+    {
+      "scenario_id": "07_node_drain",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 5,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 0,
+      "target_status_t1_counts": {
+        "NOT_EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 385.584,
+        "sd": 142.8483,
+        "ci95": [
+          283.4036,
+          487.7644
+        ]
+      }
+    },
+    {
+      "scenario_id": "08_constrained_resources",
+      "config": "A-no-rule",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 0,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.25,
+        "sd": 0.0,
+        "ci95": [
+          0.25,
+          0.25
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.25,
+        "sd": 0.0,
+        "ci95": [
+          0.25,
+          0.25
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 0,
+        "mean": null,
+        "sd": null,
+        "ci95": null
+      },
+      "target_became_exposed": 5,
+      "target_status_t1_counts": {
+        "EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 368.61,
+        "sd": 84.1442,
+        "ci95": [
+          308.4211,
+          428.7989
+        ]
+      }
+    },
+    {
+      "scenario_id": "08_constrained_resources",
+      "config": "B-spread",
+      "runs": 5,
+      "failed_runs": 0,
+      "unstable_runs": 5,
+      "d_rate": {
+        "n": 5,
+        "mean": 0.25,
+        "sd": 0.0,
+        "ci95": [
+          0.25,
+          0.25
+        ]
+      },
+      "exposure_rate_t0": {
+        "n": 5,
+        "mean": 0.0,
+        "sd": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      "exposure_rate_t1": {
+        "n": 5,
+        "mean": 0.25,
+        "sd": 0.0,
+        "ci95": [
+          0.25,
+          0.25
+        ]
+      },
+      "compliance_rate_t1": {
+        "n": 5,
+        "mean": 1.0,
+        "sd": 0.0,
+        "ci95": [
+          1.0,
+          1.0
+        ]
+      },
+      "target_became_exposed": 5,
+      "target_status_t1_counts": {
+        "EXPOSED": 5
+      },
+      "observation_ms": {
+        "n": 10,
+        "mean": 431.701,
+        "sd": 169.8359,
+        "ci95": [
+          310.2162,
+          553.1858
+        ]
+      }
+    }
+  ]
+}

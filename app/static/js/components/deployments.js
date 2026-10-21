@@ -1,26 +1,26 @@
 /**
  * Deployment Topology Modeling Master Dashboard Controller.
- * Phase 5 Executive Dashboard & Academic Validation UI.
+ * Every tab shows the connected cluster; there is no sample baseline to switch to. When the cluster
+ * cannot be read, the page says why (failure state below) and shows no topology.
  * Component: Component 2 - Deployment Topology Modeling
  * Owned by: Member 2 (P.A.M. Minara)
  */
 (function () {
     "use strict";
 
-    // The page reads the connected cluster only. There is no sample baseline to switch to: when the cluster
-    // cannot be read, the page says why (see the failure state below) and shows no topology.
     const LIVE_ENDPOINT = "/api/deployments/discovery";
-    const { fetchJson } = window.ResilienceApi || { fetchJson: (url) => fetch(url).then((r) => r.json()) };
-    const { formatRatioAsPercentage, initJsonPanel, updateLastRefreshed } =
-        window.ResilienceUi || {
-            formatRatioAsPercentage: (r) => `${Math.round(r * 100)}%`,
-            initJsonPanel: () => { },
-            updateLastRefreshed: () => { },
-        };
 
-    // Explicit failure states (our addition): when the cluster cannot be read the page says why and offers a
-    // retry, rather than leaving the widgets empty. See app/static/js/connection-state.js.
-    const { describeError, describeDiscovery, renderStateCard, applyBadge } = window.ResilienceConnection || {};
+    // base.html loads api.js, ui.js and connection-state.js with `defer`, so they run after this script.
+    // Read them when the page loads (DOMContentLoaded), not at the top of this file.
+    const api = () => window.ResilienceApi || { fetchJson: (url) => fetch(url).then((r) => r.json()) };
+    const ui = () => window.ResilienceUi || {
+        formatRatioAsPercentage: (r) => `${Math.round(r * 100)}%`,
+        initJsonPanel: () => { },
+        updateLastRefreshed: () => { },
+    };
+    // Explicit failure states: when the cluster cannot be read the page says why and offers a retry,
+    // rather than leaving the widgets empty. See app/static/js/connection-state.js.
+    const connection = () => window.ResilienceConnection || {};
 
     const region = document.querySelector('[data-role="page-region"]');
     const reloadButton = document.querySelector('[data-role="reload-button"]');
@@ -32,61 +32,54 @@
         if (element) element.textContent = value;
     }
 
+    const readyCount = (s) => s.readyReplicas ?? s.ready_replicas ?? (s.pods ? s.pods.filter((p) => p.ready).length : 0);
+
+    function renderHeadlineMetrics(deployment) {
+        const services = deployment.services || [];
+        // Exposure rate (placement_metrics.exposure_rate): exposed / evaluated, where services with 0 ready
+        // replicas are UNAVAILABLE and not evaluated. Exposed = non-empty exposedFailureDomains.
+        const evaluated = services.filter((s) => readyCount(s) > 0);
+        const exposed = evaluated.filter((s) => (s.exposedFailureDomains ?? s.exposed_failure_domains ?? []).length > 0).length;
+
+        setMetric("deployment-node-count", (deployment.nodes || []).length);
+        setMetric("deployment-service-count", services.length);
+        setMetric("deployment-ready-pods", services.reduce((acc, s) => acc + readyCount(s), 0));
+        setMetric(
+            "deployment-exposed-services",
+            evaluated.length ? `${exposed} / ${evaluated.length} (${ui().formatRatioAsPercentage(exposed / evaluated.length)})` : "n/a"
+        );
+    }
+
     async function loadPage() {
         if (reloadButton) reloadButton.disabled = true;
 
+        const { describeError, describeDiscovery, renderStateCard, applyBadge } = connection();
+        const { initJsonPanel, updateLastRefreshed } = ui();
         try {
             // The discovery envelope: the graph plus how complete it is (ok / empty / partial).
-            const body = await fetchJson(LIVE_ENDPOINT);
+            const body = await api().fetchJson(LIVE_ENDPOINT);
             const deployment = body.graph;
             if (region) region.replaceChildren();
             if (applyBadge && describeDiscovery) {
                 applyBadge(sourceBadge, describeDiscovery(body).badge);
             }
 
-            // 1. Top Executive Metrics
-            const totalNodes = deployment.nodes ? deployment.nodes.length : 0;
-            const totalServices = deployment.services ? deployment.services.length : 0;
-            const readyPods = deployment.services
-                ? deployment.services.reduce((acc, s) => acc + (s.readyReplicas ?? s.ready_replicas ?? (s.pods ? s.pods.filter((p) => p.ready).length : 0)), 0)
-                : 0;
+            renderHeadlineMetrics(deployment);
+            const services = deployment.services || [];
 
-            // A service whose concentration the cluster did not report is left out, not counted as 0%.
-            let highestConcentration = null;
-            const reported = (deployment.services || [])
-                .map((s) => s.replicaConcentration ?? s.replica_concentration)
-                .filter((value) => value !== null && value !== undefined);
-            if (reported.length > 0) {
-                highestConcentration = Math.max(...reported);
-            }
-
-            setMetric("deployment-node-count", totalNodes);
-            setMetric("deployment-service-count", totalServices);
-            setMetric("deployment-ready-pods", readyPods);
-            setMetric(
-                "deployment-highest-concentration",
-                highestConcentration === null ? "—" : formatRatioAsPercentage(highestConcentration)
-            );
-
-            // 2. Delegate to Sub-Widgets
             if (window.DeploymentsTopologyWidget) {
                 window.DeploymentsTopologyWidget.renderZoneGrid(deployment);
-                window.DeploymentsTopologyWidget.renderConcentrationPanel(deployment.services);
+                window.DeploymentsTopologyWidget.renderConcentrationPanel(services);
             }
 
-            if (window.DeploymentsIntentWidget) {
-                window.DeploymentsIntentWidget.loadIntentCompliance(deployment.services);
-            }
-
-            if (window.DeploymentsDriftWidget) {
-                window.DeploymentsDriftWidget.loadDriftSignals();
-            }
-
-            // 3. Raw JSON Panel
             const rawPanelEl = document.querySelector("#deployment-raw-json");
-            if (rawPanelEl) {
-                initJsonPanel(rawPanelEl, deployment);
-            }
+            if (rawPanelEl) initJsonPanel(rawPanelEl, deployment);
+
+            // Intent and drift tabs fetch their own data from the same cluster; load them in parallel.
+            await Promise.all([
+                window.DeploymentsIntentWidget?.loadIntentCompliance(services),
+                window.DeploymentsDriftWidget?.loadDriftSignals(),
+            ]);
 
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
@@ -101,19 +94,19 @@
     }
 
     if (reloadButton) {
-        reloadButton.addEventListener("click", loadPage);
+        reloadButton.addEventListener("click", () => {
+            loadPage().catch((err) => console.error("Failed to load deployment data:", err));
+        });
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-        // Initialize all Phase 5 modular widgets
         if (window.DeploymentsTabRouter) window.DeploymentsTabRouter.init();
         if (window.DeploymentsAcademicWidget) window.DeploymentsAcademicWidget.init();
         if (window.DeploymentsTopologyWidget) window.DeploymentsTopologyWidget.init();
         if (window.DeploymentsIntentWidget) window.DeploymentsIntentWidget.init();
-        if (window.DeploymentsDriftWidget) window.DeploymentsDriftWidget.init();
-        if (window.DeploymentsScenariosWidget) window.DeploymentsScenariosWidget.init();
+        if (window.DeploymentsLiveExperimentsWidget) window.DeploymentsLiveExperimentsWidget.init();
         if (window.DeploymentsModalManager) window.DeploymentsModalManager.init();
 
-        loadPage();
+        loadPage().catch((err) => console.error("Failed to load deployment data:", err));
     });
 })();

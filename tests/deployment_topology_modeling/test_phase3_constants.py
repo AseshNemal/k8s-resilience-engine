@@ -49,6 +49,7 @@ def test_no_arbitrary_severity_weights_remain():
 
 
 def test_self_chosen_targets_match_validation_panel():
-    from app.engine.deployment_topology_modeling.web.academic_metric_presenter import AcademicMetricPresenter
-    assert TARGET_MAPPING_ACCURACY == pytest.approx(AcademicMetricPresenter.TARGET_MAPPING_ACCURACY)
-    assert TARGET_CONCENTRATION_ACCURACY == pytest.approx(AcademicMetricPresenter.TARGET_CONCENTRATION_ACCURACY)
+    from pathlib import Path
+    panel = (Path(__file__).resolve().parents[2] / "app/templates/components/deployments_academic_panel.html").read_text(encoding="utf-8")
+    assert f"Self-chosen target ≥ {round(TARGET_MAPPING_ACCURACY * 100)}%" in panel
+    assert f"Self-chosen target ≥ {round(TARGET_CONCENTRATION_ACCURACY * 100)}%" in panel
