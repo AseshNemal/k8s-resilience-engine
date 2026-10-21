@@ -16,16 +16,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from experiments.placement_drift.live.generate_workloads import NAMESPACE, SERVICES  # noqa: E402
 from experiments.placement_drift.live.kubectl import Kubectl  # noqa: E402
 from experiments.placement_drift.live.runner import LiveExperimentRunner  # noqa: E402
 from experiments.placement_drift.live.scenarios import SCENARIOS, SCENARIOS_BY_ID  # noqa: E402
 from experiments.placement_drift.live.summary import summarise  # noqa: E402
+from experiments.placement_drift.live.workloads import STANDIN  # noqa: E402
 
-CONFIGS = {
-    "A-no-rule": str(ROOT / "deploy" / "experiments" / "placement-drift" / "config-a-no-rule.yaml"),
-    "B-spread": str(ROOT / "deploy" / "experiments" / "placement-drift" / "config-b-topology-spread.yaml"),
-}
+CONFIGS = STANDIN.configs
 
 
 def main() -> None:
@@ -54,7 +51,8 @@ def main() -> None:
               f"D_rate={d}  target {record.target_status_t0} -> {record.target_status_t1}"
               f"{'' if record.stable_after_disruption else '  (did not settle)'}", flush=True)
 
-    runner = LiveExperimentRunner(Kubectl(args.context, NAMESPACE), CONFIGS, SERVICES, results_dir)
+    runner = LiveExperimentRunner(Kubectl(args.context, STANDIN.namespace), STANDIN.configs,
+                                  list(STANDIN.deployments), results_dir, workload=STANDIN)
     print(f"Running {total} live runs on {args.context}; results -> {results_dir}", flush=True)
     runner.run(scenarios, args.configs, args.repetitions, on_record=progress)
     summarise(results_dir)
