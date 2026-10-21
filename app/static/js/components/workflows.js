@@ -21,6 +21,9 @@
     let offlineVersion = 0;
     let fieldCounter = 0;
     let discoveryPoller = null;
+    let traceActionBusy = false;
+    let traceUnavailable = false;
+    let traceControlsChecked = false;
     function guidedText(tag, className, value) {
         const element = document.createElement(tag);
         if (className) element.className = className;
@@ -173,6 +176,11 @@
     }
     function resetGuidedDiscovery() {
         discoveryPoller?.stop();
+        $('trace-start-prompt').hidden = true;
+        $('trace-stop-button').hidden = true;
+        $('find-workflows-status').textContent = '';
+        traceUnavailable = false;
+        traceControlsChecked = false;
         guidedConnectionVersion += 1;
         guidedWorkflows = [];
         guidedService.replaceChildren(new Option('Connect to load services', ''));
@@ -213,8 +221,87 @@
         } catch (error) { if (version === guidedConnectionVersion) setGuidedStatus(`Could not connect: ${error.message}`, true); }
         finally { if (version === guidedConnectionVersion) submit.disabled = false; }
     }
+    const traceService = () => window.__resilienceTraceService || {available: false};
+    function usesLocalJaeger() {
+        const source = guidedConnectionPayload().traceSource;
+        if (source.type !== 'jaeger') return false;
+        try {
+            const url = new URL(source.endpoint);
+            // The extension helper manages this fixed collector endpoint, not arbitrary local servers.
+            return ['localhost', '127.0.0.1', '[::1]', 'host.docker.internal'].includes(url.hostname)
+                && url.protocol === 'http:' && url.port === '16686' && url.pathname === '/';
+        }
+        catch { return false; }
+    }
+    async function updateTraceControls(report, version) {
+        if (version !== guidedConnectionVersion || traceActionBusy) return;
+        const down = report.state === 'jaeger_unavailable';
+        if (!down) {
+            $('trace-start-prompt').hidden = true;
+            traceUnavailable = false;
+            message($('find-workflows-status'), '');
+            if (!traceControlsChecked && usesLocalJaeger() && traceService().available) {
+                traceControlsChecked = true;
+                try {
+                    const known = await traceService().status();
+                    if (version === guidedConnectionVersion) $('trace-stop-button').hidden = known.state !== 'trace-running';
+                } catch { /* Discovery remains usable when the optional host helper is unavailable. */ }
+            }
+            return;
+        }
+        if (!usesLocalJaeger()) {
+            $('trace-start-prompt').hidden = true;
+            message($('find-workflows-status'), 'The selected trace service is unavailable. Check its address and connection.');
+            return;
+        }
+        if (!traceService().available) {
+            $('trace-start-prompt').hidden = true;
+            message($('find-workflows-status'), 'The local trace service is unavailable. Start it from your tracing setup, or use the Docker Desktop extension to start it here. Discovery will retry.');
+            return;
+        }
+        // A declined start stays declined until the operator asks to find workflows again.
+        if (traceUnavailable) return;
+        traceUnavailable = true;
+        try {
+            const known = await traceService().status();
+            if (version !== guidedConnectionVersion) return;
+            $('trace-stop-button').hidden = known.state !== 'trace-running';
+            if (['trace-not-created', 'trace-stopped'].includes(known.state)) {
+                $('trace-start-prompt').hidden = false;
+                message($('find-workflows-status'), 'The local trace service is stopped. Start it to collect traces.');
+            } else message($('find-workflows-status'), known.message, !known.ok);
+        } catch (error) {
+            if (version === guidedConnectionVersion) message($('find-workflows-status'), 'The trace service helper could not be reached. Check Docker Desktop and try again.', true);
+        }
+    }
+    async function runTraceServiceAction(action) {
+        if (traceActionBusy || !traceService().available || !usesLocalJaeger()) return;
+        if (action === 'start' && $('trace-start-prompt').hidden) return;
+        if (action === 'stop' && $('trace-stop-button').hidden) return;
+        const version = guidedConnectionVersion;
+        traceActionBusy = true;
+        const controls = ['guided-auto-discover', 'trace-start-confirm', 'trace-start-cancel', 'trace-stop-button'].map($);
+        controls.forEach(item => item.disabled = true);
+        $('trace-start-prompt').hidden = true;
+        message($('find-workflows-status'), action === 'start' ? 'Starting the trace service… Docker may need to download its image.' : 'Stopping the trace service…');
+        try {
+            const result = await traceService()[action]();
+            if (version !== guidedConnectionVersion) return;
+            $('trace-stop-button').hidden = result.state !== 'trace-running';
+            message($('find-workflows-status'), result.message, !result.ok);
+            traceUnavailable = false;
+            if (result.ok) discoveryPoller?.refresh();
+        } catch (error) {
+            if (version === guidedConnectionVersion) message($('find-workflows-status'), 'Docker Desktop did not complete the request. Try again.', true);
+        } finally {
+            traceActionBusy = false;
+            controls.forEach(item => item.disabled = false);
+        }
+    }
     function findWorkflowsAutomatically() {
-        if (!guidedForm.reportValidity()) return;
+        if (traceActionBusy || !guidedForm.reportValidity()) return;
+        traceUnavailable = false;
+        traceControlsChecked = false;
         if (discoveryPoller?.isRunning()) { discoveryPoller.refresh(); return; }
         resetGuidedDiscovery();
         const version = guidedConnectionVersion;
@@ -229,7 +316,7 @@
                 guidedOperation.append(new Option(`${item.operationName} · ${item.rootService} · ${item.traceCount} traces`, String(index)));
                 if (previous?.rootService === item.rootService && previous?.operationName === item.operationName) guidedOperation.value = String(index);
             });
-            guidedDiscovery.hidden = false;
+            guidedDiscovery.hidden = report.workflows.length === 0;
             guidedInspectButton.disabled = !selectedGuidedWorkflow(guidedWorkflows, guidedOperation.value);
             const coverage = report.truncated ? ' The scan reached its limit; other workflows may exist.' : '';
             setGuidedStatus(`${report.message}${coverage}`);
@@ -242,7 +329,7 @@
             discover: () => postCampaignAction('/api/workflows/discovery', payload),
             onChecking: () => setGuidedStatus('Finding recorded workflows across services…'),
             onWaiting: () => setGuidedStatus('Waiting for the trace service…'),
-            onReport: render,
+            onReport: report => { render(report); updateTraceControls(report, version); },
             onError: error => {
                 if (version !== guidedConnectionVersion) return;
                 setGuidedStatus(error.message, true);
@@ -1134,6 +1221,12 @@
     if (!guidedForm) return;
     guidedForm.addEventListener('submit', connectGuidedSource);
     $('guided-auto-discover').addEventListener('click', findWorkflowsAutomatically);
+    $('trace-start-confirm').addEventListener('click', () => runTraceServiceAction('start'));
+    $('trace-stop-button').addEventListener('click', () => runTraceServiceAction('stop'));
+    $('trace-start-cancel').addEventListener('click', () => {
+        $('trace-start-prompt').hidden = true;
+        message($('find-workflows-status'), 'Nothing was started. Discovery will retry while this page is open.');
+    });
     document.addEventListener('visibilitychange', () => discoveryPoller?.pageVisibilityChanged());
     window.addEventListener('focus', () => discoveryPoller?.pageVisibilityChanged());
     guidedForm.addEventListener('input', event => {

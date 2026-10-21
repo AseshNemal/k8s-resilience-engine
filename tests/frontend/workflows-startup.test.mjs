@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const script = readFileSync(new URL('../../app/static/js/components/workflows.js', import.meta.url), 'utf8');
 const pollerScript = readFileSync(new URL('../../app/static/js/workflow-discovery-poller.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
-function makeEnvironment({discover, hidden = false} = {}) {
+function makeEnvironment({discover, hidden = false, traceService} = {}) {
     const registry = new Map();
     const element = key => {
         if (registry.has(key)) return registry.get(key);
@@ -56,7 +56,9 @@ function makeEnvironment({discover, hidden = false} = {}) {
         clock = end;
     };
 
-    const window = {addEventListener(type, fn) {windowListeners[type] = fn;}};
+    element('[data-role="trace-start-prompt"]').hidden = true;
+    element('[data-role="trace-stop-button"]').hidden = true;
+    const window = {__resilienceTraceService: traceService, addEventListener(type, fn) {windowListeners[type] = fn;}};
     const sandbox = {window, document, fetch, console, setTimeout, clearTimeout,
         URL, location: {href: 'http://localhost/components/workflows'}, history: {replaceState() {}},
         localStorage: {getItem: () => null, setItem() {}},
@@ -150,4 +152,76 @@ test('rejected settings show the server message and stop retries', async () => {
 test('bounded discovery tells the user that additional workflows may exist', async () => {
     const env = makeEnvironment({discover: () => env.json(200, report('discovered', [], {truncated: true}))});
     configure(env); find(env); await flush(); assert.match(status(env), /scan reached its limit/);
+});
+
+const click = (env, role) => env.element(`[data-role="${role}"]`).listeners.click();
+const shown = (env, role) => !env.element(`[data-role="${role}"]`).hidden;
+const bridge = (known = 'trace-stopped') => ({available: true, starts: 0, stops: 0, known,
+    async status() {return {ok: true, state: this.known, message: this.known};},
+    async start() {this.starts++; return {ok: true, state: 'trace-running', message: 'Running'};},
+    async stop() {this.stops++; return {ok: true, state: 'trace-stopped', message: 'Stopped'};}});
+test('ordinary browsers explain unavailable local tracing without offering container controls', async () => {
+    const env = makeEnvironment({discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush();
+    assert.match(env.element('[data-role="find-workflows-status"]').textContent, /Docker Desktop extension/);
+    assert.equal(shown(env, 'trace-start-prompt'), false);
+    assert.equal(shown(env, 'trace-stop-button'), false);
+});
+test('extension discovery offers a start without starting anything; declining stays declined across retries', async () => {
+    const helper = bridge();
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush();
+    assert.equal(shown(env, 'trace-start-prompt'), true); assert.equal(helper.starts, 0);
+    await env.advance(10000); assert.equal(shown(env, 'trace-start-prompt'), true);
+    click(env, 'trace-start-cancel'); await env.advance(10000);
+    assert.equal(shown(env, 'trace-start-prompt'), false); assert.equal(helper.starts, 0);
+});
+test('only explicit confirmation starts tracing and concurrent clicks do not duplicate it', async () => {
+    const helper = bridge();
+    let release; helper.start = async () => {helper.starts++; return new Promise(resolve => release = resolve);};
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush();
+    const pending = click(env, 'trace-start-confirm'); click(env, 'trace-start-confirm');
+    assert.equal(helper.starts, 1);
+    helper.known = 'trace-running'; release({ok: true, state: 'trace-running', message: 'Running'}); await pending; await flush();
+    assert.equal(shown(env, 'trace-stop-button'), true);
+    assert.equal(env.element('[data-role="guided-auto-discover"]').disabled, false);
+});
+test('the stop control is available only for tracing owned by the extension', async () => {
+    for (const state of ['trace-running', 'trace-running-external']) {
+        const helper = bridge(state);
+        const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report())});
+        configure(env); find(env); await flush();
+        assert.equal(shown(env, 'trace-stop-button'), state === 'trace-running');
+        await click(env, 'trace-stop-button'); await flush();
+        assert.equal(helper.stops, state === 'trace-running' ? 1 : 0);
+    }
+});
+test('helper failures remain recoverable and restore the Find control', async () => {
+    const helper = bridge(); helper.start = async () => {throw new Error('private docker diagnostic');};
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); find(env); await flush(); await click(env, 'trace-start-confirm');
+    assert.match(env.element('[data-role="find-workflows-status"]').textContent, /did not complete/);
+    assert.equal(env.element('[data-role="guided-auto-discover"]').disabled, false);
+    assert.equal(shown(env, 'trace-start-prompt'), false);
+});
+test('remote trace connections never offer to start a local collector', async () => {
+    const helper = bridge();
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); env.field('traceEndpoint').value = 'https://tracing.example'; find(env); await flush();
+    assert.equal(shown(env, 'trace-start-prompt'), false); assert.equal(helper.starts, 0);
+});
+test('a different local tracing port cannot accidentally start the fixed extension collector', async () => {
+    const helper = bridge();
+    const env = makeEnvironment({traceService: helper, discover: () => env.json(200, report('jaeger_unavailable', []))});
+    configure(env); env.field('traceEndpoint').value = 'http://localhost:9999'; find(env); await flush();
+    assert.equal(shown(env, 'trace-start-prompt'), false); assert.equal(helper.starts, 0);
+});
+test('recovery closes a start prompt and clears the unavailable message', async () => {
+    let current = report('jaeger_unavailable', []);
+    const env = makeEnvironment({traceService: bridge(), discover: () => env.json(200, current)});
+    configure(env); find(env); await flush(); assert.equal(shown(env, 'trace-start-prompt'), true);
+    current = report('no_traces', []); await env.advance(10000);
+    assert.equal(shown(env, 'trace-start-prompt'), false);
+    assert.equal(env.element('[data-role="find-workflows-status"]').textContent, '');
 });

@@ -9,6 +9,7 @@ const path = require('node:path');
 const base = process.env.WORKFLOW_TEST_URL;
 const fixtureBase = process.env.WORKFLOW_FIXTURE_URL;
 const runLive = process.env.WORKFLOW_RUN_LIVE === '1';
+const runResponsive = process.env.WORKFLOW_RUN_RESPONSIVE === '1';
 const out = path.resolve(process.env.WORKFLOW_BROWSER_OUTPUT || 'tmp/workflow-browser');
 
 async function openTestPage() {
@@ -162,12 +163,14 @@ async function runWorkflowLifecycle() {
         await form.getByRole('button',{name:'Analyze uploaded traces',exact:true}).click();
         await status.filter({hasText:'Workflow definition JSON:'}).waitFor();
         check('Advanced imported definitions are optional and validated before submission');
+        if (runResponsive) {
         await page.setViewportSize({width:375,height:812});
         await page.waitForFunction(()=>getComputedStyle(document.querySelector('.content')).marginLeft==='0px');
         assert(await page.locator('.workspace-main').evaluate(el=>el.clientWidth>=300));
         assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
         await page.screenshot({path:path.join(out,'mobile-source.png'),fullPage:true});
         check('Upload and connection layouts fit a 375px viewport');
+        }
         await page.setViewportSize({width:1440,height:1050});
         await page.goto(fixtureBase+'/components/workflows',{waitUntil:'networkidle'});
         const fixtureCampaigns=await (await page.request.get(fixtureBase+'/api/workflows/experiment-campaigns')).json();
@@ -203,12 +206,14 @@ async function runWorkflowLifecycle() {
         await page.getByText('View test results',{exact:true}).click();
         await page.getByRole('button',{name:'Download test results JSON',exact:true}).waitFor();
         await page.screenshot({path:path.join(out,'fixture-approved.png'),fullPage:true});
+        if (runResponsive) {
         await page.setViewportSize({width:375,height:812});
         await page.waitForFunction(()=>getComputedStyle(document.querySelector('.content')).marginLeft==='0px');
         assert(await page.locator('.workspace-main').evaluate(el=>el.clientWidth>=300));
         assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
         await page.screenshot({path:path.join(out,'mobile-approved.png'),fullPage:true});
         check('Approved results and evidence remain usable on mobile');
+        }
         assert.deepEqual(errors,[]);
         check('No browser JavaScript errors throughout the tested flows');
         await fs.writeFile(path.join(out,'checks.json'),JSON.stringify({checks,errors,recordedAt:new Date().toISOString(),liveChecksIncluded:runLive,realServiceOutages:0},null,2));
@@ -335,6 +340,7 @@ async function runWorkspaceStateChecks() {
   await p.reload({waitUntil:'networkidle'});
   await p.getByRole('heading',{name:'Approved dependency graph',exact:true}).waitFor();
   await p.getByText('View test results',{exact:true}).click();
+        if (runResponsive) {
   await p.setViewportSize({width:375,height:812});
   await p.waitForFunction(()=>getComputedStyle(document.querySelector('.content')).marginLeft==='0px');
   assert(await p.locator('.workspace-main').evaluate(e=>e.clientWidth>=300));
@@ -346,6 +352,7 @@ async function runWorkspaceStateChecks() {
   await p.keyboard.press('Escape');
   assert.equal(await p.getByRole('button',{name:'Toggle navigation',exact:true}).getAttribute('aria-expanded'),'false');
   check('Mobile navigation opens with the keyboard-accessible control and closes with Escape');
+        }
   assert.deepEqual(errors,[]);
   await fs.writeFile(path.join(out,'additional-checks.json'),JSON.stringify({checks,errors,simulatedStates:'controlled fixture only',realServiceOutages:0},null,2));
  }catch(e){await fs.writeFile(path.join(out,'additional-checks.json'),JSON.stringify({checks,errors,failure:e.message},null,2));await p.screenshot({path:path.join(out,'additional-failure.png'),fullPage:true});throw e}
@@ -385,10 +392,10 @@ async function runGuidedSetupChecks() {
                     {rootService: session.entryService, operationName: session.operationName, traceCount: 3},
                 ]}});
         });
-        await page.getByRole('button', {name: 'Find workflows automatically', exact: true}).click();
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
         await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'No traces yet'}).waitFor();
         assert(await page.getByRole('button', {name: 'Inspect traces and set up workflow', exact: true}).isDisabled());
-        await page.getByRole('button', {name: 'Find workflows automatically', exact: true}).click();
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
         await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'Recorded workflows found'}).waitFor();
         await page.getByLabel('Request or operation to test', {exact: true}).selectOption('1');
         await page.route('**/api/workflows/analysis-sessions', async route => {
@@ -498,12 +505,14 @@ async function runGuidedSetupChecks() {
         assert.equal(plan.executionDefinition.steps.at(-1).jsonBody.quantity, 3);
         assert.deepEqual(plan.summary.at(-1).successStatuses, [201]);
         check('Advanced import errors are recoverable and switching modes preserves guided inputs');
+        if (runResponsive) {
         await page.setViewportSize({width: 375, height: 812});
         await page.waitForFunction(() => getComputedStyle(document.querySelector('.content')).marginLeft === '0px');
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         assert.equal(await form.locator('input:not([type="hidden"]),select,textarea').evaluateAll(inputs => inputs.filter(input => !input.disabled && !input.labels?.length).length), 0);
         await page.screenshot({path: path.join(out, 'guided-mobile.png'), fullPage: true});
         check('Guided setup fits a 375px viewport and every active input has an associated label');
+        }
         await page.setViewportSize({width: 1440, height: 1050});
         await page.screenshot({path: path.join(out, 'guided-desktop.png'), fullPage: true});
         await confirm.check();
@@ -524,6 +533,51 @@ async function runGuidedSetupChecks() {
     } finally { await browser.close(); }
 }
 
+async function runTraceControlChecks() {
+    const {browser, page, errors, checks, check} = await openTestPage();
+    try {
+        await page.addInitScript(() => {
+            const fixture = {state: 'trace-stopped', starts: 0, stops: 0};
+            window.__fixtureTrace = fixture;
+            window.__resilienceTraceService = {available: true,
+                status: async () => ({ok: true, state: fixture.state, message: fixture.state}),
+                start: async () => {fixture.starts++; fixture.state = 'trace-running'; return {ok: true, state: fixture.state, message: 'Trace collector started'};},
+                stop: async () => {fixture.stops++; fixture.state = 'trace-stopped'; return {ok: true, state: fixture.state, message: 'Trace collector stopped'};},
+            };
+        });
+        await page.route('**/api/workflows/discovery', async route => {
+            const running = await page.evaluate(() => window.__fixtureTrace.state === 'trace-running');
+            await route.fulfill({json: {state: running ? 'no_traces' : 'jaeger_unavailable',
+                message: running ? 'No traces have arrived' : 'Trace service unavailable', workflows: [], truncated: false}});
+        });
+        await page.goto(fixtureBase + '/components/workflows', {waitUntil: 'networkidle'});
+        await page.getByRole('button', {name: 'New workflow', exact: true}).click();
+        await page.getByLabel('Trace query URL', {exact: true}).fill('http://localhost:16686');
+        await page.getByLabel('Environment name', {exact: true}).fill('Controlled trace UI');
+        await page.getByLabel('Environment type', {exact: true}).selectOption('experimental');
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
+        await page.locator('[data-role="trace-start-prompt"]').waitFor({state: 'visible'});
+        assert.equal(await page.evaluate(() => window.__fixtureTrace.starts), 0);
+        await page.getByRole('button', {name: 'Not now', exact: true}).click();
+        assert.equal(await page.locator('[data-role="trace-start-prompt"]').isVisible(), false);
+        check('Desktop Find workflows offers tracing without starting it; Not now leaves it stopped');
+        await page.getByRole('button', {name: 'Find workflows', exact: true}).click();
+        await page.locator('[data-role="trace-start-prompt"]').waitFor({state: 'visible'});
+        await page.screenshot({path: path.join(out, 'desktop-trace-start.png'), fullPage: true});
+        await page.getByRole('button', {name: 'Start the trace service', exact: true}).click();
+        await page.locator('[data-role="guided-analysis-status"]').filter({hasText: 'No traces have arrived'}).waitFor();
+        assert.equal(await page.evaluate(() => window.__fixtureTrace.starts), 1);
+        assert(await page.getByRole('button', {name: 'Stop the trace service', exact: true}).isVisible());
+        check('An explicit desktop start confirmation refreshes discovery and exposes Stop for the owned collector');
+        await page.getByRole('button', {name: 'Stop the trace service', exact: true}).click();
+        await page.locator('[data-role="trace-start-prompt"]').waitFor({state: 'visible'});
+        assert.equal(await page.evaluate(() => window.__fixtureTrace.stops), 1);
+        check('Desktop stop returns to the unavailable state using a controlled helper without changing real services');
+        assert.deepEqual(errors, []);
+        await fs.writeFile(path.join(out, 'trace-control-checks.json'), JSON.stringify({checks, errors, evidence: 'controlled helper fixture', realServiceChanges: 0}, null, 2));
+    } finally { await browser.close(); }
+}
+
 async function main() {
     if (!base || !fixtureBase) {
         throw new Error('Set WORKFLOW_TEST_URL to the running app and WORKFLOW_FIXTURE_URL to browser_fixture.py on a fresh port.');
@@ -532,6 +586,6 @@ async function main() {
     if (!['all', 'lifecycle', 'state', 'setup'].includes(selection)) throw new Error('WORKFLOW_BROWSER_TESTS must be all, lifecycle, state or setup.');
     if (['all', 'lifecycle'].includes(selection)) await runWorkflowLifecycle();
     if (['all', 'state'].includes(selection)) await runWorkspaceStateChecks();
-    if (['all', 'setup'].includes(selection)) await runGuidedSetupChecks();
+    if (['all', 'setup'].includes(selection)) { await runGuidedSetupChecks(); await runTraceControlChecks(); }
 }
 main().catch(error => { console.error(error); process.exit(1); });

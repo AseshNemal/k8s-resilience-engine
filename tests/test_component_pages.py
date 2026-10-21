@@ -91,3 +91,13 @@ def test_workflow_workspace_keeps_research_tools_out_of_the_user_flow() -> None:
     assert "Component 3" not in script
     assert "seed-traces" not in script
     assert "benchmarkProfile" not in script
+
+
+def test_workflow_workspace_keeps_find_and_trace_service_controls():
+    body = client.get('/components/workflows').text
+    assert 'Find workflows' in body
+    assert 'data-role="trace-start-prompt" hidden' in body
+    assert 'data-role="trace-start-confirm"' in body
+    assert 'data-role="trace-stop-button" hidden' in body
+    assert 'data-role="saved-workflows"' in body
+    assert 'data-role="offline-analysis-form"' in body

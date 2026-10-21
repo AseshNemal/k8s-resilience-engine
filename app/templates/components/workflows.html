@@ -3,7 +3,7 @@
 {% set show_project_metadata = false %}
 {% set source_label = "No workflow selected" %}
 {% block page_css %}
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=guided-setup-3">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=guided-setup-4">
 {% endblock %}
 {% block content %}
     <div class="workflow-workspace">
@@ -149,11 +149,11 @@
                                 </div>
                             </details>
                             <div class="workspace-actions full-width">
-                                <button type="submit" class="experiment-button" data-role="guided-discover-button">
+                                <button type="submit" class="secondary-button" data-role="guided-discover-button">
                                     Connect
                                 </button>
-                                <button type="button" class="secondary-button" data-role="guided-auto-discover">
-                                    Find workflows automatically
+                                <button type="button" class="experiment-button" data-role="guided-auto-discover">
+                                    Find workflows
                                 </button>
                             </div>
                             <div data-role="guided-service-field" class="full-width" hidden>
@@ -168,6 +168,18 @@
                                 <small id="entry-service-help">Choose the service that first receives the user request, such as your frontend or API gateway.</small>
                             </div>
                         </form>
+                        <div class="guided-find" aria-label="Trace service controls">
+                            <span class="guided-find__hint">Find recorded workflows across services. If local tracing is unavailable, you can start it through the Docker Desktop extension.</span>
+                            <button type="button" class="secondary-button" data-role="trace-stop-button" hidden>Stop the trace service</button>
+                        </div>
+                        <div class="guided-find__prompt" data-role="trace-start-prompt" hidden>
+                            <p>The local trace service is unavailable. Start Jaeger through Docker Desktop? This starts the trace collector only; your application must send traces to it.</p>
+                            <div class="guided-find__actions">
+                                <button type="button" class="experiment-button" data-role="trace-start-confirm">Start the trace service</button>
+                                <button type="button" class="secondary-button" data-role="trace-start-cancel">Not now</button>
+                            </div>
+                        </div>
+                        <output class="guided-find__status" data-role="find-workflows-status" aria-live="polite"></output>
                         <div data-role="guided-discovery" hidden>
                             <div>
                                 <label for="workflow-input-9">
@@ -298,6 +310,6 @@
 {% endblock %}
 {% block page_js %}
     <script src="{{ url_for('static', path='/js/workflow-discovery-poller.js') }}" defer></script>
-    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=guided-setup-3" defer>
+    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=guided-setup-4" defer>
     </script>
 {% endblock %}
