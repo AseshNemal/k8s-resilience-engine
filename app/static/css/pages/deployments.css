@@ -876,3 +876,22 @@
 .zone-card--wide { grid-column: 1 / -1; }
 .zone-card--wide .zone-card__body { flex-direction: row; flex-wrap: wrap; }
 .zone-card--wide .node-chip-container { flex: 1 1 280px; }
+
+/* ---- namespace selector in the page header ---- */
+.namespace-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+.namespace-picker__select {
+    min-width: 180px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+}
+.namespace-picker__select:focus-visible { outline: 2px solid var(--color-primary, #2563eb); outline-offset: 1px; }

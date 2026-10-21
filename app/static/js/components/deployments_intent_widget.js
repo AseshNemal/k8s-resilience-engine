@@ -6,6 +6,9 @@
 window.DeploymentsIntentWidget = (function () {
     "use strict";
 
+    // Every request carries the namespace chosen in the page header (deployments_namespace.js).
+    const scoped = (url) => (window.DeploymentsNamespace ? window.DeploymentsNamespace.withNamespace(url) : url);
+
     // Same order as service._declared_target: say where the declared intent comes from.
     async function showManifestSource() {
         const note = document.querySelector("[data-role='manifest-source']");
@@ -31,7 +34,7 @@ window.DeploymentsIntentWidget = (function () {
     async function loadIntentCompliance(activeServices) {
         await showManifestSource();
         try {
-            const resp = await fetch("/api/deployments/manifests");
+            const resp = await fetch(scoped("/api/deployments/manifests"));
             if (!resp.ok) return;
             const intents = await resp.json();
             renderIntentTable(intents, activeServices);
@@ -47,7 +50,7 @@ window.DeploymentsIntentWidget = (function () {
         if (!rateEl) return;
         rateEl.textContent = "n/a";
         try {
-            const resp = await fetch("/api/deployments/manifests/compliance");
+            const resp = await fetch(scoped("/api/deployments/manifests/compliance"));
             if (!resp.ok) return;
             const data = await resp.json();
             rateEl.textContent = data.constraint_compliance_rate == null
