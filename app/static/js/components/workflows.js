@@ -25,6 +25,7 @@
     const extractLiveButton = document.querySelector('[data-role="extract-live-button"]');
     const discoveredContainer = document.querySelector('[data-role="discovered-workflows-container"]');
     const discoveredSelect = document.querySelector('[data-role="discovered-workflow-select"]');
+    const liveConfigStatus = document.querySelector('[data-role="live-config-status"]');
     const useCandidateButton = document.querySelector('[data-role="use-candidate-button"]');
     const scenarioForm = document.querySelector('[data-role="scenario-form"]');
     const scenarioProtocol = document.querySelector('[data-role="scenario-protocol"]');
@@ -61,6 +62,12 @@
     const guidedObservedDetail = document.querySelector('[data-role="guided-observed-detail"]');
     const guidedObservedChecked = document.querySelector('[data-role="guided-observed-checked"]');
     const guidedCandidates = document.querySelector('[data-role="guided-candidates"]');
+    const findButton = document.querySelector('[data-role="find-workflows-button"]');
+    const findStatus = document.querySelector('[data-role="find-workflows-status"]');
+    const startPrompt = document.querySelector('[data-role="trace-start-prompt"]');
+    const startConfirm = document.querySelector('[data-role="trace-start-confirm"]');
+    const startCancel = document.querySelector('[data-role="trace-start-cancel"]');
+    const stopButton = document.querySelector('[data-role="trace-stop-button"]');
     const guidedAddress = document.getElementById("guided-jaeger-url");
     const guidedLookback = document.getElementById("guided-lookback");
     const researchAudit = document.querySelector(".research-audit");
@@ -1008,6 +1015,10 @@
     function onDiscoveryReport(report) {
         clearLoadingText();
         const state = report.state;
+        if (state !== "jaeger_unavailable" && findSaysDown) {
+            setFindStatus("");
+            if (startPrompt) startPrompt.hidden = true;
+        }
         if (state === "discovered" || state === "incomplete_traces") {
             const signature = JSON.stringify([
                 state,
@@ -1028,8 +1039,12 @@
                         : "No business workflows among the recorded traces"
             );
         }
-        const detail =
+        let detail =
             state === "discovered" ? observedDetail(report) : `${report.message} ${observedDetail(report)}`.trim();
+        if (state === "no_traces" && report.servicesRecorded.length === 0) {
+            // A running trace service is only the place traces are stored; an application has to send them.
+            detail += " Nothing has sent traces to it yet: an application must send them (OTLP, port 4317 or 4318).";
+        }
         showObservedState(state, detail);
         resolveFirstDiscovery();
     }
@@ -1060,8 +1075,12 @@
         resolveFirstDiscovery();
     }
 
+    // True when the last health check was refused by the server (for example a host that is not approved).
+    let healthRefused = false;
+
     async function checkTraceServiceHealth() {
         const address = guidedAddress ? guidedAddress.value.trim() : "";
+        healthRefused = false;
         try {
             const status = await fetchJson(
                 `/api/workflows/jaeger/status${address ? `?jaeger_url=${encodeURIComponent(address)}` : ""}`
@@ -1071,6 +1090,7 @@
             if (error && error.status === 422) {
                 // The address was refused (for example, a host that is not approved). Waiting will not help:
                 // say why, and stop until the address changes.
+                healthRefused = true;
                 onDiscoveryError(error);
             }
             return false;
@@ -1097,6 +1117,125 @@
         onError: onDiscoveryError,
         isHidden: () => Boolean(document.hidden),
     });
+
+    // ---------------------------------------------------------------------------
+    // "Find workflows": one button that checks the trace service, offers to start it, and shows what it recorded.
+    //
+    // Starting the trace service means running a container on this computer, so it only ever happens after
+    // the person says yes in the prompt below, and only through the extension's host helper (a web page cannot
+    // start a container). Without the helper the page says how to start it by hand. It never starts an
+    // application, sends traffic or changes a Kubernetes workload.
+    // ---------------------------------------------------------------------------
+
+    const MANUAL_START =
+        "The trace service is not running. Start it yourself with: docker compose -f deploy/docker-compose.jaeger.yml up -d. " +
+        "This page then finds it by itself.";
+    let findBusy = false;
+    // True while the line under the button says the trace service is not running; it is cleared as soon as a
+    // report shows the service answering, so the page never says "not running" about a running service.
+    let findSaysDown = false;
+
+    const traceService = () => window.__resilienceTraceService || { available: false };
+
+    function setFindStatus(message, isError = false, saysDown = false) {
+        findSaysDown = saysDown;
+        if (!findStatus) return;
+        findStatus.textContent = message;
+        findStatus.style.color = isError ? "var(--color-danger, #b91c1c)" : "var(--color-text-muted)";
+    }
+
+    function setFindBusy(busy) {
+        findBusy = busy;
+        [findButton, startConfirm, startCancel, stopButton].forEach((button) => {
+            if (button) button.disabled = busy;
+        });
+    }
+
+    // The Stop button is offered only for a trace service the extension started itself.
+    function showStopFor(state) {
+        if (stopButton) stopButton.hidden = state !== "trace-running";
+    }
+
+    async function findWorkflows() {
+        if (findBusy || !guidedForm) return;
+        if (!guidedForm.reportValidity()) {
+            reportMissingAddress();
+            return;
+        }
+        setFindBusy(true);
+        if (startPrompt) startPrompt.hidden = true;
+        setFindStatus("Checking the trace service…");
+        try {
+            if (await checkTraceServiceHealth()) {
+                setFindStatus("The trace service is running. Looking for workflows…");
+                discoveryPoller.refresh();
+                const known = traceService().available ? await traceService().status() : null;
+                if (known) showStopFor(known.state);
+                return;
+            }
+            if (healthRefused) {
+                setFindStatus(""); // the panel above already says why the address was refused
+                return;
+            }
+            discoveryPoller.start(); // keeps watching, so it shows the result as soon as the service answers
+            if (traceService().available) {
+                setFindStatus("The trace service is not running.", false, true);
+                if (startPrompt) startPrompt.hidden = false;
+            } else {
+                setFindStatus(MANUAL_START, false, true);
+            }
+        } finally {
+            setFindBusy(false);
+        }
+    }
+
+    async function startTraceService() {
+        if (findBusy || !traceService().available) return;
+        setFindBusy(true);
+        if (startPrompt) startPrompt.hidden = true;
+        setFindStatus("Starting the trace service… the first time it may need to download the image.");
+        try {
+            const result = await traceService().start();
+            showStopFor(result.state);
+            if (!result.ok) {
+                setFindStatus(result.message, true);
+                return;
+            }
+            setFindStatus(`${result.message} Looking for workflows…`);
+            discoveryPoller.refresh();
+        } finally {
+            setFindBusy(false);
+        }
+    }
+
+    function declineTraceStart() {
+        if (startPrompt) startPrompt.hidden = true;
+        setFindStatus("Nothing was started.");
+    }
+
+    async function stopTraceService() {
+        if (findBusy || !traceService().available) return;
+        setFindBusy(true);
+        setFindStatus("Stopping the trace service…");
+        try {
+            const result = await traceService().stop();
+            showStopFor(result.state === "trace-stopped" ? "" : "trace-running");
+            setFindStatus(result.message, !result.ok);
+            discoveryPoller.refresh();
+        } finally {
+            setFindBusy(false);
+        }
+    }
+
+    // On page load, learn whether a trace service of ours is already running, to offer Stop.
+    async function showStopIfOurs() {
+        if (!traceService().available) return;
+        try {
+            showStopFor((await traceService().status()).state);
+        } catch (_error) {
+            showStopFor("");
+        }
+    }
 
     function reportMissingAddress() {
         // The page starts in a "Loading…" state. Returning silently would leave it there forever, so say what
@@ -2182,10 +2321,19 @@
         }
     }
 
+    // A message under the buttons, never a browser alert: an alert blocks the whole page (and with it the
+    // automatic checking) until it is dismissed, and its text cannot be selected.
+    function setLiveConfigStatus(message, isError = false) {
+        if (!liveConfigStatus) return;
+        liveConfigStatus.textContent = message;
+        liveConfigStatus.style.color = isError ? "var(--color-danger, #b91c1c)" : "var(--color-text-muted)";
+    }
+
     async function handleDiscoverWorkflows() {
         if (!discoverButton) return;
         discoverButton.disabled = true;
         discoverButton.textContent = "Discovering…";
+        setLiveConfigStatus("");
 
         const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
         const serviceName = entryServiceInput ? entryServiceInput.value.trim() : "";
@@ -2217,6 +2365,8 @@
                     });
                     discoveredContainer.style.display = "block";
                     if (extractLiveButton) extractLiveButton.disabled = false;
+                    const found = discoveredWorkflows.length;
+                    setLiveConfigStatus(`Found ${found} candidate operation${found === 1 ? "" : "s"}.`);
                 } else {
                     const opt = document.createElement("option");
                     opt.value = "";
@@ -2227,7 +2377,7 @@
                 }
             }
         } catch (error) {
-            alert(`Could not connect to Jaeger: ${error.message}`);
+            setLiveConfigStatus(`Could not discover workflows: ${error.message}`, true);
         } finally {
             discoverButton.disabled = false;
             discoverButton.textContent = "Discover Candidate Operations";
@@ -2240,13 +2390,14 @@
             ? discoveredWorkflows.find((item) => workflowKey(item) === discoveredSelect.value)
             : undefined;
         if (!candidate) {
-            alert("Please select a candidate operation from the dropdown.");
+            setLiveConfigStatus("Select a candidate operation from the dropdown first.", true);
             return;
         }
         const operation = candidate.operationName;
 
         extractLiveButton.disabled = true;
         extractLiveButton.textContent = "Extracting…";
+        setLiveConfigStatus("");
 
         const jaegerUrl = jaegerUrlInput ? jaegerUrlInput.value.trim() : "";
         const serviceName = (entryServiceInput && entryServiceInput.value.trim()) || candidate.rootService || "";
@@ -2257,7 +2408,7 @@
             const workflow = await fetchJson(url);
             renderWorkflowData(workflow, true);
         } catch (error) {
-            alert(`Live extraction failed: ${error.message}`);
+            setLiveConfigStatus(`Live extraction failed: ${error.message}`, true);
         } finally {
             extractLiveButton.disabled = false;
             extractLiveButton.textContent = "Extract Live Dependency Graph";
@@ -2310,6 +2461,10 @@
     if (guidedForm) guidedForm.addEventListener("submit", discoverGuidedWorkflows);
     if (guidedInspectButton) guidedInspectButton.addEventListener("click", inspectGuidedWorkflow);
     if (guidedOperation) guidedOperation.addEventListener("change", updateGuidedSelectionAction);
+    if (findButton) findButton.addEventListener("click", findWorkflows);
+    if (startConfirm) startConfirm.addEventListener("click", startTraceService);
+    if (startCancel) startCancel.addEventListener("click", declineTraceStart);
+    if (stopButton) stopButton.addEventListener("click", stopTraceService);
     // A new address or time window asks again straight away; the poller keeps requests from overlapping.
     if (guidedAddress) guidedAddress.addEventListener("change", discoverGuidedWorkflows);
     if (guidedLookback) guidedLookback.addEventListener("change", discoverGuidedWorkflows);
@@ -2339,6 +2494,7 @@
         activateWorkflowStage("define");
         const sourcePill = document.querySelector('.topbar .pill-badge--teal');
         if (sourcePill) sourcePill.textContent = "No active campaign";
+        showStopIfOurs();
         ensureJaegerDefault().then(startGuidedDiscovery).then(loadLatestExperiment);
     });
 })();

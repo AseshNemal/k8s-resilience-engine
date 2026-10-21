@@ -78,7 +78,7 @@ LABEL org.opencontainers.image.title="K8s Resilience Engine" \
 
 COPY extension/metadata.json extension/compose.yaml extension/icon.svg /
 COPY --from=render /out /ui
-COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoconnect.js extension/ui-src/connect.js extension/ui-src/connect-auto.js extension/ui-src/docker.css /ui/
+COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoconnect.js extension/ui-src/trace-service.js extension/ui-src/connect.js extension/ui-src/connect-auto.js extension/ui-src/docker.css /ui/
 COPY --from=helper --chmod=0755 /out/darwin/resilience-helper /darwin/resilience-helper
 COPY --from=helper --chmod=0755 /out/linux/resilience-helper /linux/resilience-helper
 COPY --from=helper --chmod=0755 /out/windows/resilience-helper.exe /windows/resilience-helper.exe

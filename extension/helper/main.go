@@ -12,6 +12,7 @@
 //	resilience-helper renew <context>
 //	resilience-helper renew-managed
 //	resilience-helper agent-status | agent-enable <context> | agent-disable
+//	resilience-helper trace-status | trace-start | trace-stop
 //	resilience-helper revoke <context>
 //	resilience-helper version
 package main
@@ -20,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -29,10 +31,14 @@ import (
 	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/execx"
 	"resilience-engine/helper/internal/flow"
+	"resilience-engine/helper/internal/tracesvc"
 	"resilience-engine/helper/internal/transport"
 )
 
 const version = "0.1.0"
+
+// traceDeps is replaced in tests so no test ever reaches Docker or the network.
+var traceDeps = realTrace
 
 // Deadlines. Docker Desktop on a busy machine can need 30 seconds for a single `docker exec`, and one
 // renewal makes several Docker and cluster calls, so a short limit turns "slow" into "never renews".
@@ -55,6 +61,31 @@ func realDeps() flow.Deps {
 		Prompter: approve.Default(),
 		Backends: func() []transport.Backend { return transport.Defaults(runtime.GOOS, home, docker) },
 		Agent:    realAgent(home),
+	}
+}
+
+// realTrace is the trace service's view of this machine: the Docker CLI, and a probe of the one address
+// where Jaeger's query service listens.
+func realTrace() tracesvc.Deps {
+	home, _ := os.UserHomeDir()
+	client := &http.Client{Timeout: 2 * time.Second}
+	return tracesvc.Deps{
+		Runner: execx.Real{},
+		FindDocker: func() (string, error) {
+			return transport.FindDocker(exec.LookPath, os.Stat, runtime.GOOS, home)
+		},
+		Probe: func(ctx context.Context) bool {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, tracesvc.QueryURL, nil)
+			if err != nil {
+				return false
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return false
+			}
+			defer resp.Body.Close()
+			return resp.StatusCode == http.StatusOK
+		},
 	}
 }
 
@@ -106,6 +137,13 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		timeout, do = 30*time.Second, flow.BackgroundStatus
 	case "agent-disable":
 		timeout, do = 30*time.Second, flow.DisableBackground
+	case "trace-status":
+		timeout, do = 30*time.Second, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Status(ctx, traceDeps()) }
+	case "trace-start":
+		// The first start may pull the image, so this is the longest of the three.
+		timeout, do = 5*time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Start(ctx, traceDeps()) }
+	case "trace-stop":
+		timeout, do = time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Stop(ctx, traceDeps()) }
 	case "version":
 		emit(stdout, map[string]any{"ok": true, "version": version, "platform": runtime.GOOS + "/" + runtime.GOARCH})
 		return 0
@@ -127,6 +165,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | agent-status | agent-enable <context> | agent-disable | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | agent-status | agent-enable <context> | agent-disable | trace-status | trace-start | trace-stop | revoke <context> | version\n")
 	return 2
 }
