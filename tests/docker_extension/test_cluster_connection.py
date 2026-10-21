@@ -109,7 +109,9 @@ def test_responses_never_contain_the_credential(client):
         (kubeconfig(user={"auth-provider": {"name": "gcp"}}), "bearer tokens"),
         ("not: a kubeconfig", "current-context"),
         (":\n - [", "valid YAML"),
-        ("a: " + "x" * 70000, "too large"),
+        # An explicit id: pytest keeps the test id in an environment variable, and Windows refuses one that is
+        # longer than 32767 characters, which this 70000-character value would make it.
+        pytest.param("a: " + "x" * 70000, "too large", id="oversized-file"),
     ],
 )
 def test_unsafe_or_malformed_kubeconfigs_are_rejected(client, tmp_path, text, message):
