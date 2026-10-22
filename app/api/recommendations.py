@@ -15,6 +15,7 @@ from app.engine.recommendation_evaluation_validation.approval import (
 from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
 from app.engine.recommendation_evaluation_validation.live_pipeline import build_live_recommendation
+from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 from app.shared.evidence_errors import EvidenceError, unavailable
 from app.core.config import get_settings
 from app.core.database import get_engine
@@ -197,6 +198,7 @@ def request_approval(
     provider: Callable[[], LiveRecommendation] = Depends(get_recommendation_provider),
 ) -> ApprovalResponse:
     live = provider()
+    proposal = build_yaml_proposal(live, recommendation_id)
     try:
         approval = service.request_approval(
             recommendation_id=recommendation_id,
@@ -205,6 +207,7 @@ def request_approval(
             yaml_snapshot=request.yaml_snapshot,
             requested_by="developer",
             evidence=live.evidence,
+            proposal_yaml=proposal.yaml if proposal.status == GENERATED and proposal.applicable else None,
         )
     except PreconditionError as e:
         raise HTTPException(status_code=422, detail=str(e))

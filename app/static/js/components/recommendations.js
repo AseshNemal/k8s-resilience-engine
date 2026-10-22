@@ -332,7 +332,7 @@
         const context = {
             baselineBlastRadius: detail.evidence.blastRadiusBefore,
             validation: null,
-            yaml: null,
+            yaml: detail.yaml && detail.yaml.available && detail.yaml.applicable ? detail.yaml.text : null,   // the engine's own proposal text, only when it is for live evidence
             currentDeployment: detail.currentDeployment,
             simulatedDeployment: selected ? selected.simulatedDeployment : null,   // only a selected, feasible candidate has one
         };

@@ -22,6 +22,7 @@ from typing import Any
 
 from app.engine.recommendation_evaluation_validation.approval import LiveRecommendation
 from app.engine.recommendation_evaluation_validation.approval.eligibility import evaluate_eligibility
+from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 
 TOPOLOGY_SPREAD = "TOPOLOGY_SPREAD"
 COMBINATION = "COMBINATION"
@@ -48,8 +49,8 @@ SINGLE_REPLICA_NOTE = (
 )
 
 YAML_NOT_AVAILABLE = (
-    "No Kubernetes YAML generator exists in the engine yet, so no proposal text is shown. Nothing is generated, "
-    "invented or applied."
+    "No Kubernetes YAML is proposed: the engine writes one only for a candidate that can be approved (verified "
+    "feasible and ranked), and none is selected. Nothing is generated, invented or applied."
 )
 
 VALIDATION_NOT_AVAILABLE = (
@@ -84,6 +85,19 @@ def _selection_text(candidate_id: str, ranking: dict[str, Any] | None, selected:
         return f"Ranked {ranking['rank']}; not the selection. {ranking.get('detail', '')}".strip()
     excluded = ranking.get("excluded")
     return f"Not ranked ({excluded}). {ranking.get('detail', '')}".strip() if excluded else (ranking.get("detail") or "Not ranked.")
+
+
+def _selected_yaml(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    """The page's single YAML panel: the selected candidate's proposal, or why there is none. Never invented."""
+    chosen = next((c for c in candidates if c["selected"]), None)
+    proposal = chosen["yamlProposal"] if chosen else None
+    if proposal is None:
+        return {"available": False, "reason": YAML_NOT_AVAILABLE}
+    if proposal["status"] != GENERATED:
+        return {"available": False, "recommendationId": chosen["id"], "reason": proposal["reason"]}
+    return {"available": True, "recommendationId": chosen["id"], "text": proposal["yaml"],
+            "sha256": proposal["sha256"], "applicable": proposal["applicable"], "reason": proposal["reason"],
+            "disclosures": proposal["disclosures"], "podReplacement": proposal["podReplacement"]}
 
 
 def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
@@ -133,6 +147,7 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
                 "requiresJustification": standing.requires_justification,
             },
             "simulatedDeployment": detail.get("simulatedDeployment"),
+            "yamlProposal": build_yaml_proposal(live, item.id).to_dict(),
             "notes": notes,
         })
 
@@ -163,7 +178,7 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
         },
         "candidates": candidates,
         "currentDeployment": details.get("currentDeployment"),
-        "yaml": {"available": False, "reason": YAML_NOT_AVAILABLE},
+        "yaml": _selected_yaml(candidates),
         "validation": {"available": False, "reason": VALIDATION_NOT_AVAILABLE},
         "applied": False,
     }

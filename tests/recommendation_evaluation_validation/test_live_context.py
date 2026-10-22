@@ -281,7 +281,10 @@ def test_a_concentrated_service_is_shown_with_everything_the_page_needs(client, 
     assert candidate["simulatedDeployment"]["services"]
     assert body["currentDeployment"]["nodes"]
     assert body["evidence"]["workflowFreezeId"] == "freeze-1" and body["evidence"]["isPrediction"] is True
-    assert body["yaml"]["available"] is False                                                  # no YAML generator exists
+    assert body["yaml"]["available"] is True and body["yaml"]["applicable"] is True
+    assert "topologySpreadConstraints" in body["yaml"]["text"] and "NOT APPLIED" in body["yaml"]["text"]
+    assert body["yaml"]["podReplacement"]["included"] is False
+    assert candidate["yamlProposal"]["status"] == "GENERATED"
 
 
 def test_no_candidate_is_never_reported_as_a_healthy_system(client, monkeypatch, use_cluster, evidenced_topology):

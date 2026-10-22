@@ -115,8 +115,9 @@ class Scenario:
     extra_workflows: list[WorkflowGraph] = field(default_factory=list)
 
     def evaluate(self, **kwargs) -> LiveRecommendation:
-        return evaluate_offline(self.workflow, self.deployment, failed_node=self.failed_node,
-                                evidence=self.evidence, **kwargs)
+        """Evaluate the scenario; any keyword (``evidence``, ``failed_node``, ...) overrides the scenario's own."""
+        options = {"failed_node": self.failed_node, "evidence": self.evidence, **kwargs}
+        return evaluate_offline(self.workflow, self.deployment, **options)
 
 
 def evaluate_offline(workflow: WorkflowGraph, deployment: DeploymentGraph, *, failed_node: str | None = None,
