@@ -117,7 +117,7 @@
         return {
             plan: idle && !present,
             enable: idle && !present && Boolean(view.plan && view.plan.ready),
-            verify: idle && phase === "applied",
+            verify: idle && (phase === "applied" || phase === "rolled-back"),   // after Undo, Verify checks the cleanup
             traffic: idle && phase === "applied",
             undo: idle && present,
         };
@@ -127,7 +127,7 @@
         "applying": "A setup did not finish. Undo removes what it created.",
         "applied": "Tracing is set up.",
         "rolling-back": "A removal did not finish. Undo continues it.",
-        "rolled-back": "No tracing setup is present.",
+        "rolled-back": "No tracing setup is present. Verify checks that the cluster is back to how it was.",
         "rollback-failed": "Part of the setup could not be removed. Undo tries again.",
     };
 
@@ -265,7 +265,7 @@
             const r = await longCommand("trace-bookinfo-verify", "verify");
             s.verify = r ? r.verify : null;
             publish();
-            if (r && r.ok) await readTracesOnce();
+            if (r && r.ok && r.state === "bookinfo-checks-passed") await readTracesOnce();   // nothing to read once the setup is gone
             publish();
             return view();
         }

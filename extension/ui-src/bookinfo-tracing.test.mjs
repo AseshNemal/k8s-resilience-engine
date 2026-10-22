@@ -30,7 +30,7 @@ test("Plan is the only action before anything is set up, and Enable needs a read
 test("Verify needs an applied setup; Undo is offered for anything that is not removed", () => {
     for (const [phase, want] of [["applied", { plan: false, enable: false, verify: true, traffic: true, undo: true }],
         ["applying", { plan: false, enable: false, verify: false, traffic: false, undo: true }], ["rolling-back", { plan: false, enable: false, verify: false, traffic: false, undo: true }],
-        ["rollback-failed", { plan: false, enable: false, verify: false, traffic: false, undo: true }], ["rolled-back", { plan: true, enable: false, verify: false, traffic: false, undo: false }]]) {
+        ["rollback-failed", { plan: false, enable: false, verify: false, traffic: false, undo: true }], ["rolled-back", { plan: true, enable: false, verify: true, traffic: false, undo: false }]]) {
         assert.deepEqual(plain(B.availability(view({ setup: setup(phase) }))), want, phase);
     }
 });
@@ -245,6 +245,22 @@ test("Undo clears what was shown and reads the record again", async () => {
     await c.undo();
     assert.equal(c.view().setup.phase, "rolled-back");
     assert.equal(c.view().verify, null);
+});
+
+test("after Undo, Verify checks the cleanup and does not read traces", async () => {
+    let phase = "applied";
+    const { env, log } = fakeEnv({ results: { "trace-bookinfo-status": () => ok("bookinfo-status", { setup: B.cleanSetup(setup(phase)) }),
+        "trace-bookinfo-undo": () => { phase = "rolled-back"; return ok("bookinfo-undone"); },
+        "trace-bookinfo-verify": ok("bookinfo-cleanup-verified", { message: "The cluster matches the state recorded before the setup." }) }, traces: [verifiedTrace] });
+    const c = B.createController(env);
+    await c.refresh();
+    await c.undo();
+    assert.equal(B.availability(c.view()).verify, true);
+    assert.equal(B.availability(c.view()).traffic, false, "no traffic without a setup");
+    await c.verify();
+    assert.ok(!log.some((l) => l.startsWith("GET")), "there are no traces to read once the setup is gone");
+    assert.equal(c.view().outcome, "ok");
+    assert.match(c.view().message, /matches the state recorded before/);
 });
 
 test("a second click while a command runs is ignored", async () => {

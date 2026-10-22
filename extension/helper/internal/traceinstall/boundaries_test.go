@@ -114,7 +114,7 @@ func TestEverythingTheHelperWritesIsOwnerOnly(t *testing.T) {
 // contain a call that creates, removes, logs to the record or asks.
 func TestTheVerifyFunctionContainsNoWriteAndNoDialog(t *testing.T) {
 	code := productionSources(t)["verify.go"]
-	for _, name := range []string{"Verify", "check"} {
+	for _, name := range []string{"Verify", "check", "verifyCleanup"} {
 		start := strings.Index(code, "func "+name+"(")
 		if start < 0 {
 			t.Fatalf("func %s not found", name)

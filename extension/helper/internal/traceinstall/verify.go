@@ -114,6 +114,9 @@ func check(ctx context.Context, d Deps, p Params) (*Record, *VerifyResult, *Outc
 // is in place and healthy (see check) and what memory looks like. Producing traffic is a separate operation with its
 // own approval (RunTraffic). Whether traces arrived is read from Jaeger by the page.
 func Verify(ctx context.Context, d Deps, p Params) Outcome {
+	if rec, err := d.Store.Load(p.Identity); err == nil && rec != nil && rec.Phase == PhaseRolledBack {
+		return verifyCleanup(ctx, d, rec) // after Undo, "verify" means: is the cluster really back to how it was?
+	}
 	rec, result, bad := check(ctx, d, p)
 	if bad != nil {
 		return *bad
@@ -206,4 +209,44 @@ func RunTraffic(ctx context.Context, d Deps, p Params) Outcome {
 	r.log("send real requests", "done", "")
 	return Outcome{OK: true, State: StateTrafficSent, Verify: result, Setup: SummaryOf(rec),
 		Message: "Real requests were sent from an instrumented Pod. The traces that follow are read from Jaeger."}
+}
+
+// verifyCleanup is the read-only check after Undo, independent of Undo's own result: the cluster is read again and
+// compared with the snapshot taken before the setup (namespace labels, Deployment specs, replicas, containers per Pod,
+// so no sidecar is left), and every object this installation created and deleted must really be gone. An object of the
+// same name that does not carry this installation's label is someone else's and is not counted.
+func verifyCleanup(ctx context.Context, d Deps, rec *Record) Outcome {
+	var problems []string
+	facts, err := bookinfotrace.Gather(ctx, d.Cluster)
+	if err != nil {
+		return fail(StateVerifyFailed, "The cluster could not be read to check the cleanup.")
+	}
+	diffs := bookinfotrace.Compare(rec.Snapshot, bookinfotrace.TakeSnapshot(facts, rec.Snapshot.Context, rec.Snapshot.TakenAt))
+	for _, diff := range diffs {
+		problems = append(problems, fmt.Sprintf("%s: was %s, now %s", diff.What, nonEmpty(diff.Before), nonEmpty(diff.After)))
+	}
+	for _, e := range rec.Inventory {
+		if e.State != EntryDeleted {
+			continue
+		}
+		res, err := ResourceFor(e.Ref.APIVersion, e.Ref.Kind)
+		if err != nil {
+			continue
+		}
+		obj, err := d.Cluster.Get(ctx, res, e.Ref.Namespace, e.Ref.Name)
+		switch {
+		case kube.IsNotFound(err):
+		case err != nil:
+			problems = append(problems, e.Ref.String()+" could not be read")
+		case obj.Labels[LabelInstallation] == rec.InstallationID:
+			problems = append(problems, e.Ref.String()+" is still there")
+		}
+	}
+	if len(problems) > 0 {
+		o := fail(StateVerifyFailed, "The cleanup is not complete: "+strings.Join(problems, "; ")+".")
+		o.Diffs, o.Setup = diffs, SummaryOf(rec)
+		return o
+	}
+	return Outcome{OK: true, State: StateCleanupVerified, Setup: SummaryOf(rec),
+		Message: "The cluster matches the state recorded before the setup, and every object this setup created is gone."}
 }

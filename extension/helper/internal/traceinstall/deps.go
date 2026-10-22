@@ -127,6 +127,7 @@ const (
 	StateApprovalNA        = "approval-unavailable"
 	StateError             = "error"
 	StateChecksPassed      = "bookinfo-checks-passed"
+	StateCleanupVerified   = "bookinfo-cleanup-verified"
 	StateTrafficSent       = "bookinfo-traffic-sent"
 	StateVerifyFailed      = "bookinfo-verify-failed"
 	StateNotApplied        = "bookinfo-not-applied"

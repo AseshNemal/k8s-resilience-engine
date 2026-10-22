@@ -70,10 +70,9 @@ func TestVerifyNeedsAnAppliedSetup(t *testing.T) {
 	e = applied(t)
 	e.undo()
 	e.sim.writes = nil
-	for name, out := range map[string]Outcome{"verify": e.verify(), "traffic": e.traffic()} {
-		if out.State != StateNotApplied || len(e.sim.writes) != 0 {
-			t.Fatalf("%s: %+v", name, out)
-		}
+	// after Undo there is nothing to send traffic through; Verify turns into the cleanup check (tested below)
+	if out := e.traffic(); out.State != StateNotApplied || len(e.sim.writes) != 0 || len(e.prompter.requests) != 2 {
+		t.Fatalf("traffic: %+v", out)
 	}
 }
 
@@ -286,5 +285,67 @@ func TestATrafficRunKilledAtAnyWriteLeavesNothingBehindAfterUndo(t *testing.T) {
 			}
 			e.assertRestored()
 		}
+	}
+}
+
+// ---- Verify after Undo checks the cleanup, read-only ----
+
+func TestAfterUndoVerifyChecksTheCleanupAndWritesNothing(t *testing.T) {
+	e := applied(t)
+	if out := e.undo(); !out.OK {
+		t.Fatalf("%+v", out)
+	}
+	e.sim.writes = nil
+	asked := len(e.prompter.requests)
+	out := e.verify()
+	if !out.OK || out.State != StateCleanupVerified {
+		t.Fatalf("%+v", out)
+	}
+	if len(e.sim.writes) != 0 || len(e.prompter.requests) != asked {
+		t.Fatalf("the cleanup check must be read-only: %v", e.sim.writes)
+	}
+}
+
+func TestTheCleanupCheckFindsWhatUndoClaimedToHaveRemoved(t *testing.T) {
+	cases := map[string]func(e *env){
+		"a sidecar came back": func(e *env) {
+			e.sim.objs[e.sim.podsOwnedBy("ratings", "v1")[0]].obj.Containers = []string{"ratings", "istio-proxy"}
+		},
+		"the injection label is back": func(e *env) {
+			ns, _ := e.sim.get(kube.Namespaces, "", "bookinfo")
+			ns.obj.Labels = map[string]string{"kubernetes.io/metadata.name": "bookinfo", "istio-injection": "enabled"}
+		},
+		"one of our objects is still there": func(e *env) {
+			e.sim.put(kube.Resource{Plural: "telemetries", Namespaced: true}, kube.Object{Name: "trace-demo", Namespace: "bookinfo",
+				Labels: map[string]string{LabelInstallation: e.record().InstallationID, LabelManagedBy: "resilience-tracing"}})
+		},
+	}
+	for name, change := range cases {
+		e := applied(t)
+		e.undo()
+		change(e)
+		e.sim.writes = nil
+		if out := e.verify(); out.OK || out.State != StateVerifyFailed || !strings.Contains(out.Message, "cleanup is not complete") || len(e.sim.writes) != 0 {
+			t.Errorf("%s: %+v", name, out)
+		}
+	}
+}
+
+func TestSomeoneElsesObjectWithTheSameNameIsNotCountedAsLeftover(t *testing.T) {
+	e := applied(t)
+	e.undo()
+	e.sim.put(kube.Resource{Plural: "telemetries", Namespaced: true}, kube.Object{Name: "trace-demo", Namespace: "bookinfo", Labels: map[string]string{"owner": "someone"}})
+	if out := e.verify(); !out.OK {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestAnUnreadableClusterIsNotACleanPass(t *testing.T) {
+	e := applied(t)
+	e.undo()
+	e.sim.failList["list:deployments"] = fmt.Errorf("SECRET-LIST-TEXT")
+	out := e.verify()
+	if out.OK || strings.Contains(out.Message, "SECRET") {
+		t.Fatalf("%+v", out)
 	}
 }
