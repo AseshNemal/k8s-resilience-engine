@@ -36,6 +36,27 @@ test("the status comes from the graph's exposure, and a service with no ready po
     assert.equal(status.down, "unavailable");
 });
 
+test("with no node chosen, the copies left are the worst case: the busiest node fails", () => {
+    const { copiesLeft } = window.DeploymentsDriftWidget;
+    const row = (name) => spreadMatrix(graph).rows.find((r) => r.name === name);
+    const spread = copiesLeft(row("spread"), null);
+    assert.equal(spread.left, 2);
+    assert.equal(spread.outcome, "survives");
+    const packed = copiesLeft(row("packed"), null);
+    assert.equal(packed.left, 0);
+    assert.equal(packed.node, "w2");
+    assert.equal(packed.outcome, "down");  // the same services the graph marks exposed
+});
+
+test("failing a chosen node removes only the copies on it", () => {
+    const { copiesLeft } = window.DeploymentsDriftWidget;
+    const rows = Object.fromEntries(spreadMatrix(graph).rows.map((r) => [r.name, r]));
+    assert.equal(copiesLeft(rows.spread, "w1").outcome, "fewer");
+    assert.equal(copiesLeft(rows.packed, "w1").outcome, "unaffected");
+    assert.equal(copiesLeft(rows.packed, "w2").outcome, "down");
+    assert.equal(copiesLeft(rows.down, "w1").outcome, "unavailable");
+});
+
 test("exposed services come first and pods with no node get a last column", () => {
     const { rows, columns } = spreadMatrix(graph);
     assert.equal(rows[0].name, "packed");

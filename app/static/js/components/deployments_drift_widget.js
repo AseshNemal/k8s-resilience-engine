@@ -135,8 +135,31 @@ window.DeploymentsDriftWidget = (function () {
         return { columns, rows };
     }
 
-    const STATUS_TEXT = { safe: "✅ Safe", exposed: "⚠️ Exposed", unavailable: "⛔ No ready replica" };
-    const STATUS_VARIANT = { safe: "success", exposed: "danger", unavailable: "muted" };
+    // Ready copies a service keeps when one node fails. With no node chosen, the worst case: the node
+    // holding most of its ready copies fails (the same rule as the exposure in the graph).
+    function copiesLeft(row, failedNode) {
+        const readyOn = (node) => (row.cells[node] || { ready: 0 }).ready;
+        let lost = 0;
+        let node = failedNode;
+        if (failedNode) {
+            lost = readyOn(failedNode);
+        } else {
+            Object.keys(row.cells).filter((k) => k !== PENDING).forEach((k) => {
+                if (readyOn(k) > lost) {
+                    lost = readyOn(k);
+                    node = k;
+                }
+            });
+        }
+        const left = row.ready - lost;
+        let outcome = "unaffected";
+        if (row.ready === 0) outcome = "unavailable";
+        else if (left === 0) outcome = "down";
+        else if (lost > 0) outcome = failedNode ? "fewer" : "survives";  // worst case survived: safe
+        return { left, lost, node, outcome };
+    }
+
+    const OUTCOME_ICON = { unaffected: "✅", survives: "✅", fewer: "⚠️", down: "💥", unavailable: "⛔" };
 
     function el(tag, className, text) {
         const node = document.createElement(tag);
@@ -145,34 +168,73 @@ window.DeploymentsDriftWidget = (function () {
         return node;
     }
 
+    let lastDeployment = null;
+    let failedColumn = null;
+
+    // One block per ready copy: green survives the failure, grey is lost with the failed node.
+    function copiesMeter(row) {
+        const result = copiesLeft(row, failedColumn);
+        const box = el("div", `copies copies--${result.outcome}`);
+        box.appendChild(el("span", "copies__icon", OUTCOME_ICON[result.outcome]));
+        const blocks = el("span", "copies__blocks");
+        for (let i = 0; i < row.ready; i++) blocks.appendChild(el("span", i < result.left ? "copy" : "copy copy--lost"));
+        box.append(blocks, el("span", "copies__count", row.ready ? `${result.left}/${row.ready}` : "0"));
+        const where = result.node ? shortNode(result.node) : "a node";
+        box.title = result.outcome === "unavailable"
+            ? `${row.name} has no ready copy at all.`
+            : `If ${where} fails, ${row.name} keeps ${result.left} of ${row.ready} ready copies.`;
+        return box;
+    }
+
+    function failColumn(column) {
+        failedColumn = failedColumn === column ? null : column;
+        if (lastDeployment) renderSpreadMap(lastDeployment);
+    }
+
     function renderSpreadMap(deployment) {
         const table = document.querySelector("[data-role='spread-map']");
         if (!table) return;
+        if (deployment !== lastDeployment) failedColumn = null;  // new data: start from no failure
+        lastDeployment = deployment;
         const { columns, rows } = spreadMatrix(deployment);
+        table.classList.toggle("has-failure", Boolean(failedColumn));
+
         const head = el("tr");
         head.appendChild(el("th", null, "Service"));
         columns.forEach((c) => {
-            const th = el("th", "spread-map__node", c === PENDING ? "⏳ Pending" : `🖥️ ${shortNode(c)}`);
-            th.title = c === PENDING ? "Pods with no node yet" : c;
+            const th = el("th", "spread-map__node");
+            if (c === PENDING) {
+                th.textContent = "⏳ Pending";
+                th.title = "Pods with no node yet";
+            } else {
+                const failed = c === failedColumn;
+                const btn = el("button", `node-toggle${failed ? " is-failed" : ""}`, `${failed ? "💥" : "🖥️"} ${shortNode(c)}`);
+                btn.type = "button";
+                btn.title = failed ? `${c}: click to bring it back` : `${c}: click to fail it`;
+                btn.setAttribute("aria-pressed", String(failed));
+                btn.addEventListener("click", () => failColumn(c));
+                th.appendChild(btn);
+                if (failed) th.classList.add("is-failed");
+            }
             head.appendChild(th);
         });
-        head.appendChild(el("th", null, "If one node fails"));
+        head.appendChild(el("th", "spread-map__meter-head", failedColumn ? `Copies left without ${shortNode(failedColumn)}` : "Copies left if its busiest node fails"));
+
         const body = rows.map((row) => {
-            const tr = el("tr", `spread-map__row spread-map__row--${row.status}`);
+            const outcome = copiesLeft(row, failedColumn).outcome;
+            const tr = el("tr", `spread-map__row spread-map__row--${outcome}`);
             tr.appendChild(el("th", "spread-map__service", row.name)).scope = "row";
             columns.forEach((c) => {
                 const cell = row.cells[c] || { ready: 0, notReady: 0 };
-                const td = el("td", "spread-map__cell");
+                const td = el("td", c === failedColumn ? "spread-map__cell is-failed" : "spread-map__cell");
                 for (let i = 0; i < cell.ready; i++) td.appendChild(el("span", "spread-dot"));
                 for (let i = 0; i < cell.notReady; i++) td.appendChild(el("span", "spread-dot spread-dot--notready"));
                 td.title = `${row.name} on ${c === PENDING ? "no node" : c}: ${cell.ready} ready, ${cell.notReady} not ready`;
                 tr.appendChild(td);
             });
-            const verdict = el("td");
-            const badge = el("span", `status-badge status-badge--no-dot status-badge--${STATUS_VARIANT[row.status]}`, STATUS_TEXT[row.status]);
-            if (row.status === "exposed") badge.title = `Goes down if ${row.exposedOn.join(" or ")} fails`;
-            verdict.appendChild(badge);
-            tr.appendChild(verdict);
+            const meter = el("td");
+            meter.appendChild(copiesMeter(row));
+            tr.appendChild(meter);
             return tr;
         });
         table.querySelector("thead").replaceChildren(head);
@@ -217,5 +279,6 @@ window.DeploymentsDriftWidget = (function () {
         loadDriftSignals: loadDriftSignals,
         renderSpreadMap: renderSpreadMap,
         spreadMatrix: spreadMatrix,
+        copiesLeft: copiesLeft,
     };
 })();
