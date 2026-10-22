@@ -167,31 +167,13 @@ window.DeploymentsIntentWidget = (function () {
         return node;
     }
 
-    // One seat per position: within what the YAML asks for a seat is ready, not ready or missing;
-    // past it, a running pod is extra.
-    function planSeats(declared, pods) {
-        const live = [...pods.filter((p) => p.ready), ...pods.filter((p) => !p.ready)];
-        const seats = [];
-        for (let i = 0; i < Math.max(declared, live.length); i++) {
-            const pod = live[i];
-            let kind = "missing";
-            if (i >= declared) kind = "extra";
-            else if (pod) kind = pod.ready ? "ok" : "notready";
-            seats.push({ kind, pod });
-        }
-        return seats;
-    }
-
-    function seatEl(seat) {
-        const node = el("span", `plan-seat plan-seat--${seat.kind}`);
-        const titles = {
-            ok: `${seat.pod?.name} is running and ready on ${seat.pod?.node}`,
-            notready: `${seat.pod?.name} exists on ${seat.pod?.node || "no node"} but is not ready`,
-            missing: "The YAML asks for this copy, but no ready pod fills it",
-            extra: `${seat.pod?.name} is running beyond what the YAML asks for`,
-        };
-        node.title = titles[seat.kind];
-        return node;
+    // Declared copies against ready copies, in words: the scoreboard's verdict.
+    function compareCounts(declared, ready) {
+        if (declared == null || ready == null) return { tone: "muted", diff: null, text: "Not running in the cluster" };
+        const diff = ready - declared;
+        if (diff === 0) return { tone: "ok", diff, text: "✓ Same as the YAML" };
+        if (diff < 0) return { tone: "danger", diff, text: `⚠️ ${-diff} fewer than the YAML` };
+        return { tone: "warn", diff, text: `➕ ${diff} more than the YAML` };
     }
 
     function ruleChip(label, value, tone) {
@@ -200,42 +182,33 @@ window.DeploymentsIntentWidget = (function () {
         return chip;
     }
 
+    function scoreTile(label, value, sub, className) {
+        const tile = el("span", `score-tile ${className}`);
+        tile.append(el("span", "score-tile__label", label), el("span", "score-tile__value", value), el("span", "score-tile__sub", sub));
+        return tile;
+    }
+
+    // One scoreboard per service: what the YAML asks for, what the cluster really runs, the difference.
     function planCard(item, live) {
         const declared = item.expected_replicas ?? item.declared_replicas ?? null;
         const pods = live && Array.isArray(live.pods) ? live.pods : [];
         const ready = live ? liveReadyReplicas(live) : null;
-        let tone = "muted";
-        let verdict = "Not observed in the cluster";
-        if (declared != null && ready != null) {
-            const diff = ready - declared;
-            if (diff === 0) { tone = "ok"; verdict = "✓ Matches the YAML"; }
-            else if (diff < 0) { tone = "danger"; verdict = `⚠️ ${-diff} missing`; }
-            else { tone = "warn"; verdict = `➕ ${diff} extra`; }
-        }
+        const verdict = compareCounts(declared, ready);
+        const notReady = pods.filter((p) => !p.ready).length;
 
-        const card = el("article", `plan-card plan-card--${tone}`);
+        const card = el("article", `plan-card plan-card--${verdict.tone}`);
         const head = el("button", "plan-card__head");
         head.type = "button";
         head.setAttribute("aria-expanded", "false");
         head.title = "Click for its pods per node and its declared rules";
 
-        // The box is what the YAML asks for: one slot per declared copy. Pods fill it from the left;
-        // a slot with no ready pod is missing, and pods past the box are extra.
-        const track = el("span", "plan-track");
-        const box = el("span", "plan-box");
-        box.dataset.label = declared == null ? "YAML ?" : `YAML ${declared}`;
-        const outside = el("span", "plan-outside");
-        planSeats(declared ?? 0, pods).forEach((seat) => (seat.kind === "extra" ? outside : box).appendChild(seatEl(seat)));
-        track.append(box, outside);
-
-        const numbers = el("span", "plan-card__numbers");
-        numbers.append(
-            el("strong", null, declared == null ? "n/a" : `${declared}`),
-            el("span", null, " in YAML → "),
-            el("strong", null, ready == null ? "n/a" : `${ready}`),
-            el("span", null, " ready"),
+        const board = el("span", "score");
+        board.append(
+            scoreTile("📄 YAML", declared == null ? "?" : String(declared), declared === 1 ? "copy asked for" : "copies asked for", "score-tile--yaml"),
+            el("span", "score__arrow", "→"),
+            scoreTile("🖥️ Cluster", ready == null ? "?" : String(ready), notReady ? `ready · ${notReady} not ready` : "running and ready", "score-tile--live"),
         );
-        head.append(el("span", "plan-card__name", item.service_name || "unknown"), track, numbers, el("span", "plan-card__verdict", verdict));
+        head.append(el("span", "plan-card__name", item.service_name || "unknown"), board, el("span", "plan-card__verdict", verdict.text));
 
         // Opened: the pods per node, then the declared placement rules.
         const rules = el("div", "plan-card__rules");
@@ -263,7 +236,7 @@ window.DeploymentsIntentWidget = (function () {
         });
 
         card.append(head, rules);
-        return { card, tone, name: item.service_name, verdict };
+        return { card, tone: verdict.tone, name: item.service_name };
     }
 
     function renderPlanCards(intents, liveMap) {
@@ -290,6 +263,6 @@ window.DeploymentsIntentWidget = (function () {
     return {
         init: init,
         loadIntentCompliance: loadIntentCompliance,
-        planSeats: planSeats,
+        compareCounts: compareCounts,
     };
 })();
