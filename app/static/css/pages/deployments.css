@@ -925,3 +925,26 @@
     box-shadow: inset 0 -3px 0 var(--color-primary, #2563eb);
 }
 .workload-switch__sub { font-size: 11px; font-weight: 400; color: var(--color-text-muted); }
+
+/* ---- Live Experiments: key findings as cards ---- */
+.findings-heading { margin: 0 0 var(--space-sm, 8px) 0; font-size: 1rem; }
+.findings-heading__sub { font-size: 11px; font-weight: 400; color: var(--color-text-muted); margin-left: 6px; }
+.findings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+.finding-card {
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-left-width: 5px;
+    border-radius: var(--radius-small);
+    background: var(--color-surface);
+}
+.finding-card--danger { border-left-color: var(--color-danger); }
+.finding-card--warning { border-left-color: #b45309; }
+.finding-card--success { border-left-color: var(--color-success); }
+.finding-card--muted { border-left-color: var(--color-border); }
+.finding-card__title { display: flex; gap: 6px; align-items: baseline; margin: 0 0 6px 0; font-size: 0.95rem; }
+.finding-card__text { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--color-text-muted); }

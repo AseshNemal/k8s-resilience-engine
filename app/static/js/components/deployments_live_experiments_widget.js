@@ -102,6 +102,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
                 : `while pods were stuck Pending in ${c.unstable_runs}/${okRuns(c)} runs`;
             findings.push({
                 severity: "danger",
+                title: c.unstable_runs === 0 ? "Exposed while Kubernetes reported it healthy" : "Exposed, with pods stuck Pending",
                 text: `${label(c)}: ${target} went from NOT_EXPOSED to EXPOSED in ${c.target_became_exposed}/${okRuns(c)} runs, ${health}.`,
             });
         });
@@ -109,6 +110,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         conds.filter((c) => c.target_became_exposed > 0 && c.compliance_rate_t1?.mean === 1).forEach((c) => {
             findings.push({
                 severity: "danger",
+                title: "Rule obeyed, service still exposed",
                 text: `${label(c)}: the declared rule was satisfied (compliance ${pct(c.compliance_rate_t1.mean)}), yet ${target} was exposed. Rule compliance alone did not mean resilience.`,
             });
         });
@@ -118,6 +120,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         if (stuck.length) {
             findings.push({
                 severity: "warning",
+                title: "The spread rule left pods Pending",
                 text: "Pods stayed Pending (workload not fully ready within 90 s) in: " + stuckList + ".",
             });
         }
@@ -125,25 +128,30 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const unchanged = conds.filter((c) => c.d_rate?.mean === 0 && c.target_became_exposed === 0);
         findings.push({
             severity: "success",
+            title: "Routine operations kept services spread",
             text: `In ${unchanged.length} of ${conds.length} conditions no service changed exposure status in any run (D_rate 0).`,
         });
 
         const repeatable = conds.filter((c) => c.d_rate?.sd === 0).length;
         findings.push({
             severity: "muted",
+            title: "Repeatable in every run",
             text: `${repeatable} of ${conds.length} conditions gave the same D_rate in every repetition.`,
         });
         return findings;
     }
 
-    function renderFindings(list, data) {
-        list.innerHTML = "";
-        const colors = { danger: "var(--color-danger)", warning: "#b45309", success: "var(--color-success)", muted: "var(--color-text-muted)" };
+    const FINDING_ICONS = { danger: "⚠️", warning: "⏳", success: "✅", muted: "🔁" };
+
+    // One card per finding: a short title and the generated sentence, coloured by severity.
+    function renderFindings(container, data) {
+        container.replaceChildren();
         buildFindings(data).forEach((f) => {
-            const li = el("li", null, f.text);
-            li.style.color = colors[f.severity];
-            if (f.severity === "danger") li.style.fontWeight = "600";
-            list.appendChild(li);
+            const card = el("article", `finding-card finding-card--${f.severity}`);
+            const title = el("h5", "finding-card__title");
+            title.append(el("span", "finding-card__icon", FINDING_ICONS[f.severity] || ""), el("span", null, f.title));
+            card.append(title, el("p", "finding-card__text", f.text));
+            container.appendChild(card);
         });
     }
 
