@@ -108,3 +108,25 @@ func TestEverythingTheHelperWritesIsOwnerOnly(t *testing.T) {
 		}
 	}
 }
+
+// Verify is the read-only operation. Beyond the behavioural tests (no writes, no dialog), its source must not even
+// contain a call that creates, removes, logs to the record or asks.
+func TestTheVerifyFunctionContainsNoWriteAndNoDialog(t *testing.T) {
+	code := productionSources(t)["verify.go"]
+	for _, name := range []string{"Verify", "check"} {
+		start := strings.Index(code, "func "+name+"(")
+		if start < 0 {
+			t.Fatalf("func %s not found", name)
+		}
+		end := strings.Index(code[start:], "\n}\n")
+		body := code[start : start+end]
+		for _, forbidden := range []string{".create(", ".remove(", ".log(", ".save(", "approval(", "newRun(", "guard", "Store.Save", "Prompter"} {
+			if name == "check" && forbidden == "newRun(" { // check builds a run only to read Pods through it
+				continue
+			}
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s contains %q, but it must be read-only", name, forbidden)
+			}
+		}
+	}
+}

@@ -119,8 +119,8 @@ func installCluster() *kubetest.Fake {
 	return cs
 }
 
-func TestTheFourSetupCommandsTakeExactlyOneContext(t *testing.T) {
-	for _, command := range []string{"trace-bookinfo-apply", "trace-bookinfo-undo", "trace-bookinfo-verify", "trace-bookinfo-status"} {
+func TestTheSetupCommandsTakeExactlyOneContext(t *testing.T) {
+	for _, command := range []string{"trace-bookinfo-apply", "trace-bookinfo-undo", "trace-bookinfo-verify", "trace-bookinfo-traffic", "trace-bookinfo-status"} {
 		for _, args := range [][]string{{command}, {command, "a", "b"}} {
 			code, out, errOut := invokeOn(t, installCluster(), args...)
 			if code != 2 || out != "" || !strings.HasPrefix(errOut, "usage:") || !strings.Contains(errOut, command) {
@@ -152,7 +152,7 @@ func TestDecliningTheApplyDialogChangesNothingAndStoresNothing(t *testing.T) {
 
 func TestAnUnsupportedContextIsNeverContactedByTheSetupCommands(t *testing.T) {
 	useInstall(t, approve.Approved)
-	for _, command := range []string{"trace-bookinfo-apply", "trace-bookinfo-undo", "trace-bookinfo-verify"} {
+	for _, command := range []string{"trace-bookinfo-apply", "trace-bookinfo-undo", "trace-bookinfo-verify", "trace-bookinfo-traffic"} {
 		cs := installCluster()
 		cs.ClearActions()
 		_, out, _ := invokeOn(t, cs, command, "prod")
@@ -249,7 +249,7 @@ func TestStatusWithoutASetupSaysSoAndReadsNoCluster(t *testing.T) {
 
 func TestUndoAndVerifyWithoutASetupChangeNothing(t *testing.T) {
 	useInstall(t, approve.Approved)
-	for command, state := range map[string]string{"trace-bookinfo-undo": "bookinfo-no-record", "trace-bookinfo-verify": "bookinfo-not-applied"} {
+	for command, state := range map[string]string{"trace-bookinfo-undo": "bookinfo-no-record", "trace-bookinfo-verify": "bookinfo-not-applied", "trace-bookinfo-traffic": "bookinfo-not-applied"} {
 		cs := installCluster()
 		cs.ClearActions()
 		_, out, _ := invokeOn(t, cs, command, "kind-resilience-research")
@@ -272,4 +272,10 @@ func renderDigest(t *testing.T, out []byte) string {
 		t.Fatal(err)
 	}
 	return digest
+}
+
+func TestProductionUsesTheCompiledInReviewedDigest(t *testing.T) {
+	if got := realInstall(nil).Tools.Reviewed(); got != traceinstall.ReviewedRenderDigest {
+		t.Fatalf("production must use the reviewed digest, got %s", got)
+	}
 }

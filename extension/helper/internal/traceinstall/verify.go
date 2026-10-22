@@ -49,33 +49,33 @@ func serviceEntryAddress(o *kube.Object) string {
 	return address
 }
 
-// Verify checks the setup from the cluster's side and then produces real traffic: it re-discovers the Jaeger address
-// and compares it with the ServiceEntry, checks that every workload that must have a sidecar has one and is Ready,
-// reads memory, and runs a temporary Pod inside the mesh that sends real requests to productpage. The Pod makes no
-// span itself and never talks to Jaeger, and it is deleted afterwards, also when something goes wrong.
-func Verify(ctx context.Context, d Deps, p Params) Outcome {
+// check is the read-only half shared by Verify and RunTraffic. It changes nothing in the cluster and shows no dialog: it
+// reads the saved record, re-discovers the Jaeger address and compares it with the ServiceEntry (drift is reported),
+// confirms every created object is still the one this run created, and requires a Ready sidecar on ratings, details,
+// productpage and reviews-v2. A non-nil Outcome is the reason it stopped.
+func check(ctx context.Context, d Deps, p Params) (*Record, *VerifyResult, *Outcome) {
 	rec, err := d.Store.Load(p.Identity)
 	if err != nil {
-		return recordProblem(err)
+		o := recordProblem(err)
+		return nil, nil, &o
 	}
 	if rec == nil || rec.Phase != PhaseApplied {
 		o := fail(StateNotApplied, "Tracing is not set up on this cluster, so there is nothing to verify.")
 		o.Setup = SummaryOf(rec)
-		return o
+		return nil, nil, &o
 	}
 	if existing := alreadyApplied(ctx, d, rec); !existing.OK {
 		existing.State = StateVerifyFailed
-		return existing
+		return nil, nil, &existing
 	}
 
 	result := &VerifyResult{Instrumented: []InstrumentedPod{}}
-	stop := func(format string, args ...any) Outcome {
+	stop := func(format string, args ...any) (*Record, *VerifyResult, *Outcome) {
 		o := fail(StateVerifyFailed, fmt.Sprintf(format, args...))
 		o.Verify, o.Setup = result, SummaryOf(rec)
-		return o
+		return nil, nil, &o
 	}
 
-	// 1. the address: the same check as before applying, compared with what the ServiceEntry holds
 	entry, err := d.Cluster.Get(ctx, resServiceEntry, bookinfotrace.Contract.Namespace, serviceEntryRef().Name)
 	if err != nil {
 		return stop("The ServiceEntry could not be read.")
@@ -91,7 +91,6 @@ func Verify(ctx context.Context, d Deps, p Params) Outcome {
 		return stop("The Jaeger address changed: the ServiceEntry points at %s, but the cluster's nodes now reach it at %s. Undo and set up again.", result.AppliedAddress, current.IPv4)
 	}
 
-	// 2. every workload that must be instrumented is
 	r := newRun(d, rec)
 	for _, w := range instrumentedWorkloads() {
 		pods, err := r.podsOf(ctx, w[0], w[1])
@@ -108,8 +107,39 @@ func Verify(ctx context.Context, d Deps, p Params) Outcome {
 			}
 		}
 	}
+	return rec, result, nil
+}
 
-	// 3. room for one more small Pod
+// Verify is read-only. It writes nothing to the cluster, creates no Pod and asks nothing: it reports whether the setup
+// is in place and healthy (see check) and what memory looks like. Producing traffic is a separate operation with its
+// own approval (RunTraffic). Whether traces arrived is read from Jaeger by the page.
+func Verify(ctx context.Context, d Deps, p Params) Outcome {
+	rec, result, bad := check(ctx, d, p)
+	if bad != nil {
+		return *bad
+	}
+	m := d.measure(ctx)
+	result.Readings = readingText(m)
+	return Outcome{OK: true, State: StateChecksPassed, Verify: result, Setup: SummaryOf(rec),
+		Message: "The setup is in place: every sidecar is ready and the Jaeger address is unchanged. Nothing was changed. Run test traffic to produce traces, or read the traces Jaeger already has."}
+}
+
+// RunTraffic creates one temporary Pod inside the mesh that sends real requests to productpage, after its own native
+// approval. It runs the read-only checks first, so nothing is asked when the setup is not healthy; it checks again after
+// approval, because the cluster may have changed while the person was deciding; and it deletes the Pod afterwards, also
+// when something fails, is cancelled or killed (Undo removes it from the record). The Pod makes no span itself and never
+// talks to Jaeger.
+func RunTraffic(ctx context.Context, d Deps, p Params) Outcome {
+	rec, result, bad := check(ctx, d, p)
+	if bad != nil {
+		return *bad
+	}
+	stop := func(format string, args ...any) Outcome {
+		o := fail(StateVerifyFailed, fmt.Sprintf(format, args...))
+		o.Verify, o.Setup = result, SummaryOf(rec)
+		return o
+	}
+	// room for one more small Pod
 	m := d.measure(ctx)
 	ready := true
 	m.PodsReady = &ready
@@ -117,12 +147,24 @@ func Verify(ctx context.Context, d Deps, p Params) Outcome {
 	if decision := bookinfotrace.Evaluate(bookinfotrace.Gate2, rec.Baseline, m, d.Thresholds); !decision.Proceed {
 		return stop("Memory is too tight to run the client Pod: %s.", strings.Join(decision.Reasons, "; "))
 	}
-
-	// 4. real requests, from a Pod inside the mesh
 	doc, err := documentOf(fileClient, "Pod")
 	if err != nil {
 		return stop("The client Pod manifest could not be read.")
 	}
+	req, err := bookinfotrace.TrafficDialog(p.ContextName)
+	if err != nil {
+		return stop("The description of the Pod is too long to show in full, so it cannot be approved.")
+	}
+	if refused := approval(ctx, d, req); refused != nil {
+		refused.Verify, refused.Setup = result, SummaryOf(rec)
+		return *refused
+	}
+	if _, _, bad := check(ctx, d, p); bad != nil {
+		bad.Message = "The setup changed while you were deciding, so nothing was created. " + bad.Message
+		return *bad
+	}
+
+	r := newRun(d, rec)
 	r.log("send real requests", "started", "a temporary Pod sends requests to productpage")
 	created := false
 	defer func() {
@@ -154,10 +196,14 @@ func Verify(ctx context.Context, d Deps, p Params) Outcome {
 	})
 	if err != nil || !finished {
 		r.log("send real requests", "failed", "")
-		return stop("The client Pod did not finish sending requests: %s.", err.Error())
+		reason := "it did not finish"
+		if err != nil {
+			reason = err.Error()
+		}
+		return stop("The client Pod did not finish sending requests: %s.", reason)
 	}
 	result.RequestsSent = true
 	r.log("send real requests", "done", "")
 	return Outcome{OK: true, State: StateTrafficSent, Verify: result, Setup: SummaryOf(rec),
-		Message: "The sidecars are in place and real requests were sent. The traces that follow are read from Jaeger."}
+		Message: "Real requests were sent from an instrumented Pod. The traces that follow are read from Jaeger."}
 }

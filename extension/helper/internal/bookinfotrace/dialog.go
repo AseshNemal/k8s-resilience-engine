@@ -84,3 +84,28 @@ func UndoDialog(contextName string, removeReviewsV2 bool, restarts []string) (ap
 	}
 	return approve.Request{Title: "Resilience Engine: remove Bookinfo tracing?", Body: body, Timeout: 2 * time.Minute}, nil
 }
+
+// The temporary client Pod's facts, as they appear in the dialog. A test keeps them equal to the embedded manifest.
+const (
+	TrafficImage    = "curlimages/curl:8.23.0"
+	TrafficRequests = 60
+	TrafficPodName  = "trace-demo-client"
+)
+
+// TrafficDialog is the approval for "Run test traffic", the only operation after the setup that creates anything. It
+// names the one Pod, what it sends, what it does not do, and that it is removed again.
+func TrafficDialog(contextName string) (approve.Request, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Cluster: %s\n\nThis CREATES one temporary Pod in the %s namespace:\n", approve.Sanitize(contextName, 60), Contract.Namespace)
+	fmt.Fprintf(&b, "  %s (image %s, downloaded if the cluster does not have it; memory limit 32 MiB plus a sidecar of up to %d MiB)\n\n",
+		TrafficPodName, TrafficImage, Contract.MemoryMiB.SidecarLimit)
+	fmt.Fprintf(&b, "It sends %d real requests to productpage over about a minute, so Bookinfo answers and logs %d extra page views. ", TrafficRequests, TrafficRequests)
+	b.WriteString("It creates no trace of its own and never contacts Jaeger: the traces come from the sidecars of the Pods that serve those requests.\n\n")
+	b.WriteString("The Pod is deleted when it finishes, or if anything fails or you stop it. No existing Deployment, Pod, route or setting is changed. ")
+	b.WriteString("This uses your own kubeconfig, inside the helper, for this one operation; the extension's read-only Kubernetes access is not changed.")
+	body := b.String()
+	if len([]rune(body)) > maxBody {
+		return approve.Request{}, ErrPreviewTooLong
+	}
+	return approve.Request{Title: "Resilience Engine: send test traffic to Bookinfo?", Body: body, Timeout: 2 * time.Minute}, nil
+}

@@ -21,17 +21,19 @@ import (
 //   - takes exactly one argument, the kubeconfig context, and nothing else from the page;
 //   - works only on a verified local cluster, with the person's own kubeconfig credential held in memory for the
 //     length of the command (never stored, printed or sent anywhere);
-//   - (apply and undo) changes nothing before a native approval dialog, which the page cannot see or answer;
+//   - (apply, undo and traffic) changes nothing before a native approval dialog, which the page cannot see or answer.
+//     Verify and status are read-only: they create no Pod and ask nothing;
 //   - prints one JSON object built from fixed wording and names the setup chose.
 const (
-	cmdApply  = "trace-bookinfo-apply"
-	cmdUndo   = "trace-bookinfo-undo"
-	cmdVerify = "trace-bookinfo-verify"
-	cmdStatus = "trace-bookinfo-status"
+	cmdApply   = "trace-bookinfo-apply"
+	cmdUndo    = "trace-bookinfo-undo"
+	cmdVerify  = "trace-bookinfo-verify"
+	cmdTraffic = "trace-bookinfo-traffic"
+	cmdStatus  = "trace-bookinfo-status"
 )
 
 func isBookinfoInstall(command string) bool {
-	return command == cmdApply || command == cmdUndo || command == cmdVerify || command == cmdStatus
+	return command == cmdApply || command == cmdUndo || command == cmdVerify || command == cmdTraffic || command == cmdStatus
 }
 
 // installDeps and setupLock are replaced in tests, so no test touches the user's directories or a real cluster.
@@ -85,7 +87,7 @@ func fromOutcome(command, contextName string, o traceinstall.Outcome) installOut
 	}
 }
 
-var commandTimeout = map[string]time.Duration{cmdApply: 45 * time.Minute, cmdUndo: 35 * time.Minute, cmdVerify: 12 * time.Minute, cmdStatus: 15 * time.Second}
+var commandTimeout = map[string]time.Duration{cmdApply: 45 * time.Minute, cmdUndo: 35 * time.Minute, cmdVerify: 3 * time.Minute, cmdTraffic: 12 * time.Minute, cmdStatus: 15 * time.Second}
 
 // bookinfoStatus reads the saved record for a context, without contacting the cluster, so the page can poll it while
 // a setup is running. It is informational: Apply, Undo and Verify act only on the record of the cluster they reached.
@@ -97,7 +99,7 @@ func bookinfoStatus(name string) installOutput {
 	return installOutput{Result: flow.Result{OK: true, Command: cmdStatus, State: flow.State(traceinstall.StateStatus), Context: name}, Setup: traceinstall.SummaryOf(rec)}
 }
 
-// bookinfoInstall runs apply, undo or verify.
+// bookinfoInstall runs apply, undo, traffic or verify.
 func bookinfoInstall(ctx context.Context, d flow.Deps, command, name string) installOutput {
 	release, err := setupLock().Acquire()
 	if err != nil {
@@ -125,6 +127,8 @@ func bookinfoInstall(ctx context.Context, d flow.Deps, command, name string) ins
 		outcome = traceinstall.Apply(ctx, deps, params)
 	case cmdUndo:
 		outcome = traceinstall.Undo(ctx, deps, params)
+	case cmdTraffic:
+		outcome = traceinstall.RunTraffic(ctx, deps, params)
 	default:
 		outcome = traceinstall.Verify(ctx, deps, params)
 	}

@@ -15,7 +15,8 @@
 //	resilience-helper agent-status | agent-enable <context> | agent-disable
 //	resilience-helper trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop
 //	resilience-helper trace-bookinfo-plan <context>      (read-only: previews the Bookinfo tracing setup, changes nothing)
-//	resilience-helper trace-bookinfo-apply | -undo | -verify <context>   (change the cluster only after a native approval; see main_bookinfo.go)
+//	resilience-helper trace-bookinfo-apply | -undo | -traffic <context>   (change the cluster only after a native approval; see main_bookinfo.go)
+//	resilience-helper trace-bookinfo-verify <context>    (read-only checks: no Pod, no dialog)
 //	resilience-helper trace-bookinfo-status <context>    (reads the saved record only)
 //	resilience-helper revoke <context>
 //	resilience-helper version
@@ -269,6 +270,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-bookinfo-plan <context> | trace-bookinfo-apply <context> | trace-bookinfo-undo <context> | trace-bookinfo-verify <context> | trace-bookinfo-status <context> | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-bookinfo-plan <context> | trace-bookinfo-apply <context> | trace-bookinfo-undo <context> | trace-bookinfo-verify <context> | trace-bookinfo-traffic <context> | trace-bookinfo-status <context> | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
 	return 2
 }
