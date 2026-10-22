@@ -133,3 +133,52 @@ test("no answer from the backend is reported as unavailable, not as disconnected
     assert.equal(info.chip, "Backend unavailable");
     assert.equal(info.action, null);
 });
+
+// ---- a cluster the person approved earlier that is not connected right now
+
+const APPROVED = { context: "docker-desktop", server: "127.0.0.1:50345", caSha256: "ab".repeat(32), disconnectedByUser: false };
+
+test("an approved cluster that is being reconnected says so and needs nothing from the person", () => {
+    const info = describeCluster({ connected: false, approved: APPROVED }, NOW, true, { phase: "reconnecting" });
+    assert.equal(info.state, "renewing");
+    assert.equal(info.chip, "Reconnecting…");
+    assert.match(info.title, /docker-desktop/);
+    assert.match(info.detail, /approved this cluster earlier/);
+    assert.equal(info.action, null);
+});
+
+test("while a reconnect keeps failing the reason is shown, still with nothing to click", () => {
+    const info = describeCluster({ connected: false, approved: APPROVED }, NOW, true, { phase: "retrying", message: "The cluster is not reachable." });
+    assert.equal(info.state, "renewing");
+    assert.match(info.detail, /not reachable/);
+    assert.equal(info.action, null);
+});
+
+test("a reconnect that needs the person asks for their attention and points at the connection page", () => {
+    const info = describeCluster({ connected: false, approved: APPROVED }, NOW, true, { phase: "attention", message: "The cluster behind this context is not the one you approved." });
+    assert.equal(info.state, "attention");
+    assert.equal(info.chip, "Needs your attention");
+    assert.match(info.detail, /not the one you approved/);
+    assert.equal(info.action, "Manage connection");
+});
+
+test("a cluster the person disconnected is shown as not connected and says it will not reconnect by itself", () => {
+    const info = describeCluster({ connected: false, approved: { ...APPROVED, disconnectedByUser: true } }, NOW, true, { phase: "needs-setup" });
+    assert.equal(info.state, "none");
+    assert.equal(info.chip, "Not connected");
+    assert.match(info.detail, /disconnected/);
+    assert.match(info.detail, /not reconnect/i);
+    assert.equal(info.action, "Connect cluster");
+});
+
+test("without automatic setup an approved cluster is never described as reconnecting", () => {
+    const info = describeCluster({ connected: false, approved: APPROVED }, NOW, false, null);
+    assert.equal(info.state, "none");
+    assert.equal(info.action, "Connect cluster");
+});
+
+test("a cluster that was never approved is described exactly as before", () => {
+    const info = describeCluster({ connected: false }, NOW, true, { phase: "needs-setup" });
+    assert.equal(info.chip, "Not connected");
+    assert.doesNotMatch(info.detail, /approved this cluster earlier|disconnected/);
+});

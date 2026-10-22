@@ -526,12 +526,32 @@ textarea.form-input { width: 100%; resize: vertical; }
 /* Automatic setup: the cluster list, the renewal problem banner, and the manual disclosure. */
 .connect__lead { margin: 0 0 12px; color: var(--dd-text-2); }
 .connect__clusters { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
-.connect__cluster label { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--dd-border); border-radius: var(--dd-radius); cursor: pointer; }
+.connect__cluster label { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--dd-border); border-radius: var(--dd-radius); cursor: pointer; }
 .connect__cluster label:has(input:checked) { border-color: var(--dd-primary); }
 .connect__cluster input { grid-row: 1 / span 2; margin: 0; }
 .connect__cluster[data-usable="false"] label { cursor: default; opacity: 0.7; }
 .connect__cluster-name { font-weight: 500; overflow-wrap: anywhere; }
-.connect__cluster-meta { grid-column: 2; color: var(--dd-text-2); font-size: 13px; overflow-wrap: anywhere; }
+.connect__cluster-meta { grid-column: 2 / -1; color: var(--dd-text-2); font-size: 13px; overflow-wrap: anywhere; }
+/* One state per listed cluster, always in words as well as colour. */
+.connect__cluster-badge { grid-column: 3; grid-row: 1; justify-self: end; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--dd-bg-highlight); color: var(--dd-text-2); }
+.connect__cluster-badge[data-kind="connected"] { background: var(--dd-success-soft); color: var(--dd-success); }
+.connect__cluster-badge[data-kind="reconnecting"] { background: var(--dd-bg-highlight); color: var(--dd-text); }
+.connect__cluster-badge[data-kind="attention"],
+.connect__cluster-badge[data-kind="unreachable"] { background: var(--dd-warning-soft); color: var(--dd-warning); }
+.connect__cluster-badge[data-kind="unsupported"] { background: var(--dd-danger-soft); color: var(--dd-danger); }
+
+/* Applications the cluster reports (namespaces.js): shown as reported, with incomplete evidence marked. */
+.connect__apps { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.connect__app { padding: 10px 12px; border: 1px solid var(--dd-border); border-radius: var(--dd-radius); overflow-wrap: anywhere; }
+.connect__app[data-incomplete="true"] { border-color: var(--dd-warning); }
+.connect__app-meta { color: var(--dd-text-2); font-size: 13px; }
+.connect__app-warning { color: var(--dd-warning); font-size: 13px; }
+.connect__app-services { margin-top: 4px; color: var(--dd-text-2); font-size: 13px; }
+.namespace-hint { margin: 6px 0 0; font-size: 13px; color: var(--dd-text-2); overflow-wrap: anywhere; }
+.namespace-hint:empty { display: none; }
+.namespace-hint[data-kind="error"] { color: var(--dd-danger); }
+.namespace-hint[data-kind="incomplete"] { color: var(--dd-warning); }
+.connect__apps:empty { display: none; }
 .connect__attention { margin: 12px 0 0; padding: 10px 12px; border-radius: var(--dd-radius); background: var(--dd-danger-soft); border-left: 3px solid var(--dd-danger); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; }
 .connect__manual > summary { cursor: pointer; }
 .connect__manual[open] > summary { margin-bottom: 12px; }

@@ -219,7 +219,9 @@ func TestRenewRefusesUnsupportedContexts(t *testing.T) {
 	for _, name := range []string{"docker-desktop", "prod-cluster", "minikube", "nope"} {
 		l := newLoader(cs)
 		r := Renew(bg, deps(l, neverPrompt(t), managedBackend()), name)
-		if r.State != StateUnsupportedContext || l.called[name] != 0 {
+		// docker-desktop here is the kubeadm-style mode on a non-loopback name; a loopback kind
+		// docker-desktop renews like any other supported cluster (verify_test.go).
+		if r.State != StateUnsupportedContext || l.called[name] != 0 || (name != "nope" && r.Message == "") {
 			t.Errorf("%s: %+v (client calls %d)", name, r, l.called[name])
 		}
 	}

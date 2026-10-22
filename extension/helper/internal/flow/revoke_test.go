@@ -93,7 +93,8 @@ func TestRevokeRefusesUnsupportedContexts(t *testing.T) {
 	for _, name := range []string{"docker-desktop", "prod-cluster", "nope"} {
 		l := newLoader(cs)
 		r := Revoke(bg, deps(l, answer(approve.Approved), managedBackend()), name)
-		if r.State != StateUnsupportedContext || l.called[name] != 0 {
+		// docker-desktop here is the kubeadm-style mode on a non-loopback name; see verify_test.go.
+		if r.State != StateUnsupportedContext || l.called[name] != 0 || (name != "nope" && r.Message == "") {
 			t.Errorf("%s: %+v", name, r)
 		}
 	}

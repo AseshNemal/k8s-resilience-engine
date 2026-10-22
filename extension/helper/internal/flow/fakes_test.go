@@ -34,6 +34,7 @@ var (
 func newCluster(grant time.Duration) *kubetest.Fake {
 	cs := kubetest.New()
 	cs.GrantTokens(tokenValue, t0, grant)
+	cs.Put(kube.Nodes, kube.Object{Name: "kind-control-plane", ProviderID: "kind://docker/resilience-research/kind-control-plane"})
 	return cs
 }
 
@@ -105,6 +106,7 @@ type fakeLoader struct {
 	contexts []clusters.Context
 	clients  map[string]*kubetest.Fake
 	called   map[string]int
+	ca       []byte // the certificate authority the kubeconfig names; pem when nil
 }
 
 func newLoader(cs *kubetest.Fake) *fakeLoader {
@@ -134,7 +136,11 @@ func (l *fakeLoader) Client(name string) (kube.Client, kubeconfig.Cluster, error
 			server = c.Server
 		}
 	}
-	return cs, kubeconfig.Cluster{Server: server, CAData: pem}, nil
+	ca := l.ca
+	if ca == nil {
+		ca = pem
+	}
+	return cs, kubeconfig.Cluster{Server: server, CAData: ca}, nil
 }
 
 // ---------------------------------------------------------------- a fake dialog

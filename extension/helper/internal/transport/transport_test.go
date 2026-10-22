@@ -418,3 +418,44 @@ func TestASocketThatNeverAnswersKeepsTheDeadlineAsTheCause(t *testing.T) {
 		t.Fatalf("err must be unavailable AND a deadline, got %v", err)
 	}
 }
+
+func TestThePayloadCarriesTheOriginAndIdentityAndTheTokenOnlyInsideTheKubeconfig(t *testing.T) {
+	req := InstallRequest{
+		Kubeconfig: secret.NewBytes([]byte("token: SECRET-TOKEN")), Context: "docker-desktop", Origin: "reconnect",
+		Identity: &Identity{Server: "127.0.0.1:50345", CASha256: strings.Repeat("ab", 32)},
+	}
+
+	body, err := payload(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded struct {
+		Kubeconfig string `json:"kubeconfig"`
+		Managed    struct {
+			Context  string    `json:"context"`
+			Origin   string    `json:"origin"`
+			Identity *Identity `json:"identity"`
+		} `json:"managed"`
+	}
+	if err := json.Unmarshal(body.Reveal(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Managed.Origin != "reconnect" || decoded.Managed.Identity == nil || decoded.Managed.Identity.Server != "127.0.0.1:50345" || decoded.Managed.Context != "docker-desktop" {
+		t.Fatalf("managed = %+v", decoded.Managed)
+	}
+	managed, _ := json.Marshal(decoded.Managed)
+	if strings.Contains(string(managed), "SECRET-TOKEN") {
+		t.Fatal("the token must travel only inside the kubeconfig, never in the managed record the backend stores and prints")
+	}
+}
+
+func TestAStatusWithAnApprovalIsDecodedAndOneWithoutIsNot(t *testing.T) {
+	var with, without Status
+	json.Unmarshal([]byte(`{"connected":false,"approved":{"context":"docker-desktop","server":"127.0.0.1:1","caSha256":"ab","disconnectedByUser":true}}`), &with)
+	json.Unmarshal([]byte(`{"connected":true}`), &without)
+
+	if with.Approved == nil || with.Approved.Context != "docker-desktop" || !with.Approved.DisconnectedByUser || without.Approved != nil {
+		t.Fatalf("with %+v without %+v", with.Approved, without.Approved)
+	}
+}

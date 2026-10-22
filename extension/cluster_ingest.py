@@ -2,7 +2,7 @@
 
     python -m extension.cluster_ingest            read {"kubeconfig": ..., "managed": ...} from stdin
     python -m extension.cluster_ingest --status   print the connection status
-    python -m extension.cluster_ingest --disconnect   delete the stored credential
+    python -m extension.cluster_ingest --disconnect   delete the stored credential and remember the disconnect
 
 The helper reaches this through `docker exec -i -u 10001`, so the credential travels on stdin and
 never appears in a process list. It runs exactly the checks of PUT /_extension/cluster (it calls the
@@ -30,9 +30,10 @@ def run(argv: list[str], stdin) -> int:
     if argv == ["--status"]:
         return _emit({"ok": True, **cc._status()}, 0)
     if argv == ["--disconnect"]:
-        cc.KUBECONFIG_PATH.unlink(missing_ok=True)
-        cc._managed_path().unlink(missing_ok=True)
-        return _emit({"ok": True, **cc._status()}, 0)
+        try:
+            return _emit({"ok": True, **cc.disconnect()}, 0)
+        except HTTPException as error:
+            return _emit({"ok": False, "status": error.status_code, "error": str(error.detail)}, 1)
     if argv:
         return _emit({"ok": False, "error": "usage: cluster_ingest [--status | --disconnect]"}, 2)
 

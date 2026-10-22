@@ -3,6 +3,7 @@ from typing import Callable
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.engine.recommendation_evaluation_validation.approval import (
+    ApprovalModel,
     ApprovalService,
     ApprovalRepository,
     LiveRecommendation,
@@ -71,6 +72,31 @@ def get_recommendation_provider(
             ) from error
 
     return provide
+
+
+def get_current_evaluator() -> Callable[[ApprovalModel], LiveRecommendation]:
+    """Supplies the function that re-evaluates, on the server, the workflow and failure a request was made for.
+
+    An approval is decided against the evaluation as it is now, not as it was when the request was written. The
+    workflow, namespace and failed node come from the provenance the server stored with the request, never from
+    the client. Tests substitute it with ``app.dependency_overrides``.
+    """
+
+    def evaluate(approval: ApprovalModel) -> LiveRecommendation:
+        provenance = (approval.evaluation_snapshot or {}).get("provenance") or {}
+        workflow_id, namespace = provenance.get("workflowId"), provenance.get("namespace")
+        if not workflow_id or not namespace:
+            raise PreconditionError(
+                "This approval request does not record the workflow and namespace it was computed for, so it "
+                "cannot be re-evaluated; reject it and request a new approval from a current recommendation.")
+        try:
+            return build_live_recommendation(workflow_id, provenance.get("failedNode"), namespace)
+        except ValueError as error:
+            raise EvidenceError(
+                "INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation"
+            ) from error
+
+    return evaluate
 
 
 def _to_response(approval) -> ApprovalResponse:
@@ -164,6 +190,7 @@ def approve_recommendation(
     recommendation_id: str,
     request: ApprovalDecisionRequest,
     service: ApprovalService = Depends(get_approval_service),
+    evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_current_evaluator),
 ) -> ApprovalResponse:
     try:
         approval = service.approve(
@@ -171,6 +198,7 @@ def approve_recommendation(
             expected_proposal_version=request.expected_proposal_version,
             note=request.note,
             decided_by="developer",
+            evaluate=evaluator,
         )
     except PreconditionError as e:
         raise HTTPException(status_code=422, detail=str(e))

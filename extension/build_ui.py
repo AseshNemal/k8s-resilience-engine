@@ -94,12 +94,15 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <h3 class="section-header__title" id="connect-auto-title">Set up automatically</h3>
         <p class="ui-note" data-role="auto-note"></p>
         <div data-role="auto-controls">
-            <p class="connect__lead">Find a local kind cluster and approve read-only access once. The extension then keeps
-                the credential renewed while it is open, and recovers by itself when you reopen it.</p>
+            <p class="connect__lead">Local clusters (kind, or Docker Desktop's Kubernetes) appear here by themselves, marked
+                <em>Not connected</em> until you connect one. Connect it and approve read-only access once: the
+                extension then keeps the credential renewed, reconnects the cluster by itself if the connection is
+                lost, and reads the applications in it. A cluster you disconnect stays disconnected until you connect
+                it again.</p>
             <ul class="connect__clusters" data-role="auto-clusters" aria-live="polite"></ul>
             <div class="connect__picker">
                 <button type="button" class="secondary-button" data-role="auto-refresh">Find clusters</button>
-                <button type="button" class="primary-button" data-role="auto-connect" disabled>Set up access</button>
+                <button type="button" class="primary-button" data-role="auto-connect" disabled>Connect</button>
                 <button type="button" class="secondary-button" data-role="auto-remove" hidden>Remove access…</button>
             </div>
             <p class="connect__message" data-role="auto-message" role="status"></p>
@@ -113,6 +116,18 @@ CONNECT_MAIN = """<main class="page" id="main-content">
                 only ever receives a read-only token that expires after hours.
             </p>
         </div>
+    </section>
+
+    <section class="card" aria-labelledby="connect-apps-title" data-role="apps-card" hidden>
+        <h3 class="section-header__title" id="connect-apps-title">Applications in your cluster</h3>
+        <p class="ui-note" data-role="apps-status" role="status" aria-live="polite"></p>
+        <ul class="connect__apps" data-role="apps-list"></ul>
+        <p class="ui-note">
+            Read from the connected cluster by the Deployment topology discovery and refreshed while this page is
+            visible. Namespaces and services appear only as the cluster reports them: nothing is added, and
+            namespaces whose placement could not be fully resolved are marked incomplete. Pick a namespace on the
+            Failure impact and Recommendations pages from this list.
+        </p>
     </section>
 
     <details class="card connect__manual" data-role="manual-details" open>
@@ -150,11 +165,11 @@ def _static_paths(html: str, key: str, title: str) -> str:
     # The Docker look loads after every app stylesheet (including the page-specific ones) so it wins.
     html = html.replace("</head>", '    <link rel="stylesheet" href="docker.css">\n</head>', 1)
     html = html.replace("<body>", f'<body data-page="{key}">', 1)
-    html = html.replace("</body>", '<script src="chrome.js" defer></script>\n<script src="autoconnect.js" defer></script>\n</body>', 1)
+    html = html.replace("</body>", '<script src="chrome.js" defer></script>\n<script src="autoconnect.js" defer></script>\n<script src="namespaces.js" defer></script>\n</body>', 1)
     if key == "workflows":
         # Only this page can start the trace service (through the host helper), so only it loads the bridge.
-        html = html.replace('<script src="autoconnect.js" defer></script>\n</body>',
-                            '<script src="autoconnect.js" defer></script>\n<script src="trace-service.js" defer></script>\n</body>', 1)
+        html = html.replace('<script src="namespaces.js" defer></script>\n</body>',
+                            '<script src="namespaces.js" defer></script>\n<script src="trace-service.js" defer></script>\n</body>', 1)
 
     for old, new in NAV_LABELS.items():
         html = html.replace(f'<span class="sidebar__link-label">{old}</span>', f'<span class="sidebar__link-label">{new}</span>')

@@ -254,6 +254,9 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 			Namespace string            `json:"namespace"`
 			Labels    map[string]string `json:"labels"`
 		} `json:"metadata"`
+		Spec struct {
+			ProviderID string `json:"providerID"`
+		} `json:"spec"`
 		Rules           []PolicyRule    `json:"rules"`
 		AggregationRule json.RawMessage `json:"aggregationRule"`
 		RoleRef         RoleRef         `json:"roleRef"`
@@ -271,6 +274,7 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 		AggregationRule: aggregation,
 		RoleRef:         wire.RoleRef,
 		Subjects:        wire.Subjects,
+		ProviderID:      wire.Spec.ProviderID,
 		raw:             raw,
 	}, nil
 }

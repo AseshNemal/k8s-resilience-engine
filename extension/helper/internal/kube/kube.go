@@ -37,6 +37,9 @@ func (r Resource) APIVersion() string {
 
 const rbacGroup = "rbac.authorization.k8s.io"
 
+// Nodes is only listed, to read the provider ID each node reports (see Object.ProviderID).
+var Nodes = Resource{Version: "v1", Plural: "nodes", Kind: "Node"}
+
 // The four kinds the helper creates, changes and deletes.
 var (
 	Namespaces          = Resource{Version: "v1", Plural: "namespaces", Kind: "Namespace"}
@@ -106,6 +109,10 @@ type Object struct {
 
 	RoleRef  RoleRef
 	Subjects []Subject
+
+	// ProviderID is spec.providerID of a Node ("kind://docker/<cluster>/<node>" for kind). Empty when the
+	// node reports none; it is never guessed.
+	ProviderID string
 
 	// raw is the object exactly as the server sent it. Update writes onto it, so fields the helper does
 	// not model are sent back unchanged. It is nil for an object that was not read from the server.

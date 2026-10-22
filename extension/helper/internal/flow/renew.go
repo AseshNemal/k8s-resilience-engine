@@ -20,6 +20,11 @@ import (
 // Docker Desktop restart all recover without anybody opening the extension.
 func Renew(ctx context.Context, d Deps, name string) Result {
 	const cmd = "renew"
+	release, busy := d.acquire(cmd)
+	if busy != nil {
+		return *busy
+	}
+	defer release()
 	c, refusal := d.supported(cmd, name)
 	if refusal != nil {
 		return *refusal
@@ -38,6 +43,11 @@ func Renew(ctx context.Context, d Deps, name string) Result {
 // writes, never recreating revoked access), and a credential added by hand is never touched.
 func RenewManaged(ctx context.Context, d Deps) Result {
 	const cmd = "renew-managed"
+	release, busy := d.acquire(cmd)
+	if busy != nil {
+		return *busy
+	}
+	defer release()
 	backend, st, err := d.pickBackend(ctx)
 	if err != nil {
 		return backendFailure(cmd, err)
@@ -65,26 +75,48 @@ func renewWith(ctx context.Context, d Deps, cmd string, c clusters.Context, back
 	if err != nil {
 		return fail(cmd, StateError, err.Error())
 	}
-	if _, err := cs.ServerVersion(ctx); err != nil {
-		return fail(cmd, StateClusterUnreachable, "the cluster is not reachable; is Docker Desktop running and the kind cluster started?")
+	// A connection approved before identities were recorded has no Approved record; it is accepted once and
+	// the identity is recorded by this renewal. Otherwise the cluster must be the one that was approved.
+	if st.Approved != nil && !sameIdentity(st.Approved, identityOf(c, cluster)) {
+		return identityChanged(cmd)
 	}
+	if _, refusal := verified(ctx, cmd, c.Name, cs, cluster); refusal != nil {
+		return *refusal
+	}
+	if refusal := requireApprovedAccess(ctx, cmd, cs); refusal != nil {
+		return *refusal
+	}
+	return issueAndInstall(ctx, d, cmd, OriginRenew, c, cs, cluster, backend)
+}
 
+func identityChanged(cmd string) Result {
+	return fail(cmd, StateIdentityChanged, "the cluster behind this context is not the one you approved (its address or certificate authority changed), so no token was issued; connect it again to approve it")
+}
+
+// requireApprovedAccess is the one rule for issuing a token without asking: the extension's access in the
+// cluster must still be exactly what was approved. It reads the cluster and nothing else; whatever is missing
+// or changed is reported, never repaired.
+func requireApprovedAccess(ctx context.Context, cmd string, cs kubeClient) *Result {
 	report, err := rbac.Inspect(ctx, cs)
 	if err != nil {
-		return clusterError(cmd, err)
+		r := clusterError(cmd, err)
+		return &r
 	}
-	if !report.Usable() {
-		switch report.Overall() {
-		case rbac.OverallOverGranted:
-			return overGranted(cmd, report)
-		case rbac.OverallDrifted:
-			if report.NeedsMoreAccess() {
-				return fail(cmd, StateDrifted, "this version of the extension needs more read access than you approved before, so no token was issued; approve again to add it")
-			}
-			return fail(cmd, StateDrifted, "the extension's access in the cluster was changed from what you approved, so no token was issued; review it and approve again")
-		default: // absent or partial
-			return fail(cmd, StateAuthorizationGone, "the extension's access was removed from the cluster, so no token was issued; approve it again to restore it")
+	if report.Usable() {
+		return nil
+	}
+	var r Result
+	switch report.Overall() {
+	case rbac.OverallOverGranted:
+		r = overGranted(cmd, report)
+	case rbac.OverallDrifted:
+		if report.NeedsMoreAccess() {
+			r = fail(cmd, StateDrifted, "this version of the extension needs more read access than you approved before, so no token was issued; approve again to add it")
+		} else {
+			r = fail(cmd, StateDrifted, "the extension's access in the cluster was changed from what you approved, so no token was issued; review it and approve again")
 		}
+	default: // absent or partial
+		r = fail(cmd, StateAuthorizationGone, "the extension's access was removed from the cluster, so no token was issued; approve it again to restore it")
 	}
-	return issueAndInstall(ctx, d, cmd, c.Name, cs, cluster, backend)
+	return &r
 }
