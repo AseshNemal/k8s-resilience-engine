@@ -109,7 +109,7 @@
         setMetric("deployment-ready-pods", `${services.reduce((acc, s) => acc + readyCount(s), 0)} / ${pods}`);
         setMetric(
             "deployment-exposed-services",
-            evaluated.length ? `${exposed} / ${evaluated.length} (${ui().formatRatioAsPercentage(exposed / evaluated.length)})` : "n/a"
+            evaluated.length ? `${exposed} / ${evaluated.length}` : "n/a"
         );
     }
 
@@ -120,19 +120,19 @@
         const unavailable = services.length - evaluated.length;
         const downNote = unavailable ? ` ${unavailable} service(s) have no ready replica at all.` : "";
         if (!evaluated.length) {
-            return { state: "muted", icon: "⏸️", title: "No ready service to assess", text: `No service in this namespace has a ready replica.${downNote}` };
+            return { state: "muted", icon: "NO DATA", title: "No ready service to assess", text: `No service in this namespace has a ready replica.${downNote}` };
         }
         if (!exposed.length) {
             return {
-                state: "ok", icon: "✅",
+                state: "ok", icon: "RESILIENT",
                 title: "No single node failure can take a service down",
                 text: `All ${evaluated.length} services keep ready replicas on more than one node.${downNote}`,
             };
         }
         return {
-            state: "danger", icon: "⚠️",
+            state: "danger", icon: "AT RISK",
             title: `${exposed.length} of ${evaluated.length} services would go down if one node fails`,
-            text: `Each has every ready replica on one node. Click one to see why.${downNote}`,
+            text: `each has every ready copy on one node · click a name for why${downNote}`,
             names: exposed.map((s) => s.name),
         };
     }
@@ -211,7 +211,7 @@
             const box = document.querySelector('[data-role="evidence-box"]');
             if (box) box.hidden = true;  // no live data shown, so nothing to vouch for
             renderVerdict({
-                state: "muted", icon: "⛔", title: "Could not read the cluster", text: "No verdict without live data; see the message above.",
+                state: "muted", icon: "NO DATA", title: "Could not read the cluster", text: "No verdict without live data; see the message above.",
             });
             if (applyBadge && renderStateCard && describeError && region) {
                 applyBadge(sourceBadge, { variant: "danger", text: "Not showing live data" });

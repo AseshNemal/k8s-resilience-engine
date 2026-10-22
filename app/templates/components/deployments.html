@@ -4,11 +4,11 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.44">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.44">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.44">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.44">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.44">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.45">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.45">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.45">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.45">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.45">
 {% endblock %}
 
 {% block content %}
@@ -51,11 +51,13 @@
 {# The answer at a glance: can one worker-node failure take a service down? Each number opens the tab behind it. #}
 <section class="verdict" data-role="verdict" data-state="loading" aria-live="polite" aria-label="Deployment verdict">
     <div class="verdict__main">
-        <span class="verdict__icon" data-role="verdict-icon" aria-hidden="true">⏳</span>
         <div class="verdict__words">
+            <span class="verdict__icon" data-role="verdict-icon">READING</span>
             <h3 class="verdict__title" data-role="verdict-title">Reading the cluster…</h3>
-            <p class="verdict__text" data-role="verdict-text"></p>
-            <div class="verdict__names" data-role="verdict-names"></div>
+            <div class="verdict__detail">
+                <div class="verdict__names" data-role="verdict-names"></div>
+                <p class="verdict__text" data-role="verdict-text"></p>
+            </div>
         </div>
     </div>
     <div class="verdict__stats" aria-label="Deployment metrics">
@@ -163,13 +165,13 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.44"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.44"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.45"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.45"></script>
 {% endblock %}
