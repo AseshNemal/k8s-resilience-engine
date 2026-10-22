@@ -338,7 +338,11 @@ window.DeploymentsDriftWidget = (function () {
             el("span", "risk-row__value", pct == null ? "n/a" : `${pct}%`),
             el("span", "risk-row__detail", detail),
         );
+        // Showing where a service's copies are is one view and crashing a node another: choosing a
+        // service brings any crashed node back, so the board never shows both at once.
         btn.addEventListener("click", () => {
+            stopPlay();
+            board.failed = null;
             board.focus = board.focus === row.name ? null : row.name;
             paint();
             showOnBoard();
@@ -362,6 +366,7 @@ window.DeploymentsDriftWidget = (function () {
         );
         btn.addEventListener("click", () => {
             stopPlay();
+            board.focus = null;  // crashing a node clears any highlighted service
             crash(board.failed === node ? null : node);
             showOnBoard();
         });
