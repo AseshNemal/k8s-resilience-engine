@@ -62,3 +62,14 @@ def test_guide_documents_post_failure_method_evaluation() -> None:
     assert "--output $methodEvaluationPath" in guide
     assert "claims were not probed" in guide
     assert "exported as `null`" in guide
+
+
+def test_guide_distinguishes_repeated_method_comparison_manifest() -> None:
+    guide = GUIDE.read_text(encoding="utf-8")
+
+    assert '"comparison": "captures/run-01/method-comparison.json"' in guide
+    assert '"evidence": "captures/run-01/evidence.json"' in guide
+    assert "run_method_evaluation_batch.py" in guide
+    assert "--batch-manifest .\\experiments\\failure_impact_validation\\method-batch.json" in guide
+    assert "method-batch-evaluation.json" in guide
+    assert "Duplicate experiment IDs" in guide

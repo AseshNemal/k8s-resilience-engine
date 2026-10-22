@@ -266,6 +266,8 @@ is exported as `null`; it is not counted as a correct empty prediction.
 
 ## 7. Validate repeated experiments
 
+### A. Aggregate the proposed cross-layer predictions
+
 Create a batch manifest after completing two or more independent runs. Paths in
 the manifest are resolved relative to the manifest file:
 
@@ -296,6 +298,42 @@ Run the batch:
   --batch-manifest .\experiments\failure_impact_validation\batch.json `
   --output .\experiments\failure_impact_validation\batch-validation.json
 ```
+
+### B. Compare all four methods across repeated runs
+
+Create a separate method batch manifest. It references the pre-failure method
+comparison and post-failure evidence from each run, rather than the standalone
+prediction artifact:
+
+```json
+{
+  "batchId": "worker-failure-method-comparison",
+  "experiments": [
+    {
+      "comparison": "captures/run-01/method-comparison.json",
+      "evidence": "captures/run-01/evidence.json"
+    },
+    {
+      "comparison": "captures/run-02/method-comparison.json",
+      "evidence": "captures/run-02/evidence.json"
+    }
+  ]
+}
+```
+
+Save it as a new file such as `method-batch.json`, then run:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_method_evaluation_batch.py `
+  --batch-manifest .\experiments\failure_impact_validation\method-batch.json `
+  --output .\experiments\failure_impact_validation\method-batch-evaluation.json
+```
+
+Every pair is revalidated from its source artifacts. The command rejects
+duplicate experiment IDs, incomplete probe coverage, mismatched snapshots, and
+comparisons created after their observations. The output contains separate
+service and workflow metrics for every applicable method dimension.
 
 ## Reported metrics
 
@@ -343,6 +381,12 @@ score. For example, recall is undefined when no positive failure was observed.
   probe scope. Run the missing probe; do not treat the missing observation as a
   successful service or workflow.
 
+`Duplicate experiment IDs`
+
+: Two batch entries identify the same experiment. Keep only one occurrence or
+  correct the captured `experimentId`; duplicated runs must not be counted
+  twice.
+
 `refusing to overwrite ...`
 
 : The output already exists. Preserve it and use a new experiment ID or output
@@ -364,6 +408,7 @@ Expected input failures return exit code `2` with a concise `error:` message.
   tests\failure_impact_prediction\test_validation_runner.py `
   tests\failure_impact_prediction\test_validation_batch_runner.py `
   tests\failure_impact_prediction\test_method_evaluation_runner.py `
+  tests\failure_impact_prediction\test_method_evaluation_batch_runner.py `
   tests\failure_impact_prediction\test_method_comparison_guide.py `
   -v --basetemp .pytest-tmp-validation-guide
 ```
