@@ -1829,6 +1829,50 @@
 /* ---- main output: DeploymentGraph ---- */
 .main-output__desc { margin: 0 0 var(--space-md) 0; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); max-width: 900px; }
 
+/* Accuracy tab: per real node failure, the model's prediction next to what Kubernetes showed */
+.proof { display: flex; flex-direction: column; gap: 12px; padding-top: 14px; border-top: 1px solid var(--c2-border-light); }
+.proof__title { margin: 0; font-size: 1rem; color: var(--c2-text-main); }
+.proof__picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.proof-pick {
+    padding: 7px 14px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: 999px;
+    background: var(--c2-glass-bg);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--c2-text-main);
+    cursor: pointer;
+    transition: var(--c2-transition);
+}
+.proof-pick:hover { border-color: var(--c2-accent-danger); }
+.proof-pick.is-active { background: var(--c2-accent-danger); border-color: var(--c2-accent-danger); color: #fff; }
+.proof-pick:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
+.proof__table { display: flex; flex-direction: column; gap: 6px; }
+.proof-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) minmax(150px, 1.2fr) minmax(150px, 1.2fr) 60px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-md);
+    background: var(--c2-glass-bg);
+    animation: plan-in 0.3s ease both;
+}
+.proof-row--head { padding-block: 4px; border: 0; background: transparent; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--c2-text-muted); animation: none; }
+.proof-row--miss { border-color: var(--c2-accent-danger); }
+.proof-pill { justify-self: start; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+.proof-pill--up { background: color-mix(in srgb, var(--c2-accent-success) 14%, transparent); color: #047857; }
+.proof-pill--down { background: color-mix(in srgb, var(--c2-accent-danger) 14%, transparent); color: #b91c1c; }
+.proof-match { font-size: 18px; text-align: center; }
+@keyframes plan-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-color-scheme: dark) {
+    .proof-pill--up { color: #6ee7b7; }
+    .proof-pill--down { color: #fca5a5; }
+}
+@media (prefers-reduced-motion: reduce) { .proof-row { animation: none; } }
+
 /* Output tab: inputs -> Component 2 -> DeploymentGraph -> Component 3 */
 .flow {
     display: flex;
