@@ -25,6 +25,16 @@
     animation: pulse-ring 1.8s infinite;
 }
 
+.spof-alert-badge--clear {
+    background: #dcfce7;
+    border-color: #86efac;
+    color: #15803d;
+}
+.spof-alert-badge--clear .pulsing-dot {
+    background: #22c55e;
+    animation: none;
+}
+
 @keyframes pulse-ring {
     0% {
         transform: scale(0.95);

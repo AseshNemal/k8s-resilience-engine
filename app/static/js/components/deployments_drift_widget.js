@@ -65,11 +65,13 @@ window.DeploymentsDriftWidget = (function () {
 
         if (bannerCount) bannerCount.textContent = spofs.length;
         if (totalBadge) totalBadge.textContent = `${spofs.length} exposed`;
+        // Red only when something is exposed; 0 exposed is the good outcome.
+        document.getElementById("spof-banner-badge")?.classList.toggle("spof-alert-badge--clear", spofs.length === 0);
         if (!container) return;
 
         container.innerHTML = "";
         if (spofs.length === 0) {
-            container.innerHTML = '<span class="node-card__empty">No single points of failure detected.</span>';
+            container.innerHTML = '<span class="node-card__empty">✅ No exposed services: every service has ready copies on more than one node.</span>';
             return;
         }
 
