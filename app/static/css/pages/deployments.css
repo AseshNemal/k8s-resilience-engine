@@ -1357,9 +1357,18 @@
 }
 .plan__headline { margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--c2-text-main); text-wrap: balance; }
 .plan__headline[data-tone="danger"] { color: #b91c1c; }
-.plan__source { margin: -6px 0 0 0; font-size: 12px; color: var(--c2-text-muted); }
-.plan__source:empty { display: none; }
-.plan__legend { margin: 0; font-size: 12px; color: var(--c2-text-muted); }
+.plan__top { display: flex; align-items: center; gap: 8px; }
+.plan__info {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 14px;
+    color: var(--c2-text-muted);
+    cursor: help;
+}
+.plan__info:hover, .plan__info:focus-visible { color: var(--c2-accent-primary); background: color-mix(in srgb, var(--c2-accent-primary) 10%, transparent); outline: none; }
 .plan__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: var(--space-md); align-items: start; }
 
 .plan-card {

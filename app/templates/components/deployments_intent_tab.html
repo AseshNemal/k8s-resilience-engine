@@ -12,9 +12,11 @@
     </div>
 
     <section class="plan" data-role="plan-board" aria-label="Declared copies against running pods, per service">
-        <p class="plan__headline" data-role="plan-headline" aria-live="polite">Reading the declared intent…</p>
-        <p class="plan__source" data-role="plan-source"></p>
-        <p class="plan__legend">📄 YAML = copies the YAML asks for &nbsp;·&nbsp; 🖥️ Cluster = copies really running and ready &nbsp;·&nbsp; click a service for its nodes and rules</p>
+        <div class="plan__top">
+            <p class="plan__headline" data-role="plan-headline" aria-live="polite">Reading the declared intent…</p>
+            {# Where the YAML comes from, on hover: needed when asked, not read out in a demo #}
+            <span class="plan__info" data-role="plan-source" tabindex="0" role="note" aria-label="Where the YAML comes from">ⓘ</span>
+        </div>
         <div class="plan__cards" data-role="plan-cards"></div>
     </section>
 

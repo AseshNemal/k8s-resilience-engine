@@ -26,11 +26,11 @@ window.DeploymentsIntentWidget = (function () {
             } else {
                 note.textContent = `The named manifest ${src.path} does not exist, so there is no declared intent to compare.`;
             }
-            const short = document.querySelector("[data-role='plan-source']");
-            if (short) {
-                short.textContent = src.source === "cluster"
-                    ? "📄 The YAML here is the one last applied with kubectl, kept by the cluster; a kubectl scale does not change it, so hand changes show as drift."
-                    : `📄 The YAML here is ${src.path}.`;
+            const info = document.querySelector("[data-role='plan-source']");
+            if (info) {
+                info.title = src.source === "cluster"
+                    ? "The YAML here is the one last applied with kubectl, which the cluster keeps. A kubectl scale does not change it, so changes made by hand show as a difference."
+                    : `The YAML here is ${src.path}.`;
             }
         } catch (err) {
             console.warn("Could not load manifest source:", err);
