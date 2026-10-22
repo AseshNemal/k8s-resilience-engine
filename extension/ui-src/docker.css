@@ -552,6 +552,16 @@ textarea.form-input { width: 100%; resize: vertical; }
 .namespace-hint[data-kind="error"] { color: var(--dd-danger); }
 .namespace-hint[data-kind="incomplete"] { color: var(--dd-warning); }
 .connect__apps:empty { display: none; }
+
+/* The suggestion list under a namespace box (namespaces.js). In flow, directly under the box: never a floating popup. */
+.ns-suggest { list-style: none; margin: 4px 0 0; padding: 4px; max-height: 220px; overflow-y: auto; border: 1px solid var(--dd-border-strong); border-radius: var(--dd-radius); background: var(--dd-bg-sunken); }
+.ns-suggest[hidden] { display: none; }
+.ns-suggest__item { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 10px; border-radius: var(--dd-radius); cursor: pointer; }
+.ns-suggest__item:hover, .ns-suggest__item[aria-selected="true"] { background: var(--dd-hover); }
+.ns-suggest__item[aria-selected="true"] { outline: 2px solid var(--dd-primary); outline-offset: -2px; }
+.ns-suggest__item[data-current="true"] .ns-suggest__name { color: var(--dd-primary-strong); }
+.ns-suggest__name { overflow-wrap: anywhere; }
+.ns-suggest__detail { color: var(--dd-text-2); font-size: 13px; white-space: nowrap; }
 .connect__attention { margin: 12px 0 0; padding: 10px 12px; border-radius: var(--dd-radius); background: var(--dd-danger-soft); border-left: 3px solid var(--dd-danger); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; }
 .connect__manual > summary { cursor: pointer; }
 .connect__manual[open] > summary { margin-bottom: 12px; }

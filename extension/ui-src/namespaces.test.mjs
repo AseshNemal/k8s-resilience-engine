@@ -294,3 +294,28 @@ test("the extension only ever reads: the one URL it requests is a GET of discove
     assert.equal(N.DISCOVERY_URL, "/api/deployments/discovery/all");
     assert.doesNotMatch(source, /method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i);
 });
+
+
+test("suggestions list every namespace unless the box holds text that is not yet one", () => {
+    const rows = [{ namespace: "default", serviceCount: 4, incomplete: false }, { namespace: "shop", serviceCount: 0, incomplete: true }, { namespace: "shopping", serviceCount: 1, incomplete: false }];
+    const all = (typed) => plain(N.suggestions({ rows }, typed)).map((s) => s.value);
+    assert.deepEqual(all(""), ["default", "shop", "shopping"]);
+    assert.deepEqual(all("   "), ["default", "shop", "shopping"]);
+    assert.deepEqual(all("default"), ["default", "shop", "shopping"]);         // an exact namespace: all are offered
+    assert.deepEqual(all("DEFAULT"), ["default", "shop", "shopping"]);
+    assert.deepEqual(all("sho"), ["shop", "shopping"]);
+    assert.deepEqual(all("zzz"), []);
+    assert.deepEqual(plain(N.suggestions({ rows }, "")).map((s) => s.detail), ["4 services", "no services resolved · incomplete evidence", "1 service"]);
+    assert.deepEqual(plain(N.suggestions({ rows: [] }, "")), []);
+});
+
+test("moveActive stops at the ends and starts from the right end", () => {
+    const m = N.moveActive;
+    assert.equal(m(-1, 3, "ArrowDown"), 0);
+    assert.equal(m(-1, 3, "ArrowUp"), 2);
+    assert.equal(m(2, 3, "ArrowDown"), 2);
+    assert.equal(m(0, 3, "ArrowUp"), 0);
+    assert.equal(m(1, 3, "ArrowDown"), 2);
+    assert.equal(m(0, 0, "ArrowDown"), -1);
+    assert.equal(m(1, 3, "Home"), 1);
+});
