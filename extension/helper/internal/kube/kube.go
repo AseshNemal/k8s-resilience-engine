@@ -48,6 +48,9 @@ var (
 	ClusterRoleBindings = Resource{Group: rbacGroup, Version: "v1", Plural: "clusterrolebindings", Kind: "ClusterRoleBinding"}
 )
 
+// CustomResourceDefinitions is only listed, to see whether a CRD group (for example Istio's) is already installed.
+var CustomResourceDefinitions = Resource{Group: "apiextensions.k8s.io", Version: "v1", Plural: "customresourcedefinitions", Kind: "CustomResourceDefinition"}
+
 // Kinds that are only listed: to find other bindings of the service account, and to check that the
 // extension's namespace holds nothing else before it may be deleted.
 var (
@@ -114,6 +117,17 @@ type Object struct {
 	// node reports none; it is never guessed.
 	ProviderID string
 
+	// Read-only facts about workloads, filled in only when the server reported them. Unknown stays nil or empty:
+	// nothing here is ever defaulted.
+	Containers    []string // spec.containers[].name of a Pod or of a Deployment's Pod template
+	Replicas      *int     // spec.replicas of a Deployment
+	ReadyReplicas *int     // status.readyReplicas of a Deployment
+	Phase         string   // status.phase of a Pod
+	Ready         *bool    // the Ready condition of a Pod
+	// SpecDigest is a SHA-256 of the object's spec as the server sent it (keys sorted, so it is stable). It lets a
+	// caller prove a spec is unchanged without keeping a copy of it. Empty when the object has no spec.
+	SpecDigest string
+
 	// raw is the object exactly as the server sent it. Update writes onto it, so fields the helper does
 	// not model are sent back unchanged. It is nil for an object that was not read from the server.
 	raw map[string]any
@@ -124,6 +138,17 @@ type Object struct {
 type Token struct {
 	Value     string
 	ExpiresAt time.Time
+}
+
+// Reader is the read-only part of Client. Code that must never change a cluster takes a Reader, so a Create,
+// Update, Delete or token request in it does not compile.
+type Reader interface {
+	// ServerVersion returns the server's git version, for example v1.37.0.
+	ServerVersion(ctx context.Context) (string, error)
+	// Get reads one object. namespace is ignored for cluster-scoped kinds.
+	Get(ctx context.Context, r Resource, namespace, name string) (*Object, error)
+	// List reads a collection. For a namespaced kind, namespace "" lists every namespace.
+	List(ctx context.Context, r Resource, namespace string) ([]Object, error)
 }
 
 // Client is what the helper needs from a cluster.

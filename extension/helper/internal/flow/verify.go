@@ -75,3 +75,23 @@ func verified(ctx context.Context, cmd string, name string, cs kube.Client, clus
 	r.Context = approve.Sanitize(name, 80)
 	return v, &r
 }
+
+// ReadOnlyCluster returns a read-only view of a verified local cluster, for planning commands that must never
+// change it. The administrator credential stays in this process, as everywhere else; what is returned is a
+// kube.Reader, which has no Create, Update, Delete or token request, so a write cannot be written against it.
+// A refusal (an unsupported or unverifiable cluster) is returned as a Result and nothing is touched.
+func ReadOnlyCluster(ctx context.Context, d Deps, cmd, name string) (kube.Reader, string, *Result) {
+	c, refusal := d.supported(cmd, name)
+	if refusal != nil {
+		return nil, "", refusal
+	}
+	cs, cluster, err := d.Clusters.Client(c.Name)
+	if err != nil {
+		r := fail(cmd, StateError, err.Error())
+		return nil, "", &r
+	}
+	if _, refusal := verified(ctx, cmd, c.Name, cs, cluster); refusal != nil {
+		return nil, "", refusal
+	}
+	return cs, c.Name, nil
+}

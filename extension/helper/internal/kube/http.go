@@ -3,8 +3,10 @@ package kube
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -256,7 +258,26 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 		} `json:"metadata"`
 		Spec struct {
 			ProviderID string `json:"providerID"`
+			Replicas   *int   `json:"replicas"`
+			Containers []struct {
+				Name string `json:"name"`
+			} `json:"containers"`
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name string `json:"name"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
 		} `json:"spec"`
+		Status struct {
+			Phase         string `json:"phase"`
+			ReadyReplicas *int   `json:"readyReplicas"`
+			Conditions    []struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			} `json:"conditions"`
+		} `json:"status"`
 		Rules           []PolicyRule    `json:"rules"`
 		AggregationRule json.RawMessage `json:"aggregationRule"`
 		RoleRef         RoleRef         `json:"roleRef"`
@@ -264,6 +285,29 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 	}
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		return nil, err
+	}
+	var containers []string
+	for _, c := range wire.Spec.Containers {
+		containers = append(containers, c.Name)
+	}
+	if len(containers) == 0 { // a Deployment keeps its containers in the Pod template
+		for _, c := range wire.Spec.Template.Spec.Containers {
+			containers = append(containers, c.Name)
+		}
+	}
+	var ready *bool
+	for _, c := range wire.Status.Conditions {
+		if c.Type == "Ready" {
+			value := c.Status == "True"
+			ready = &value
+		}
+	}
+	specDigest := ""
+	if spec, ok := raw["spec"]; ok {
+		if canonical, err := json.Marshal(spec); err == nil { // encoding/json sorts map keys: the same spec gives the same digest
+			sum := sha256.Sum256(canonical)
+			specDigest = hex.EncodeToString(sum[:])
+		}
 	}
 	aggregation := len(wire.AggregationRule) > 0 && string(wire.AggregationRule) != "null"
 	return &Object{
@@ -275,6 +319,12 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 		RoleRef:         wire.RoleRef,
 		Subjects:        wire.Subjects,
 		ProviderID:      wire.Spec.ProviderID,
+		Containers:      containers,
+		Replicas:        wire.Spec.Replicas,
+		ReadyReplicas:   wire.Status.ReadyReplicas,
+		Phase:           wire.Status.Phase,
+		Ready:           ready,
+		SpecDigest:      specDigest,
 		raw:             raw,
 	}, nil
 }
