@@ -160,3 +160,22 @@ func TestThePlannedInventoryIsTheReviewedListPlusTheBookinfoObjects(t *testing.T
 		}
 	}
 }
+
+func TestTheInventoryIsInCreationOrderSoUndoCanWalkItBackwards(t *testing.T) {
+	var kinds []string
+	for _, e := range PlannedInventory(false) {
+		if e.Stage == StageIstio {
+			kinds = append(kinds, e.Ref.Kind)
+		}
+	}
+	if kinds[0] != "Namespace" || kinds[1] != "CustomResourceDefinition" || kinds[len(kinds)-1] != "MutatingWebhookConfiguration" {
+		t.Fatalf("%v", kinds)
+	}
+	last := -1
+	for _, k := range kinds {
+		if kindOrder[k] < last {
+			t.Fatalf("not in creation order at %s: %v", k, kinds)
+		}
+		last = kindOrder[k]
+	}
+}

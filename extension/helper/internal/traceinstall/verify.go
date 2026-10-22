@@ -1,4 +1,163 @@
 package traceinstall
 
-// VerifyResult is filled in by Verify.
-type VerifyResult struct{}
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"resilience-engine/helper/internal/bookinfotrace"
+	"resilience-engine/helper/internal/kube"
+)
+
+// InstrumentedPod is one Pod that must carry a sidecar for traces to exist.
+type InstrumentedPod struct {
+	Workload string `json:"workload"`
+	Pod      string `json:"pod"`
+	Sidecar  bool   `json:"sidecar"`
+	Ready    bool   `json:"ready"`
+}
+
+// VerifyResult is the cluster-side half of Verify: what the helper can see from the cluster. It does NOT say that
+// traces arrived; that is read from Jaeger afterwards (GET /_extension/tracing/trace-path), because only the spans in
+// Jaeger prove that an instrumented Pod really reached it.
+type VerifyResult struct {
+	AppliedAddress string            `json:"appliedAddress"`
+	CurrentAddress string            `json:"currentAddress"`
+	AddressDrift   bool              `json:"addressDrift"`
+	Instrumented   []InstrumentedPod `json:"instrumented"`
+	RequestsSent   bool              `json:"requestsSent"` // the temporary client Pod ran to completion
+	Readings       string            `json:"readings"`
+}
+
+// workloads that must have a sidecar for the demo traces: the three that were restarted and reviews-v2.
+func instrumentedWorkloads() [][2]string {
+	var out [][2]string
+	for _, w := range bookinfotrace.Contract.RecreatedWorkloads {
+		out = append(out, [2]string{w.App, w.Version})
+	}
+	return append(out, [2]string{"reviews", "v2"})
+}
+
+func serviceEntryAddress(o *kube.Object) string {
+	spec, _ := o.Raw()["spec"].(map[string]any)
+	endpoints, _ := spec["endpoints"].([]any)
+	if len(endpoints) == 0 {
+		return ""
+	}
+	endpoint, _ := endpoints[0].(map[string]any)
+	address, _ := endpoint["address"].(string)
+	return address
+}
+
+// Verify checks the setup from the cluster's side and then produces real traffic: it re-discovers the Jaeger address
+// and compares it with the ServiceEntry, checks that every workload that must have a sidecar has one and is Ready,
+// reads memory, and runs a temporary Pod inside the mesh that sends real requests to productpage. The Pod makes no
+// span itself and never talks to Jaeger, and it is deleted afterwards, also when something goes wrong.
+func Verify(ctx context.Context, d Deps, p Params) Outcome {
+	rec, err := d.Store.Load(p.Identity)
+	if err != nil {
+		return recordProblem(err)
+	}
+	if rec == nil || rec.Phase != PhaseApplied {
+		o := fail(StateNotApplied, "Tracing is not set up on this cluster, so there is nothing to verify.")
+		o.Setup = SummaryOf(rec)
+		return o
+	}
+	if existing := alreadyApplied(ctx, d, rec); !existing.OK {
+		existing.State = StateVerifyFailed
+		return existing
+	}
+
+	result := &VerifyResult{Instrumented: []InstrumentedPod{}}
+	stop := func(format string, args ...any) Outcome {
+		o := fail(StateVerifyFailed, fmt.Sprintf(format, args...))
+		o.Verify, o.Setup = result, SummaryOf(rec)
+		return o
+	}
+
+	// 1. the address: the same check as before applying, compared with what the ServiceEntry holds
+	entry, err := d.Cluster.Get(ctx, resServiceEntry, bookinfotrace.Contract.Namespace, serviceEntryRef().Name)
+	if err != nil {
+		return stop("The ServiceEntry could not be read.")
+	}
+	result.AppliedAddress = serviceEntryAddress(entry)
+	current, err := d.discover(ctx)
+	if err != nil {
+		return stop("The Jaeger receiver can no longer be reached from the cluster's nodes (%s).", err.Error())
+	}
+	result.CurrentAddress = current.IPv4
+	if bookinfotrace.Drift(result.AppliedAddress, current) {
+		result.AddressDrift = true
+		return stop("The Jaeger address changed: the ServiceEntry points at %s, but the cluster's nodes now reach it at %s. Undo and set up again.", result.AppliedAddress, current.IPv4)
+	}
+
+	// 2. every workload that must be instrumented is
+	r := newRun(d, rec)
+	for _, w := range instrumentedWorkloads() {
+		pods, err := r.podsOf(ctx, w[0], w[1])
+		if err != nil {
+			return stop("The %s Pods could not be read.", w[0])
+		}
+		if len(pods) == 0 {
+			return stop("There is no %s-%s Pod.", w[0], w[1])
+		}
+		for _, pod := range pods {
+			result.Instrumented = append(result.Instrumented, InstrumentedPod{Workload: w[0] + "-" + w[1], Pod: pod.Name, Sidecar: hasSidecar(pod), Ready: isReady(pod)})
+			if !hasSidecar(pod) || !isReady(pod) {
+				return stop("%s has no working sidecar, so it cannot produce traces.", pod.Name)
+			}
+		}
+	}
+
+	// 3. room for one more small Pod
+	m := d.measure(ctx)
+	ready := true
+	m.PodsReady = &ready
+	result.Readings = readingText(m)
+	if decision := bookinfotrace.Evaluate(bookinfotrace.Gate2, rec.Baseline, m, d.Thresholds); !decision.Proceed {
+		return stop("Memory is too tight to run the client Pod: %s.", strings.Join(decision.Reasons, "; "))
+	}
+
+	// 4. real requests, from a Pod inside the mesh
+	doc, err := documentOf(fileClient, "Pod")
+	if err != nil {
+		return stop("The client Pod manifest could not be read.")
+	}
+	r.log("send real requests", "started", "a temporary Pod sends requests to productpage")
+	created := false
+	defer func() {
+		if created {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.Timeouts.Pod)
+			defer cancel()
+			r.remove(cleanup, clientPodRef())
+		}
+	}()
+	if err := r.create(ctx, doc); err != nil {
+		created = true // the intent was recorded; the cleanup looks at the cluster
+		return stop("The client Pod could not be created: %s.", err.Error())
+	}
+	created = true
+	finished := false
+	err = r.waitUntil(ctx, "the client Pod to finish its requests", d.Timeouts.Client, func(ctx context.Context) (bool, error) {
+		pod, err := d.Cluster.Get(ctx, resPod, bookinfotrace.Contract.Namespace, clientPodRef().Name)
+		if err != nil {
+			return false, err
+		}
+		switch pod.Phase {
+		case "Succeeded":
+			finished = true
+			return true, nil
+		case "Failed":
+			return false, failed("the client Pod failed")
+		}
+		return false, nil
+	})
+	if err != nil || !finished {
+		r.log("send real requests", "failed", "")
+		return stop("The client Pod did not finish sending requests: %s.", err.Error())
+	}
+	result.RequestsSent = true
+	r.log("send real requests", "done", "")
+	return Outcome{OK: true, State: StateTrafficSent, Verify: result, Setup: SummaryOf(rec),
+		Message: "The sidecars are in place and real requests were sent. The traces that follow are read from Jaeger."}
+}

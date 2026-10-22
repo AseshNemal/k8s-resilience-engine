@@ -158,6 +158,10 @@ func (e ToolEnv) Ensure(ctx context.Context) (string, error) {
 	return bin, nil
 }
 
+// syncWrites makes every write wait until the data is on disk. It is always true in the helper; the test suite turns
+// it off for the hundreds of simulated runs, and one test turns it on to cover the real path.
+var syncWrites = true
+
 // writeFileAtomic writes next to the target and renames, so a crash never leaves half a file under the real name.
 func writeFileAtomic(target string, data []byte, mode os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(target), ".tmp-*")
@@ -171,10 +175,12 @@ func writeFileAtomic(target string, data []byte, mode os.FileMode) error {
 		cleanup()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
+	if syncWrites {
+		if err := tmp.Sync(); err != nil {
+			tmp.Close()
+			cleanup()
+			return err
+		}
 	}
 	if err := tmp.Close(); err != nil {
 		cleanup()
@@ -316,6 +322,16 @@ var kindOrder = map[string]int{
 	"Role": 6, "RoleBinding": 7, "Service": 8, "Deployment": 9, "ValidatingWebhookConfiguration": 10, "MutatingWebhookConfiguration": 11,
 }
 
+// creationBefore orders objects the way they are created. The inventory uses the same order, so Undo, which walks it
+// backwards, removes the webhooks first and the namespace last.
+func creationBefore(a, b ObjectRef) bool {
+	ka, kb := kindOrder[a.Kind], kindOrder[b.Kind]
+	if ka != kb {
+		return ka < kb
+	}
+	return a.Name < b.Name
+}
+
 func refOf(doc map[string]any) ObjectRef {
 	meta, _ := doc["metadata"].(map[string]any)
 	str := func(m map[string]any, k string) string { s, _ := m[k].(string); return s }
@@ -372,13 +388,7 @@ func parseRendered(out []byte) ([]Manifest, error) {
 			return nil, ErrRenderUnexpected
 		}
 	}
-	sort.SliceStable(got, func(i, j int) bool {
-		a, b := kindOrder[got[i].Ref.Kind], kindOrder[got[j].Ref.Kind]
-		if a != b {
-			return a < b
-		}
-		return got[i].Ref.Name < got[j].Ref.Name
-	})
+	sort.SliceStable(got, func(i, j int) bool { return creationBefore(got[i].Ref, got[j].Ref) })
 	for _, m := range got {
 		if _, ok := kindOrder[m.Ref.Kind]; !ok {
 			return nil, fmt.Errorf("%w: %s", ErrRenderUnexpected, m.Ref.Kind)

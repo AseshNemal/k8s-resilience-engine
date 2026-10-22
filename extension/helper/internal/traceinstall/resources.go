@@ -2,6 +2,7 @@ package traceinstall
 
 import (
 	"fmt"
+	"sort"
 
 	"resilience-engine/helper/internal/bookinfotrace"
 	"resilience-engine/helper/internal/kube"
@@ -87,7 +88,9 @@ func PlannedInventory(reviewsV2Exists bool) []Entry {
 		inv = append(inv, Entry{Ref: ref, Stage: stage, State: EntryPlanned})
 	}
 	add(StageIstio, istioNamespace)
-	for _, o := range ExpectedIstioObjects() {
+	istio := ExpectedIstioObjects()
+	sort.SliceStable(istio, func(i, j int) bool { return creationBefore(istio[i], istio[j]) })
+	for _, o := range istio {
 		add(StageIstio, o)
 	}
 	add(StageConfig, serviceEntryRef())

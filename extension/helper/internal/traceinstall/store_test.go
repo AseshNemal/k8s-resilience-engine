@@ -177,3 +177,15 @@ func TestInstallationIDsAreRandomAndLongEnough(t *testing.T) {
 		t.Fatalf("%q %q", a, b)
 	}
 }
+
+func TestRecordWritesAreSyncedByDefault(t *testing.T) {
+	syncWrites = true
+	defer func() { syncWrites = false }()
+	s := Store{Dir: filepath.Join(t.TempDir(), "rec")}
+	if err := s.Save(someRecord(), epoch); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Load(identity()); err != nil || got == nil {
+		t.Fatalf("%v %v", got, err)
+	}
+}
