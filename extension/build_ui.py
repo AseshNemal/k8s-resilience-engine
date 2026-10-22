@@ -130,6 +130,34 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         </p>
     </section>
 
+    <section class="card" aria-labelledby="tracing-title" data-role="tracing-card" hidden>
+        <h3 class="section-header__title" id="tracing-title">Tracing service</h3>
+        <p class="connect__lead" data-role="tracing-headline" role="status" aria-live="polite"></p>
+        <p class="ui-note" data-role="tracing-detail" aria-live="polite"></p>
+        <div class="connect__picker">
+            <button type="button" class="primary-button" data-role="tracing-enable" hidden>Enable tracing</button>
+            <button type="button" class="secondary-button" data-role="tracing-off" hidden>Turn off tracing</button>
+            <button type="button" class="secondary-button" data-role="tracing-check" hidden>Check connections</button>
+        </div>
+        <p class="connect__message" data-role="tracing-message" role="status"></p>
+        <ul class="connect__apps" data-role="tracing-endpoints" aria-label="Tested addresses"></ul>
+        <h4 class="section-header__title">Applications</h4>
+        <ul class="connect__apps" data-role="tracing-apps" aria-live="polite"></ul>
+        <details class="connect__manual" data-role="tracing-guidance" hidden>
+            <summary class="section-header__title" data-role="tracing-guidance-title">Set up tracing</summary>
+            <div data-role="tracing-guidance-text"></div>
+            <pre data-role="tracing-guidance-snippet"></pre>
+            <button type="button" class="secondary-button" data-role="tracing-copy">Copy the variables</button>
+        </details>
+        <p class="ui-note">
+            Enable tracing once: a system dialog shows exactly what will run (one small Jaeger container on this computer,
+            reachable from this computer only) and nothing starts unless you approve there. After that the extension
+            keeps it running and brings back that one container if it stops. It only shows traces your applications
+            really send: the extension never sends, seeds or invents a trace, and it does not change your cluster or
+            your applications. An application that sends nothing is shown with guidance for you to apply yourself.
+        </p>
+    </section>
+
     <details class="card connect__manual" data-role="manual-details" open>
         <summary class="section-header__title" id="connect-new-title">Advanced: use a kubeconfig file</summary>
         <ol class="connect__steps">
@@ -220,7 +248,8 @@ def _connect_page(index_html: str) -> str:
     html, count = re.subn(r'<main class="page" id="main-content">.*?</main>', lambda _m: CONNECT_MAIN, html, count=1, flags=re.S)
     if count != 1:
         raise SystemExit("Could not find the main content area for the Connect page.")
-    return html.replace("</body>", '<script src="connect.js" defer></script>\n<script src="connect-auto.js" defer></script>\n</body>', 1)
+    scripts = "connect.js connect-auto.js trace-service.js tracing-panel.js".split()
+    return html.replace("</body>", "".join(f'<script src="{name}" defer></script>\n' for name in scripts) + "</body>", 1)
 
 
 def _check_relative(name: str, html: str) -> None:
