@@ -70,7 +70,7 @@ func TestTheUndoDialogSaysWhatIsRemovedAndWhatIsKept(t *testing.T) {
 		}
 	}
 	// Undo must remove the label before it removes Istio, or Pods cannot be created while the webhook is gone.
-	if strings.Index(req.Body, "istio-injection label") > strings.Index(req.Body, "uninstall Istio") {
+	if strings.Index(req.Body, "istio-injection label") > strings.Index(req.Body, "remove the Istio objects") {
 		t.Error("the label must be removed before Istio")
 	}
 	kept, _ := UndoDialog("docker-desktop", false, []string{"a"})
@@ -118,5 +118,20 @@ func TestPodsAreRecreatedLeafFirst(t *testing.T) {
 	}
 	if len(p.Disruptions) != len(p.Restarts) {
 		t.Fatalf("every restarted Pod must have a stated effect")
+	}
+}
+
+func TestTheUndoDialogDoesNotPromiseToDeleteWhatItMayKeep(t *testing.T) {
+	req, err := UndoDialog("docker-desktop", true, []string{"a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, claim := range []string{"uninstall Istio", "delete its namespace and CRDs"} {
+		if strings.Contains(req.Body, claim) {
+			t.Errorf("the dialog promises %q, but a definition in use or a namespace holding other objects is kept", claim)
+		}
+	}
+	if !strings.Contains(req.Body, "is kept and reported") {
+		t.Errorf("the dialog does not say what may be kept:\n%s", req.Body)
 	}
 }

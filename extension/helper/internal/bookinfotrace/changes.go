@@ -127,35 +127,3 @@ func (c Changeset) object(kind string) ChangesetObject {
 	}
 	return ChangesetObject{Kind: kind, Name: "<missing from changeset.json>"}
 }
-
-// Allowed is the allow-list a future writer must stay inside. It names only objects in the bookinfo namespace that
-// this setup creates, plus the injection label on that namespace itself. Everything else (another namespace, RBAC,
-// Secrets, the existing Deployments) is refused, whatever a caller asks for.
-func Allowed(kind, namespace, name string) bool {
-	c := Contract
-	if kind == "Namespace" {
-		return name == c.Namespace // the label only; the namespace is never created or deleted
-	}
-	if namespace != c.Namespace {
-		return false
-	}
-	if kind == c.CreatedFromOriginal.Kind && name == c.CreatedFromOriginal.Name {
-		return true
-	}
-	for _, o := range c.Objects {
-		if o.Kind == kind && o.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// AllowedPodDeletion accepts only a Pod the plan named, so a request cannot delete any other Pod.
-func AllowedPodDeletion(name string, planned []string) bool {
-	for _, p := range planned {
-		if p == name {
-			return true
-		}
-	}
-	return false
-}

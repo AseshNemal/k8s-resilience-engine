@@ -76,7 +76,7 @@ func UndoDialog(contextName string, removeReviewsV2 bool, restarts []string) (ap
 	step++
 	fmt.Fprintf(&b, "%d. recreate %d Pods without a sidecar, one at a time: %s\n", step, len(restarts), strings.Join(restarts, ", "))
 	step++
-	fmt.Fprintf(&b, "%d. delete the Telemetry and ServiceEntry\n%d. uninstall Istio and delete its namespace and CRDs\n", step, step+1)
+	fmt.Fprintf(&b, "%d. delete the Telemetry and ServiceEntry\n%d. remove the Istio objects this setup created (a definition other resources still use, or a namespace that holds other objects, is kept and reported)\n", step, step+1)
 	b.WriteString("\nOnly objects this setup recorded as created are deleted, each by its recorded ID; anything else is left alone and reported. The original Bookinfo Deployments are not edited. Afterwards the result is checked against the snapshot taken before the setup. Jaeger is not changed.")
 	body := b.String()
 	if len([]rune(body)) > maxBody {

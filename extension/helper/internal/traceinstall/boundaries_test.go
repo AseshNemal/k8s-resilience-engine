@@ -80,7 +80,8 @@ func TestThePlanningPackageDoesNotImportTheInstaller(t *testing.T) {
 	files, _ := filepath.Glob("../bookinfotrace/*.go")
 	for _, f := range files {
 		raw, _ := os.ReadFile(f)
-		if strings.Contains(string(raw), "traceinstall") && !strings.HasSuffix(f, "_test.go") {
+		code := regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(string(raw), "") // a comment may say where the installer lives
+		if strings.Contains(code, "traceinstall") && !strings.HasSuffix(f, "_test.go") {
 			t.Errorf("%s reaches the installer", f)
 		}
 	}
