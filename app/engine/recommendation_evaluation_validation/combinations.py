@@ -35,6 +35,7 @@ from app.engine.recommendation_evaluation_validation.capacity_ledger import (
     CapacityLedger,
     LedgerError,
     LedgerPlacementMutation,
+    LedgerReplicaIncreaseMutation,
     UnknownCapacity,
 )
 from app.engine.recommendation_evaluation_validation.feasibility_analyzer import (
@@ -51,6 +52,10 @@ from app.engine.recommendation_evaluation_validation.feasibility_analyzer import
 from app.engine.recommendation_evaluation_validation.metrics import calculate_replica_concentration
 from app.engine.recommendation_evaluation_validation.ranking import DEFAULT_TOLERANCE, ImpactSnapshot, impact_reductions
 from app.engine.recommendation_evaluation_validation.simulation_result import SimulationResult
+from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
+    ADDED_MARKER,
+    check_replica_increase_feasibility,
+)
 from app.engine.simulation import simulate_deployment_change
 from app.shared.schemas.deployment import DeploymentGraph
 
@@ -69,6 +74,11 @@ ROLLOUT_TIME = {
 }
 
 
+# The strategies a member of a pair can have. Required anti-affinity is not one of them: its final-state check would
+# need the term injected into the held graph, and it is only ever an alternative to a blocked spread.
+PAIRABLE = ("TOPOLOGY_SPREAD", "REPLICA_INCREASE")
+
+
 @dataclass(frozen=True)
 class Member:
     """A candidate that is individually verified FEASIBLE, with the placement that verification found."""
@@ -76,6 +86,7 @@ class Member:
     id: str
     service: str
     feasibility: FeasibilityResult | None
+    strategy: str = "TOPOLOGY_SPREAD"
 
 
 @dataclass(frozen=True)
@@ -133,8 +144,21 @@ class _Failed:
     missing: tuple[str, ...] = ()
 
 
-def _apply(deployment: DeploymentGraph, member_service: str, placement: Mapping[str, str]) -> DeploymentGraph:
-    return simulate_deployment_change(deployment, LedgerPlacementMutation(member_service, placement)).after
+def _apply(deployment: DeploymentGraph, member: Member, placement: Mapping[str, str]) -> DeploymentGraph:
+    if member.strategy == "REPLICA_INCREASE":
+        added = sorted(name for name in placement if ADDED_MARKER in name)
+        return simulate_deployment_change(
+            deployment, LedgerReplicaIncreaseMutation(member.service, placement, added)).after
+    return simulate_deployment_change(deployment, LedgerPlacementMutation(member.service, placement)).after
+
+
+def _plan(deployment: DeploymentGraph, member: Member, evidence: SchedulingEvidence, max_skew: int,
+          search_budget: int) -> FeasibilityResult:
+    if member.strategy == "REPLICA_INCREASE":
+        return check_replica_increase_feasibility(deployment, member.service, evidence, max_skew=max_skew,
+                                                  search_budget=search_budget)
+    return check_topology_spread_feasibility(deployment, member.service, evidence, max_skew=max_skew,
+                                             search_budget=search_budget)
 
 
 def _refused(label: str, error: LedgerError) -> _Failed:
@@ -149,18 +173,17 @@ def _try_order(deployment: DeploymentGraph, lead: Member, follow: Member, eviden
                max_skew: int, search_budget: int) -> _Applied | _Failed:
     label = f"{lead.service} then {follow.service}"
     try:
-        after_lead = _apply(deployment, lead.service, lead.feasibility.placement)
+        after_lead = _apply(deployment, lead, lead.feasibility.placement)
     except LedgerError as error:
         return _refused(label, error)
 
-    plan = check_topology_spread_feasibility(after_lead, follow.service, evidence, max_skew=max_skew,
-                                             search_budget=search_budget)
+    plan = _plan(after_lead, follow, evidence, max_skew, search_budget)
     if plan.status is not FeasibilityStatus.FEASIBLE:
         blocked_by = ", ".join(sorted({f.constraint for f in plan.findings})) or "no verified placement"
         return _Failed(f"{label}: {follow.service} cannot be placed once {lead.service} has moved "
                        f"({plan.status.value}; blocked by {blocked_by})", plan.missing_evidence)
     try:
-        final = _apply(after_lead, follow.service, plan.placement)
+        final = _apply(after_lead, follow, plan.placement)
     except LedgerError as error:
         return _refused(label, error)
 
@@ -239,7 +262,8 @@ def combined_simulation(base: DeploymentGraph, outcome: PairOutcome) -> Simulati
         concentration_reduction=round(before - after, 2),
         simulated_deployment=outcome.deployment if verified else None,
         feasibility_status=outcome.status, feasibility=outcome.feasibility,
-        pods_to_recreate=outcome.feasibility.pods_to_recreate if verified else ())
+        pods_to_recreate=outcome.feasibility.pods_to_recreate if verified else (),
+        added_replicas=tuple(sorted(n for n in outcome.feasibility.placement if ADDED_MARKER in n)) if verified else ())
 
 
 def redundant_members(

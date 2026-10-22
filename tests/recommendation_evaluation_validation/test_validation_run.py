@@ -144,3 +144,44 @@ def test_the_observed_side_agrees_with_component_3_on_the_same_placement():
     direct = predict_failure_impact(scenario.workflow, cluster.graph, plan.predicted.failed_node)
 
     assert result.observed["blastRadiusAfter"] == direct.blast_radius
+
+
+# --- the other strategies -----------------------------------------------------------------------------------------
+
+def prepare_case(name, **cluster_options):
+    from tests.support.member4_scenarios import catalogue
+
+    scenario = next(c for c in catalogue() if c.name == name).scenario
+    approval, live = approved_for_test(scenario)
+    plan = ValidationPlan.from_approval(approval, live, scenario.workflow, TARGET)
+    return plan, FakeTestCluster(scenario.deployment, **cluster_options)
+
+
+def test_a_replica_increase_is_validated_when_the_scheduler_keeps_the_replicas_apart():
+    plan, cluster = prepare_case("single-replica-increase")
+
+    result = run_all(plan, cluster)
+
+    assert result.validated is True and result.prediction_error == pytest.approx(0.0)
+    assert result.comparison["placement"]["match"] is True
+    assert result.comparison["riskReduction"]["observed"] == pytest.approx(100.0)
+    assert sum(result.comparison["placement"]["observed"]["reviews"].values()) == 2      # two replicas now exist
+
+
+def test_a_replica_increase_whose_replicas_end_up_on_one_node_fails_validation_with_the_error_measured():
+    plan, cluster = prepare_case("single-replica-increase", scheduler=stay)       # the constraint was not honoured
+
+    result = run_all(plan, cluster)
+
+    assert result.state is RunState.COMPLETED and result.validated is False
+    assert result.prediction_error == pytest.approx(100.0)
+    assert result.comparison["placement"]["match"] is False
+
+
+def test_a_pair_of_replica_increases_is_validated_as_one_proposal():
+    plan, cluster = prepare_case("pair-of-replica-increases")
+
+    result = run_all(plan, cluster)
+
+    assert result.validated is True and result.comparison["serviceSurvival"]["agreement"] == "4/4"
+    assert set(result.comparison["placement"]["observed"]) == {"details", "productpage"}

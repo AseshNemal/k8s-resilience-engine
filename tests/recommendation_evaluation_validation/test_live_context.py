@@ -234,7 +234,8 @@ def test_the_checklist_is_read_only_and_builds_no_workflow(client, monkeypatch, 
 
 # ---- the explained recommendation --------------------------------------------------------------------------------
 
-def test_bookinfo_gets_no_invented_replica_fix(client, monkeypatch, use_cluster, evidenced_topology):
+def test_bookinfo_single_replicas_get_no_invented_spread_but_a_verified_pair_of_replica_increases(
+        client, monkeypatch, use_cluster, evidenced_topology):
     store(monkeypatch, bookinfo_workflow())
     use_cluster(bookinfo_cluster())
 
@@ -242,21 +243,29 @@ def test_bookinfo_gets_no_invented_replica_fix(client, monkeypatch, use_cluster,
 
     assert response.status_code == 200
     body = response.json()
-    assert body["outcome"]["state"] == "CANDIDATES_NOT_READY"
-    assert body["applied"] is False and body["report"]["selectedRecommendationId"] is None
-    assert body["candidates"], "the services on the riskiest node are evaluated"
-    for candidate in body["candidates"]:
+    assert body["applied"] is False
+    spreads = [c for c in body["candidates"] if c["type"] == "TOPOLOGY_SPREAD"]
+    assert spreads, "the services on the riskiest node are evaluated"
+    for candidate in spreads:        # a spread cannot make one replica survive: still reported infeasible, never invented
         assert candidate["feasible"] is False and candidate["selected"] is False
         assert candidate["approval"]["ready"] is False and candidate["approval"]["reason"]
         assert candidate["declaredReplicas"] == 1
         assert any("single replica" in note for note in candidate["notes"])
-        # no improvement is claimed: the predicted blast radius is the baseline
         assert candidate["predicted"]["riskReduction"] == 0.0
         assert candidate["predicted"]["blastRadiusAfter"] == candidate["predicted"]["blastRadiusBefore"]
         assert candidate["simulatedDeployment"] is None             # no predicted placement exists for an infeasible change
         assert candidate["feasibility"]["status"] == "INFEASIBLE"
         assert candidate["rootCause"] and candidate["recommendedChange"] and candidate["currentPlacement"]
-    assert body["yaml"]["available"] is False and "invented" in body["yaml"]["reason"]
+        assert candidate["yamlProposal"]["status"] == "REFUSED" and candidate["yamlProposal"]["yaml"] is None
+    # productpage and ratings share the failing node and both are required, so neither added replica helps alone...
+    singles = [c for c in body["candidates"] if c["type"] == "REPLICA_INCREASE"]
+    assert {c["service"] for c in singles} == {"productpage", "ratings"}
+    assert all(c["feasible"] and c["approval"]["ready"] is False and c["predicted"]["riskReduction"] == 0.0 for c in singles)
+    # ...but the pair does, and it is the one candidate that can be approved.
+    assert body["outcome"]["state"] == "READY"
+    (pair,) = [c for c in body["candidates"] if c["type"] == "COMBINATION"]
+    assert pair["selected"] and pair["approval"]["ready"] and pair["predicted"]["riskReduction"] == pytest.approx(100.0)
+    assert body["yaml"]["available"] is True and body["yaml"]["text"].count("replicas: 2") == 2
 
 
 def test_a_concentrated_service_is_shown_with_everything_the_page_needs(client, monkeypatch, use_cluster, evidenced_topology):

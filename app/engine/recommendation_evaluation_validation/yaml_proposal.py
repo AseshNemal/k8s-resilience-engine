@@ -1,10 +1,18 @@
 """Kubernetes YAML for an approved-eligible recommendation: a minimal Deployment patch, never an applied change.
 
-What is produced. For a TOPOLOGY_SPREAD candidate, one strategic-merge patch of the backing Deployment that adds
-exactly the constraint the feasibility check verified: ``topologySpreadConstraints`` on ``kubernetes.io/hostname``,
-``maxSkew`` as modelled, ``whenUnsatisfiable: DoNotSchedule``, selecting the Deployment's own pod labels. A
-COMBINATION is one patch per member Deployment, in a fixed order. Nothing else in the Deployment is touched: no
-replica count, no affinity, no other field.
+What is produced. One strategic-merge patch of the backing Deployment per changed service, adding exactly what the
+feasibility check verified and nothing else:
+
+* TOPOLOGY_SPREAD: ``topologySpreadConstraints`` on ``kubernetes.io/hostname``, ``maxSkew`` as modelled,
+  ``whenUnsatisfiable: DoNotSchedule``, selecting the Deployment's own pod labels;
+* POD_ANTI_AFFINITY: a required ``podAntiAffinity`` term on ``kubernetes.io/hostname`` selecting the Deployment's own
+  pods. Kubernetes treats that list as atomic, so a patch REPLACES it: a Deployment that already has required terms is
+  refused instead of having them silently dropped;
+* REPLICA_INCREASE: ``spec.replicas`` raised by the verified amount, together with the spread constraint that keeps the
+  added replica off the node of the existing one (without it the scheduler may co-locate them);
+* a COMBINATION is one such patch per member Deployment, in a fixed order.
+
+No other field is touched.
 
 When nothing is produced. A proposal is generated only for a candidate that the approval gate would accept
 (``approval.eligibility``: verified FEASIBLE, ranked, with a positive score and a recorded plan). A candidate that is
@@ -35,11 +43,22 @@ from app.engine.recommendation_evaluation_validation.feasibility_analyzer import
     DEFAULT_MAX_SKEW,
     STRATEGY_MODEL,
 )
+from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
+    ADDED_MARKER,
+    ANTI_AFFINITY_MODEL,
+    REPLICA_INCREASE_MODEL,
+    has_hostname_spread,
+    has_required_anti_affinity,
+    self_anti_affinity_term,
+)
 from app.shared.schemas.deployment import DeploymentGraph, ServicePlacement
 
 HOSTNAME = "kubernetes.io/hostname"
 TOPOLOGY_SPREAD = "TOPOLOGY_SPREAD"
+POD_ANTI_AFFINITY = "POD_ANTI_AFFINITY"
+REPLICA_INCREASE = "REPLICA_INCREASE"
 COMBINATION = "COMBINATION"
+MODELS = {TOPOLOGY_SPREAD: STRATEGY_MODEL, POD_ANTI_AFFINITY: ANTI_AFFINITY_MODEL, REPLICA_INCREASE: REPLICA_INCREASE_MODEL}
 GENERATED, REFUSED = "GENERATED", "REFUSED"
 
 NOT_APPLIED = "PROPOSAL ONLY - NOT APPLIED. A prediction from a what-if simulation; nothing has been applied or measured."
@@ -50,6 +69,12 @@ DISCLOSURES = (
     "A spread constraint only filters where newly scheduled pods may go. It does not move a running pod, and the "
     "scheduler, not this patch, chooses where replacements land; the predicted placement is a model's answer.",
     "The rollout's own transient (old pods still counted for skew and capacity while new ones schedule) is not modelled.",
+)
+
+REPLICA_DISCLOSURES = (
+    "The change adds replicas, which request more CPU and memory on the nodes they land on.",
+    "If a HorizontalPodAutoscaler or another controller owns the replica count, it may revert this change; that is not "
+    "visible in the evidence.",
 )
 
 REPLACEMENT_NOTE = (
@@ -89,7 +114,7 @@ class YamlProposal:
             "deployments": [{"service": p.service, "deployment": p.deployment, "namespace": p.namespace}
                             for p in self.patches],
             "disclosures": list(self.disclosures), "podReplacement": dict(self.pod_replacement),
-            "strategyModel": STRATEGY_MODEL, "appliesNothing": True,
+            "strategyModels": sorted(set(MODELS.values())), "appliesNothing": True,
         }
 
 
@@ -97,11 +122,13 @@ def _refuse(recommendation_id: str, code: str, reason: str, source: str | None =
     return YamlProposal(recommendation_id, REFUSED, False, code=code, reason=reason, evidence_source=source)
 
 
-def _services_of(live: LiveRecommendation, recommendation_id: str, candidate) -> list[str]:
+def _strategies_of(live: LiveRecommendation, recommendation_id: str, candidate) -> dict[str, str]:
+    """service -> strategy for each change in the proposal (a combination has one per member)."""
     if candidate.type != COMBINATION:
-        return [candidate.service]
+        return {candidate.service: candidate.type}
     entry = ((live.evidence.get("combinations") or {}).get("entries") or {}).get(recommendation_id) or {}
-    return list(entry.get("services") or [])
+    types = {c.id: (c.type, c.service) for c in live.report.recommendations}
+    return {types[m][1]: types[m][0] for m in entry.get("members") or [] if m in types}
 
 
 def _graph(live: LiveRecommendation) -> DeploymentGraph | None:
@@ -114,7 +141,12 @@ def _graph(live: LiveRecommendation) -> DeploymentGraph | None:
         return None
 
 
-def _patch_for(service: ServicePlacement) -> DeploymentPatch | tuple[str, str]:
+def _spread_constraint(service: ServicePlacement) -> dict[str, Any]:
+    return {"maxSkew": DEFAULT_MAX_SKEW, "topologyKey": HOSTNAME, "whenUnsatisfiable": "DoNotSchedule",
+            "labelSelector": {"matchLabels": dict(sorted(service.declared_intent.selector.items()))}}
+
+
+def _patch_for(service: ServicePlacement, strategy: str, added: int = 0) -> DeploymentPatch | tuple[str, str]:
     """The Deployment patch for one service, or ``(code, reason)`` when it cannot be written honestly."""
     if len(service.deployment_names) != 1:
         return ("DEPLOYMENT_UNRESOLVED",
@@ -123,31 +155,45 @@ def _patch_for(service: ServicePlacement) -> DeploymentPatch | tuple[str, str]:
     intent = service.declared_intent
     if intent is None or not intent.selector:
         return ("DEPLOYMENT_UNRESOLVED",
-                f"The pod labels of {service.name} are not in the evidence, so the constraint cannot select them.")
-    if any(c.topology_key == HOSTNAME for c in intent.topology_spread_constraints):
-        return ("ALREADY_CONSTRAINED",
-                f"{service.name} already has a spread constraint on {HOSTNAME}. A strategic merge on the same "
-                f"topology key would rewrite it, which is a different change from the one that was verified.")
-    constraint = {"maxSkew": DEFAULT_MAX_SKEW, "topologyKey": HOSTNAME, "whenUnsatisfiable": "DoNotSchedule",
-                  "labelSelector": {"matchLabels": dict(sorted(intent.selector.items()))}}
+                f"The pod labels of {service.name} are not in the evidence, so the change cannot select them.")
+    pod_spec: dict[str, Any] = {}
+    spec: dict[str, Any] = {}
+    if strategy == POD_ANTI_AFFINITY:
+        if has_required_anti_affinity(service):
+            return ("ALREADY_CONSTRAINED",
+                    f"{service.name} already has required pod anti-affinity. Kubernetes replaces that list as a whole "
+                    f"when it is patched, so the existing terms would be dropped; that is a different change from the "
+                    f"one that was verified.")
+        pod_spec["affinity"] = {"podAntiAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": [
+            self_anti_affinity_term(intent.selector)]}}
+    else:
+        if has_hostname_spread(service) or (strategy == REPLICA_INCREASE and has_required_anti_affinity(service)):
+            return ("ALREADY_CONSTRAINED",
+                    f"{service.name} already has a placement constraint on {HOSTNAME}. A strategic merge on the same "
+                    f"topology key would rewrite it, which is a different change from the one that was verified.")
+        pod_spec["topologySpreadConstraints"] = [_spread_constraint(service)]
+        if strategy == REPLICA_INCREASE:
+            spec["replicas"] = service.declared_replicas + added
     document = {
         "apiVersion": "apps/v1", "kind": "Deployment",
         "metadata": {"name": service.deployment_names[0], "namespace": service.namespace},
-        "spec": {"template": {"spec": {"topologySpreadConstraints": [constraint]}}},
+        "spec": {**spec, "template": {"spec": pod_spec}},
     }
     return DeploymentPatch(service.name, service.deployment_names[0], service.namespace, document)
 
 
 def _render(recommendation_id: str, fingerprint: str, patches: list[DeploymentPatch],
-            churn: list[str]) -> str:
+            churn: list[str], models: list[str], added: list[str]) -> str:
     header = [
         f"# {NOT_APPLIED}",
         f"# Recommendation {recommendation_id}; proposal fingerprint {fingerprint}.",
-        f"# Verified model: {STRATEGY_MODEL}.",
+        f"# Verified model: {', '.join(models)}.",
         "# This edits the pod template: the Deployment rolls out. It does NOT move running pods; the scheduler "
         "places replacements, possibly differently from the prediction.",
         f"# Pods predicted to change node (a separate step, not included): {', '.join(churn) or 'none'}.",
     ]
+    if added:
+        header.append(f"# Replicas this change adds (new pods, not replacements): {len(added)}.")
     documents = [yaml.safe_dump(p.document, sort_keys=False, default_flow_style=False) for p in patches]
     return "\n".join(header) + "\n" + "---\n".join(documents)
 
@@ -173,16 +219,22 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
     standing = evaluate_eligibility(live, recommendation_id)
     if not standing.eligible:
         return _refuse(recommendation_id, "NOT_ELIGIBLE", standing.reason or "Not eligible for approval.", source)
-    if candidate.type not in (TOPOLOGY_SPREAD, COMBINATION):
+    if candidate.type not in (TOPOLOGY_SPREAD, POD_ANTI_AFFINITY, REPLICA_INCREASE, COMBINATION):
         return _refuse(recommendation_id, "UNSUPPORTED_TYPE",
                        f"No YAML renderer exists for {candidate.type}.", source)
 
     graph = _graph(live)
     placement = {s.name: s for s in graph.services} if graph is not None else {}
+    strategies = _strategies_of(live, recommendation_id, candidate)
+    if any(kind not in MODELS for kind in strategies.values()):
+        return _refuse(recommendation_id, "UNSUPPORTED_TYPE",
+                       f"No YAML renderer exists for a member of {recommendation_id}.", source)
+    added_names = sorted(n for n in (plan.get("placement") or {}) if ADDED_MARKER in n)
     patches: list[DeploymentPatch] = []
-    for name in sorted(_services_of(live, recommendation_id, candidate)):
+    for name in sorted(strategies):
         service = placement.get(name)
-        patch = _patch_for(service) if service is not None else (
+        added = sum(1 for n in added_names if n.startswith(f"{name}{ADDED_MARKER}"))
+        patch = _patch_for(service, strategies[name], added) if service is not None else (
             "DEPLOYMENT_UNRESOLVED", f"Service {name} is not in the topology the evaluation recorded.")
         if isinstance(patch, tuple):
             return _refuse(recommendation_id, patch[0], patch[1], source)
@@ -191,7 +243,8 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
         return _refuse(recommendation_id, "DEPLOYMENT_UNRESOLVED", "The candidate names no service to patch.", source)
 
     churn = sorted(plan.get("podsToRecreate") or [])
-    text = _render(recommendation_id, standing.fingerprint, patches, churn)
+    models = sorted({MODELS[kind] for kind in strategies.values()})
+    text = _render(recommendation_id, standing.fingerprint, patches, churn, models, added_names)
     applicable = source == LIVE_EVIDENCE_SOURCE
     return YamlProposal(
         recommendation_id, GENERATED, applicable,
@@ -199,6 +252,7 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
             f"The evidence source is {source!r}, not read from the connected cluster, so this text is for research "
             f"and testing only."),
         yaml=text, sha256=hashlib.sha256(text.encode()).hexdigest(), fingerprint=standing.fingerprint,
-        evidence_source=source, patches=tuple(patches), disclosures=DISCLOSURES,
+        evidence_source=source, patches=tuple(patches),
+        disclosures=DISCLOSURES + (REPLICA_DISCLOSURES if REPLICA_INCREASE in strategies.values() else ()),
         pod_replacement={"included": False, "pods": churn, "note": REPLACEMENT_NOTE},
     )

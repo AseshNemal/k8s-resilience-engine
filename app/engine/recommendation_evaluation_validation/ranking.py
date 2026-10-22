@@ -79,6 +79,11 @@ DEFAULT_TOLERANCE = 1e-6
 SINGLE_WORKFLOW = "single-workflow"
 # Ordinal cost labels. A candidate type adds real cost only when it adds replicas (spread adds none).
 RESOURCE_FRACTION = MappingProxyType({"LOW": 0.0, "MEDIUM": 0.5, "HIGH": 1.0})
+# How restrictive a strategy is, for breaking a tie between candidates that score the same, cost the same and move the
+# same pods: the least restrictive wins (the "minimal change"). A plain spread tolerates a skew of one; required
+# anti-affinity forbids a second replica on a node and leaves replicas Pending when nodes run out. A type that is not
+# listed sorts after every listed one, so it can never silently beat a known strategy.
+RESTRICTIVENESS = MappingProxyType({"TOPOLOGY_SPREAD": 0, "COMBINATION": 0, "POD_ANTI_AFFINITY": 1, "REPLICA_INCREASE": 2})
 # Component 3 reports blast radius and survivability as percentages; the two views of one node must agree.
 _PERCENT_TOLERANCE = 0.01
 
@@ -325,8 +330,8 @@ def rank_candidates(
 ) -> list[RankedCandidate]:
     """Every candidate, ranked ones first. Raises ValueError if they were not assessed against one failure.
 
-    Order: score, then less placement churn, then cheaper, then service, type and id, so the result never
-    depends on the order the candidates arrive in.
+    Order: score, then less placement churn, then cheaper, then the less restrictive strategy (``RESTRICTIVENESS``),
+    then service, type and id, so the result never depends on the order the candidates arrive in.
     """
     weights = weights or RankingWeights()
     shared = {(c.before.failed_node, c.before.basis) for c in evaluated if isinstance(c.before, ImpactSnapshot)}
@@ -338,7 +343,7 @@ def rank_candidates(
     scored = [_score(candidate, weights, tolerance) for candidate in evaluated]
     ranked = sorted((r for r in scored if r.score is not None),
                     key=lambda r: (-r.score, r.components.placement_churn, r.components.resource_fraction,
-                                   r.service, r.type, r.id))
+                                   RESTRICTIVENESS.get(r.type, len(RESTRICTIVENESS)), r.service, r.type, r.id))
     excluded = sorted((r for r in scored if r.score is None), key=lambda r: (r.service, r.type, r.id))
     return [RankedCandidate(r.id, r.type, r.service, position, r.score, r.components, None, r.detail)
             for position, r in enumerate(ranked, start=1)] + excluded

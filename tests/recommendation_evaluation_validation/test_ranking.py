@@ -361,3 +361,25 @@ def test_the_ranking_module_neither_predicts_failures_nor_touches_the_cluster_or
 
     for forbidden in ("failure_impact_prediction", "integrations", "kubernetes", "approval", "httpx", "open("):
         assert forbidden not in source.replace("Kubernetes", "").replace("kubernetes.io", ""), forbidden
+
+
+# --- the least restrictive strategy wins a tie ------------------------------------------------------------------
+
+def test_a_spread_beats_required_anti_affinity_when_everything_else_is_equal():
+    from tests.support.member4_scenarios import catalogue
+
+    live = next(c for c in catalogue() if c.name == "soft-anti-affinity-hardened").scenario.evaluate()
+    ranking = live.evidence["ranking"]["candidates"]
+
+    spread = ranking["rec-productpage-view-reviews-topology-spread"]
+    anti = ranking["rec-productpage-view-reviews-pod-anti-affinity"]
+    assert spread["score"] == pytest.approx(anti["score"])                  # the same placement, the same prediction
+    assert (spread["rank"], anti["rank"]) == (1, 2)                          # so the less restrictive change is selected
+    assert live.report.selected_recommendation_id == "rec-productpage-view-reviews-topology-spread"
+
+
+def test_an_unlisted_strategy_never_beats_a_known_one_on_a_tie():
+    from app.engine.recommendation_evaluation_validation.ranking import RESTRICTIVENESS
+
+    assert max(RESTRICTIVENESS.values()) < len(RESTRICTIVENESS)
+    assert RESTRICTIVENESS["TOPOLOGY_SPREAD"] < RESTRICTIVENESS["POD_ANTI_AFFINITY"] < RESTRICTIVENESS["REPLICA_INCREASE"]

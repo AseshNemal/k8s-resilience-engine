@@ -23,6 +23,8 @@ class SimulationResult:
     # The simulated deployment is the TARGET state. A spread constraint does not move running pods. These are
     # the ready pods whose target node differs from today's (placement churn), not the pods a rollout restarts.
     pods_to_recreate: tuple[str, ...] = ()
+    # Replicas the change would ADD (virtual pods; not placement churn and not existing pods).
+    added_replicas: tuple[str, ...] = ()
 
     @property
     def requires_pod_recreation(self) -> bool:

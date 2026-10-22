@@ -76,9 +76,18 @@ class FakeTestCluster:
     def apply(self, yaml_text: str) -> None:
         self.calls.append("apply")
         self._maybe_break("apply")
-        patched = [doc["metadata"]["name"] for doc in yaml.safe_load_all(yaml_text)
-                   if doc and doc.get("kind") == "Deployment"]
-        services = [s.name for s in self.graph.services if set(s.deployment_names) & set(patched)]
+        documents = [doc for doc in yaml.safe_load_all(yaml_text) if doc and doc.get("kind") == "Deployment"]
+        services = []
+        for doc in documents:
+            service = next((s for s in self.graph.services if doc["metadata"]["name"] in s.deployment_names), None)
+            if service is None:
+                continue
+            services.append(service.name)
+            replicas = (doc.get("spec") or {}).get("replicas")
+            while replicas is not None and len(service.pods) < replicas:      # the controller creates the missing pods
+                service.pods.append(service.pods[0].model_copy(update={"name": f"{service.name}-{len(service.pods)}"}))
+            service.declared_replicas = len(service.pods)
+            service.ready_replicas = sum(1 for pod in service.pods if pod.ready)
         self.scheduler(self.graph, services)
 
     def await_settled(self) -> bool:

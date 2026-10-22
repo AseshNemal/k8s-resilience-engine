@@ -157,16 +157,21 @@ def test_a_well_spread_cluster_needs_no_recommendation(client, monkeypatch, use_
     assert response.json()["selectedRecommendationId"] is None
 
 
-def test_a_single_replica_service_gets_an_infeasible_candidate_not_silence(client, monkeypatch, use_cluster, evidenced_topology):
+def test_a_single_replica_service_gets_an_infeasible_spread_and_a_verified_replica_increase(
+        client, monkeypatch, use_cluster, evidenced_topology):
     freeze_checkout(monkeypatch)
     use_cluster(two_node_shop())
 
     response = client.get(LIVE, params=PARAMS)
 
-    # db has one replica on worker-1: spreading cannot help, and the report says so instead of omitting it.
-    (candidate,) = [c for c in response.json()["recommendations"] if c["service"] == "db"]
-    assert candidate["feasible"] is False and candidate["riskReduction"] == 0
-    assert response.json()["selectedRecommendationId"] is None
+    # db has one replica on worker-1: spreading cannot help, and the report says so instead of omitting it...
+    (spread,) = [c for c in response.json()["recommendations"] if c["service"] == "db" and c["type"] == "TOPOLOGY_SPREAD"]
+    assert spread["feasible"] is False and spread["riskReduction"] == 0
+    # ...but one more replica, kept off that node, is a verified change that removes the risk. Its cost is not hidden.
+    (grow,) = [c for c in response.json()["recommendations"] if c["service"] == "db" and c["type"] == "REPLICA_INCREASE"]
+    assert grow["feasible"] is True and grow["riskReduction"] == pytest.approx(100.0) and grow["resourceCost"] == "MEDIUM"
+    assert grow["score"] == pytest.approx(0.85)       # full benefit, no churn, discounted for the extra replica
+    assert response.json()["selectedRecommendationId"] == grow["id"]
 
 
 def test_a_service_that_cannot_be_spread_is_reported_infeasible_with_no_gain(client, monkeypatch, use_cluster, evidenced_topology):

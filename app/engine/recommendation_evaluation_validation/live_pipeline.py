@@ -46,6 +46,7 @@ from app.engine.recommendation_evaluation_validation.candidate_generation import
 from app.engine.recommendation_evaluation_validation.combinations import (
     COMBINATION,
     DEFAULT_EVALUATION_BUDGET,
+    PAIRABLE,
     ROLLOUT_TIME,
     Member,
     combination_id,
@@ -69,14 +70,21 @@ from app.engine.recommendation_evaluation_validation.ranking import (
     rank_candidates,
 )
 from app.engine.recommendation_evaluation_validation.service import evaluate_candidate
+from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
+    ANTI_AFFINITY_MODEL,
+    REPLICA_INCREASE_MODEL,
+)
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.recommendation import RecommendationCandidate, RecommendationReport
 
 COMPONENT = "recommendation"
 
-# A topology spread constraint adds no replicas, so it needs no extra capacity. The disruption of applying it
+# Spread and anti-affinity add no replicas, so they need no extra capacity; a replica increase adds one. The disruption of applying it
 # (a pod-template edit rolls out every pod of the Deployment) is a separate, future operational cost.
-RESOURCE_COST = {"TOPOLOGY_SPREAD": "LOW"}
+RESOURCE_COST = {"TOPOLOGY_SPREAD": "LOW", "POD_ANTI_AFFINITY": "LOW", "REPLICA_INCREASE": "MEDIUM"}
+
+# The model each strategy's verdict was reached under (None: the plain spread's, which is the default of the digest).
+STRATEGY_MODELS = {"POD_ANTI_AFFINITY": ANTI_AFFINITY_MODEL, "REPLICA_INCREASE": REPLICA_INCREASE_MODEL}
 
 # Ordered so the dearest member decides the cost of a combination.
 COST_ORDER = ("LOW", "MEDIUM", "HIGH")
@@ -330,12 +338,13 @@ def evaluate_recommendation(
     candidate_details: dict[str, Any] = {}
     singles_after: dict[str, ImpactSnapshot | None] = {}
     ready_replicas: dict[str, int] = {}
-    for spec in generate_candidates(CandidateContextBuilder.build(deployment, before)):
+    def consider(spec: CandidateSpec) -> None:
+        """Evaluate one candidate and record everything the report, the ranking and the pairs need about it."""
         try:
             simulated = evaluate_candidate(deployment, spec, scheduling_evidence)
         except ValueError:
             skipped.append(spec.recommendation_type)  # a type the simulator cannot evaluate yet
-            continue
+            return
 
         coverage = _coverage(deployment, spec.service)
         after_snapshot, predicted, reduction = None, before.blast_radius, 0.0
@@ -349,7 +358,7 @@ def evaluate_recommendation(
                 predicted, reduction = after.blast_radius, round(before.blast_radius - after.blast_radius, 2)
         candidate_id = f"rec-{workflow_id}-{spec.service}-{spec.recommendation_type}".lower().replace("_", "-")
         feasibility[candidate_id] = simulated.feasibility.to_dict() | {
-            "constraintsDigest": scheduling_basis(deployment, [spec.service])}
+            "constraintsDigest": scheduling_basis(deployment, [spec.service], model=STRATEGY_MODELS.get(spec.recommendation_type))}
         cost = RESOURCE_COST.get(spec.recommendation_type, "UNKNOWN")
         outcomes[candidate_id] = _Outcome(spec.recommendation_type, spec.service, simulated.feasible, predicted,
                                           reduction, coverage, cost)
@@ -365,14 +374,22 @@ def evaluate_recommendation(
             "currentPlacement": {spec.service: _current_placement(deployment, spec.service)},
             "simulatedDeployment": _dump(simulated.simulated_deployment) if simulated.feasible else None,
             "podsToRecreate": list(simulated.pods_to_recreate),
+            "addedReplicas": list(simulated.added_replicas),
         }
-        if simulated.feasible:      # verified individually, even when it improves nothing on its own
-            members.append(Member(id=candidate_id, service=spec.service, feasibility=simulated.feasibility))
+        if spec.recommendation_type in PAIRABLE and simulated.feasible:      # verified individually, even when it improves nothing on its own
+            members.append(Member(id=candidate_id, service=spec.service, feasibility=simulated.feasibility,
+                                  strategy=spec.recommendation_type))
         evaluated.append(EvaluatedCandidate(
             id=candidate_id, type=spec.recommendation_type, service=spec.service, simulation=simulated,
             before=before_snapshot, after=after_snapshot, ready_replicas=ready_replicas[spec.service],
             confidence=coverage, resource_cost=cost,
         ))
+
+    # Plain topology spread for a concentrated service; a replica increase (with its spread) only for a single-replica
+    # service, where no change of placement can help; required anti-affinity only for a Deployment that already asks
+    # for it softly. Each rule decides from the declared facts, so a strategy is not offered where it cannot differ.
+    for spec in generate_candidates(CandidateContextBuilder.build(deployment, before)):
+        consider(spec)
 
     combos = _evaluate_combinations(
         workflow, deployment, failed_node, before, before_snapshot, members, singles_after, outcomes, ready_replicas,

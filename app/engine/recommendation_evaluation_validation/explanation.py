@@ -25,6 +25,8 @@ from app.engine.recommendation_evaluation_validation.approval.eligibility import
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 
 TOPOLOGY_SPREAD = "TOPOLOGY_SPREAD"
+POD_ANTI_AFFINITY = "POD_ANTI_AFFINITY"
+REPLICA_INCREASE = "REPLICA_INCREASE"
 COMBINATION = "COMBINATION"
 
 RECOMMENDED_CHANGE = {
@@ -33,10 +35,25 @@ RECOMMENDED_CHANGE = {
         "the Deployment's pod template, so that its replicas are placed on at least two different worker nodes. "
         "The edit changes the pod template, so the Deployment rolls out."
     ),
-    COMBINATION: "Apply the topology spread change to each of the listed services together, as one proposal.",
+    POD_ANTI_AFFINITY: (
+        "Add a required podAntiAffinity term on kubernetes.io/hostname, selecting the service's own pods, to the "
+        "Deployment's pod template, so that no two of its replicas share a worker node. This is stricter than a topology "
+        "spread: with more replicas than usable nodes the extra replicas stay Pending. The edit changes the pod template, "
+        "so the Deployment rolls out."
+    ),
+    REPLICA_INCREASE: (
+        "Add one replica to the Deployment together with a topologySpreadConstraint on kubernetes.io/hostname, so the "
+        "added replica runs on a different worker node from the existing one. The edit changes the replica count and the "
+        "pod template, so the Deployment rolls out."
+    ),
+    COMBINATION: "Apply the listed changes to each of the listed services together, as one proposal.",
 }
 
 COST_NOTE = {
+    "MEDIUM": (
+        "Adds a replica, so one more pod's CPU and memory is requested on the node it lands on (the capacity was "
+        "checked). The pod-template edit also rolls out the Deployment; that rollout disruption is not modelled."
+    ),
     "LOW": (
         "Adds no replicas, so no extra CPU or memory is requested. The pod-template edit rolls out every pod of the "
         "Deployment; that rollout disruption is not modelled."
@@ -45,7 +62,8 @@ COST_NOTE = {
 
 SINGLE_REPLICA_NOTE = (
     "This service runs a single replica. A spread constraint cannot make one replica survive the loss of the node "
-    "it runs on, and the engine did not produce a feasible change that does."
+    "it runs on; only adding a replica can, and whether that is feasible is shown by the replica-increase candidate "
+    "for this service."
 )
 
 YAML_NOT_AVAILABLE = (

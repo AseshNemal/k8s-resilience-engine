@@ -11,10 +11,16 @@ from app.engine.recommendation_evaluation_validation.metrics import (
     calculate_replica_concentration,
 )
 from app.engine.recommendation_evaluation_validation.mutations import (
+    ReplicaIncreaseMutation,
     TopologySpreadMutation,
 )
 from app.engine.recommendation_evaluation_validation.simulation_result import (
     SimulationResult,
+)
+from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
+    ADDED_MARKER,
+    check_pod_anti_affinity_feasibility,
+    check_replica_increase_feasibility,
 )
 from app.engine.simulation import simulate_deployment_change
 from app.shared.sample_loader import load_sample_json
@@ -54,6 +60,23 @@ def evaluate_first_recommendation(
     return evaluate_candidate(deployment, candidates[0], evidence)
 
 
+def _spread_mutation(candidate: CandidateSpec, feasibility):
+    return TopologySpreadMutation(candidate.service, feasibility.placement)
+
+
+def _replica_mutation(candidate: CandidateSpec, feasibility):
+    added = tuple(sorted(name for name in feasibility.placement if ADDED_MARKER in name))
+    return ReplicaIncreaseMutation(candidate.service, feasibility.placement, added)
+
+
+# Strategy -> (feasibility check, how the verified placement is applied to the virtual copy).
+_STRATEGIES = {
+    "TOPOLOGY_SPREAD": (check_topology_spread_feasibility, _spread_mutation),
+    "POD_ANTI_AFFINITY": (check_pod_anti_affinity_feasibility, _spread_mutation),
+    "REPLICA_INCREASE": (check_replica_increase_feasibility, _replica_mutation),
+}
+
+
 def evaluate_candidate(
     deployment: DeploymentGraph,
     candidate: CandidateSpec,
@@ -68,13 +91,14 @@ def evaluate_candidate(
     supported yet, so a caller can skip it instead of guessing an outcome.
     """
 
-    if candidate.recommendation_type != "TOPOLOGY_SPREAD":
+    if candidate.recommendation_type not in _STRATEGIES:
         raise ValueError(
             f"Unsupported recommendation: "
             f"{candidate.recommendation_type}"
         )
+    check, mutation_for = _STRATEGIES[candidate.recommendation_type]
 
-    feasibility = check_topology_spread_feasibility(
+    feasibility = check(
         deployment,
         candidate.service,
         evidence,
@@ -99,10 +123,8 @@ def evaluate_candidate(
             feasibility=feasibility,
         )
 
-    sim_result = simulate_deployment_change(
-        deployment,
-        TopologySpreadMutation(candidate.service, feasibility.placement),
-    )
+    mutation = mutation_for(candidate, feasibility)
+    sim_result = simulate_deployment_change(deployment, mutation)
 
     concentration_after = calculate_replica_concentration(
         sim_result.after,
@@ -124,4 +146,5 @@ def evaluate_candidate(
         feasibility_status=feasibility.status,
         feasibility=feasibility,
         pods_to_recreate=feasibility.pods_to_recreate,
+        added_replicas=getattr(mutation, "_added", ()),
     )

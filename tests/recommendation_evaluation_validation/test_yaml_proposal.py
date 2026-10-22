@@ -125,7 +125,7 @@ def test_an_infeasible_candidate_never_gets_yaml():
                                   make_service("reviews", ["w1"])], nodes)
     scenario = Scenario("single-replica", "", bookinfo_workflow(), deployment, no_taints(deployment), "w1")
     live = scenario.evaluate()
-    (candidate,) = [c for c in live.report.recommendations if c.service == "reviews"]
+    (candidate,) = [c for c in live.report.recommendations if c.service == "reviews" and c.type == "TOPOLOGY_SPREAD"]
 
     proposal = build_yaml_proposal(live, candidate.id)
 
@@ -192,3 +192,86 @@ def test_a_combination_becomes_one_patch_per_deployment_in_a_fixed_order():
     assert proposal.status == "GENERATED"
     assert [d["metadata"]["name"] for d in documents(proposal)] == ["details", "reviews"]
     assert proposal.yaml.count("topologySpreadConstraints") == 2
+
+
+# --- the other strategies ---------------------------------------------------------------------------------------
+
+from tests.support.member4_scenarios import SOFT_ANTI_AFFINITY, catalogue      # noqa: E402
+
+
+def case(name):
+    return next(c for c in catalogue() if c.name == name)
+
+
+def recommendation(live, service, kind):
+    return next(c for c in live.report.recommendations if c.service == service and c.type == kind)
+
+
+def test_a_replica_increase_raises_replicas_and_adds_the_constraint_that_keeps_them_apart():
+    live = case("single-replica-increase").scenario.evaluate()
+
+    proposal = build_yaml_proposal(live, live.report.selected_recommendation_id)
+
+    (doc,) = documents(proposal)
+    assert proposal.status == "GENERATED" and doc["metadata"]["name"] == "reviews"
+    assert doc["spec"]["replicas"] == 2
+    assert doc["spec"]["template"]["spec"]["topologySpreadConstraints"][0]["topologyKey"] == HOSTNAME
+    assert set(doc["spec"]) == {"replicas", "template"}
+    assert proposal.pod_replacement["pods"] == []        # the added replica is not a replacement
+    assert any("HorizontalPodAutoscaler" in line for line in proposal.disclosures)
+    assert "Replicas this change adds (new pods, not replacements): 1" in proposal.yaml
+
+
+def test_hardening_soft_anti_affinity_adds_only_the_required_term():
+    live = case("soft-anti-affinity-hardened").scenario.evaluate()
+    anti = recommendation(live, "reviews", "POD_ANTI_AFFINITY")
+
+    proposal = build_yaml_proposal(live, anti.id)
+
+    (doc,) = documents(proposal)
+    assert proposal.status == "GENERATED"
+    assert doc["spec"]["template"]["spec"] == {"affinity": {"podAntiAffinity": {
+        "requiredDuringSchedulingIgnoredDuringExecution": [
+            {"labelSelector": {"matchLabels": {"app": "reviews"}}, "topologyKey": HOSTNAME}]}}}
+    assert "preferredDuringSchedulingIgnoredDuringExecution" not in proposal.yaml     # the soft term is left alone
+
+
+def test_anti_affinity_that_cannot_place_every_replica_gets_no_yaml():
+    live = case("anti-affinity-too-strict").scenario.evaluate()
+    anti = recommendation(live, "reviews", "POD_ANTI_AFFINITY")
+
+    proposal = build_yaml_proposal(live, anti.id)
+
+    assert anti.feasible is False and proposal.code == "INFEASIBLE" and proposal.yaml is None
+
+
+def test_the_patch_generator_will_not_drop_required_anti_affinity_terms_it_would_replace():
+    from app.engine.recommendation_evaluation_validation.yaml_proposal import _patch_for
+
+    service = make_service("svc", ["n1", "n1"], pod_anti_affinity_rules={
+        "requiredDuringSchedulingIgnoredDuringExecution": [
+            {"labelSelector": {"matchLabels": {"app": "other"}}, "topologyKey": HOSTNAME}]})
+
+    code, reason = _patch_for(service, "POD_ANTI_AFFINITY")
+
+    assert code == "ALREADY_CONSTRAINED" and "replaces that list" in reason
+
+
+def test_a_pair_of_replica_increases_is_one_patch_per_deployment_each_with_its_replicas():
+    live = case("pair-of-replica-increases").scenario.evaluate()
+
+    proposal = build_yaml_proposal(live, live.report.selected_recommendation_id)
+
+    docs = documents(proposal)
+    assert [d["metadata"]["name"] for d in docs] == ["details", "productpage"]
+    assert all(d["spec"]["replicas"] == 2 for d in docs)
+
+
+def test_a_mixed_pair_patches_each_deployment_with_its_own_strategy():
+    live = case("spread-and-replica-increase").scenario.evaluate()
+
+    proposal = build_yaml_proposal(live, live.report.selected_recommendation_id)
+
+    by_name = {d["metadata"]["name"]: d for d in documents(proposal)}
+    assert "replicas" not in by_name["details"]["spec"] and by_name["reviews"]["spec"]["replicas"] == 2
+    assert all("topologySpreadConstraints" in d["spec"]["template"]["spec"] for d in by_name.values())

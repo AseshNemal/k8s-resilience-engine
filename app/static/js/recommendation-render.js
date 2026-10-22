@@ -246,7 +246,7 @@
                 missingState(
                     doc,
                     "No Kubernetes YAML proposal has been generated",
-                    "Generating a proposal for a recommendation is not wired in yet. Changes are never applied automatically: a developer must approve a proposal first."
+                    "A proposal is written only for a recommendation that can be approved (verified feasible and ranked), and none is selected. Changes are never applied automatically: a developer must approve a proposal first."
                 )
             );
             return;

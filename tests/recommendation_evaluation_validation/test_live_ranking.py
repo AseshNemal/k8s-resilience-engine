@@ -91,10 +91,11 @@ def test_a_single_replica_candidate_is_listed_unranked_as_infeasible(monkeypatch
 
     live = build_live_recommendation("checkout", None, "shop")
 
-    entries = live.evidence["ranking"]["candidates"]
+    entries = {i: e for i, e in live.evidence["ranking"]["candidates"].items() if e["type"] == "TOPOLOGY_SPREAD"}
     assert entries and all(e["rank"] is None for e in entries.values())
     assert any(e["excluded"] == "INFEASIBLE" for e in entries.values())
-    assert live.report.selected_recommendation_id is None
+    # the spread cannot help, so the engine's selection is the replica increase for the same service, not the spread
+    assert live.report.selected_recommendation_id == "rec-checkout-db-replica-increase"
 
 
 def test_a_fix_that_only_works_together_with_another_is_not_ranked_on_its_own_but_as_a_pair(
