@@ -45,6 +45,8 @@ DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "deploy" / "kubernetes" / "boutique.yaml"
 FALLBACK_MANIFEST_DIR = PROJECT_ROOT / "deploy" / "test-workloads"
 SAMPLE_FILE = PROJECT_ROOT / "sample_data" / "deployment.json"
 LIVE_EXPERIMENT_RESULTS_DIR = PROJECT_ROOT / "experiments" / "placement_drift" / "results" / "five-repetitions"
+# The real-application check: the same live runs on the team's Bookinfo benchmark.
+LIVE_EXPERIMENT_BOOKINFO_DIR = PROJECT_ROOT / "experiments" / "placement_drift" / "results" / "bookinfo-five-repetitions"
 HOSTNAME_LABEL = "kubernetes.io/hostname"
 
 
@@ -842,16 +844,50 @@ def _example_run(results_dir: Path, scenario_id: str, config: str) -> dict[str, 
     return None
 
 
-def get_live_experiment_results(results_dir: Path | None = None) -> dict[str, Any] | None:
-    """Summary of the stored live placement-drift runs, or None if no summary exists.
+def _live_evidence_note(workload: str) -> tuple[str, list[str]]:
+    """What the stored runs of one workload ran on, and the services they observed."""
+    if workload == "bookinfo":
+        from experiments.placement_drift.live import bookinfo_workloads as bi
+        services = list(bi.SERVICES)
+        return (
+            f"Observed on a local KinD cluster (nodes are containers on one host) with the team's Bookinfo benchmark "
+            f"(v1, images {bi.IMAGE_TAG}) in its own namespace {bi.NAMESPACE}: {len(services)} services x {bi.REPLICAS} "
+            f"replicas, requests {bi.REQUESTS['cpu']}/{bi.REQUESTS['memory']}. Disruptions target reviews; "
+            f"all services are observed.",
+            services,
+        )
+    from experiments.placement_drift.live.generate_workloads import IMAGE, REPLICAS, SERVICES
+    from experiments.placement_drift.live.scenarios import TARGET_SERVICE
+    return (
+        f"Observed on a local KinD cluster (nodes are containers on one host) with stand-in workloads: "
+        f"{len(SERVICES)} services x {REPLICAS} replicas running {IMAGE}. "
+        f"Disruptions target {TARGET_SERVICE}; all services are observed.",
+        list(SERVICES),
+    )
+
+
+def _live_results_dir(workload: str) -> Path:
+    """Stored runs of one workload (read at call time, so the folders can be swapped in tests)."""
+    return LIVE_EXPERIMENT_BOOKINFO_DIR if workload == "bookinfo" else LIVE_EXPERIMENT_RESULTS_DIR
+
+
+def available_live_experiment_workloads() -> list[str]:
+    """Workloads whose live runs have a stored summary."""
+    return [name for name in ("standin", "bookinfo") if (_live_results_dir(name) / "summary.json").exists()]
+
+
+def get_live_experiment_results(results_dir: Path | None = None, workload: str = "standin") -> dict[str, Any] | None:
+    """Summary of the stored live placement-drift runs of one workload, or None if no summary exists.
 
     The runs were executed by experiments/placement_drift/run_live_experiments.py; this only reads
     their summary.json, so the values are observations, not recomputed or simulated.
     """
-    from experiments.placement_drift.live.generate_workloads import IMAGE, REPLICAS, SERVICES
-    from experiments.placement_drift.live.scenarios import SCENARIOS_BY_ID, TARGET_SERVICE
+    from experiments.placement_drift.live.scenarios import SCENARIOS_BY_ID
+    from experiments.placement_drift.live.workloads import WORKLOADS
 
-    results_dir = results_dir or LIVE_EXPERIMENT_RESULTS_DIR
+    if workload not in WORKLOADS:
+        raise ValueError(f"Unknown workload '{workload}'; expected one of {sorted(WORKLOADS)}.")
+    results_dir = results_dir or _live_results_dir(workload)
     summary_file = results_dir / "summary.json"
     if not summary_file.exists():
         return None
@@ -868,17 +904,16 @@ def get_live_experiment_results(results_dir: Path | None = None) -> dict[str, An
         source = str(results_dir.relative_to(PROJECT_ROOT))
     except ValueError:
         source = results_dir.name
+    note, services = _live_evidence_note(workload)
     return {
         "execution_mode": "LIVE_KIND_CLUSTER",
         "is_experimental_evidence": True,
-        "evidence_note": (
-            f"Observed on a local KinD cluster (nodes are containers on one host) with stand-in workloads: "
-            f"{len(SERVICES)} services x {REPLICAS} replicas running {IMAGE}. "
-            f"Disruptions target {TARGET_SERVICE}; all services are observed."
-        ),
+        "workload": workload,
+        "available_workloads": available_live_experiment_workloads(),
+        "evidence_note": note,
         "results_source": source.replace("\\", "/"),
-        "target_service": TARGET_SERVICE,
-        "services": SERVICES,
+        "target_service": WORKLOADS[workload].target_service,
+        "services": services,
         "total_runs": summary["total_runs"],
         "failed_runs": sum(c["failed_runs"] for c in conditions),
         "conditions": conditions,

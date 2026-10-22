@@ -722,9 +722,12 @@ def get_ground_truth_report() -> Dict[str, Any]:
     summary="[Validation] Stored results of the live placement-drift runs on KinD",
     responses={404: {"description": "No live experiment results have been stored yet"}},
 )
-def get_live_experiments() -> Dict[str, Any]:
+def get_live_experiments(
+    workload: Literal["standin", "bookinfo"] = Query(
+        "standin", description="standin: the controlled stand-in runs; bookinfo: the real-application runs"),
+) -> Dict[str, Any]:
     """Per scenario and configuration: runs, unsettled runs, D_rate, exposure rates and target status."""
-    results = get_live_experiment_results()
+    results = get_live_experiment_results(workload=workload)
     if results is None:
         raise HTTPException(status_code=404, detail="No live experiment results found. Run experiments/placement_drift/run_live_experiments.py first.")
     return results

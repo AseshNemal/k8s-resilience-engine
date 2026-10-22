@@ -94,3 +94,43 @@ def test_page_has_live_experiments_tab(client):
     assert 'id="tab-btn-live-experiments"' in html
     assert 'id="tab-live-experiments"' in html
     assert "deployments_live_experiments_widget.js" in html
+
+
+def test_bookinfo_results_name_their_own_workload_and_target(tmp_path):
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "results_dir": "bookinfo-five-repetitions", "total_runs": 2,
+        "conditions": [_condition("08_constrained_resources", "A-no-rule", True)],
+    }), encoding="utf-8")
+
+    data = service.get_live_experiment_results(tmp_path, workload="bookinfo")
+
+    assert data["workload"] == "bookinfo"
+    assert data["target_service"] == "reviews"
+    assert data["services"] == ["details", "ratings", "reviews", "productpage"]
+    assert "Bookinfo" in data["evidence_note"] and "bookinfo-exp" in data["evidence_note"]
+
+
+def test_unknown_workload_is_refused():
+    with pytest.raises(ValueError):
+        service.get_live_experiment_results(workload="boutique")
+
+
+def test_endpoint_serves_the_requested_workload(client, tmp_path, monkeypatch):
+    standin, bookinfo = tmp_path / "standin", tmp_path / "bookinfo"
+    for folder, scenario in ((standin, "01_initial_deployment"), (bookinfo, "08_constrained_resources")):
+        folder.mkdir()
+        (folder / "summary.json").write_text(json.dumps({
+            "results_dir": folder.name, "total_runs": 2, "conditions": [_condition(scenario, "A-no-rule", False)],
+        }), encoding="utf-8")
+    monkeypatch.setattr(service, "LIVE_EXPERIMENT_RESULTS_DIR", standin)
+    monkeypatch.setattr(service, "LIVE_EXPERIMENT_BOOKINFO_DIR", bookinfo)
+
+    default = client.get("/api/deployments/benchmarks/live-experiments").json()
+    real_app = client.get("/api/deployments/benchmarks/live-experiments?workload=bookinfo").json()
+
+    assert (default["workload"], default["target_service"]) == ("standin", "paymentservice")
+    assert default["conditions"][0]["scenario_id"] == "01_initial_deployment"
+    assert (real_app["workload"], real_app["target_service"]) == ("bookinfo", "reviews")
+    assert real_app["conditions"][0]["scenario_id"] == "08_constrained_resources"
+    assert real_app["available_workloads"] == ["standin", "bookinfo"]
+    assert client.get("/api/deployments/benchmarks/live-experiments?workload=other").status_code == 422
