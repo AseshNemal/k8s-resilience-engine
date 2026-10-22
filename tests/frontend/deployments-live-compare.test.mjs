@@ -46,18 +46,31 @@ test("a target that ended unavailable is never shown as safe", () => {
     assert.equal(verdict.text, "UNAVAILABLE 2/5");
 });
 
-test("the main finding prefers 'rule obeyed, still exposed' and falls back to the calm finding", () => {
-    const { heroFinding } = window.DeploymentsLiveExperimentsWidget;
-    const stat = (mean) => ({ mean, sd: 0 });
-    const condition = (config, exposed, unstable) => ({
-        scenario_id: "08", scenario_name: "08", config, runs: 5, failed_runs: 0, unstable_runs: unstable,
-        target_became_exposed: exposed ? 5 : 0, d_rate: stat(exposed ? 0.25 : 0),
-        compliance_rate_t1: stat(config === "B-spread" ? 1 : null),
-    });
-    const exposedBoth = { target_service: "reviews", conditions: [condition("A-no-rule", true, 0), condition("B-spread", true, 5)] };
-    assert.equal(heroFinding(exposedBoth).key, "rule-obeyed-exposed");
-    const calm = { target_service: "reviews", conditions: [condition("A-no-rule", false, 0)] };
-    assert.equal(heroFinding(calm).key, "routine-unchanged");
+// The player: where the target's pods are in a stored snapshot, and what the run shows afterwards.
+const pod = (node, ready = true) => ({ name: `reviews-${node}`, node, ready });
+
+test("a snapshot's target pods are grouped by node, and pods with no node are counted as Pending", () => {
+    const { targetPlacement } = window.DeploymentsLiveExperimentsWidget;
+    const placement = targetPlacement({ reviews: [pod("w3"), pod("unscheduled", false), pod(null, false)], details: [pod("w1")] }, "reviews");
+    assert.deepEqual([...Object.keys(placement.nodes)], ["w3"]);
+    assert.equal(placement.pending, 2);
+    assert.equal(placement.total, 3);
+});
+
+test("a run that ended exposed names the one node, and stuck copies are reported", () => {
+    const { runVerdict } = window.DeploymentsLiveExperimentsWidget;
+    const run = { target_status_t1: "EXPOSED", t1: { reviews: [pod("resilience-research-worker3"), pod("unscheduled", false), pod("unscheduled", false)] } };
+    const parts = [...runVerdict(run, "reviews").map((p) => ({ ...p }))];  // copied out of the vm context
+    assert.deepEqual(parts, [
+        { tone: "danger", text: "⚠️ reviews exposed: every ready copy on worker3" },
+        { tone: "warn", text: "⏳ 2 copies stuck Pending, no node took them" },
+    ]);
+});
+
+test("a run that stayed spread counts the nodes with a ready copy", () => {
+    const { runVerdict } = window.DeploymentsLiveExperimentsWidget;
+    const run = { target_status_t1: "NOT_EXPOSED", t1: { reviews: [pod("w1"), pod("w2"), pod("w3")] } };
+    assert.equal(runVerdict(run, "reviews")[0].text, "✅ reviews still spread over 3 nodes");
 });
 
 test("the run count is the shown workload's own stored runs", () => {

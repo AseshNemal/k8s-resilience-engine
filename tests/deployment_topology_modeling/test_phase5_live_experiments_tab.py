@@ -155,6 +155,15 @@ def test_endpoint_serves_the_requested_workload(client, tmp_path, monkeypatch):
     assert client.get("/api/deployments/benchmarks/live-experiments?workload=other").status_code == 422
 
 
+def test_tab_opens_on_the_experiment_player_with_the_table_under_details(client):
+    html = client.get("/components/deployments").text
+    for role in ("xp", "xp-list", "xp-config", "xp-runs", "xp-play", "xp-before", "xp-action", "xp-after", "xp-verdict"):
+        assert f'data-role="{role}"' in html
+    assert 'data-config="A-no-rule"' in html and 'data-config="B-spread"' in html
+    assert 'data-role="live-exp-hero"' not in html  # the main-finding card was removed
+    assert html.index('data-role="xp"') < html.index('data-role="live-exp-table-body"')
+
+
 def test_tab_offers_both_workloads_and_a_comparison(client):
     html = client.get("/components/deployments").text
     assert 'data-workload="standin"' in html

@@ -1,35 +1,56 @@
-{# Tab 4: Stored results of the live placement-drift runs on KinD. One question, one table; the rest is behind "Show details". #}
+{# Tab 4: Stored results of the live placement-drift runs on KinD, as a player: pick an experiment, see the
+   pods before and after the real Kubernetes action. The full table and the findings are behind "Show details". #}
 <div class="tab-pane" id="tab-live-experiments" role="tabpanel" aria-labelledby="tab-btn-live-experiments" hidden>
     <div class="tab-pane__header">
         <div>
             <h3 class="tab-pane__title">What happened when we really disrupted the cluster?</h3>
-            <p class="tab-pane__desc">The Bookinfo app on a live KinD cluster: 8 real Kubernetes actions, each run 5 times without and with a spread rule. Click a row to see the pods before and after.</p>
+            <p class="tab-pane__desc">Pick an experiment to see where the pods were before and after a real Kubernetes action.</p>
         </div>
     </div>
 
     {# How much was run for the workload on show, counted from its stored results #}
     <dl class="exp-scale" data-role="live-exp-scale" hidden></dl>
 
-    {# The strongest finding of the shown workload, generated from its stored runs #}
-    <article class="exp-hero" data-role="live-exp-hero" hidden></article>
+    <section class="xp" data-role="xp" aria-label="Experiment player">
+        {# The 8 experiments; the two dots are the outcome without and with the spread rule #}
+        <div class="xp__list" data-role="xp-list" role="listbox" aria-label="Experiments"></div>
 
-    <div class="table-scroll">
-        <table class="data-table live-exp-table">
-            <thead>
-                <tr>
-                    <th scope="col">Scenario</th>
-                    <th scope="col">No rule</th>
-                    <th scope="col">Spread rule</th>
-                </tr>
-            </thead>
-            <tbody data-role="live-exp-table-body"></tbody>
-        </table>
-    </div>
-    <p class="live-exp-legend">✅ Safe: target still spread &nbsp;·&nbsp; ⚠️ Exposed: one node failure takes the target down &nbsp;·&nbsp; ⏳ Pods stuck Pending &nbsp;·&nbsp; hover a cell for the numbers</p>
+        <div class="xp__stage">
+            <div class="xp__controls">
+                <div class="xp__config" role="group" aria-label="Placement config" data-role="xp-config">
+                    <button type="button" class="xp__toggle is-active" data-config="A-no-rule" aria-pressed="true">No rule</button>
+                    <button type="button" class="xp__toggle" data-config="B-spread" aria-pressed="false">Spread rule</button>
+                </div>
+                <div class="xp__runs" role="group" aria-label="Run" data-role="xp-runs"></div>
+                <button type="button" class="xp__play" data-role="xp-play">▶ Play all</button>
+            </div>
+            <h4 class="xp__title" data-role="xp-title"></h4>
+            <div class="xp__scene">
+                <div class="xp__snap" data-role="xp-before"></div>
+                <div class="xp__action" data-role="xp-action"></div>
+                <div class="xp__snap" data-role="xp-after"></div>
+            </div>
+            <p class="xp__verdict" data-role="xp-verdict" aria-live="polite"></p>
+        </div>
+    </section>
 
     <details class="show-details">
         <summary>Show details</summary>
         <div class="show-details__body">
+            <h4 class="show-details__title">All results</h4>
+            <div class="table-scroll">
+                <table class="data-table live-exp-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Scenario</th>
+                            <th scope="col">No rule</th>
+                            <th scope="col">Spread rule</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="live-exp-table-body"></tbody>
+                </table>
+            </div>
+            <p class="live-exp-legend">✅ Safe: target still spread &nbsp;·&nbsp; ⚠️ Exposed: one node failure takes the target down &nbsp;·&nbsp; ⏳ Pods stuck Pending &nbsp;·&nbsp; hover a cell for the numbers</p>
             <div>
                 <h4 class="show-details__title">Which runs are shown</h4>
                 <p class="live-exp-headline" data-role="live-exp-headline" hidden></p>

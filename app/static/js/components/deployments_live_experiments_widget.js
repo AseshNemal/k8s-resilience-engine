@@ -169,43 +169,222 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         });
     }
 
-    // The headline card: the most telling finding the runs support, in this order of preference.
-    const HERO_ORDER = ["rule-obeyed-exposed", "exposed-healthy", "exposed-pending", "rule-left-pending", "routine-unchanged"];
+    // ---------------------------------------------------------------------------------------------------------
+    // The player: one experiment at a time, the target's pods before (T0) and after (T1) the real action, as
+    // stored by the run. Pick an experiment, the config (no rule / spread rule) and the run; Play steps through.
+    // ---------------------------------------------------------------------------------------------------------
 
-    function heroFinding(data) {
-        const findings = buildFindings(data);
-        for (const key of HERO_ORDER) {
-            const found = findings.find((f) => f.key === key);
-            if (found) return found;
-        }
-        return findings[0] || null;
+    const SCENARIO_ICONS = { "01": "🚀", "02": "⬆️", "03": "⬇️", "04": "🔄", "05": "🗑️", "06": "🚧", "07": "🧹", "08": "🔥" };
+    const NO_NODE = ["unscheduled", "Pending (no node)"];
+    const PLAY_MS = 3200;
+    const player = { data: null, scenarios: [], scenario: null, config: "A-no-rule", run: 0, timer: null };
+    const shortNodeName = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
+
+    function scenarioList(data) {
+        const byId = new Map();
+        data.conditions.forEach((c) => {
+            if (!byId.has(c.scenario_id)) byId.set(c.scenario_id, { id: c.scenario_id, name: c.scenario_name, configs: {} });
+            byId.get(c.scenario_id).configs[c.config] = c;
+        });
+        return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
     }
 
-    function renderHero(container, data) {
-        if (!container) return;
-        const f = heroFinding(data);
-        container.hidden = !f;
-        if (!f) return;
-        container.className = `exp-hero exp-hero--${f.severity}`;
-        const icon = el("span", "exp-hero__icon", FINDING_ICONS[f.severity] || "");
-        icon.setAttribute("aria-hidden", "true");
-        const body = el("div", "exp-hero__body");
-        body.append(el("span", "exp-hero__eyebrow", "Main finding"), el("h4", "exp-hero__title", f.title), el("p", "exp-hero__text", f.text));
-        if (f.scenario) {
-            // Straight to the evidence: open that scenario's before/after pods in the table below.
-            const show = el("button", "exp-hero__show", "👁 Show me the pods");
-            show.type = "button";
-            show.addEventListener("click", () => openScenario(f.scenario));
-            body.appendChild(show);
-        }
-        container.replaceChildren(icon, body);
+    // The target in one snapshot: its pods per node, and the ones no node took (Pending).
+    function targetPlacement(snapshot, target) {
+        const pods = (snapshot || {})[target] || [];
+        const nodes = {};
+        let pending = 0;
+        pods.forEach((p) => {
+            if (!p.node || NO_NODE.includes(p.node)) pending++;
+            else (nodes[p.node] = nodes[p.node] || []).push(p);
+        });
+        return { nodes, pending, total: pods.length };
     }
 
-    function openScenario(scenarioId) {
-        const row = document.querySelector(`#tab-live-experiments .live-exp-row[data-scenario="${CSS.escape(scenarioId)}"]`);
-        if (!row) return;
-        if (!row.classList.contains("is-open")) row.click();
-        row.scrollIntoView({ behavior: "smooth", block: "start" });
+    // What the run shows after the action, from its own stored status, as short sentences.
+    function runVerdict(run, target) {
+        const after = targetPlacement(run.t1, target);
+        const readyNodes = Object.entries(after.nodes).filter(([, ps]) => ps.some((p) => p.ready)).map(([n]) => shortNodeName(n));
+        const parts = [];
+        if (run.target_status_t1 === "EXPOSED") {
+            parts.push({ tone: "danger", text: `⚠️ ${target} exposed: every ready copy on ${readyNodes[0] || "one node"}` });
+        } else if (run.target_status_t1 === "NOT_EXPOSED") {
+            parts.push({ tone: "ok", text: `✅ ${target} still spread over ${readyNodes.length} nodes` });
+        } else {
+            parts.push({ tone: "muted", text: `${target}: ${String(run.target_status_t1).replace("_", " ").toLowerCase()}` });
+        }
+        if (after.pending) parts.push({ tone: "warn", text: `⏳ ${after.pending} ${after.pending === 1 ? "copy" : "copies"} stuck Pending, no node took them` });
+        return parts;
+    }
+
+    function allNodes(run) {
+        const names = new Set();
+        [run.t0, run.t1].forEach((snap) => Object.values(snap || {}).forEach((pods) => pods.forEach((p) => {
+            if (p.node && !NO_NODE.includes(p.node)) names.add(p.node);
+        })));
+        return [...names].sort((a, b) => a.localeCompare(b));
+    }
+
+    // One snapshot: a column per node with the target's pods as pills and the other services as grey dots.
+    function snapshotView(title, snapshot, target, nodes) {
+        const box = el("div", "xp-snap");
+        box.appendChild(el("span", "xp-snap__title", title));
+        const cols = el("div", "xp-snap__nodes");
+        const others = (node) => Object.entries(snapshot || {}).filter(([svc]) => svc !== target)
+            .flatMap(([svc, pods]) => pods.filter((p) => p.node === node).map(() => svc));
+        const placement = targetPlacement(snapshot, target);
+        nodes.forEach((node) => {
+            const col = el("div", "xp-node");
+            col.appendChild(el("span", "xp-node__name", `🖥️ ${shortNodeName(node)}`));
+            const pods = el("div", "xp-node__pods");
+            (placement.nodes[node] || []).forEach((p) => {
+                const pill = el("span", p.ready ? "xp-pod" : "xp-pod xp-pod--notready", target);
+                pill.title = `${p.name} on ${node}${p.ready ? "" : " (not ready)"}`;
+                pods.appendChild(pill);
+            });
+            const rest = others(node);
+            if (rest.length) {
+                const dots = el("span", "xp-node__others", "•".repeat(Math.min(rest.length, 8)));
+                dots.title = `Other services here: ${rest.join(", ")}`;
+                pods.appendChild(dots);
+            }
+            col.appendChild(pods);
+            cols.appendChild(col);
+        });
+        if (placement.pending) {
+            const col = el("div", "xp-node xp-node--pending");
+            col.appendChild(el("span", "xp-node__name", "⏳ No node"));
+            const pods = el("div", "xp-node__pods");
+            for (let i = 0; i < placement.pending; i++) pods.appendChild(el("span", "xp-pod xp-pod--pending", target));
+            col.appendChild(pods);
+            col.title = "Kubernetes created these copies but could not place them on any node (Pending)";
+            cols.appendChild(col);
+        }
+        box.appendChild(cols);
+        return box;
+    }
+
+    function currentRun() {
+        const cond = player.scenario?.configs[player.config];
+        const runs = cond?.run_placements?.length ? cond.run_placements : [cond?.example_run].filter(Boolean);
+        return { runs, run: runs[Math.min(player.run, runs.length - 1)] };
+    }
+
+    function paintPlayer() {
+        const root = document.querySelector("#tab-live-experiments [data-role='xp']");
+        if (!root || !player.data || !player.scenario) return;
+        const target = player.data.target_service;
+
+        root.querySelectorAll(".xp-item").forEach((b) => {
+            const on = b.dataset.scenario === player.scenario.id;
+            b.classList.toggle("is-active", on);
+            b.setAttribute("aria-selected", String(on));
+        });
+        root.querySelectorAll("[data-config]").forEach((b) => {
+            const on = b.dataset.config === player.config;
+            b.classList.toggle("is-active", on);
+            b.setAttribute("aria-pressed", String(on));
+        });
+
+        const { runs, run } = currentRun();
+        const chosen = Math.min(player.run, runs.length - 1);
+        root.querySelector("[data-role='xp-runs']").replaceChildren(...runs.map((r, i) => {
+            const cls = `xp-run${i === chosen ? " is-active" : ""}${r.target_status_t1 === "EXPOSED" ? " xp-run--danger" : ""}`;
+            const btn = el("button", cls, `Run ${r.repetition}`);
+            btn.type = "button";
+            btn.addEventListener("click", () => { stopPlayer(); player.run = i; paintPlayer(); });
+            return btn;
+        }));
+
+        root.querySelector("[data-role='xp-title']").textContent =
+            `${SCENARIO_ICONS[player.scenario.id.slice(0, 2)] || "🧪"} ${player.scenario.name} · ${CONFIG_LABELS[player.config] || player.config}`;
+        const before = root.querySelector("[data-role='xp-before']");
+        const after = root.querySelector("[data-role='xp-after']");
+        const action = root.querySelector("[data-role='xp-action']");
+        const verdict = root.querySelector("[data-role='xp-verdict']");
+        if (!run) {
+            before.replaceChildren();
+            after.replaceChildren();
+            action.replaceChildren(el("span", "xp-action__text", "No stored run"));
+            verdict.replaceChildren();
+            return;
+        }
+        const nodes = allNodes(run);
+        before.replaceChildren(snapshotView("Before", run.t0, target, nodes));
+        after.replaceChildren(snapshotView("After", run.t1, target, nodes));
+        action.replaceChildren(el("span", "xp-action__arrow", "➜"), el("code", "xp-action__text", run.action.action));
+        verdict.replaceChildren(...runVerdict(run, target).map((p) => el("span", `xp-verdict xp-verdict--${p.tone}`, p.text)));
+    }
+
+    function selectScenario(scenario) {
+        player.scenario = scenario;
+        player.run = 0;
+        paintPlayer();
+    }
+
+    function stopPlayer() {
+        if (player.timer) clearInterval(player.timer);
+        player.timer = null;
+        const btn = document.querySelector("#tab-live-experiments [data-role='xp-play']");
+        if (btn) btn.textContent = "▶ Play all";
+    }
+
+    // Step through every experiment with the chosen config, then stop.
+    function togglePlay() {
+        if (player.timer) {
+            stopPlayer();
+            return;
+        }
+        let i = 0;
+        selectScenario(player.scenarios[0]);
+        document.querySelector("#tab-live-experiments [data-role='xp-play']").textContent = "■ Stop";
+        player.timer = setInterval(() => {
+            i++;
+            if (i >= player.scenarios.length) {
+                stopPlayer();
+                return;
+            }
+            selectScenario(player.scenarios[i]);
+        }, PLAY_MS);
+    }
+
+    function renderPlayer(data) {
+        const root = document.querySelector("#tab-live-experiments [data-role='xp']");
+        if (!root) return;
+        stopPlayer();
+        player.data = data;
+        player.scenarios = scenarioList(data);
+        root.querySelector("[data-role='xp-list']").replaceChildren(...player.scenarios.map((s) => {
+            const btn = el("button", "xp-item");
+            btn.type = "button";
+            btn.dataset.scenario = s.id;
+            btn.setAttribute("role", "option");
+            btn.append(el("span", "xp-item__icon", SCENARIO_ICONS[s.id.slice(0, 2)] || "🧪"), el("span", "xp-item__name", s.name));
+            const dots = el("span", "xp-item__dots");
+            CONFIGS.forEach((cfg) => {
+                const cond = s.configs[cfg];
+                const v = cond ? cellVerdict(cond) : { variant: "muted", text: "not run" };
+                const dot = el("span", `xp-dot xp-dot--${v.variant}`);
+                dot.title = `${CONFIG_LABELS[cfg] || cfg}: ${v.text}`;
+                dots.appendChild(dot);
+            });
+            btn.appendChild(dots);
+            btn.addEventListener("click", () => { stopPlayer(); selectScenario(s); });
+            return btn;
+        }));
+        selectScenario(player.scenarios.find((s) => s.id === player.scenario?.id) || player.scenarios[0]);
+    }
+
+    function initPlayer() {
+        const root = document.querySelector("#tab-live-experiments [data-role='xp']");
+        if (!root) return;
+        root.querySelectorAll("[data-config]").forEach((b) => b.addEventListener("click", () => {
+            stopPlayer();
+            player.config = b.dataset.config;
+            player.run = 0;
+            paintPlayer();
+        }));
+        root.querySelector("[data-role='xp-play']").addEventListener("click", togglePlay);
     }
 
     // How much was run for the workload on show, counted from its stored results.
@@ -426,7 +605,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             note.textContent = `${data.evidence_note} Source: ${data.results_source}`;
             if (target) target.textContent = `Target: ${data.target_service}`;
             renderScale(root.querySelector("[data-role='live-exp-scale']"), data);
-            renderHero(root.querySelector("[data-role='live-exp-hero']"), data);
+            renderPlayer(data);
             renderFindings(root.querySelector("[data-role='live-exp-findings']"), data);
             renderSummary(root.querySelector("[data-role='live-exp-summary']"), data);
             renderTable(root.querySelector("[data-role='live-exp-table-body']"), data);
@@ -689,6 +868,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
     function init() {
         initWorkloadSwitch();
+        initPlayer();
         load().catch((err) => console.warn("Failed to load live experiment results:", err));
         renderComparison().catch((err) => console.warn("Failed to compare the experiment results:", err));
         initSimulation();
@@ -696,7 +876,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
     return {
         init: init, load: load, buildFindings: buildFindings, sameOutcome: sameOutcome, cellVerdict: cellVerdict,
-        heroFinding: heroFinding, scaleFacts: scaleFacts,
+        scaleFacts: scaleFacts, targetPlacement: targetPlacement, runVerdict: runVerdict,
         runSimulation: runSimulation, loadSimulationNamespaces: loadSimulationNamespaces,
     };
 })();
