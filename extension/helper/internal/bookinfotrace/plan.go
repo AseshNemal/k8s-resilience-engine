@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/kube"
 )
 
@@ -107,7 +108,7 @@ func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, con
 		p.block("KUBERNETES_VERSION_UNKNOWN", "The cluster's Kubernetes version could not be read, so compatibility with Istio %s cannot be confirmed.", c.IstioVersion)
 	case f.KubernetesMinor < c.SupportedKubernetesMinors.Min || f.KubernetesMinor > c.SupportedKubernetesMinors.Max:
 		p.block("KUBERNETES_VERSION_UNSUPPORTED", "Istio %s supports Kubernetes 1.%d to 1.%d; this cluster is %s.", c.IstioVersion,
-			c.SupportedKubernetesMinors.Min, c.SupportedKubernetesMinors.Max, f.ServerVersion)
+			c.SupportedKubernetesMinors.Min, c.SupportedKubernetesMinors.Max, approve.Sanitize(f.ServerVersion, 40))
 	}
 
 	if !f.NamespaceExists {

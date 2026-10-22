@@ -28,6 +28,10 @@ EXPECTED_EDGES: tuple[tuple[str, str], ...] = (
     ("reviews", "ratings"),
 )
 ENTRY_EDGE = ("trace-demo-client", "productpage")
+# Each of these Pods has its own sidecar, and a span that carries the service's name was exported by that sidecar. A span
+# of ``ratings`` in Jaeger therefore shows that the ``ratings`` Pod reached the trace service, which a connection test
+# from a Kubernetes node cannot show.
+EXPECTED_SERVICES: tuple[str, ...] = ("productpage", "details", "reviews", "ratings")
 MAX_TRACES = 100
 
 
@@ -68,6 +72,17 @@ def trace_edges(trace: dict[str, Any], namespace: str) -> set[tuple[str, str]]:
             if child and parent and child != parent:
                 edges.add((parent, child))
     return edges
+
+
+def reporting_services(trace: dict[str, Any], namespace: str) -> set[str]:
+    """The short names of the services that have at least one span in this trace."""
+    processes = trace.get("processes") or {}
+    names: set[str] = set()
+    for span in trace.get("spans") or []:
+        service = (processes.get(span.get("processID")) or {}).get("serviceName")
+        if isinstance(service, str) and service:
+            names.add(short_name(service, namespace))
+    return names
 
 
 def reviews_version_evidence(trace: dict[str, Any], namespace: str) -> str:
@@ -114,6 +129,8 @@ def verify_trace_path(
         "completeTraces": 0,
         "entryTraces": 0,
         "reviewsVersion": {"v2": 0, "v1": 0, "unknown": 0},
+        "servicesReporting": [],
+        "missingServices": list(EXPECTED_SERVICES),
         "observedAt": _iso(observed),
     }
     try:
@@ -129,7 +146,9 @@ def verify_trace_path(
 
     counts: dict[tuple[str, str], int] = {}
     complete = entry = 0
+    reporting: set[str] = set()
     for trace in traces:
+        reporting |= reporting_services(trace, namespace)
         edges = trace_edges(trace, namespace)
         for edge in edges:
             counts[edge] = counts.get(edge, 0) + 1
@@ -139,6 +158,8 @@ def verify_trace_path(
             entry += 1
         answer["reviewsVersion"][reviews_version_evidence(trace, namespace)] += 1
 
+    answer["servicesReporting"] = [name for name in EXPECTED_SERVICES if name in reporting]
+    answer["missingServices"] = [name for name in EXPECTED_SERVICES if name not in reporting]
     answer["tracesExamined"] = len(traces)
     answer["completeTraces"], answer["entryTraces"] = complete, entry
     answer["edges"] = [{"from": a, "to": b, "traces": n} for (a, b), n in sorted(counts.items())]

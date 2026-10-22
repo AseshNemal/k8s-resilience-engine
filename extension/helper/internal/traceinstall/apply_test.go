@@ -2,8 +2,10 @@ package traceinstall
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -484,5 +486,37 @@ func TestAnExistingReviewsV2IsLeftAloneAndNotRemoved(t *testing.T) {
 	}
 	if _, ok := e.sim.get(kube.Deployments, "bookinfo", "reviews-v2"); !ok {
 		t.Fatal("Undo removed a reviews-v2 it did not create")
+	}
+}
+
+func TestNoClusterTextReachesAnyOutcomeOrTheRecordWhenReadsFail(t *testing.T) {
+	const secret = "SECRET-LIST-TEXT-10.1.2.3"
+	for _, plural := range []string{"pods", "deployments", "customresourcedefinitions", "configmaps", "services", "serviceaccounts"} {
+		for _, phase := range []string{"apply", "applied-then-undo", "applied-then-verify"} {
+			e := newEnv(t)
+			switch phase {
+			case "apply":
+				e.sim.failList["list:"+plural] = errors.New(secret)
+			default:
+				if out := e.apply(); !out.OK {
+					t.Fatalf("setup: %+v", out)
+				}
+				e.sim.failList["list:"+plural] = errors.New(secret)
+			}
+			var out Outcome
+			switch phase {
+			case "applied-then-undo":
+				out = e.undo()
+			case "applied-then-verify":
+				out = e.verify()
+			default:
+				out = e.apply()
+			}
+			raw, _ := json.Marshal(out)
+			rec, _ := os.ReadFile(e.deps.Store.path(e.params.Identity))
+			if strings.Contains(string(raw), secret) || strings.Contains(string(rec), secret) {
+				t.Errorf("%s failing during %s leaked cluster text:\n%s", plural, phase, raw)
+			}
+		}
 	}
 }
