@@ -1,7 +1,9 @@
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Optional
 
-from .models import ApprovalModel, has_verified_provenance
+from .eligibility import evaluate_eligibility
+from .models import ApprovalModel, LiveRecommendation, has_verified_provenance
 from .repository import ApprovalRepository
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.approval import ApprovalStatus
@@ -30,9 +32,23 @@ class UnverifiedProvenanceError(EvidenceError):
             component="recommendation",
         )
 
+# Approving a candidate that is not the top-ranked one needs a written reason of at least this many characters.
+MIN_JUSTIFICATION_CHARS = 20
+
+
 class ApprovalService:
-    def __init__(self, repository: ApprovalRepository):
+    """The approval gate.
+
+    A candidate can be put forward, and later approved, only when the server's own evaluation says it is
+    verified feasible and ranked with a positive score (``eligibility.py``). The evaluation is the one passed in
+    when the request is made and a fresh one when it is decided, so a request written before this policy, or
+    one the cluster has since overtaken, is judged by what is true now. The top-ranked candidate is the
+    automatic selection; any other ranked candidate needs a documented justification in the approval note.
+    """
+
+    def __init__(self, repository: ApprovalRepository, min_justification_chars: int = MIN_JUSTIFICATION_CHARS):
         self.repository = repository
+        self.min_justification_chars = min_justification_chars
 
     def request_approval(
         self,
@@ -54,6 +70,11 @@ class ApprovalService:
         if not candidate.feasible:
             raise PreconditionError(f"Candidate {recommendation_id} is not feasible")
 
+        standing = evaluate_eligibility(LiveRecommendation(report=recommendation, evidence=evidence or {}),
+                                        recommendation_id)
+        if not standing.eligible:
+            raise PreconditionError(standing.reason)
+
         existing = self.repository.get_by_recommendation_id(recommendation_id)
         if existing and existing.status == ApprovalStatus.PENDING_APPROVAL:
             raise StateTransitionError("Approval already pending")
@@ -67,6 +88,7 @@ class ApprovalService:
             "confidence": candidate.confidence,
             "score": candidate.score,
         }
+        evaluation_snapshot["selection"] = standing.to_dict()
         if evidence is not None:
             evaluation_snapshot["provenance"] = dict(evidence)
 
@@ -93,7 +115,14 @@ class ApprovalService:
         expected_proposal_version: str,
         note: str,
         decided_by: str = "developer",
+        evaluate: Callable[[ApprovalModel], LiveRecommendation] | None = None,
     ) -> ApprovalModel:
+        """Approve a pending request.
+
+        ``evaluate`` re-runs the server's evaluation for the workflow and failure the request was made for. It
+        is called only after the state, version and provenance checks pass, and without it nothing can be
+        approved: eligibility is never taken from what was stored when the request was made.
+        """
         approval = self.repository.get_by_recommendation_id(recommendation_id)
         if not approval:
             raise PreconditionError("No approval requested for this recommendation")
@@ -109,10 +138,27 @@ class ApprovalService:
         if not has_verified_provenance(approval):
             raise UnverifiedProvenanceError()
 
+        if evaluate is None:
+            raise PreconditionError("There is no current evaluation to check this candidate against, so it "
+                                    "cannot be approved")
+        standing = evaluate_eligibility(evaluate(approval), recommendation_id)
+        if not standing.eligible:
+            raise PreconditionError(standing.reason)
+        justification = (note or "").strip()
+        if standing.requires_justification and len(justification) < self.min_justification_chars:
+            raise PreconditionError(
+                f"Candidate {recommendation_id} is ranked {standing.rank}; the top-ranked candidate is "
+                f"{standing.selected_recommendation_id}. Approving another candidate needs a documented "
+                f"justification of at least {self.min_justification_chars} characters in the note.")
+
+        decided_at = datetime.now(timezone.utc)
         approval.status = ApprovalStatus.APPROVED
-        approval.decided_at = datetime.now(timezone.utc)
+        approval.decided_at = decided_at
         approval.decided_by = decided_by
         approval.decision_note = note
+        approval.evaluation_snapshot = {**(approval.evaluation_snapshot or {}), "approvalCheck": {
+            **standing.to_dict(), "checkedAt": decided_at.isoformat(),
+            "justification": justification if standing.requires_justification else None}}
 
         return self.repository.update(approval)
 

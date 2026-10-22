@@ -156,3 +156,72 @@ def test_the_selected_candidate_is_still_only_a_recommendation_that_needs_a_deve
     assert requested.json()["evaluationSnapshot"]["score"] == pytest.approx(0.8)
     provenance = requested.json()["evaluationSnapshot"]["provenance"]
     assert provenance["ranking"]["weights"]["status"].startswith("experimental")
+
+
+# --- the approval gate on top of the real pipeline (nothing is faked between the request and the decision) -----
+
+def spread_db() -> FakeClusterSource:
+    """The same services as concentrated_db, but db is now already spread: there is nothing left to recommend."""
+    return FakeClusterSource(
+        nodes=[node("w1"), node("w2"), node("w3")],
+        pods={"shop": [pod("db-1", "w1", app="db"), pod("db-2", "w2", app="db"), pod("db-3", "w3", app="db"),
+                       pod("web-1", "w2", app="web"), pod("web-2", "w3", app="web")]},
+        deployments={"shop": [deployment("db", 3), deployment("web", 2)]},
+    )
+
+
+def request_live(client, rec_id):
+    return client.post(f"/api/recommendations/{rec_id}/request-approval", params=PARAMS,
+                       json={"recommendationId": rec_id, "proposalVersion": "v1"})
+
+
+def test_approving_re_evaluates_on_the_server_from_the_stored_provenance_not_from_anything_the_client_sends(
+        client, monkeypatch, use_cluster, evidenced_topology):
+    freeze_checkout(monkeypatch)
+    use_cluster(concentrated_db())
+    rec_id = client.get(LIVE, params=PARAMS).json()["selectedRecommendationId"]
+    request_live(client, rec_id)
+
+    # No workflow, namespace or failed node in this request: the server knows them from the stored provenance.
+    response = client.post(f"/api/recommendations/{rec_id}/approve", json={"expectedProposalVersion": "v1", "note": "ok"})
+
+    assert response.status_code == 200 and response.json()["status"] == "APPROVED"
+    check = response.json()["evaluationSnapshot"]["approvalCheck"]
+    assert check["rank"] == 1 and check["isSelected"] is True and check["score"] == pytest.approx(0.8)
+
+
+def test_a_pending_request_the_cluster_has_overtaken_cannot_be_approved(client, monkeypatch, use_cluster, evidenced_topology):
+    freeze_checkout(monkeypatch)
+    use_cluster(concentrated_db())
+    rec_id = client.get(LIVE, params=PARAMS).json()["selectedRecommendationId"]
+    request_live(client, rec_id)
+    use_cluster(spread_db())      # the replicas were spread by hand in the meantime: the candidate is gone
+
+    response = client.post(f"/api/recommendations/{rec_id}/approve", json={"expectedProposalVersion": "v1", "note": "ok"})
+
+    assert response.status_code == 422 and "current evaluation" in response.json()["detail"]
+    assert client.get(f"/api/recommendations/{rec_id}/approval").json()["status"] == "PENDING_APPROVAL"
+
+
+def test_a_candidate_without_verified_feasibility_cannot_even_be_requested_on_the_real_pipeline(
+        client, monkeypatch, use_cluster):
+    freeze_checkout(monkeypatch)
+    use_cluster(concentrated_db())      # no scheduling evidence: the live topology cannot verify feasibility
+    (candidate,) = client.get(LIVE, params=PARAMS).json()["recommendations"]
+
+    response = request_live(client, candidate["id"])
+
+    assert candidate["feasible"] is False and response.status_code == 422
+
+
+def test_a_feasible_candidate_with_no_predicted_gain_is_shown_but_cannot_be_requested(
+        client, monkeypatch, use_cluster, evidenced_topology):
+    freeze_checkout(monkeypatch, mandatory=("web", "db", "cart"))
+    use_cluster(two_concentrated_services())
+    report = client.get(LIVE, params=PARAMS).json()
+    db = next(c for c in report["recommendations"] if c["service"] == "db")
+
+    response = request_live(client, db["id"])
+
+    assert db["feasible"] is True and db["score"] == 0.0 and report["selectedRecommendationId"] is None
+    assert response.status_code == 422 and "not ranked" in response.json()["detail"]

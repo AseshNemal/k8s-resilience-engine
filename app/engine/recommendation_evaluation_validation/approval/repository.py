@@ -60,6 +60,7 @@ class ApprovalRepository:
             record.decided_at = approval.decided_at
             record.decided_by = approval.decided_by
             record.decision_note = approval.decision_note
+            record.evaluation_snapshot = approval.evaluation_snapshot
             self.session.commit()
             self.session.refresh(record)
             return self._to_domain(record)

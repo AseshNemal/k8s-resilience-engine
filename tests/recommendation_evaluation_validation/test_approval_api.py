@@ -6,7 +6,7 @@ from alembic.config import Config
 
 from app.main import app
 from app.core.database import get_engine
-from app.api.recommendations import get_db, get_recommendation_provider
+from app.api.recommendations import get_current_evaluator, get_db, get_recommendation_provider
 from app.engine.recommendation_evaluation_validation.approval import LIVE_EVIDENCE_SOURCE, LiveRecommendation
 from sqlalchemy.orm import Session
 from app.shared.schemas.recommendation import RecommendationReport, RecommendationCandidate
@@ -40,7 +40,11 @@ def override_get_db(sqlite_url: str):
 def client(override_get_db) -> TestClient:
     return TestClient(app)
 
+RANKED_SCORE = 0.8
+
+
 def make_report(rec_id: str, feasible: bool = True) -> RecommendationReport:
+    """One candidate. A feasible one is ranked first with a positive score, as the live pipeline would produce."""
     return RecommendationReport(
         workflow_id="wf1",
         recommendations=[
@@ -53,7 +57,7 @@ def make_report(rec_id: str, feasible: bool = True) -> RecommendationReport:
                 risk_reduction=0.0,
                 resource_cost="high",
                 confidence=0.0,
-                score=0.0
+                score=RANKED_SCORE if feasible else 0.0
             )
         ],
         selected_recommendation_id=rec_id
@@ -64,6 +68,10 @@ LIVE_EVIDENCE = {
     "source": LIVE_EVIDENCE_SOURCE,
     "topologyCapturedAt": "2026-01-01T00:00:00Z",
     "connectionFingerprint": "test-connection",
+    # What the server stores so it can re-evaluate the request when it is decided.
+    "workflowId": "wf1",
+    "namespace": "shop",
+    "failedNode": "w1",
 }
 
 
@@ -77,7 +85,12 @@ class LiveSource:
         self.report = make_report(rec_id, feasible)
 
     def __call__(self) -> LiveRecommendation:
-        return LiveRecommendation(report=self.report, evidence=dict(LIVE_EVIDENCE))
+        evidence = dict(LIVE_EVIDENCE)
+        evidence["ranking"] = {"candidates": {
+            c.id: {"id": c.id, "rank": 1 if c.feasible else None, "score": c.score if c.feasible else None,
+                   "excluded": None if c.feasible else "INSUFFICIENT_EVIDENCE"}
+            for c in self.report.recommendations}}
+        return LiveRecommendation(report=self.report, evidence=evidence)
 
 
 @pytest.fixture
@@ -85,9 +98,11 @@ def mock_get_sample(override_get_db):
     """Kept under its old name for the tests below: a controllable *live* recommendation source."""
     source = LiveSource()
     app.dependency_overrides[get_recommendation_provider] = lambda: source
+    app.dependency_overrides[get_current_evaluator] = lambda: (lambda approval: source())   # same evaluation
     source._get_mock = make_report
     yield source
     app.dependency_overrides.pop(get_recommendation_provider, None)
+    app.dependency_overrides.pop(get_current_evaluator, None)
 
 def test_request_approval_succeeds_and_get_returns_it(client: TestClient, mock_get_sample):
     recommendation_id = "rec-1"
