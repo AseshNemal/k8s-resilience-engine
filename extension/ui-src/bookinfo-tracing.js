@@ -5,8 +5,9 @@
  * the Jaeger container this extension already manages. Everything that touches the cluster is done by the host helper
  * (resilience-helper, through Docker Desktop), which uses your own kubeconfig inside its own process. This page never
  * holds a credential and cannot change the cluster itself: Plan only reads; Enable tracing and Undo make the helper
- * show a system dialog that lists every change and that this page cannot see or answer; Verify sends real requests
- * from a temporary Pod and then reads the traces Jaeger actually received.
+ * show a system dialog that lists every change and that this page cannot see or answer. Verify only reads: it checks
+ * the setup and shows the traces Jaeger already holds. Run test traffic is separate, with its own dialog: it creates one
+ * temporary Pod that sends real requests, and the page then reads the traces Jaeger actually received.
  *
  * What it never does: invent, seed or send a trace; say "verified" for anything but traces that really arrived and are
  * linked; hide a blocker; turn a reading that could not be taken into a pass.
@@ -27,7 +28,8 @@
         "trace-bookinfo-plan": 150000,
         "trace-bookinfo-apply": 2820000,
         "trace-bookinfo-undo": 2220000,
-        "trace-bookinfo-verify": 780000,
+        "trace-bookinfo-verify": 240000,
+        "trace-bookinfo-traffic": 780000,
         "trace-bookinfo-status": 45000,
     };
 
@@ -116,6 +118,7 @@
             plan: idle && !present,
             enable: idle && !present && Boolean(view.plan && view.plan.ready),
             verify: idle && phase === "applied",
+            traffic: idle && phase === "applied",
             undo: idle && present,
         };
     }
@@ -133,7 +136,8 @@
         if (view.context === "") return "Connect a cluster first.";
         if (view.busy === "plan") return "Reading the cluster… nothing is changed.";
         if (view.busy === "enable") return "Waiting for your approval in the system dialog, then setting up. This can take several minutes.";
-        if (view.busy === "verify") return "Sending real requests from a temporary Pod…";
+        if (view.busy === "verify") return "Checking the setup… nothing is changed.";
+        if (view.busy === "traffic") return "Waiting for your approval in the system dialog, then sending real requests from a temporary Pod…";
         if (view.busy === "undo") return "Waiting for your approval in the system dialog, then removing the setup.";
         if (view.setup) return PHASE_TEXT[view.setup.phase] || "";
         return "Tracing is not set up. Plan shows exactly what would change.";
@@ -161,6 +165,19 @@
         }
     }
 
+    // What Verify found, one line per Pod that must carry a sidecar, and whether the Jaeger address is unchanged.
+    function describeChecks(verify) {
+        if (!verify) return [];
+        const lines = verify.instrumented.map((p) => ({ ok: p.sidecar && p.ready, text: `${p.workload}: ${p.pod} — ${p.sidecar ? "sidecar" : "no sidecar"}, ${p.ready ? "ready" : "not ready"}` }));
+        if (verify.appliedAddress) {
+            lines.push({ ok: !verify.addressDrift, text: verify.addressDrift
+                ? `Jaeger address changed: the ServiceEntry has ${verify.appliedAddress}, the nodes now reach ${verify.currentAddress}`
+                : `Jaeger address unchanged (${verify.appliedAddress})` });
+        }
+        if (verify.requestsSent) lines.push({ ok: true, text: "Real requests were sent from a temporary Pod inside the mesh; it has been removed." });
+        return lines;
+    }
+
     // ---- controller (no DOM) ------------------------------------------------------------------------------------------
 
     // env: { helper: {available, run(command, context) -> cleaned result}, context() -> string, fetchJson(url), sleep(ms),
@@ -175,7 +192,7 @@
                 busy: s.busy, message: s.message, outcome: s.outcome,
             };
         }
-        function publish() { if (env.onUpdate) env.onUpdate({ ...view(), headline: headline(view()), can: availability(view()), traceView: describeTrace(s.trace) }); }
+        function publish() { if (env.onUpdate) env.onUpdate({ ...view(), headline: headline(view()), can: availability(view()), traceView: describeTrace(s.trace), checks: describeChecks(s.verify) }); }
 
         async function refresh() {
             s.context = (await env.context()) || "";
@@ -216,6 +233,11 @@
             return view();
         }
 
+        async function readTracesOnce() {
+            const answer = await env.fetchJson(`${BACKEND}/trace-path?namespace=${NAMESPACE}`);
+            s.trace = answer && answer.status === 200 && answer.body ? answer.body : null;
+        }
+
         async function readTraces() {
             const deadline = env.now() + TRACE_WAIT_MS;
             for (;;) {
@@ -236,11 +258,25 @@
             return view();
         }
 
+        // Verify only reads: it checks the setup and shows the traces Jaeger already holds. It creates nothing.
         async function verify() {
             if (!availability(view()).verify) return view();
             s.trace = null;
             const r = await longCommand("trace-bookinfo-verify", "verify");
             s.verify = r ? r.verify : null;
+            publish();
+            if (r && r.ok) await readTracesOnce();
+            publish();
+            return view();
+        }
+
+        // Run test traffic is separate and approval-controlled in the helper: it creates one temporary Pod. Only after
+        // it has really sent requests does the page wait for the traces to arrive.
+        async function traffic() {
+            if (!availability(view()).traffic) return view();
+            s.trace = null;
+            const r = await longCommand("trace-bookinfo-traffic", "traffic");
+            s.verify = r ? r.verify : s.verify;
             publish();
             if (r && r.ok && r.state === "bookinfo-traffic-sent") await readTraces();
             publish();
@@ -255,7 +291,7 @@
             return view();
         }
 
-        return { refresh, plan, enable, verify, undo, view };
+        return { refresh, plan, enable, verify, traffic, undo, view };
     }
 
     function helperFile(platform) { return platform === "win32" ? "resilience-helper.exe" : "resilience-helper"; }
@@ -294,7 +330,7 @@
         return { available, run };
     }
 
-    window.__resilienceBookinfo = { createController, createHelper, availability, headline, describeTrace, cleanPlan, cleanSetup, cleanVerify, cleanResult, parseHelperOutput, validContext, helperFile, platformOf, WAIT_MS };
+    window.__resilienceBookinfo = { createController, createHelper, availability, headline, describeTrace, describeChecks, cleanPlan, cleanSetup, cleanVerify, cleanResult, parseHelperOutput, validContext, helperFile, platformOf, WAIT_MS };
     if (!window.document || !window.document.addEventListener) return;
 
     // ---- browser wiring -----------------------------------------------------------------------------------------------
@@ -304,7 +340,8 @@
     const part = (role) => card.querySelector(`[data-role="${role}"]`);
     const nodes = {
         headline: part("bookinfo-headline"), message: part("bookinfo-message"), plan: part("bookinfo-plan"), enable: part("bookinfo-enable"),
-        verify: part("bookinfo-verify"), undo: part("bookinfo-undo"), details: part("bookinfo-details"), steps: part("bookinfo-steps"),
+        verify: part("bookinfo-verify"), traffic: part("bookinfo-traffic"), undo: part("bookinfo-undo"), details: part("bookinfo-details"),
+        checks: part("bookinfo-checks"), steps: part("bookinfo-steps"),
         trace: part("bookinfo-trace"), traceHeadline: part("bookinfo-trace-headline"), traceLines: part("bookinfo-trace-lines"),
     };
 
@@ -315,7 +352,7 @@
         return node;
     }
 
-    const LABELS = { plan: "Plan", enable: "Enable Bookinfo tracing", verify: "Verify", undo: "Undo" };
+    const LABELS = { plan: "Plan", enable: "Enable Bookinfo tracing", verify: "Verify", traffic: "Run test traffic", undo: "Undo" };
 
     function renderPlan(plan) {
         const out = [];
@@ -345,12 +382,13 @@
         nodes.headline.textContent = v.headline;
         nodes.message.textContent = v.message;
         nodes.message.dataset.state = v.outcome;
-        for (const name of ["plan", "enable", "verify", "undo"]) {
+        for (const name of ["plan", "enable", "verify", "traffic", "undo"]) {
             const button = nodes[name];
             button.disabled = !v.can[name];
             button.textContent = v.busy !== "" && ((name === "enable" && v.busy === "enable") || v.busy === name) ? "Working…" : LABELS[name];
         }
         nodes.details.replaceChildren(...renderPlan(v.plan));
+        nodes.checks.replaceChildren(...v.checks.map((c) => { const li = el("li", "connect__app", c.text); li.dataset.state = c.ok ? "ok" : "fail"; return li; }));
         const steps = v.setup ? v.setup.steps : [];
         nodes.steps.replaceChildren(...steps.map((s) => { const li = el("li", "connect__app", `${s.step}: ${s.status}${s.detail ? " (" + s.detail + ")" : ""}`); li.dataset.state = s.status === "failed" ? "fail" : s.status === "done" ? "ok" : "unknown"; return li; }));
         if (v.setup && v.setup.remaining.length) v.setup.remaining.forEach((r) => { const li = el("li", "connect__app", "Remaining: " + r); li.dataset.state = "fail"; nodes.steps.append(li); });
@@ -389,6 +427,7 @@
     nodes.plan.addEventListener("click", () => { controller.plan(); });
     nodes.enable.addEventListener("click", () => { controller.enable(); });
     nodes.verify.addEventListener("click", () => { controller.verify(); });
+    nodes.traffic.addEventListener("click", () => { controller.traffic(); });
     nodes.undo.addEventListener("click", () => { controller.undo(); });
     document.addEventListener("DOMContentLoaded", () => { controller.refresh(); });
     window.addEventListener("resilience-cluster-changed", () => { controller.refresh(); });

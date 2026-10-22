@@ -22,21 +22,21 @@ const setup = (phase, extra = {}) => ({ phase, steps: [], created: 0, deleted: 0
 const view = (over) => ({ busy: "", helperAvailable: true, context: "docker-desktop", plan: null, setup: null, ...over });
 
 test("Plan is the only action before anything is set up, and Enable needs a ready plan", () => {
-    assert.deepEqual(plain(B.availability(view())), { plan: true, enable: false, verify: false, undo: false });
+    assert.deepEqual(plain(B.availability(view())), { plan: true, enable: false, verify: false, traffic: false, undo: false });
     assert.equal(B.availability(view({ plan: B.cleanPlan(readyPlan) })).enable, true);
     assert.equal(B.availability(view({ plan: B.cleanPlan({ ...readyPlan, ready: false, blockers: [{ code: "X", message: "m" }] }) })).enable, false);
 });
 
 test("Verify needs an applied setup; Undo is offered for anything that is not removed", () => {
-    for (const [phase, want] of [["applied", { plan: false, enable: false, verify: true, undo: true }],
-        ["applying", { plan: false, enable: false, verify: false, undo: true }], ["rolling-back", { plan: false, enable: false, verify: false, undo: true }],
-        ["rollback-failed", { plan: false, enable: false, verify: false, undo: true }], ["rolled-back", { plan: true, enable: false, verify: false, undo: false }]]) {
+    for (const [phase, want] of [["applied", { plan: false, enable: false, verify: true, traffic: true, undo: true }],
+        ["applying", { plan: false, enable: false, verify: false, traffic: false, undo: true }], ["rolling-back", { plan: false, enable: false, verify: false, traffic: false, undo: true }],
+        ["rollback-failed", { plan: false, enable: false, verify: false, traffic: false, undo: true }], ["rolled-back", { plan: true, enable: false, verify: false, traffic: false, undo: false }]]) {
         assert.deepEqual(plain(B.availability(view({ setup: setup(phase) }))), want, phase);
     }
 });
 
 test("nothing is available while something runs, without a helper, or without a cluster", () => {
-    const none = { plan: false, enable: false, verify: false, undo: false };
+    const none = { plan: false, enable: false, verify: false, traffic: false, undo: false };
     assert.deepEqual(plain(B.availability(view({ busy: "enable", setup: setup("applied") }))), none);
     assert.deepEqual(plain(B.availability(view({ helperAvailable: false }))), none);
     assert.deepEqual(plain(B.availability(view({ context: "" }))), none);
@@ -150,25 +150,42 @@ test("a blocked plan never enables the setup", async () => {
     assert.ok(!log.some((l) => l.startsWith("trace-bookinfo-apply")));
 });
 
-test("Verify sends the requests, then reads Jaeger until the traces are linked", async () => {
-    const partial = { verdict: "PARTIAL", edges: [], missingEdges: ["reviews->ratings"], servicesReporting: ["productpage"], missingServices: ["ratings"], tracesExamined: 1, reviewsVersion: { v2: 0, v1: 0, unknown: 1 } };
-    const verified = { verdict: "VERIFIED", edges: [{ from: "productpage", to: "details", traces: 12 }], missingEdges: [], servicesReporting: ["productpage", "details", "reviews", "ratings"], missingServices: [], tracesExamined: 12, reviewsVersion: { v2: 12, v1: 0, unknown: 0 } };
-    const { env, log } = fakeEnv({ results: { "trace-bookinfo-status": ok("bookinfo-status", { setup: B.cleanSetup(setup("applied")) }),
-        "trace-bookinfo-verify": ok("bookinfo-traffic-sent", { verify: B.cleanVerify({ requestsSent: true, instrumented: [] }) }) }, traces: [partial, partial, verified] });
+const partialTrace = { verdict: "PARTIAL", edges: [{ from: "productpage", to: "details", traces: 3 }], missingEdges: ["reviews->ratings"], servicesReporting: ["productpage", "details"], missingServices: ["reviews", "ratings"], tracesExamined: 3, reviewsVersion: { v2: 0, v1: 0, unknown: 3 } };
+const verifiedTrace = { verdict: "VERIFIED", edges: [{ from: "productpage", to: "details", traces: 12 }], missingEdges: [], servicesReporting: ["productpage", "details", "reviews", "ratings"], missingServices: [], tracesExamined: 12, reviewsVersion: { v2: 12, v1: 0, unknown: 0 } };
+const appliedStatus = () => ok("bookinfo-status", { setup: B.cleanSetup(setup("applied")) });
+
+test("Verify only reads: it never runs the traffic command and reads Jaeger once, without waiting", async () => {
+    const { env, log } = fakeEnv({ results: { "trace-bookinfo-status": appliedStatus(),
+        "trace-bookinfo-verify": ok("bookinfo-checks-passed", { verify: B.cleanVerify({ requestsSent: false, instrumented: [{ workload: "ratings-v1", pod: "ratings-v1-x", sidecar: true, ready: true }] }) }) }, traces: [partialTrace] });
     const c = B.createController(env);
     await c.refresh();
     await c.verify();
+    assert.ok(!log.some((l) => l.startsWith("trace-bookinfo-traffic")), "Verify must never create the client Pod");
+    assert.ok(!log.some((l) => l.startsWith("trace-bookinfo-apply") || l.startsWith("trace-bookinfo-undo")));
+    assert.equal(log.filter((l) => l.startsWith("GET")).length, 1, "Verify reads Jaeger once and does not wait for traffic");
+    assert.equal(c.view().verify.instrumented.length, 1);
+    assert.equal(c.view().trace.verdict, "PARTIAL");
+});
+
+test("Run test traffic is its own operation, then waits for the traces to be linked", async () => {
+    const { env, log } = fakeEnv({ results: { "trace-bookinfo-status": appliedStatus(),
+        "trace-bookinfo-traffic": ok("bookinfo-traffic-sent", { verify: B.cleanVerify({ requestsSent: true, instrumented: [] }) }) }, traces: [partialTrace, partialTrace, verifiedTrace] });
+    const c = B.createController(env);
+    await c.refresh();
+    await c.traffic();
+    assert.equal(log.filter((l) => l.startsWith("trace-bookinfo-traffic")).length, 1);
+    assert.ok(!log.some((l) => l.startsWith("trace-bookinfo-verify")));
     assert.equal(log.filter((l) => l.startsWith("GET")).length, 3);
     assert.equal(c.view().trace.verdict, "VERIFIED");
     assert.match(B.describeTrace(c.view().trace).headline, /^Verified:/);
+    assert.ok(B.describeChecks(c.view().verify).some((l) => /temporary Pod .* removed/.test(l.text)));
 });
 
 test("traces that never become linked are reported as partial, never as verified", async () => {
-    const partial = { verdict: "PARTIAL", edges: [{ from: "productpage", to: "details", traces: 3 }], missingEdges: ["reviews->ratings"], servicesReporting: ["productpage", "details"], missingServices: ["reviews", "ratings"], tracesExamined: 3, reviewsVersion: { v2: 0, v1: 0, unknown: 3 } };
-    const { env } = fakeEnv({ results: { "trace-bookinfo-status": ok("bookinfo-status", { setup: B.cleanSetup(setup("applied")) }), "trace-bookinfo-verify": ok("bookinfo-traffic-sent") }, traces: [partial] });
+    const { env } = fakeEnv({ results: { "trace-bookinfo-status": appliedStatus(), "trace-bookinfo-traffic": ok("bookinfo-traffic-sent") }, traces: [partialTrace] });
     const c = B.createController(env);
     await c.refresh();
-    await c.verify();
+    await c.traffic();
     const shown = B.describeTrace(c.view().trace);
     assert.equal(shown.kind, "warn");
     assert.doesNotMatch(shown.headline, /Verified/);
@@ -176,16 +193,46 @@ test("traces that never become linked are reported as partial, never as verified
     assert.ok(shown.lines.some((l) => /Calls not seen: reviews->ratings/.test(l)));
 });
 
-test("a failed Verify does not read Jaeger or claim anything", async () => {
-    const { env, log } = fakeEnv({ results: { "trace-bookinfo-status": ok("bookinfo-status", { setup: B.cleanSetup(setup("applied")) }),
-        "trace-bookinfo-verify": { ok: false, state: "bookinfo-verify-failed", message: "The Jaeger address changed", plan: null, setup: null, verify: null } }, traces: [] });
+test("a declined or failed traffic run does not read Jaeger or claim anything", async () => {
+    for (const result of [{ ok: false, state: "declined", message: "you declined, so nothing was changed", plan: null, setup: null, verify: null },
+        { ok: false, state: "bookinfo-verify-failed", message: "The Jaeger address changed", plan: null, setup: null, verify: null }]) {
+        const { env, log } = fakeEnv({ results: { "trace-bookinfo-status": appliedStatus(), "trace-bookinfo-traffic": result }, traces: [] });
+        const c = B.createController(env);
+        await c.refresh();
+        await c.traffic();
+        assert.ok(!log.some((l) => l.startsWith("GET")));
+        assert.equal(c.view().trace, null);
+        assert.equal(c.view().outcome, "fail");
+        assert.equal(c.view().message, result.message);
+    }
+});
+
+test("a failed Verify shows its reason and claims nothing", async () => {
+    const { env } = fakeEnv({ results: { "trace-bookinfo-status": appliedStatus(),
+        "trace-bookinfo-verify": { ok: false, state: "bookinfo-verify-failed", message: "productpage-x has no working sidecar", plan: null, setup: null, verify: B.cleanVerify({ instrumented: [{ workload: "productpage-v1", pod: "productpage-x", sidecar: false, ready: true }] }) } }, traces: [partialTrace] });
     const c = B.createController(env);
     await c.refresh();
     await c.verify();
-    assert.ok(!log.some((l) => l.startsWith("GET")));
-    assert.equal(c.view().trace, null);
     assert.equal(c.view().outcome, "fail");
-    assert.equal(c.view().message, "The Jaeger address changed");
+    assert.equal(c.view().trace, null);
+    assert.equal(B.describeChecks(c.view().verify)[0].ok, false);
+});
+
+test("the checks name every Pod and the Jaeger address, and report drift", () => {
+    const lines = B.describeChecks(B.cleanVerify({ appliedAddress: "192.168.65.254", currentAddress: "192.168.65.1", addressDrift: true,
+        instrumented: [{ workload: "ratings-v1", pod: "ratings-v1-x", sidecar: true, ready: true }] }));
+    assert.equal(lines[0].ok, true);
+    assert.equal(lines[1].ok, false);
+    assert.match(lines[1].text, /192\.168\.65\.254.*192\.168\.65\.1/);
+    assert.deepEqual(plain(B.describeChecks(null)), []);
+});
+
+test("the traffic command is known to the bridge and passed only the context", async () => {
+    const calls = [];
+    const helper = B.createHelper({ platform: "darwin", exec: (file, args) => { calls.push(args); return Promise.resolve({ stdout: '{"ok":true,"state":"bookinfo-traffic-sent"}' }); } });
+    assert.equal((await helper.run("trace-bookinfo-traffic", "docker-desktop")).state, "bookinfo-traffic-sent");
+    assert.deepEqual(plain(calls), [["trace-bookinfo-traffic", "docker-desktop"]]);
+    assert.ok("trace-bookinfo-traffic" in B.WAIT_MS && B.WAIT_MS["trace-bookinfo-verify"] < B.WAIT_MS["trace-bookinfo-traffic"], "Verify is quick; the traffic run waits for a dialog and a Pod");
 });
 
 test("Undo clears what was shown and reads the record again", async () => {
@@ -219,6 +266,8 @@ test("the headline always says what is true", () => {
     assert.match(B.headline(view({ helperAvailable: false })), /helper is not available/);
     assert.match(B.headline(view({ context: "" })), /Connect a cluster first/);
     assert.match(B.headline(view({ busy: "enable" })), /Waiting for your approval/);
+    assert.match(B.headline(view({ busy: "verify" })), /nothing is changed/);
+    assert.match(B.headline(view({ busy: "traffic" })), /Waiting for your approval in the system dialog, then sending real requests/);
     assert.match(B.headline(view({ setup: setup("applying") })), /did not finish/);
     assert.match(B.headline(view({ setup: setup("rollback-failed") })), /could not be removed/);
 });

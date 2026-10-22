@@ -165,10 +165,12 @@ CONNECT_MAIN = """<main class="page" id="main-content">
             <button type="button" class="secondary-button" data-role="bookinfo-plan" disabled>Plan</button>
             <button type="button" class="primary-button" data-role="bookinfo-enable" disabled>Enable Bookinfo tracing</button>
             <button type="button" class="secondary-button" data-role="bookinfo-verify" disabled>Verify</button>
+            <button type="button" class="secondary-button" data-role="bookinfo-traffic" disabled>Run test traffic</button>
             <button type="button" class="danger-button" data-role="bookinfo-undo" disabled>Undo</button>
         </div>
         <p class="connect__message" data-role="bookinfo-message" role="status" aria-live="polite"></p>
         <div data-role="bookinfo-details"></div>
+        <ul class="connect__apps" data-role="bookinfo-checks" aria-live="polite" aria-label="Checks"></ul>
         <ul class="connect__apps" data-role="bookinfo-steps" aria-live="polite" aria-label="Progress"></ul>
         <div data-role="bookinfo-trace" hidden>
             <h4 class="section-header__title" data-role="bookinfo-trace-headline" role="status"></h4>
@@ -180,8 +182,10 @@ CONNECT_MAIN = """<main class="page" id="main-content">
             if a step fails; nothing is changed unless you approve there. This uses your own kubeconfig inside the helper
             on this computer, only for that one command: the extension's read-only access is not changed. It installs
             Istio 1.31.2 with no gateways, adds a sidecar to the Bookinfo Pods and sends their traces to the Jaeger above.
-            Verify sends real requests from a temporary Pod and reports only the traces Jaeger actually received: nothing
-            is simulated or invented. Undo removes only what this setup created and checks the result against a snapshot
+            Verify only reads: it checks that every sidecar is ready and the Jaeger address is unchanged. Run test traffic
+            is separate and has its own system dialog: it creates one temporary Pod that sends real requests to
+            productpage, then removes it. The page reports only the traces Jaeger actually received: nothing is
+            simulated or invented. Undo removes only what this setup created and checks the result against a snapshot
             taken before.
         </p>
     </section>

@@ -348,10 +348,12 @@ def test_only_the_connect_page_carries_the_bookinfo_card_and_script(built):
 
 def test_the_four_controls_start_disabled_and_the_card_says_what_it_does_not_do(built):
     page = (built / "connect.html").read_text(encoding="utf-8")
-    for role in ("bookinfo-plan", "bookinfo-enable", "bookinfo-verify", "bookinfo-undo"):
+    for role in ("bookinfo-plan", "bookinfo-enable", "bookinfo-verify", "bookinfo-traffic", "bookinfo-undo"):
         assert re.search(rf'<button[^>]*data-role="{role}"[^>]*disabled', page), f"{role} must start disabled"
-    for sentence in ("Plan only reads the cluster", "nothing is changed unless you approve there", "nothing\n            is simulated or invented", "read-only access is not changed"):
-        assert sentence in page, sentence
+    text = " ".join(page.split())  # the markup wraps lines in the middle of sentences
+    for sentence in ("Plan only reads the cluster", "nothing is changed unless you approve there", "nothing is simulated or invented", "read-only access is not changed",
+                     "Verify only reads", "Run test traffic is separate and has its own system dialog"):
+        assert sentence in text, sentence
 
 
 def test_the_image_ships_the_bookinfo_script():
