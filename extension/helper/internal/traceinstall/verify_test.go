@@ -349,3 +349,48 @@ func TestAnUnreadableClusterIsNotACleanPass(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 }
+
+// ---- an earlier test Pod must never be orphaned ----
+
+// A run that is killed after creating its Pod leaves a Pod that is ours. The next run must clean it up, not find the
+// name taken, mark it foreign and thereby make sure nobody ever deletes it.
+func TestALeftoverTestPodOfAnEarlierKilledRunIsRemovedNotOrphaned(t *testing.T) {
+	e := applied(t)
+	e.sim.killAfter = 1 // killed right after the Pod was created
+	func() {
+		defer func() { recover() }()
+		e.traffic()
+	}()
+	e.sim.killAfter = 0
+	if _, there := e.sim.get(kube.Pods, "bookinfo", "trace-demo-client"); !there {
+		t.Fatal("the test did not leave a Pod behind")
+	}
+	e.sim.writes = nil
+	out := e.traffic()
+	if !out.OK || out.State != StateTrafficSent {
+		t.Fatalf("%+v", out)
+	}
+	if _, there := e.sim.get(kube.Pods, "bookinfo", "trace-demo-client"); there {
+		t.Fatal("the Pod is still there")
+	}
+	if entry := e.record().Entry(clientPodRef()); entry == nil || entry.State == EntryForeign {
+		t.Fatalf("our own earlier Pod was marked foreign, so Undo would never remove it: %+v", entry)
+	}
+}
+
+// A Pod with that name that is not ours is never touched, and the run says why.
+func TestAForeignPodWithTheSameNameIsNeverDeletedOrAdopted(t *testing.T) {
+	e := applied(t)
+	e.sim.put(kube.Pods, kube.Object{Name: "trace-demo-client", Namespace: "bookinfo", UID: "someone-elses", Labels: map[string]string{"owner": "someone"}})
+	e.sim.writes = nil
+	out := e.traffic()
+	if out.OK || !strings.Contains(out.Message, "did not create") {
+		t.Fatalf("%+v", out)
+	}
+	if o, there := e.sim.get(kube.Pods, "bookinfo", "trace-demo-client"); !there || o.obj.UID != "someone-elses" {
+		t.Fatal("somebody else's Pod was touched")
+	}
+	if len(e.sim.writes) != 0 {
+		t.Fatalf("%v", e.sim.writes)
+	}
+}

@@ -143,7 +143,7 @@ func Apply(ctx context.Context, d Deps, p Params) Outcome {
 	if err := r.save(); err != nil {
 		return r.abort(ctx, err)
 	}
-	return Outcome{OK: true, State: StateApplied, Message: "Tracing is set up. Use Verify to produce and check real traces.", Plan: &again, Setup: SummaryOf(rec)}
+	return Outcome{OK: true, State: StateApplied, Message: "Tracing is set up. Verify checks that every sidecar is ready; Run test traffic then produces the real requests whose traces are checked.", Plan: &again, Setup: SummaryOf(rec)}
 }
 
 // documents holds the objects of the bookinfo namespace, ready to create.

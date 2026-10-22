@@ -177,6 +177,26 @@ func RunTraffic(ctx context.Context, d Deps, p Params) Outcome {
 			r.remove(cleanup, clientPodRef())
 		}
 	}()
+	// A Pod of this name from an earlier run (killed, or still terminating) would make the create find the name taken, and
+	// the entry would then be marked foreign, so that nobody would ever delete our own Pod. Remove it first if it is ours,
+	// wait until it is gone, and if the name belongs to someone else, stop without touching it.
+	if msg := r.remove(ctx, clientPodRef()); msg != "" {
+		return stop("An earlier test Pod could not be removed: %s.", msg)
+	}
+	if err := r.waitUntil(ctx, "an earlier test Pod to disappear", d.Timeouts.Pod, func(ctx context.Context) (bool, error) {
+		pod, err := d.Cluster.Get(ctx, resPod, bookinfotrace.Contract.Namespace, clientPodRef().Name)
+		switch {
+		case kube.IsNotFound(err):
+			return true, nil
+		case err != nil:
+			return false, err
+		case pod.Labels[LabelInstallation] != rec.InstallationID:
+			return false, failed("a Pod named %s exists that this setup did not create, so it was left alone and nothing was created", clientPodRef().Name)
+		}
+		return false, nil
+	}); err != nil {
+		return stop("%s.", err.Error())
+	}
 	if err := r.create(ctx, doc); err != nil {
 		created = true // the intent was recorded; the cleanup looks at the cluster
 		return stop("The client Pod could not be created: %s.", err.Error())
