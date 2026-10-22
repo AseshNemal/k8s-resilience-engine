@@ -124,7 +124,9 @@ window.DeploymentsDriftWidget = (function () {
             let status = "safe";
             if (ready === 0) status = "unavailable";
             else if (exposedOn.length) status = "exposed";
-            return { name: svc.name, cells, ready, status, exposedOn };
+            // The graph's own replica concentration: largest share of the ready copies on one node.
+            const concentration = svc.replicaConcentration ?? svc.replica_concentration ?? null;
+            return { name: svc.name, cells, ready, status, exposedOn, concentration };
         });
         // Pods on a node the graph does not list (or on none) still get a column, so no pod disappears.
         const extra = new Set();
@@ -279,6 +281,113 @@ window.DeploymentsDriftWidget = (function () {
             headline.textContent = `💥 ${shortNode(board.failed)} crashed: ${down} service${down === 1 ? "" : "s"} down, ${running} still running.`;
         }
         root.querySelector("[data-role='whatif-reset']").hidden = !board.failed;
+
+        // The two measures below the board follow its state: the chosen service, the crashed node.
+        document.querySelectorAll("[data-role='conc-rows'] .risk-row").forEach((r) => r.classList.toggle("is-selected", r.dataset.service === board.focus));
+        document.querySelectorAll("[data-role='expo-rows'] .risk-row").forEach((r) => r.classList.toggle("is-selected", r.dataset.node === board.failed));
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // Below the board: replica concentration per service and failure-domain exposure per node, with
+    // the graph's own values. A row is a button that drives the board above.
+    // -----------------------------------------------------------------------------------------------
+
+    function showOnBoard() {
+        document.querySelector("[data-role='whatif']")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    // Busiest node of a service: the node holding most of its ready copies.
+    function busiestNode(row) {
+        let best = null;
+        Object.entries(row.cells).forEach(([node, c]) => {
+            if (node !== PENDING && c.ready > 0 && (!best || c.ready > best.ready)) best = { node, ready: c.ready };
+        });
+        return best;
+    }
+
+    function concentrationRow(row, workers) {
+        const pct = row.concentration == null ? null : Math.round(row.concentration * 100);
+        const even = workers ? Math.round(100 / workers) : null;
+        let tone = "ok";
+        if (pct === 100) tone = "danger";
+        else if (pct != null && even != null && pct > even) tone = "warn";
+        const busiest = busiestNode(row);
+
+        const btn = el("button", `risk-row risk-row--${tone}`);
+        btn.type = "button";
+        btn.dataset.service = row.name;
+        btn.title = `Click to show ${row.name}'s copies on the board`;
+        const meter = el("span", "conc-meter");
+        const fill = el("span", "conc-meter__fill");
+        fill.style.width = `${pct ?? 0}%`;
+        meter.appendChild(fill);
+        if (even != null) {
+            const mark = el("span", "conc-meter__even");
+            mark.style.left = `${even}%`;
+            mark.title = `Evenly spread over ${workers} nodes = ${even}%`;
+            meter.appendChild(mark);
+        }
+        // When several nodes tie for the most copies, no node is singled out.
+        const tied = busiest ? Object.entries(row.cells).filter(([n, c]) => n !== PENDING && c.ready === busiest.ready).length : 0;
+        let detail = "no ready copy";
+        if (busiest && tied > 1) detail = `${busiest.ready} ${busiest.ready === 1 ? "copy" : "copies"} on each of ${tied} nodes`;
+        else if (busiest) detail = `${busiest.ready} of ${row.ready} ${row.ready === 1 ? "copy" : "copies"} on ${shortNode(busiest.node)}`;
+        btn.append(
+            el("span", "risk-row__name", row.name),
+            meter,
+            el("span", "risk-row__value", pct == null ? "n/a" : `${pct}%`),
+            el("span", "risk-row__detail", detail),
+        );
+        btn.addEventListener("click", () => {
+            board.focus = board.focus === row.name ? null : row.name;
+            paint();
+            showOnBoard();
+        });
+        return { btn, pct };
+    }
+
+    function exposureRow(node) {
+        const takesDown = board.rows.filter((r) => r.exposedOn.includes(node)).map((r) => r.name);
+        const btn = el("button", `risk-row risk-row--${takesDown.length ? "danger" : "ok"}`);
+        btn.type = "button";
+        btn.dataset.node = node;
+        btn.title = `Click to crash ${shortNode(node)} on the board`;
+        const chips = el("span", "expo-chips");
+        if (takesDown.length) takesDown.forEach((name) => chips.appendChild(el("span", "expo-chip", name)));
+        else chips.appendChild(el("span", "expo-none", "takes nothing down"));
+        btn.append(
+            el("span", "risk-row__name", `🖥️ ${shortNode(node)}`),
+            chips,
+            el("span", "risk-row__value", takesDown.length ? `💥 ${takesDown.length}` : "✅ 0"),
+        );
+        btn.addEventListener("click", () => {
+            stopPlay();
+            crash(board.failed === node ? null : node);
+            showOnBoard();
+        });
+        return btn;
+    }
+
+    function renderRiskPanels() {
+        const concBox = document.querySelector("[data-role='conc-rows']");
+        const expoBox = document.querySelector("[data-role='expo-rows']");
+        if (!concBox || !expoBox) return;
+        const workers = board.columns.filter((c) => c !== PENDING);
+
+        const conc = board.rows.map((row) => ({ row, ...concentrationRow(row, workers.length) }))
+            .sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.row.name.localeCompare(b.row.name));
+        concBox.replaceChildren(...conc.map((c) => c.btn));
+
+        expoBox.replaceChildren(...workers.map(exposureRow));
+        const evaluated = board.rows.filter((r) => r.ready > 0);
+        const exposed = evaluated.filter((r) => r.exposedOn.length);
+        const summary = document.querySelector("[data-role='expo-summary']");
+        if (summary) {
+            summary.textContent = evaluated.length
+                ? `${exposed.length} of ${evaluated.length} services depend on a single node (exposure rate ${Math.round(exposed.length / evaluated.length * 100)}%).`
+                : "No service has a ready copy.";
+            summary.dataset.tone = exposed.length ? "danger" : "ok";
+        }
     }
 
     function crash(column) {
@@ -324,6 +433,7 @@ window.DeploymentsDriftWidget = (function () {
         Object.assign(board, { deployment, rows, columns, failed: null, focus: null });
         root.querySelector("[data-role='whatif-nodes']").replaceChildren(...columns.map(nodeBox));
         root.querySelector("[data-role='whatif-services']").replaceChildren(...rows.map(serviceCard));
+        renderRiskPanels();
         paint();
     }
 

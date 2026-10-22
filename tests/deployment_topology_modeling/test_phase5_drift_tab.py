@@ -33,6 +33,10 @@ def test_drift_tab_markup_presence(client):
     for role in ("whatif", "whatif-nodes", "whatif-services", "whatif-play", "whatif-reset", "whatif-headline"):
         assert f'data-role="{role}"' in html
     assert html.index('data-role="whatif"') < html.index('id="spof-workloads-list"')
+    # Below the board: replica concentration per service and failure-domain exposure per node
+    for role in ("conc-rows", "expo-rows", "expo-summary"):
+        assert f'data-role="{role}"' in html
+    assert html.index('data-role="whatif"') < html.index('data-role="conc-rows"')
 
     # Lists
     assert 'id="spof-workloads-list"' in html

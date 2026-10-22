@@ -1283,6 +1283,67 @@
     .wi-node.is-crashed { transform: none; }
 }
 
+/* ---- Exposed services tab: replica concentration and failure-domain exposure, below the board ---- */
+.risk-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--space-lg); margin-top: var(--space-lg); }
+.risk-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 18px 20px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-lg);
+    background: var(--c2-glass-bg);
+    box-shadow: var(--c2-glass-shadow);
+}
+.risk-panel__title { margin: 0; font-size: 1.05rem; color: var(--c2-text-main); }
+.risk-panel__desc { margin: 0; font-size: 12.5px; color: var(--c2-text-muted); }
+.risk-panel__summary { margin: 4px 0 0 0; font-size: 13px; font-weight: 700; color: var(--c2-text-main); }
+.risk-panel__summary[data-tone="danger"] { color: #b91c1c; }
+.risk-panel__summary[data-tone="ok"] { color: #047857; }
+.risk-rows { display: flex; flex-direction: column; gap: 6px; }
+.risk-row {
+    --tone: var(--c2-accent-success);
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr) 64px;
+    grid-template-areas: "name meter value" ". detail detail";
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 2px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--c2-radius-md);
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    color: var(--c2-text-main);
+    cursor: pointer;
+    transition: var(--c2-transition);
+}
+.risk-row--warn { --tone: var(--c2-accent-warning); }
+.risk-row--danger { --tone: var(--c2-accent-danger); }
+.risk-row:hover { background: color-mix(in srgb, var(--tone) 8%, transparent); border-color: color-mix(in srgb, var(--tone) 30%, transparent); }
+.risk-row:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
+.risk-row.is-selected { background: color-mix(in srgb, var(--tone) 12%, transparent); border-color: var(--tone); }
+.risk-row__name { grid-area: name; font-weight: 800; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.risk-row__value { grid-area: value; text-align: right; font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--tone) 80%, var(--c2-text-main)); }
+.risk-row__detail { grid-area: detail; font-size: 12px; color: var(--c2-text-muted); }
+
+/* concentration: a meter from 0 to 100%, filled in the row's tone, with a tick at an even spread */
+.conc-meter { grid-area: meter; position: relative; height: 14px; border-radius: 999px; background: var(--c2-border-light); }
+.conc-meter__fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--tone); transition: width 0.6s ease; }
+.conc-meter__even { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--c2-text-main); opacity: 0.6; }
+
+/* exposure: the services a node alone would take down */
+.expo-chips { grid-area: meter; display: flex; flex-wrap: wrap; gap: 4px; }
+.expo-chip { padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--c2-accent-danger) 14%, transparent); color: #b91c1c; font-size: 12px; font-weight: 700; }
+.expo-none { font-size: 12px; color: var(--c2-text-muted); font-style: italic; }
+@media (prefers-color-scheme: dark) {
+    .expo-chip { color: #fca5a5; }
+    .risk-panel__summary[data-tone="danger"] { color: #fca5a5; }
+    .risk-panel__summary[data-tone="ok"] { color: #6ee7b7; }
+}
+@media (prefers-reduced-motion: reduce) { .conc-meter__fill, .risk-row { transition: none; } }
+
 /* ---- Experiments tab: how much was run ---- */
 .exp-scale {
     display: grid;

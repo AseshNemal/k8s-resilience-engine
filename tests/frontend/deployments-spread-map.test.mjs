@@ -57,6 +57,12 @@ test("failing a chosen node removes only the copies on it", () => {
     assert.equal(copiesLeft(rows.down, "w1").outcome, "unavailable");
 });
 
+test("the concentration shown is the graph's own value, not recomputed", () => {
+    const withConcentration = { nodes: graph.nodes, services: [{ ...graph.services[0], replicaConcentration: 0.3333 }] };
+    assert.equal(spreadMatrix(withConcentration).rows[0].concentration, 0.3333);
+    assert.equal(spreadMatrix(graph).rows[0].concentration, null);  // absent stays unknown
+});
+
 test("exposed services come first and pods with no node get a last column", () => {
     const { rows, columns } = spreadMatrix(graph);
     assert.equal(rows[0].name, "packed");

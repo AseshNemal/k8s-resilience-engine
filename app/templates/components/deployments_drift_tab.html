@@ -29,6 +29,21 @@
         <div class="whatif__services" data-role="whatif-services"></div>
     </section>
 
+    {# The two measures behind the board, each one picture; clicking a row drives the board above #}
+    <section class="risk-pair" aria-label="Replica concentration and failure-domain exposure">
+        <div class="risk-panel">
+            <h4 class="risk-panel__title">Replica concentration</h4>
+            <p class="risk-panel__desc">How much of each service sits on its busiest node. 100% = every copy on one node. The tick marks an even spread.</p>
+            <div class="risk-rows" data-role="conc-rows"></div>
+        </div>
+        <div class="risk-panel">
+            <h4 class="risk-panel__title">Failure-domain exposure</h4>
+            <p class="risk-panel__desc">What each node would take down on its own. Click a node to crash it above.</p>
+            <div class="risk-rows" data-role="expo-rows"></div>
+            <p class="risk-panel__summary" data-role="expo-summary"></p>
+        </div>
+    </section>
+
     <details class="show-details">
         <summary>Show details</summary>
         <div class="show-details__body">
