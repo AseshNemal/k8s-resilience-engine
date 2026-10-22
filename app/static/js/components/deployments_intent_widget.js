@@ -19,7 +19,8 @@ window.DeploymentsIntentWidget = (function () {
             const src = await resp.json();
             note.classList.toggle("manifest-source--warning", !src.found);
             if (src.source === "cluster") {
-                note.textContent = "Declared intent from the Deployment specs of the connected cluster (no manifest file found).";
+                note.textContent = "Declared intent from the connected cluster (no manifest file found): the YAML last applied with " +
+                    "kubectl (kubectl.kubernetes.io/last-applied-configuration), or the Deployment spec when none was kept.";
             } else if (src.found) {
                 note.textContent = `Declared intent from ${src.path}.`;
             } else {
@@ -28,7 +29,7 @@ window.DeploymentsIntentWidget = (function () {
             const short = document.querySelector("[data-role='plan-source']");
             if (short) {
                 short.textContent = src.source === "cluster"
-                    ? "📄 The YAML here is the cluster's own Deployment spec (no manifest file found), so a kubectl scale changes both rows."
+                    ? "📄 The YAML here is the one last applied with kubectl, kept by the cluster; a kubectl scale does not change it, so hand changes show as drift."
                     : `📄 The YAML here is ${src.path}.`;
             }
         } catch (err) {
