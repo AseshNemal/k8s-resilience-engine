@@ -225,37 +225,54 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         return [...names].sort((a, b) => a.localeCompare(b));
     }
 
-    // One snapshot: a column per node with the target's pods as pills and the other services as grey dots.
-    function snapshotView(title, snapshot, target, nodes) {
+    // One colour per service, by sorted name, so a service looks the same in Before and After.
+    const SERVICE_HUES = [212, 152, 32, 350, 190, 95, 15, 320];
+    function serviceHues(snapshots, target) {
+        const names = new Set();
+        snapshots.forEach((snap) => Object.keys(snap || {}).forEach((svc) => { if (svc !== target) names.add(svc); }));
+        const hues = {};
+        [...names].sort((a, b) => a.localeCompare(b)).forEach((svc, i) => { hues[svc] = SERVICE_HUES[i % SERVICE_HUES.length]; });
+        return hues;
+    }
+
+    // A pod: the disrupted service is a solid purple pill marked 🎯, the others light pills in their colour.
+    function podPill(svc, pod, target, hues, where) {
+        const isTarget = svc === target;
+        let cls = isTarget ? "xp-pod" : "xp-pod xp-pod--other";
+        if (!where) cls += " xp-pod--pending";
+        else if (!pod.ready) cls += " xp-pod--notready";
+        const pill = el("span", cls, isTarget ? `🎯 ${svc}` : svc);
+        if (!isTarget) pill.style.setProperty("--svc-hue", hues[svc]);
+        pill.title = `${pod.name}${where ? ` on ${where}` : ": no node took it (Pending)"}${where && !pod.ready ? " (not ready)" : ""}`;
+        return pill;
+    }
+
+    // One snapshot: a column per node with every service's pods (the target first), and a No node box for
+    // the copies Kubernetes created but could not place.
+    function snapshotView(title, snapshot, target, nodes, hues) {
         const box = el("div", "xp-snap");
         box.appendChild(el("span", "xp-snap__title", title));
         const cols = el("div", "xp-snap__nodes");
-        const others = (node) => Object.entries(snapshot || {}).filter(([svc]) => svc !== target)
-            .flatMap(([svc, pods]) => pods.filter((p) => p.node === node).map(() => svc));
-        const placement = targetPlacement(snapshot, target);
+        const services = Object.keys(snapshot || {}).sort((a, b) => (a === target ? -1 : b === target ? 1 : a.localeCompare(b)));
+        const podsOn = (node) => services.flatMap((svc) => (snapshot[svc] || [])
+            .filter((p) => (node ? p.node === node : !p.node || NO_NODE.includes(p.node)))
+            .map((p) => ({ svc, p })));
+
         nodes.forEach((node) => {
             const col = el("div", "xp-node");
             col.appendChild(el("span", "xp-node__name", `🖥️ ${shortNodeName(node)}`));
             const pods = el("div", "xp-node__pods");
-            (placement.nodes[node] || []).forEach((p) => {
-                const pill = el("span", p.ready ? "xp-pod" : "xp-pod xp-pod--notready", target);
-                pill.title = `${p.name} on ${node}${p.ready ? "" : " (not ready)"}`;
-                pods.appendChild(pill);
-            });
-            const rest = others(node);
-            if (rest.length) {
-                const dots = el("span", "xp-node__others", "•".repeat(Math.min(rest.length, 8)));
-                dots.title = `Other services here: ${rest.join(", ")}`;
-                pods.appendChild(dots);
-            }
+            podsOn(node).forEach(({ svc, p }) => pods.appendChild(podPill(svc, p, target, hues, node)));
+            if (!pods.childElementCount) pods.appendChild(el("span", "xp-node__empty", "empty"));
             col.appendChild(pods);
             cols.appendChild(col);
         });
-        if (placement.pending) {
+        const pending = podsOn(null);
+        if (pending.length) {
             const col = el("div", "xp-node xp-node--pending");
             col.appendChild(el("span", "xp-node__name", "⏳ No node"));
             const pods = el("div", "xp-node__pods");
-            for (let i = 0; i < placement.pending; i++) pods.appendChild(el("span", "xp-pod xp-pod--pending", target));
+            pending.forEach(({ svc, p }) => pods.appendChild(podPill(svc, p, target, hues, null)));
             col.appendChild(pods);
             col.title = "Kubernetes created these copies but could not place them on any node (Pending)";
             cols.appendChild(col);
@@ -310,8 +327,9 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             return;
         }
         const nodes = allNodes(run);
-        before.replaceChildren(snapshotView("Before", run.t0, target, nodes));
-        after.replaceChildren(snapshotView("After", run.t1, target, nodes));
+        const hues = serviceHues([run.t0, run.t1], target);
+        before.replaceChildren(snapshotView("Before", run.t0, target, nodes, hues));
+        after.replaceChildren(snapshotView("After", run.t1, target, nodes, hues));
         action.replaceChildren(el("span", "xp-action__arrow", "➜"), el("code", "xp-action__text", run.action.action));
         verdict.replaceChildren(...runVerdict(run, target).map((p) => el("span", `xp-verdict xp-verdict--${p.tone}`, p.text)));
     }
