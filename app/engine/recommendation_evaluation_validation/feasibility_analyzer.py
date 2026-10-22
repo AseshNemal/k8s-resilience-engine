@@ -22,12 +22,41 @@ out; if the search budget runs out first the answer is inconclusive (``INSUFFICI
 guessed ``INFEASIBLE``. ``NOT_MODELED`` lists what the model ignores.
 
 Adding a topology spread constraint does not move pods that are already running: it only filters where
-*newly scheduled* pods may go. The placement returned is therefore a target state, reachable only by
-recreating the pods listed in ``pods_to_recreate`` (a rollout restart, or deleting them).
+*newly scheduled* pods may go. The placement returned is therefore a target state. ``pods_to_recreate`` lists
+the ready pods whose target node differs from the node they run on now; it measures *placement churn*, not
+how many pods a change would restart. The change itself is an edit to the Deployment's pod template, and any
+such edit triggers a rollout that eventually replaces every pod of that Deployment, so the real operational
+disruption (rollout scope, surge capacity, the RollingUpdate transient) is larger and is not modelled here.
 
-Two policy fields of a spread constraint are not in the contract: ``nodeTaintsPolicy`` (whether nodes with
-untolerated taints, or NotReady or cordoned nodes, still count as domains; the default is that they do) and
-``nodeAffinityPolicy``. Where the answer depends on them it is inconclusive rather than decided on a default.
+Two policy fields of a spread constraint are not in the contract. Their defaults, verified against the
+Kubernetes documentation and KEP-3094 (fields beta and on by default from v1.26, GA in v1.33):
+
+* ``nodeAffinityPolicy`` unset behaves as ``Honor``: only nodes matching the pod's nodeSelector / required
+  node affinity count as domains. ``Ignore`` counts every node.
+* ``nodeTaintsPolicy`` unset behaves as ``Ignore``: node taints are ignored and every node counts as a domain,
+  including ones the pod cannot be scheduled on. ``Honor`` counts nodes without taints and tainted nodes the pod
+  tolerates.
+
+``nodeTaintsPolicy`` is about taints only. It is not the same thing as node schedulability: a NotReady or
+cordoned node is rejected by the scheduler's own filters whatever the policy says, and whether such a node also
+carries a taint the pod does not tolerate (which is what would make ``Honor`` stop counting it) is not in the
+evidence. The model therefore does not claim to know which nodes ``Honor`` would drop. Its relaxed reading is
+deliberately optimistic: it drops every node that cannot take pods (untolerated taint, NotReady, cordoned).
+Dropping domains only loosens the skew rule, so a search that fails even then is a sound ``INFEASIBLE``, and
+one that succeeds only then is reported as inconclusive.
+
+The model uses the defaults. Where the answer differs under the other value, or depends on a field the graph
+dropped, it is inconclusive rather than decided on a default.
+
+Model-feasible is not operationally verified. ``FEASIBLE`` means: given the evidence in the graph, a placement
+exists that satisfies every constraint this module models. It is a statement about the model and its inputs.
+It does not mean the scheduler will choose that placement, that the pods will become Ready, or that the
+constraints the evidence cannot show (host ports, kubelet pod limit, volume topology, quota, priority,
+init-container requests) are satisfied; ``not_modeled`` lists them. Kubernetes itself documents that spread
+constraints are not guaranteed to stay satisfied when pods are removed and suggests a rebalancer such as the
+Descheduler. A placement is operationally verified only after a developer-approved change has been applied and
+the observed pod placement and Component 3's recomputed blast radius match the prediction; that is the later
+validation phase, and nothing in this module applies or verifies a change.
 
 All the facts come from the DeploymentGraph (Member 2's contract), which is read and never changed. Node
 taints are not in that contract: they are taken from a ``SchedulingEvidence`` the caller supplies, and are
@@ -82,9 +111,11 @@ ASSUMPTIONS = (
     "Placement is a deterministic least-loaded prediction; the real scheduler may place pods differently.",
     "A node record whose Ready condition is absent is treated as unread: its schedulable flag defaults to "
     "True in the contract and so proves nothing.",
-    "The placement is a target state. A spread constraint does not move running pods; it is reached only by "
-    "recreating the pods in pods_to_recreate, and a RollingUpdate's transient (old pods still counted for "
-    "skew and capacity while new ones schedule) is not modelled.",
+    "The placement is a target state. A spread constraint does not move running pods; it takes effect when the "
+    "Deployment's pods are scheduled again, which a pod-template change does for every pod of the Deployment. "
+    "pods_to_recreate lists only the pods whose target node differs from today's (placement churn), not the "
+    "pods a rollout would restart; rollout scope, surge capacity and a RollingUpdate's transient (old pods "
+    "still counted for skew and capacity while new ones schedule) are not modelled.",
 )
 
 NOT_MODELED = (
@@ -152,7 +183,9 @@ class FeasibilityResult:
     # Predicted pod -> node placement; filled only when the status is FEASIBLE.
     placement: Mapping[str, str] = field(default_factory=dict)
     missing_evidence: tuple[str, ...] = ()
-    # The pods that would have to be recreated to reach `placement`; the constraint alone moves none of them.
+    # The ready pods whose target node in `placement` differs from their current node: placement churn. It is
+    # NOT the set of pods a rollout restarts (a pod-template change replaces every pod of the Deployment), and
+    # the constraint alone moves none of them.
     pods_to_recreate: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ASSUMPTIONS
     not_modeled: tuple[str, ...] = NOT_MODELED
@@ -467,8 +500,9 @@ _PLAN_FAILURES = {
                        "tainted, filtered out by capacity or affinity) still count as domains with no pods",
 }
 
-# Nodes that nodeTaintsPolicy: Honor stops counting as spread domains: the ones carrying an untolerated taint,
-# and the NotReady and cordoned ones, which the control plane taints on its own.
+# Nodes the relaxed reading drops from the spread domains. nodeTaintsPolicy: Honor itself drops only nodes with an
+# untolerated taint; NotReady and cordoned nodes are included here as a deliberately optimistic over-approximation
+# (their taints are not in the evidence), which keeps an INFEASIBLE verdict sound. See the module docstring.
 _TAINT_EXCLUSIONS = frozenset({"NODE_TAINT", "NODE_READY", "NODE_SCHEDULABLE"})
 
 
@@ -649,8 +683,9 @@ def check_topology_spread_feasibility(
                              "No placement was found, but the search stopped before it could rule one out.")
     if relaxed is not None and relaxed.nodes is not None:
         ctx.need("nodeTaintsPolicy: Honor on the spread constraints (Kubernetes >= 1.26): the replicas can only "
-                 "be spread if nodes that are NotReady, cordoned or tainted are not counted as domains, and "
-                 "the cluster version and the existing constraints' policy are not in the evidence")
+                 "be spread if the nodes that cannot take pods are not counted as domains. Honor drops nodes with "
+                 "an untolerated taint; whether the NotReady or cordoned nodes carry one, the cluster version and "
+                 "the existing constraints' policy are not in the evidence")
         return _inconclusive(service_name, ctx, findings,
                              "A placement exists only if the spread constraint does not count nodes that cannot "
                              "take pods as domains.")
@@ -692,9 +727,12 @@ def check_topology_spread_feasibility(
             scheduling=INSUFFICIENT, single_node_resilience=None,
             findings=tuple(findings), missing_evidence=missing,
         )
-    moves = (f"Adding the constraint does not move running pods: reaching this placement means recreating "
-             f"{len(recreate)} pod(s) (for example a rollout restart), and the scheduler is expected, not "
-             f"guaranteed, to place them there." if recreate else "No pod needs to move.")
+    moves = (f"Adding the constraint does not move running pods. {len(recreate)} of {len(movable)} ready "
+             f"replica(s) have a different target node than today (placement churn). Applying it edits the pod "
+             f"template, which rolls out every pod of the Deployment, and the scheduler is expected, not "
+             f"guaranteed, to place the new pods there." if recreate else
+             "No ready replica needs a different node, though applying the constraint still rolls out the "
+             "Deployment.")
     return FeasibilityResult(
         status=FEASIBLE,
         reason=(f"Under the modelled constraints the {len(movable)} ready replicas of {service_name} can be "

@@ -20,8 +20,8 @@ class SimulationResult:
     # `feasible` stays a plain bool for existing readers: it is True only when the status is FEASIBLE.
     feasibility_status: FeasibilityStatus | None = None
     feasibility: FeasibilityResult | None = None
-    # The simulated deployment is the TARGET state. A spread constraint does not move running pods, so it is
-    # reached only by recreating these pods.
+    # The simulated deployment is the TARGET state. A spread constraint does not move running pods. These are
+    # the ready pods whose target node differs from today's (placement churn), not the pods a rollout restarts.
     pods_to_recreate: tuple[str, ...] = ()
 
     @property

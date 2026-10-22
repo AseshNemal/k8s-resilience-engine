@@ -316,5 +316,5 @@ def test_with_scheduling_evidence_the_verdict_and_predicted_placement_are_in_the
     assert sorted(verdict["placement"].values()) == ["w1", "w2", "w3"]
     assert verdict["missingEvidence"] == []
     assert verdict["notModeled"]  # what the prediction ignores is always disclosed
-    # Adding the constraint moves no running pod: the target is reached by recreating two of the three.
+    # Adding the constraint moves no running pod; two of the three replicas have a new target node (churn).
     assert verdict["requiresPodRecreation"] is True and len(verdict["podsToRecreate"]) == 2

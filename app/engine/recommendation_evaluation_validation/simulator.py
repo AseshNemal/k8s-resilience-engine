@@ -15,8 +15,9 @@ def simulate_topology_spread(
     whether a node can actually take them.
 
     The result is a TARGET state, not what applying a spread constraint does: that constraint only filters
-    where newly scheduled pods may go and never moves a running pod. Reaching the target means recreating the
-    pods that differ (``FeasibilityResult.pods_to_recreate``).
+    where newly scheduled pods may go and never moves a running pod. The pods whose node differs from today's
+    are ``FeasibilityResult.pods_to_recreate`` (placement churn). The change that applies the constraint edits
+    the Deployment's pod template and so rolls out every pod of the Deployment; that scope is not simulated.
     """
 
     service = next(

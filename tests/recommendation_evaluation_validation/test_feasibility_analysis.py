@@ -655,10 +655,11 @@ def test_a_feasible_spread_lists_the_pods_that_would_have_to_be_recreated():
 
     assert result.status is FEASIBLE
     assert result.requires_pod_recreation is True
-    assert len(result.pods_to_recreate) == 2         # one replica already sits where it should end up
+    assert len(result.pods_to_recreate) == 2         # one replica already sits where it should end up (churn)
     assert set(result.pods_to_recreate) <= {"db-0", "db-1", "db-2"}
-    assert "does not move" in result.reason and "recreat" in result.reason
-    assert any("recreat" in item for item in result.assumptions)
+    assert "does not move running pods" in result.reason and "placement churn" in result.reason
+    assert "rolls out every pod of the Deployment" in result.reason
+    assert any("rollout" in item and "placement churn" in item for item in result.assumptions)
 
 
 def test_pods_that_can_stay_where_they_are_are_not_recreated():
