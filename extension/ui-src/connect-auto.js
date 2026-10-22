@@ -1,9 +1,12 @@
 /*
  * "Set up automatically" card on the Connect page (extension-only).
  *
- * Presentation over autoconnect.js: list the local clusters the helper found, let the person pick one
- * and start setup (the approval itself happens in a native system dialog, not here), show renewal
- * problems, and offer to remove access. Cluster and context names come from the user's kubeconfig, so
+ * Presentation over autoconnect.js: list the local clusters the helper found, say for each one whether it is
+ * Connected, Not connected, being reconnected or disconnected by the person, let the person pick one and
+ * connect it (the approval itself happens in a native system dialog, not here), show renewal problems, and offer
+ * to remove access. A newly started cluster appears by itself: the list is read again every minute while the
+ * page is visible. Finding a cluster never connects it and never changes it; only the person's click, and
+ * their approval in the dialog, does. Cluster and context names come from the user's kubeconfig, so
  * they are untrusted: everything is written with textContent, never innerHTML. No credential ever
  * reaches this page, so there is nothing here that could show one.
  */
@@ -27,6 +30,8 @@
     const attention = q("auto-attention");
     const attentionText = q("auto-attention-text");
     const retryButton = q("auto-retry");
+
+    const AUTO_REFRESH_MS = 60000;
 
     const ACCESS = {
         approved: "Access already set up",
@@ -53,19 +58,23 @@
         return input ? input.value : "";
     }
 
-    function item(context) {
+    function item(context, status) {
         const li = document.createElement("li");
         li.className = "connect__cluster";
+        const badge = auto.clusterBadge(context, status);
         const label = document.createElement("label");
         const radio = document.createElement("input");
         radio.type = "radio";
         radio.name = "auto-context";
         radio.value = context.name;
-        const usable = context.supported && context.reachable === true;
-        radio.disabled = !usable;
+        radio.disabled = !badge.connectable;
         const name = document.createElement("span");
         name.className = "connect__cluster-name";
         name.textContent = context.name;
+        const state = document.createElement("span");
+        state.className = "connect__cluster-badge";
+        state.dataset.kind = badge.kind;
+        state.textContent = badge.text;
         const meta = document.createElement("span");
         meta.className = "connect__cluster-meta";
         if (!context.supported) {
@@ -76,30 +85,62 @@
             const access = ACCESS[context.authorization] || "Access state unknown";
             meta.textContent = `${context.server} · Kubernetes ${context.serverVersion || ""} · ${access}`.replace("  ", " ");
         }
-        label.append(radio, name, meta);
+        label.append(radio, name, state, meta);
         li.append(label);
-        li.dataset.usable = String(usable);
+        li.dataset.usable = String(badge.connectable);
+        li.dataset.state = badge.kind;
         return li;
     }
 
-    async function findClusters() {
-        setBusy(true);
-        say("Looking for clusters…");
+    async function readStatus() {
+        try {
+            const response = await fetch("/_extension/cluster");
+            return response.ok ? await response.json() : null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    // `quiet` is the automatic refresh: no "Looking…" message and no flicker, and the person's choice stays.
+    let looking = false;
+    let lastFound = null;
+    function showList(result, status) {
+        const chosen = selected();
         list.replaceChildren();
-        const result = await controller.discover();
-        setBusy(false);
+        const contexts = result.contexts.slice().sort((a, b) => Number(b.supported) - Number(a.supported) || a.name.localeCompare(b.name));
+        contexts.forEach((c) => list.append(item(c, status)));
+        const usable = contexts.filter((c) => auto.clusterBadge(c, status).connectable);
+        const keep = chosen && list.querySelector(`input[name="auto-context"]:not(:disabled)[value="${CSS.escape(chosen)}"]`);
+        if (keep) keep.checked = true;
+        else if (usable.length === 1) list.querySelector('input[name="auto-context"]:not(:disabled)').checked = true;
+        connectButton.disabled = !selected();
+        const running = contexts.filter((c) => c.supported && c.reachable === true);
+        say(running.length ? "" : "No supported cluster is running. Start Docker Desktop's Kubernetes or your kind cluster; it appears here by itself.");
+    }
+
+    async function findClusters(quiet) {
+        if (looking) return;
+        looking = true;
+        if (!quiet) {
+            setBusy(true);
+            say("Looking for clusters…");
+            list.replaceChildren();
+        }
+        const [result, status] = await Promise.all([controller.discover(), readStatus()]);
+        looking = false;
+        if (!quiet) setBusy(false);
         if (!result.ok || !Array.isArray(result.contexts)) {
-            say(auto.messageFor(result.state), "error");
+            if (!quiet) say(auto.messageFor(result.state), "error");
             return;
         }
-        const contexts = result.contexts.slice().sort((a, b) => Number(b.supported) - Number(a.supported) || a.name.localeCompare(b.name));
-        contexts.forEach((c) => list.append(item(c)));
-        const usable = contexts.filter((c) => c.supported && c.reachable === true);
-        if (usable.length === 1) {
-            list.querySelector('input[name="auto-context"]:not(:disabled)').checked = true;
-        }
-        connectButton.disabled = !selected();
-        say(usable.length ? "" : "No supported cluster is running. Start your kind cluster and press Find clusters.");
+        lastFound = result;
+        showList(result, status);
+    }
+
+    // The status changed (connected, renewed, disconnected): relabel the list without asking the helper again.
+    async function relabel() {
+        if (!lastFound || looking) return;
+        showList(lastFound, await readStatus());
     }
 
     async function refreshAttention() {
@@ -130,7 +171,7 @@
     note.textContent = "";
 
     list.addEventListener("change", () => { connectButton.disabled = !selected(); });
-    refreshButton.addEventListener("click", findClusters);
+    refreshButton.addEventListener("click", () => findClusters(false));
 
     connectButton.addEventListener("click", async () => {
         const name = selected();
@@ -170,6 +211,11 @@
         await refreshAttention();
     });
 
-    window.addEventListener("resilience-cluster-changed", refreshAttention);
-    findClusters().then(refreshAttention);
+    window.addEventListener("resilience-cluster-changed", () => { refreshAttention(); relabel(); });
+    findClusters(false).then(refreshAttention);
+
+    // Detect a cluster that starts later, without being asked, while the person can see the page. Never while
+    // a dialog is open (the buttons are disabled then) and never overlapping a search that is still running.
+    setInterval(() => { if (!document.hidden && !refreshButton.disabled) findClusters(true); }, AUTO_REFRESH_MS);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && !refreshButton.disabled) findClusters(true); });
 })();

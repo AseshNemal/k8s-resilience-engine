@@ -444,3 +444,211 @@ test("the page is told nothing when no renewal happened or it failed", async () 
     await failed.controller.tick();
     assert.equal(notDue.renewed.length + failed.renewed.length, 0);
 });
+
+// ------------------------------------------------------------------ reconnecting a cluster that was approved earlier
+
+const APPROVED = { context: CTX, server: "127.0.0.1:58227", caSha256: "ab".repeat(32), disconnectedByUser: false };
+const lost = (approved = APPROVED) => ({ connected: false, approved });
+const reconnected = JSON.stringify({ ok: true, command: "reconnect", state: "connected", context: CTX, tokenRequest: true });
+const idle = JSON.stringify({ ok: true, command: "reconnect", state: "idle", message: "nothing to reconnect" });
+
+test("a connection lost for a cluster the person approved is restored by the helper, with no argument and no dialog", async () => {
+    const w = world({ statuses: [lost()], helper: reconnected });
+    const s = await w.controller.tick();
+    assert.equal(s.phase, "ready");
+    assert.deepEqual(plain(w.calls), [{ file: "resilience-helper", args: ["reconnect"] }]);
+    assert.equal(w.renewed.length, 1, "pages that loaded without access retry themselves");
+});
+
+test("a cluster the person disconnected is never reconnected, on any reload", async () => {
+    // Each iteration is a fresh page load or extension restart: a new controller with no memory.
+    for (let i = 0; i < 4; i++) {
+        const w = world({ statuses: [lost({ ...APPROVED, disconnectedByUser: true })], helper: reconnected });
+        for (let j = 0; j < 3; j++) {
+            const s = await w.controller.tick();
+            assert.equal(s.phase, "needs-setup");
+        }
+        assert.equal(w.calls.length, 0, "the helper must not even be started");
+    }
+});
+
+test("nothing approved means nothing is reconnected, and a first connection always waits for the person", async () => {
+    const w = world({ statuses: [{ connected: false }], helper: reconnected });
+    assert.equal((await w.controller.tick()).phase, "needs-setup");
+    assert.equal(w.calls.length, 0);
+});
+
+test("a connected cluster is only renewed, never reconnected", async () => {
+    const w = world({ statuses: [managed("ok", { approved: APPROVED })], helper: reconnected });
+    await w.controller.tick();
+    assert.equal(w.calls.length, 0);
+});
+
+for (const state of ["identity-changed", "authorization-revoked", "drifted", "over-granted", "rbac-denied", "not-authorized", "unsupported-context"]) {
+    test(`a reconnect that stops with ${state} waits for the person instead of retrying`, async () => {
+        const w = world({ statuses: [lost()], helper: fail(state) });
+        const first = await w.controller.tick();
+        assert.equal(first.phase, "attention");
+        assert.equal(first.state, state);
+        w.clock.ms += 3_600_000;
+        await w.controller.tick();
+        await w.controller.tick();
+        assert.equal(w.calls.length, 1, "a problem only a person can fix must not be retried");
+        assert.notEqual(A.messageFor(state), A.messageFor("error"), "and it must be explained, not shown as a generic error");
+    });
+}
+
+for (const state of ["cluster-unreachable", "backend-unavailable", "too-slow", "busy"]) {
+    test(`a reconnect that stops with ${state} is retried with growing delays`, async () => {
+        const w = world({ statuses: [lost()], helper: fail(state) });
+        const first = await w.controller.tick();
+        assert.equal(first.phase, "retrying");
+        await w.controller.tick();
+        assert.equal(w.calls.length, 1, "inside the back-off");
+        w.clock.ms += 31_000;
+        await w.controller.tick();
+        assert.equal(w.calls.length, 2);
+        w.clock.ms += 31_000;
+        await w.controller.tick();
+        assert.equal(w.calls.length, 2, "the second delay is longer");
+    });
+}
+
+test("when the helper says there is nothing to reconnect, the page waits quietly instead of asking every minute", async () => {
+    const w = world({ statuses: [lost()], helper: idle });
+    assert.equal((await w.controller.tick()).phase, "needs-setup");
+    await w.controller.tick();
+    w.clock.ms += 60_000;
+    await w.controller.tick();
+    assert.equal(w.calls.length, 1);
+});
+
+test("two checks at once start one reconnect, and a person's own action is never raced by one", async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const w = world({ statuses: [lost()], helper: async () => { await gate; return reconnected; } });
+    const both = Promise.all([w.controller.tick(), w.controller.tick()]);
+    release();
+    await both;
+    assert.equal(w.calls.length, 1);
+});
+
+test("the person's own setup still runs the normal approval, and clears a problem that was waiting for them", async () => {
+    const w = world({ statuses: [lost()], helper: (args) => (args[0] === "reconnect" ? fail("identity-changed") : ok) });
+    assert.equal((await w.controller.tick()).phase, "attention");
+    const done = await w.controller.setup(CTX);
+    assert.equal(done.ok, true);
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["reconnect"], ["authorize", CTX]]);
+});
+
+test("the page never sees a token, whatever the helper prints", async () => {
+    const w = world({ statuses: [lost()], helper: JSON.stringify({ ok: true, command: "reconnect", state: "connected", context: CTX, token: TOKEN }) });
+    await w.controller.tick();
+    assert.equal(JSON.stringify(w.changes).includes(TOKEN), false);
+    assert.equal(JSON.stringify(w.controller.snapshot()).includes(TOKEN), false);
+});
+
+test("the wording for the new states is specific and never generic", () => {
+    for (const state of ["identity-changed", "busy"]) {
+        assert.notEqual(A.messageFor(state), A.messageFor("error"));
+    }
+    assert.match(A.messageFor("identity-changed"), /approve/i);
+});
+
+test("a person's own setup or removal is refused while a reconnect is running, so the two never race", async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const w = world({ statuses: [lost()], helper: async (args) => { if (args[0] === "reconnect") await gate; return reconnected; } });
+    const running = w.controller.tick();
+    while (w.calls.length === 0) await new Promise((resolve) => setTimeout(resolve, 0)); // the reconnect is under way
+
+    const setup = await w.controller.setup(CTX);
+    const removal = await w.controller.remove(CTX);
+    release();
+    await running;
+
+    assert.equal(setup.ok, false);
+    assert.equal(removal.ok, false);
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["reconnect"]], "no authorize or revoke may start beside it");
+});
+
+// ------------------------------------------------------------------ the cluster list on the Connect page
+
+const found = (name, extra = {}) => ({ name, server: "127.0.0.1:50345", supported: true, reachable: true, serverVersion: "v1.36.1", authorization: "absent", ...extra });
+
+test("a newly found supported cluster is listed as Not connected, ready for the person to connect", () => {
+    const badge = A.clusterBadge(found("docker-desktop"), { connected: false });
+    assert.deepEqual(plain(badge), { kind: "not-connected", text: "Not connected", connectable: true });
+});
+
+test("the cluster the extension is connected to says Connected, and no other cluster does", () => {
+    const status = { connected: true, managed: true, context: "docker-desktop", state: "ok" };
+    assert.equal(A.clusterBadge(found("docker-desktop"), status).kind, "connected");
+    assert.equal(A.clusterBadge(found("kind-other"), status).kind, "not-connected");
+});
+
+test("a connection added by hand does not make any listed cluster look connected", () => {
+    const status = { connected: true, managed: false, state: "ok" };
+    assert.equal(A.clusterBadge(found("docker-desktop"), status).kind, "not-connected");
+});
+
+test("an approved cluster that the extension is reconnecting by itself says so", () => {
+    const status = { connected: false, approved: { context: "docker-desktop", disconnectedByUser: false } };
+    const badge = A.clusterBadge(found("docker-desktop", { authorization: "approved" }), status);
+    assert.equal(badge.kind, "reconnecting");
+    assert.match(badge.text, /approved earlier/i);
+});
+
+test("a cluster the person disconnected says so and waits for them to connect it again", () => {
+    const status = { connected: false, approved: { context: "docker-desktop", disconnectedByUser: true } };
+    const badge = A.clusterBadge(found("docker-desktop"), status);
+    assert.equal(badge.kind, "disconnected");
+    assert.match(badge.text, /disconnected/i);
+    assert.equal(badge.connectable, true);
+});
+
+test("an approval for another context does not describe this one", () => {
+    const status = { connected: false, approved: { context: "kind-other", disconnectedByUser: false } };
+    assert.equal(A.clusterBadge(found("docker-desktop"), status).kind, "not-connected");
+});
+
+test("access that was changed or widened in the cluster is flagged for the person, not silently repaired", () => {
+    for (const authorization of ["drifted", "over-granted"]) {
+        const badge = A.clusterBadge(found("docker-desktop", { authorization }), { connected: false });
+        assert.equal(badge.kind, "attention");
+        assert.equal(badge.connectable, authorization === "drifted", "a widened grant must be removed first");
+    }
+});
+
+test("unsupported and unreachable clusters cannot be connected, and say which", () => {
+    assert.deepEqual(plain(A.clusterBadge(found("prod", { supported: false }), null)), { kind: "unsupported", text: "Not supported", connectable: false });
+    assert.deepEqual(plain(A.clusterBadge(found("docker-desktop", { reachable: false }), null)), { kind: "unreachable", text: "Not reachable", connectable: false });
+});
+
+test("a badge never contains anything from the kubeconfig", () => {
+    const hostile = found("<img src=x onerror=alert(1)>", { authorization: "<b>x</b>" });
+    assert.doesNotMatch(JSON.stringify(A.clusterBadge(hostile, { connected: false })), /img|onerror|<b>/);
+});
+
+test("finding clusters only ever runs the read-only discover command: a new cluster is never connected or changed by being found", async () => {
+    const listing = JSON.stringify({ ok: true, command: "discover", state: "connected", contexts: [{ name: "docker-desktop", server: "127.0.0.1:50345", supported: true, reachable: true, authorization: "absent" }] });
+    const w = world({ statuses: [{ connected: false }], helper: listing });
+
+    const first = await w.controller.discover();
+    await w.controller.tick();
+    await w.controller.discover();
+
+    assert.equal(first.contexts[0].name, "docker-desktop");
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["discover"], ["discover"]], "nothing but discover: no authorize, no reconnect");
+});
+
+test("a newly found cluster is connected only by the person's own action, which runs the normal authorize with its native dialog", async () => {
+    const w = world({ statuses: [{ connected: false }], helper: JSON.stringify({ ok: true, command: "authorize", state: "connected", context: "docker-desktop" }) });
+    await w.controller.tick();
+    assert.equal(w.calls.length, 0);
+
+    const result = await w.controller.setup("docker-desktop");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["authorize", "docker-desktop"]]);
+});

@@ -30,6 +30,13 @@ ROUTES = {
     # Stored results of Member 2's live KinD placement-drift runs (experiments/placement_drift/results):
     # recorded observations of a separate research cluster, labelled "[Validation]", not the connected one.
     ("GET", "/api/deployments/benchmarks/live-experiments"),
+    # Component 1's guarded local Online Boutique intervention runner (app/api/workflows.py). It serves no
+    # sample or fixture data: it stops one named container of this repository's Docker Compose demo, collects
+    # live Jaeger trials while it is down and always restores it. It is named here only because "demo" is in
+    # the path. Restricted to loopback clients with an explicit X-Local-Demo-Confirm header, an approved
+    # service list and containers proven to belong to deploy/docker-compose.boutique.yml (403/422/503
+    # otherwise); no page calls it. Covered by tests/workflow_dependency_modeling/test_local_boutique_intervention.py.
+    ("POST", "/api/workflows/experiment-campaigns/{campaign_id}/local-demo/{target_service}/run-cohort"),
 }
 
 PATHS = {path for _, path in ROUTES}

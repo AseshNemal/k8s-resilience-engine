@@ -54,12 +54,36 @@
     // `automatic` is true where the host helper can set up self-renewing access (see autoconnect.js);
     // `auto` is the renewal controller's snapshot, when there is one.
     // A credential added by hand never renews itself, so there the wording leads to that setup.
+    // Not connected, but the person approved a cluster earlier. Unless they disconnected it, the extension
+    // reconnects it by itself (autoconnect.js), so this says what is happening, not "no cluster connected".
+    function describeApproved(approved, automatic, auto) {
+        const name = approved.context;
+        if (approved.disconnectedByUser) {
+            return { state: "none", chip: "Not connected", title: `${name} is disconnected`,
+                detail: `You disconnected ${name}, so it will not reconnect by itself. Connect it again to approve it. Until then pages show an error instead of data.`,
+                action: "Connect cluster" };
+        }
+        if (!automatic) return null;
+        if (auto && auto.phase === "attention") {
+            return { state: "attention", chip: "Needs your attention", title: "The extension's access needs you",
+                detail: auto.message || "The cluster has to be approved again.", action: "Manage connection" };
+        }
+        const reason = auto && auto.phase === "retrying" && auto.message ? `${auto.message} ` : "";
+        return { state: "renewing", chip: "Reconnecting…", title: `Reconnecting to ${name}`,
+            detail: `${reason}You approved this cluster earlier, so it reconnects by itself. No action is needed; pages show data again as soon as that finishes.`,
+            action: null };
+    }
+
     function describeCluster(status, now, automatic, auto) {
         if (!status) {
             return { state: "error", chip: "Backend unavailable", title: "The extension backend is not responding",
                 detail: "Wait a few seconds and reload. If it persists, restart the extension.", action: null };
         }
         if (!status.connected) {
+            if (status.approved) {
+                const approved = describeApproved(status.approved, automatic, auto);
+                if (approved) return approved;
+            }
             return { state: "none", chip: "Not connected", title: "No cluster connected",
                 detail: "No cluster is connected, so pages show an error instead of data. Connect a read-only credential to see your own cluster.",
                 action: "Connect cluster" };

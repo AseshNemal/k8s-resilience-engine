@@ -158,7 +158,7 @@ def test_the_page_says_nothing_happens_without_approval_in_a_system_dialog(built
     assert "nothing is changed unless you approve there" in page
 
 
-@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js"])
+@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js", "namespaces.js"])
 def test_the_new_scripts_never_write_html_or_log(script):
     source = (UI_SRC / script).read_text(encoding="utf-8")
     # Comments may discuss these APIs (they explain why they are not used); only code is checked.
@@ -226,3 +226,63 @@ def test_build_refuses_a_folder_that_is_not_an_earlier_build(tmp_path):
 def test_build_refuses_paths_outside_the_working_and_temp_directories(outside):
     with pytest.raises(SystemExit):
         build_ui.main(outside)
+
+
+# ---- applications in the cluster: namespace suggestions and the Connect page's list -------------------------
+
+@pytest.mark.parametrize("name", PAGE_FILES)
+def test_every_page_loads_the_namespace_script_after_the_connection_scripts(built, name):
+    page = html(built, name)
+    assert 'src="namespaces.js"' in page, name
+    # It reacts to the event autoconnect.js sends, so it loads after it.
+    assert page.index('src="chrome.js"') < page.index('src="autoconnect.js"') < page.index('src="namespaces.js"')
+
+
+def test_the_trace_bridge_still_loads_after_the_namespace_script_on_the_workflows_page(built):
+    page = html(built, "workflows.html")
+    assert page.index('src="namespaces.js"') < page.index('src="trace-service.js"')
+
+
+@pytest.mark.parametrize("name", ["failure-impacts.html", "recommendations.html"])
+def test_the_pages_that_take_a_namespace_still_expose_the_box_the_suggestions_attach_to(built, name):
+    # If an owner renames this hook the suggestions would silently stop; this makes that visible.
+    assert 'data-role="namespace"' in html(built, name)
+
+
+def test_connect_page_lists_applications_with_every_element_the_script_fills(built):
+    page = html(built, "connect.html")
+    for role in ["apps-card", "apps-status", "apps-list"]:
+        assert f'data-role="{role}"' in page, role
+    assert re.search(r'<section[^>]*data-role="apps-card"[^>]*\shidden', page), "hidden until the script has something honest to say"
+    assert page.index('data-role="auto-card"') < page.index('data-role="apps-card"') < page.index('data-role="manual-details"')
+
+
+def test_the_apps_list_says_it_adds_nothing_and_marks_incomplete_evidence(built):
+    page = html(built, "connect.html")
+    assert "nothing is added" in page and "incomplete" in page
+
+
+def test_connect_page_explains_first_connection_reconnection_and_disconnect(built):
+    page = html(built, "connect.html")
+    assert ">Connect</button>" in page and "Not connected" in page
+    assert "stays disconnected until you connect" in page
+    assert "A system dialog shows the exact cluster" in page
+
+
+def test_the_namespace_script_reads_one_discovery_url_and_never_writes(built):
+    code = (UI_SRC / "namespaces.js").read_text(encoding="utf-8")
+    code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
+    code = re.sub(r"(?m)^\s*//.*$", "", code)
+    assert re.findall(r'"(/api/[^"]*)"', code) == ["/api/deployments/discovery/all"]
+    assert not re.search(r"method\s*:", code), "it only reads"
+
+
+def test_every_script_a_built_page_loads_is_copied_into_the_image(built):
+    # The final image copies the extension's own scripts by name. A page that loads one that is not listed
+    # would 404 in the installed extension while every unit test passed.
+    dockerfile = (UI_SRC.parents[1] / "extension" / "Dockerfile").read_text(encoding="utf-8")
+    copied = re.search(r"COPY (extension/ui-src/\S+(?: extension/ui-src/\S+)*) /ui/", dockerfile).group(1).split()
+    shipped = {Path(path).name for path in copied}
+    loaded = {name for page in PAGE_FILES for name in re.findall(r'<script src="([A-Za-z0-9_-]+\.js)"', html(built, page))}
+    assert loaded, "the pages load the extension's scripts"
+    assert loaded <= shipped, sorted(loaded - shipped)

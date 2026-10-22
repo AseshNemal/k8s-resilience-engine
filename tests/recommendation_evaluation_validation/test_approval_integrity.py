@@ -32,8 +32,9 @@ def test_client_cannot_override_canonical_facts(client: TestClient, mock_get_sam
     # The recommendation_snapshot should contain the canonical data from the live recommendation source
     snapshot = data["recommendationSnapshot"]
     
-    # In mock_get_sample, score is 0.0 and blast radius is 0.5
-    assert snapshot["score"] == 0.0
+    # In mock_get_sample, the ranked candidate's score is 0.8 and blast radius is 0.5 (a zero score would not
+    # be approvable at all any more)
+    assert snapshot["score"] == pytest.approx(0.8)
     assert snapshot["predicted_blast_radius"] == 0.5
     assert "fakeField" not in snapshot
     

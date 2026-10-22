@@ -36,6 +36,22 @@ type RejectedError struct{ Message string }
 
 func (e *RejectedError) Error() string { return e.Message }
 
+// Identity is what makes a cluster THE cluster a person approved: the API endpoint they connected to and the
+// fingerprint of the certificate authority that signs it. Neither is secret.
+type Identity struct {
+	Server   string `json:"server"`   // host:port of the API server in the person's kubeconfig
+	CASha256 string `json:"caSha256"` // hex SHA-256 of the cluster's certificate authority
+}
+
+// Approval is the backend's record of the one cluster the person approved. Reconnecting automatically is
+// allowed only for this cluster, and never once the person has disconnected it.
+type Approval struct {
+	Context            string `json:"context"`
+	Server             string `json:"server"`
+	CASha256           string `json:"caSha256"`
+	DisconnectedByUser bool   `json:"disconnectedByUser,omitempty"`
+}
+
 // Status mirrors the backend's GET /_extension/cluster. It contains no credential.
 type Status struct {
 	Connected bool   `json:"connected"`
@@ -46,6 +62,8 @@ type Status struct {
 	ExpiresAt string `json:"expiresAt,omitempty"`
 	RenewAt   string `json:"renewAt,omitempty"`
 	Expired   bool   `json:"expired,omitempty"`
+	// Approved is set whenever the person has approved a cluster, whether or not it is connected now.
+	Approved *Approval `json:"approved,omitempty"`
 }
 
 // InstallRequest is a credential for the backend. Kubeconfig holds the token, so it is a secret.
@@ -53,6 +71,11 @@ type InstallRequest struct {
 	Kubeconfig secret.Bytes
 	Context    string
 	ExpiresAt  time.Time // what Kubernetes reported, a fallback if the token has no readable exp
+	// Origin says why the credential is being installed: authorize (the person just approved), renew or
+	// reconnect (nobody was asked). The backend refuses the last two unless they match the approval it holds
+	// and the person has not disconnected.
+	Origin   string
+	Identity *Identity
 }
 
 type Backend interface {
@@ -64,9 +87,15 @@ type Backend interface {
 
 // payload is the JSON body shared by both transports (and accepted by the Python ingest command).
 func payload(req InstallRequest) (secret.Bytes, error) {
-	managed := map[string]string{"context": req.Context}
+	managed := map[string]any{"context": req.Context}
 	if !req.ExpiresAt.IsZero() {
 		managed["expiresAt"] = req.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	if req.Origin != "" {
+		managed["origin"] = req.Origin
+	}
+	if req.Identity != nil {
+		managed["identity"] = req.Identity
 	}
 	body, err := json.Marshal(map[string]any{
 		"kubeconfig": string(req.Kubeconfig.Reveal()),

@@ -1,7 +1,10 @@
+import hashlib
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Optional
 
-from .models import ApprovalModel, has_verified_provenance
+from .eligibility import evaluate_eligibility
+from .models import ApprovalModel, LiveRecommendation, has_verified_provenance
 from .repository import ApprovalRepository
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.approval import ApprovalStatus
@@ -30,9 +33,52 @@ class UnverifiedProvenanceError(EvidenceError):
             component="recommendation",
         )
 
+def _sha256(text: str | None) -> str | None:
+    return None if text is None else hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _yaml_record(yaml_snapshot: str | None) -> dict:
+    """What is recorded about the YAML stored with a request.
+
+    The YAML is supplied by the client. Nothing here generates it, and nothing checks that it matches the
+    recommendation, so the hash is an INTEGRITY check only: it shows the stored text is unchanged since the request,
+    not that the text does what the recommendation says. That is stated in the record so it cannot be read as
+    verification. Approving applies nothing, whatever the YAML says.
+    """
+    return {"sha256": _sha256(yaml_snapshot), "origin": "client-supplied", "verifiedAgainstRecommendation": False}
+
+
+# Approving a candidate that is not the top-ranked one needs a written reason of at least this many characters.
+MIN_JUSTIFICATION_CHARS = 20
+
+
+class StaleProposalError(EvidenceError):
+    """The proposal an approval was requested for is not what the current evaluation recommends any more."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            "APPROVAL_PROPOSAL_STALE",
+            f"{detail} Reject this request and request a new approval from the current recommendation.",
+            http_status=409,
+            component="recommendation",
+        )
+
+
 class ApprovalService:
-    def __init__(self, repository: ApprovalRepository):
+    """The approval gate.
+
+    A candidate can be put forward, and later approved, only when the server's own evaluation says it is
+    verified feasible and ranked with a positive score (``eligibility.py``). The evaluation is the one passed in
+    when the request is made and a fresh one when it is decided, so a request written before this policy, or
+    one the cluster has since overtaken, is judged by what is true now. The request is also bound to the exact
+    proposal (``eligibility.proposal_fingerprint``): if the plan or its predicted effect has changed since it was
+    requested, it is refused as stale. The top-ranked candidate is the automatic selection; any other ranked
+    candidate needs a documented justification in the approval note.
+    """
+
+    def __init__(self, repository: ApprovalRepository, min_justification_chars: int = MIN_JUSTIFICATION_CHARS):
         self.repository = repository
+        self.min_justification_chars = min_justification_chars
 
     def request_approval(
         self,
@@ -54,6 +100,11 @@ class ApprovalService:
         if not candidate.feasible:
             raise PreconditionError(f"Candidate {recommendation_id} is not feasible")
 
+        standing = evaluate_eligibility(LiveRecommendation(report=recommendation, evidence=evidence or {}),
+                                        recommendation_id)
+        if not standing.eligible:
+            raise PreconditionError(standing.reason)
+
         existing = self.repository.get_by_recommendation_id(recommendation_id)
         if existing and existing.status == ApprovalStatus.PENDING_APPROVAL:
             raise StateTransitionError("Approval already pending")
@@ -66,6 +117,13 @@ class ApprovalService:
             "resource_cost": candidate.resource_cost,
             "confidence": candidate.confidence,
             "score": candidate.score,
+        }
+        evaluation_snapshot["selection"] = standing.to_dict()
+        evaluation_snapshot["proposal"] = {
+            "fingerprint": standing.fingerprint,
+            "failedNode": (evidence or {}).get("failedNode"),
+            "topologySnapshotId": (evidence or {}).get("topologySnapshotId"),   # for audit; not part of the binding
+            "yaml": _yaml_record(yaml_snapshot),
         }
         if evidence is not None:
             evaluation_snapshot["provenance"] = dict(evidence)
@@ -93,7 +151,14 @@ class ApprovalService:
         expected_proposal_version: str,
         note: str,
         decided_by: str = "developer",
+        evaluate: Callable[[ApprovalModel], LiveRecommendation] | None = None,
     ) -> ApprovalModel:
+        """Approve a pending request.
+
+        ``evaluate`` re-runs the server's evaluation for the workflow and failure the request was made for. It
+        is called only after the state, version and provenance checks pass, and without it nothing can be
+        approved: eligibility is never taken from what was stored when the request was made.
+        """
         approval = self.repository.get_by_recommendation_id(recommendation_id)
         if not approval:
             raise PreconditionError("No approval requested for this recommendation")
@@ -109,10 +174,40 @@ class ApprovalService:
         if not has_verified_provenance(approval):
             raise UnverifiedProvenanceError()
 
+        if evaluate is None:
+            raise PreconditionError("There is no current evaluation to check this candidate against, so it "
+                                    "cannot be approved")
+        standing = evaluate_eligibility(evaluate(approval), recommendation_id)
+        if not standing.eligible:
+            raise PreconditionError(standing.reason)
+        bound = ((approval.evaluation_snapshot or {}).get("proposal") or {}).get("fingerprint")
+        if bound is None:
+            raise StaleProposalError("This approval request predates proposal binding, so it cannot be shown to be "
+                                     "for what the current evaluation recommends.")
+        if bound != standing.fingerprint:
+            raise StaleProposalError("The plan or the predicted effect of this proposal has changed since it was "
+                                     "requested (the topology moved), so it is not what the developer was shown.")
+        recorded_yaml = ((approval.evaluation_snapshot or {}).get("proposal") or {}).get("yaml") or {}
+        if recorded_yaml.get("sha256") != _sha256(approval.yaml_snapshot):
+            raise StaleProposalError("The YAML stored with this request is not the YAML it was requested with "
+                                     "(an integrity check only: the YAML is client-supplied and is not verified "
+                                     "against the recommendation).")
+        justification = (note or "").strip()
+        if standing.requires_justification and len(justification) < self.min_justification_chars:
+            raise PreconditionError(
+                f"Candidate {recommendation_id} is ranked {standing.rank}; the top-ranked candidate is "
+                f"{standing.selected_recommendation_id}. Approving another candidate needs a documented "
+                f"justification of at least {self.min_justification_chars} characters in the note.")
+
+        decided_at = datetime.now(timezone.utc)
         approval.status = ApprovalStatus.APPROVED
-        approval.decided_at = datetime.now(timezone.utc)
+        approval.decided_at = decided_at
         approval.decided_by = decided_by
         approval.decision_note = note
+        approval.evaluation_snapshot = {**(approval.evaluation_snapshot or {}), "approvalCheck": {
+            **standing.to_dict(), "proposalFingerprint": standing.fingerprint,
+            "yamlVerifiedAgainstRecommendation": False, "appliesNothing": True, "checkedAt": decided_at.isoformat(),
+            "justification": justification if standing.requires_justification else None}}
 
         return self.repository.update(approval)
 

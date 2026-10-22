@@ -31,9 +31,12 @@ func TestDiscoverClassifiesEveryContextButOnlyContactsSupportedOnes(t *testing.T
 	if c := by[ctxName]; !c.Supported || c.Reachable == nil || !*c.Reachable || c.Version != "v1.37.0" || c.Authorization != "approved" || !c.Current {
 		t.Fatalf("kind context = %+v", c)
 	}
-	for _, name := range []string{"docker-desktop", "prod-cluster", "minikube"} {
-		if by[name].Supported || by[name].Reason == "" {
-			t.Errorf("%s must be unsupported with a reason: %+v", name, by[name])
+	// docker-desktop here is Docker Desktop's other, kubeadm-style mode (kubernetes.docker.internal:6443): a
+	// candidate by name but not a loopback address, so it is refused before any network access. A loopback
+	// docker-desktop that is a kind cluster is supported: see verify_test.go.
+	for name, reason := range map[string]string{"docker-desktop": "loopback", "prod-cluster": "loopback", "minikube": "kind-*"} {
+		if by[name].Supported || !strings.Contains(by[name].Reason, reason) {
+			t.Errorf("%s must be unsupported because of %q: %+v", name, reason, by[name])
 		}
 		if l.called[name] != 0 {
 			t.Errorf("%s must never be contacted, Client was called %d times", name, l.called[name])
@@ -307,7 +310,7 @@ func TestDriftedAccessIsRepairedOnlyAfterTheDialogListsTheUpdate(t *testing.T) {
 
 // ---------------------------------------------------------------- authorize: contexts the UI names
 
-func TestOnlySupportedLocalKindContextsCanBeAuthorized(t *testing.T) {
+func TestOnlyCandidateContextsOnLoopbackCanBeAuthorized(t *testing.T) {
 	cs := newCluster(8 * time.Hour)
 	for _, name := range []string{
 		"docker-desktop", "prod-cluster", "minikube", "no-such-context", "",
@@ -330,9 +333,10 @@ func TestOnlySupportedLocalKindContextsCanBeAuthorized(t *testing.T) {
 	}
 }
 
-func TestClassifyAcceptsOnlyLocalHttpsKindClusters(t *testing.T) {
+func TestClassifyAcceptsOnlyLocalHttpsCandidates(t *testing.T) {
 	good := []struct{ name, server string }{
 		{"kind-a", "https://127.0.0.1:1234"}, {"kind-a", "https://localhost:1"}, {"kind-a", "https://[::1]:6443"},
+		{"docker-desktop", "https://127.0.0.1:50345"}, // Docker Desktop's kind-based cluster, now a candidate
 	}
 	for _, g := range good {
 		if ok, why := Classify(g.name, g.server); !ok {
@@ -341,7 +345,8 @@ func TestClassifyAcceptsOnlyLocalHttpsKindClusters(t *testing.T) {
 	}
 	bad := []struct{ name, server string }{
 		{"kind-a", "http://127.0.0.1:1234"}, {"kind-a", "https://10.0.0.1:6443"}, {"kind-a", "https://127.0.0.1.evil.com:6443"},
-		{"kind-a", "https://127.0.0.1@evil.com:6443"}, {"docker-desktop", "https://127.0.0.1:6443"}, {"kind-a", ""}, {"kind-a", "::::"},
+		{"kind-a", "https://127.0.0.1@evil.com:6443"}, {"docker-desktop", "https://kubernetes.docker.internal:6443"},
+		{"minikube", "https://127.0.0.1:6443"}, {"kind-a", ""}, {"kind-a", "::::"},
 	}
 	for _, b := range bad {
 		if ok, _ := Classify(b.name, b.server); ok {

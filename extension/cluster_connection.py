@@ -6,17 +6,25 @@ credential, stores a normalised copy at KUBECONFIG, and never logs or returns it
 """
 
 import base64
+import contextlib
 import json
 import os
 import re
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
+
+try:  # the backend runs in a Linux container; a developer machine without fcntl simply has no cross-process lock
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 from app.integrations.kubernetes import rest
 
@@ -56,12 +64,45 @@ def _valid_context(name: object) -> bool:
 
 router = APIRouter(prefix="/_extension", tags=["Extension"])
 
+# How long a disconnect waits for a connection attempt that is running before it says so.
+DISCONNECT_WAIT_SECONDS = 20.0
+SERVER = re.compile(r"^(?:[A-Za-z0-9.-]{1,253}(?::[0-9]{1,5})?|\[[0-9A-Fa-f:]{2,45}\]:[0-9]{1,5})$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+class Identity(BaseModel):
+    """What makes a cluster the one a person approved: its API address and certificate authority. Not secret."""
+
+    server: str
+    caSha256: str
+
+    @field_validator("server")
+    @classmethod
+    def _valid_server(cls, value: str) -> str:
+        if not SERVER.match(value):
+            raise ValueError("invalid server")
+        return value
+
+    @field_validator("caSha256")
+    @classmethod
+    def _valid_fingerprint(cls, value: str) -> str:
+        if not SHA256.match(value):
+            raise ValueError("invalid fingerprint")
+        return value
+
 
 class ManagedInfo(BaseModel):
-    """Non-secret facts about a credential the host helper installed (never the credential itself)."""
+    """Non-secret facts about a credential the host helper installed (never the credential itself).
+
+    ``origin`` says why it is being installed: ``authorize`` is a person's explicit approval, ``renew`` and
+    ``reconnect`` ask nobody and are only accepted for the approved identity and never after a disconnect.
+    Absent means an older helper, which is treated like a renewal that cannot record an identity.
+    """
 
     context: str
     expiresAt: str | None = None
+    origin: Literal["authorize", "renew", "reconnect"] | None = None
+    identity: Identity | None = None
 
     @field_validator("context")
     @classmethod
@@ -216,7 +257,8 @@ def _store_managed(info: ManagedInfo | None) -> None:
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".managed-")
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(info.model_dump(), handle)
+            # Only what the record always held: the origin and identity belong to approval.json, not here.
+            json.dump(info.model_dump(include={"context", "expiresAt"}), handle)
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
     except BaseException:
@@ -230,6 +272,109 @@ def _read_managed() -> dict | None:
         return data if isinstance(data, dict) and _valid_context(data.get("context")) else None
     except (OSError, ValueError):
         return None
+
+
+# ---- the approved cluster, and whether the person disconnected it -------------------------------------------
+#
+# approval.json lives next to the credential in the data volume, so it survives page reloads, backend restarts
+# and the helper's background job. It holds no credential: the context name, the cluster's API address, the
+# fingerprint of its certificate authority, and whether the person disconnected it.
+
+
+def _approval_path() -> Path:
+    return KUBECONFIG_PATH.parent / "approval.json"
+
+
+def _write_private_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".record-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(data, handle)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def _read_approval() -> dict | None:
+    try:
+        data = json.loads(_approval_path().read_text(encoding="utf-8"))
+        identity = Identity(server=data["server"], caSha256=data["caSha256"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not _valid_context(data.get("context")):
+        return None
+    return {
+        "context": data["context"], "server": identity.server, "caSha256": identity.caSha256,
+        "disconnectedByUser": data.get("disconnectedByUser") is True,
+    }
+
+
+def _write_approval(context: str, identity: Identity, *, disconnected: bool) -> None:
+    _write_private_json(_approval_path(), {
+        "context": context, "server": identity.server, "caSha256": identity.caSha256,
+        "disconnectedByUser": disconnected, "recordedAt": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+def _mark_disconnected() -> None:
+    """The person disconnected: keep who was approved, but never reconnect or renew it without a new approval."""
+    record = _read_approval()
+    if record is not None and not record["disconnectedByUser"]:
+        _write_approval(record["context"], Identity(server=record["server"], caSha256=record["caSha256"]), disconnected=True)
+
+
+def _check_origin(managed: ManagedInfo) -> bool:
+    """Refuse an install nobody asked for unless it is for the cluster the person approved and still wants.
+
+    Returns True when the install should record the identity (a connection from before identities existed,
+    renewed once). Raises 409 otherwise.
+    """
+    origin, record = managed.origin, _read_approval()
+    if record is not None and record["disconnectedByUser"] and origin != "authorize":
+        raise _bad("You disconnected this cluster, so it is not reconnected or renewed automatically. Connect it again to approve it.", 409)
+    if origin in (None, "authorize"):
+        return False
+    if record is None:
+        current = _read_managed()
+        if origin == "renew" and KUBECONFIG_PATH.is_file() and current and current["context"] == managed.context:
+            return managed.identity is not None
+        raise _bad("No cluster has been approved, so nothing is renewed or reconnected without asking. Connect it first.", 409)
+    different = managed.identity is not None and (
+        managed.identity.server != record["server"] or managed.identity.caSha256 != record["caSha256"]
+    )
+    if record["context"] != managed.context or different:
+        raise _bad("This is not the cluster you approved (its context, address or certificate authority differs), so nothing was changed.", 409)
+    return False
+
+
+@contextlib.contextmanager
+def _connection_lock(wait: float):
+    """One connection, renewal or disconnect at a time, across the server and the helper's ingest processes.
+
+    A file lock in the data volume (both run in this container). ``wait`` is how long to wait for the running
+    one; 0 refuses at once.
+    """
+    if fcntl is None:  # pragma: no cover
+        yield
+        return
+    KUBECONFIG_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    handle = os.fdopen(os.open(KUBECONFIG_PATH.parent / ".connect.lock", os.O_CREAT | os.O_RDWR, 0o600), "r+")
+    try:
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise _bad("Another connection or renewal is already running; try again shortly.", 409) from None
+                time.sleep(0.05)
+        yield
+    finally:
+        handle.close()  # closing releases the lock, whatever happened
 
 
 def _token_claims(token: str) -> dict:
@@ -261,7 +406,33 @@ def _renew_at(expires: datetime, issued: datetime | None) -> datetime:
     return expires - lead
 
 
+def _approval_view() -> dict | None:
+    record = _read_approval()
+    if record is None:
+        return None
+    return {
+        "context": record["context"], "server": record["server"], "caSha256": record["caSha256"],
+        "disconnectedByUser": record["disconnectedByUser"],
+    }
+
+
+def _disconnected_status() -> dict:
+    status: dict = {"connected": False}
+    approved = _approval_view()
+    if approved is not None:
+        status["approved"] = approved
+    return status
+
+
 def _status() -> dict:
+    status = _connected_status()
+    approved = _approval_view()
+    if approved is not None:
+        status["approved"] = approved
+    return status
+
+
+def _connected_status() -> dict:
     if not KUBECONFIG_PATH.is_file():
         return {"connected": False}
     try:
@@ -323,10 +494,22 @@ def connect(kubeconfig: str, managed: ManagedInfo | None = None) -> dict:
             raise _bad(f"A managed connection must use {MANAGED_SERVER_HOST} as the API server.")
         if "token" not in document["users"][0]["user"]:
             raise _bad("A managed connection must use a bearer token.")
-    _verify_read_only(document)
-    _store(document)
-    _store_managed(managed)  # a manual upload clears any earlier managed record
-    return _status()
+        if managed.origin == "reconnect" and managed.identity is None:
+            raise _bad("A reconnect must carry the identity of the cluster that was approved.")
+    with _connection_lock(wait=0):
+        record_identity = managed is not None and _check_origin(managed)
+        _verify_read_only(document)
+        _store(document)
+        _store_managed(managed)  # a manual upload clears any earlier managed record
+        if managed is not None and managed.origin == "authorize":
+            # The person just approved this cluster: remember it, and forget any earlier disconnect.
+            if managed.identity is not None:
+                _write_approval(managed.context, managed.identity, disconnected=False)
+            else:
+                _approval_path().unlink(missing_ok=True)
+        elif record_identity:
+            _write_approval(managed.context, managed.identity, disconnected=False)
+        return _status()
 
 
 @router.put("/cluster")
@@ -334,8 +517,15 @@ def connect_cluster(request: ConnectRequest) -> dict:
     return connect(request.kubeconfig, request.managed)
 
 
+def disconnect() -> dict:
+    """The person's disconnect: remove the credential and remember the choice, so nothing reconnects it."""
+    with _connection_lock(wait=DISCONNECT_WAIT_SECONDS):
+        KUBECONFIG_PATH.unlink(missing_ok=True)
+        _managed_path().unlink(missing_ok=True)
+        _mark_disconnected()
+        return _status()
+
+
 @router.delete("/cluster")
 def disconnect_cluster() -> dict:
-    KUBECONFIG_PATH.unlink(missing_ok=True)
-    _managed_path().unlink(missing_ok=True)
-    return _status()
+    return disconnect()

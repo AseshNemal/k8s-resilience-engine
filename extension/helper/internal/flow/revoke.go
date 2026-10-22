@@ -14,6 +14,11 @@ import (
 // invalidates every token already issued.
 func Revoke(ctx context.Context, d Deps, name string) Result {
 	const cmd = "revoke"
+	release, busy := d.acquire(cmd)
+	if busy != nil {
+		return *busy
+	}
+	defer release()
 	c, refusal := d.supported(cmd, name)
 	if refusal != nil {
 		return *refusal
