@@ -226,7 +226,9 @@ window.DeploymentsIntentWidget = (function () {
             ruleChip("Anti-affinity", anti ? "declared" : "none", anti ? "ok" : "muted"),
             ruleChip("Node affinity", item.has_node_affinity ? "declared" : "none", item.has_node_affinity ? "ok" : "muted"),
             ruleChip("Rules satisfied", compliant == null ? "nothing to check" : compliant ? "yes" : "no", compliant == null ? "muted" : compliant ? "ok" : "danger"),
-            ruleChip("Limits (info)", limitsText(item), "muted"),
+            // Limits: the most CPU / memory one copy may use, as the YAML sets them (information only).
+            ruleChip("CPU limit", item.resource_limits?.cpu || "not set", "muted"),
+            ruleChip("Memory limit", item.resource_limits?.memory || "not set", "muted"),
         );
         rules.hidden = true;
         head.addEventListener("click", () => {
