@@ -81,7 +81,7 @@
         put("evidence-took", ms == null ? "n/a" : `${(ms / 1000).toFixed(2)} s`);
         put("evidence-complete", `${evidence.filter((e) => e.complete).length} of ${evidence.length}`);
         put("evidence-command", `kubectl -n ${body.namespace} get pods -o wide`);
-        put("evidence-line", `namespace ${body.namespace} · read at ${box.querySelector('[data-role="evidence-time"]').textContent}`);
+        put("evidence-line", `read at ${Number.isNaN(read.getTime()) ? "unknown time" : read.toLocaleTimeString()}`);
         box.hidden = false;
         // The main-output section names the same snapshot, so the JSON can be matched to what the page shows.
         document.querySelectorAll('[data-role="output-snapshot"]').forEach((n) => { n.textContent = graph.snapshotId || "n/a"; });
@@ -127,15 +127,34 @@
                 text: `All ${evaluated.length} services keep ready replicas on more than one node.${downNote}`,
             };
         }
-        const names = exposed.map((s) => s.name);
         return {
             state: "danger", icon: "⚠️",
             title: `${exposed.length} of ${evaluated.length} services would go down if one node fails`,
-            text: `Exposed: ${names.join(", ")}. Each has every ready replica on one node.${downNote}`,
+            text: `Each has every ready replica on one node. Click one to see why.${downNote}`,
+            names: exposed.map((s) => s.name),
         };
     }
 
-    function renderVerdict(namespace, verdict) {
+    function goToTab(tab) {
+        window.DeploymentsTabRouter?.switchTab(tab);
+        document.querySelector(".dashboard-tabs-wrapper")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    // An exposed service's name opens its drill-down on the Exposed services tab.
+    function nameChip(name) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "verdict__name";
+        chip.textContent = name;
+        chip.title = `Why is ${name} exposed?`;
+        chip.addEventListener("click", () => {
+            goToTab("drift");
+            window.DeploymentsModalManager?.openViolationModal(name);
+        });
+        return chip;
+    }
+
+    function renderVerdict(verdict) {
         const box = document.querySelector('[data-role="verdict"]');
         if (!box) return;
         const put = (role, text) => {
@@ -143,10 +162,10 @@
             if (node) node.textContent = text;
         };
         box.dataset.state = verdict.state;
-        put("verdict-namespace", namespace || "…");
         put("verdict-icon", verdict.icon);
         put("verdict-title", verdict.title);
         put("verdict-text", verdict.text);
+        box.querySelector('[data-role="verdict-names"]')?.replaceChildren(...(verdict.names || []).map(nameChip));
     }
 
     async function loadPage() {
@@ -166,7 +185,7 @@
 
             renderHeadlineMetrics(deployment);
             const services = deployment.services || [];
-            renderVerdict(body.namespace, verdictFor(services));
+            renderVerdict(verdictFor(services));
 
             if (window.DeploymentsTopologyWidget) {
                 window.DeploymentsTopologyWidget.renderZoneGrid(deployment);
@@ -189,7 +208,7 @@
             console.error("Failed to load deployment data:", error);
             const box = document.querySelector('[data-role="evidence-box"]');
             if (box) box.hidden = true;  // no live data shown, so nothing to vouch for
-            renderVerdict(scope().get(), {
+            renderVerdict({
                 state: "muted", icon: "⛔", title: "Could not read the cluster", text: "No verdict without live data; see the message above.",
             });
             if (applyBadge && renderStateCard && describeError && region) {
@@ -221,6 +240,9 @@
         if (window.DeploymentsIntentWidget) window.DeploymentsIntentWidget.init();
         if (window.DeploymentsLiveExperimentsWidget) window.DeploymentsLiveExperimentsWidget.init();
         if (window.DeploymentsModalManager) window.DeploymentsModalManager.init();
+        document.querySelectorAll("[data-goto-tab]").forEach((btn) => {
+            btn.addEventListener("click", () => goToTab(btn.dataset.gotoTab));
+        });
 
         loadNamespaces()
             .then(loadPage)
