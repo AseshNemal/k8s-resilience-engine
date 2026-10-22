@@ -92,20 +92,61 @@
 
     const readyCount = (s) => s.readyReplicas ?? s.ready_replicas ?? (s.pods ? s.pods.filter((p) => p.ready).length : 0);
 
+    const exposedDomains = (s) => s.exposedFailureDomains ?? s.exposed_failure_domains ?? [];
+
     function renderHeadlineMetrics(deployment) {
         const services = deployment.services || [];
         // Exposure rate (placement_metrics.exposure_rate): exposed / evaluated, where services with 0 ready
         // replicas are UNAVAILABLE and not evaluated. Exposed = non-empty exposedFailureDomains.
         const evaluated = services.filter((s) => readyCount(s) > 0);
-        const exposed = evaluated.filter((s) => (s.exposedFailureDomains ?? s.exposed_failure_domains ?? []).length > 0).length;
+        const exposed = evaluated.filter((s) => exposedDomains(s).length > 0).length;
+        const pods = services.reduce((acc, s) => acc + (s.pods || []).length, 0);
 
         setMetric("deployment-node-count", (deployment.nodes || []).length);
         setMetric("deployment-service-count", services.length);
-        setMetric("deployment-ready-pods", services.reduce((acc, s) => acc + readyCount(s), 0));
+        setMetric("deployment-ready-pods", `${services.reduce((acc, s) => acc + readyCount(s), 0)} / ${pods}`);
         setMetric(
             "deployment-exposed-services",
             evaluated.length ? `${exposed} / ${evaluated.length} (${ui().formatRatioAsPercentage(exposed / evaluated.length)})` : "n/a"
         );
+    }
+
+    // The sentence at the top of the page, from the same rule as the Exposed services tab.
+    function verdictFor(services) {
+        const evaluated = services.filter((s) => readyCount(s) > 0);
+        const exposed = evaluated.filter((s) => exposedDomains(s).length > 0);
+        const unavailable = services.length - evaluated.length;
+        const downNote = unavailable ? ` ${unavailable} service(s) have no ready replica at all.` : "";
+        if (!evaluated.length) {
+            return { state: "muted", icon: "⏸️", title: "No ready service to assess", text: `No service in this namespace has a ready replica.${downNote}` };
+        }
+        if (!exposed.length) {
+            return {
+                state: "ok", icon: "✅",
+                title: "No single node failure can take a service down",
+                text: `All ${evaluated.length} services keep ready replicas on more than one node.${downNote}`,
+            };
+        }
+        const names = exposed.map((s) => s.name);
+        return {
+            state: "danger", icon: "⚠️",
+            title: `${exposed.length} of ${evaluated.length} services would go down if one node fails`,
+            text: `Exposed: ${names.join(", ")}. Each has every ready replica on one node.${downNote}`,
+        };
+    }
+
+    function renderVerdict(namespace, verdict) {
+        const box = document.querySelector('[data-role="verdict"]');
+        if (!box) return;
+        const put = (role, text) => {
+            const node = box.querySelector(`[data-role="${role}"]`);
+            if (node) node.textContent = text;
+        };
+        box.dataset.state = verdict.state;
+        put("verdict-namespace", namespace || "…");
+        put("verdict-icon", verdict.icon);
+        put("verdict-title", verdict.title);
+        put("verdict-text", verdict.text);
     }
 
     async function loadPage() {
@@ -125,6 +166,7 @@
 
             renderHeadlineMetrics(deployment);
             const services = deployment.services || [];
+            renderVerdict(body.namespace, verdictFor(services));
 
             if (window.DeploymentsTopologyWidget) {
                 window.DeploymentsTopologyWidget.renderZoneGrid(deployment);
@@ -145,6 +187,9 @@
             console.error("Failed to load deployment data:", error);
             const box = document.querySelector('[data-role="evidence-box"]');
             if (box) box.hidden = true;  // no live data shown, so nothing to vouch for
+            renderVerdict(scope().get(), {
+                state: "muted", icon: "⛔", title: "Could not read the cluster", text: "No verdict without live data; see the message above.",
+            });
             if (applyBadge && renderStateCard && describeError && region) {
                 applyBadge(sourceBadge, { variant: "danger", text: "Not showing live data" });
                 renderStateCard(region, describeError(error), { onRetry: loadPage });

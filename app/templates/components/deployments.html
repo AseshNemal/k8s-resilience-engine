@@ -1,6 +1,5 @@
 {# Deployment Topology Modeling Master Dashboard. Owned by: Member 2 (P.A.M. Minara). #}
 {% extends "base.html" %}
-{% from "partials/metric_card.html" import metric_card %}
 {% from "partials/loading_state.html" import loading_state %}
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
@@ -54,12 +53,22 @@
     </details>
 </section>
 
-{# Headline metrics #}
-<section class="metric-grid" aria-label="Deployment metrics">
-    {{ metric_card("deployment-node-count", "Total Nodes", icon_name="server", icon_color="blue") }}
-    {{ metric_card("deployment-service-count", "Total Services", icon_name="topology", icon_color="teal") }}
-    {{ metric_card("deployment-ready-pods", "Ready Pods", icon_name="check-circle", icon_color="green") }}
-    {{ metric_card("deployment-exposed-services", "Exposed Services (one node failure = 0 ready)", icon_name="gauge", icon_color="red") }}
+{# The answer at a glance: can one worker-node failure take a service down? Then the headline numbers. #}
+<section class="verdict" data-role="verdict" data-state="loading" aria-live="polite" aria-label="Deployment verdict">
+    <div class="verdict__main">
+        <span class="verdict__icon" data-role="verdict-icon" aria-hidden="true">⏳</span>
+        <div class="verdict__words">
+            <p class="verdict__eyebrow">Namespace <strong data-role="verdict-namespace">…</strong></p>
+            <h3 class="verdict__title" data-role="verdict-title">Reading the cluster…</h3>
+            <p class="verdict__text" data-role="verdict-text"></p>
+        </div>
+    </div>
+    <dl class="verdict__stats" aria-label="Deployment metrics">
+        <div class="verdict__stat"><dt>Worker nodes</dt><dd data-metric="deployment-node-count">—</dd></div>
+        <div class="verdict__stat"><dt>Services</dt><dd data-metric="deployment-service-count">—</dd></div>
+        <div class="verdict__stat"><dt>Ready pods</dt><dd data-metric="deployment-ready-pods">—</dd></div>
+        <div class="verdict__stat verdict__stat--exposed"><dt>Exposed services</dt><dd data-metric="deployment-exposed-services">—</dd></div>
+    </dl>
 </section>
 
 {# Tab navigation #}
