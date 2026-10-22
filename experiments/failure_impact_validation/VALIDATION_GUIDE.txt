@@ -18,6 +18,7 @@ Use this order for every run:
 4. Probe every expected service and workflow.
 5. Record the observed results.
 6. Run validation.
+7. Evaluate all four research methods against the same observations.
 
 Do not capture the prediction after failure injection. By then, rescheduling or
 loss of cluster objects may have changed the topology, so it would no longer be
@@ -70,8 +71,9 @@ New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $workflowPath = Join-Path $runDirectory "workflow-graph.json"
 $deploymentPath = Join-Path $runDirectory "deployment-graph.json"
 $comparisonPath = Join-Path $runDirectory "method-comparison.json"
+$methodEvaluationPath = Join-Path $runDirectory "method-evaluation.json"
 
-foreach ($path in @($workflowPath, $deploymentPath, $comparisonPath)) {
+foreach ($path in @($workflowPath, $deploymentPath, $comparisonPath, $methodEvaluationPath)) {
     if (Test-Path -LiteralPath $path) {
         throw "Refusing to overwrite existing experiment artifact: $path"
     }
@@ -81,6 +83,15 @@ $escapedWorkflowId = [Uri]::EscapeDataString($workflowId)
 $escapedNamespace = [Uri]::EscapeDataString($namespace)
 $frozenWorkflow = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/workflows/$escapedWorkflowId/frozen"
 $deploymentGraph = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/deployments/live?namespace=$escapedNamespace"
+$workflowFreezeId = $frozenWorkflow.freezeId
+$deploymentSnapshotId = $deploymentGraph.snapshotId
+
+if ([string]::IsNullOrWhiteSpace($workflowFreezeId)) {
+    throw "The frozen workflow response did not include freezeId"
+}
+if ([string]::IsNullOrWhiteSpace($deploymentSnapshotId)) {
+    throw "The live deployment response did not include snapshotId"
+}
 
 $utf8NoBom = [Text.UTF8Encoding]::new($false)
 $workflowJson = $frozenWorkflow.graph | ConvertTo-Json -Depth 100
@@ -109,6 +120,13 @@ For a dependency scenario containing several services, repeat
 records each method's evidence scope so a replica vulnerability is not
 misreported as an observed service failure, and deployment-only analysis is not
 misreported as a workflow prediction.
+
+Inspect the comparison artifact before the failure. The experiment's service
+probe scope must include every service claimed by any method, including static
+`vulnerableServices`, deployment `unavailableServices`, and cross-layer
+`failedServices`. The workflow probe scope must include the compared workflow.
+If a claimed identifier cannot be probed, do not report method-level accuracy
+for that run.
 
 ## 1. Enter the real experiment identifiers
 
@@ -197,6 +215,8 @@ Then save the evidence manifest:
   --namespace $namespace `
   --observation-source $observationSource `
   --observed-at $observedAt `
+  --workflow-freeze-id $workflowFreezeId `
+  --deployment-snapshot-id $deploymentSnapshotId `
   --expected-service $serviceName `
   --service-result "$serviceName=$serviceResult" `
   --expected-workflow $workflowProbe `
@@ -208,9 +228,9 @@ For multiple services or workflows, repeat both the corresponding
 `--expected-*` and `--*-result` arguments. Every expected identifier must have
 exactly one result.
 
-When available, also supply `--workflow-freeze-id` and
-`--deployment-snapshot-id` so the experiment can be traced to its exact upstream
-inputs.
+The workflow freeze and deployment snapshot arguments are mandatory for this
+research workflow. The method evaluator rejects evidence that omits the
+deployment snapshot or names a different pre-failure topology.
 
 ## 5. Validate one experiment
 
@@ -226,7 +246,25 @@ inputs.
 The command prints the JSON result and writes the same UTF-8 JSON to
 `$validationPath`.
 
-## 6. Validate repeated experiments
+## 6. Evaluate all research methods
+
+Use the same complete evidence manifest to score the limited baselines and the
+proposed cross-layer method. Run this only after all declared probes have real
+results:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_method_evaluation.py `
+  --comparison $comparisonPath `
+  --evidence $evidencePath `
+  --output $methodEvaluationPath
+```
+
+The command verifies the failed node, deployment snapshot, experiment order,
+and probe coverage. A method dimension that is not supported by that baseline
+is exported as `null`; it is not counted as a correct empty prediction.
+
+## 7. Validate repeated experiments
 
 Create a batch manifest after completing two or more independent runs. Paths in
 the manifest are resolved relative to the manifest file:
@@ -294,6 +332,17 @@ score. For example, recall is undefined when no positive failure was observed.
 : The prediction and evidence came from different experiment scenarios. Do not
   combine them.
 
+`Method comparison and evidence must use the same deployment snapshot`
+
+: The comparison and observation do not share the same pre-failure topology.
+  Preserve both runs and repeat the experiment with matching inputs.
+
+`claims were not probed`
+
+: At least one baseline or cross-layer failure claim falls outside the declared
+  probe scope. Run the missing probe; do not treat the missing observation as a
+  successful service or workflow.
+
 `refusing to overwrite ...`
 
 : The output already exists. Preserve it and use a new experiment ID or output
@@ -314,6 +363,8 @@ Expected input failures return exit code `2` with a concise `error:` message.
   tests\failure_impact_prediction\test_validation_input_capture.py `
   tests\failure_impact_prediction\test_validation_runner.py `
   tests\failure_impact_prediction\test_validation_batch_runner.py `
+  tests\failure_impact_prediction\test_method_evaluation_runner.py `
+  tests\failure_impact_prediction\test_method_comparison_guide.py `
   -v --basetemp .pytest-tmp-validation-guide
 ```
 

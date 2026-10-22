@@ -41,3 +41,24 @@ def test_guide_declares_dependency_scenario_before_observation() -> None:
 
     assert declaration < failure_experiment
     assert "Never populate it from the\nfailures observed" in guide
+
+
+def test_guide_records_required_comparison_provenance() -> None:
+    guide = GUIDE.read_text(encoding="utf-8")
+
+    assert "$workflowFreezeId = $frozenWorkflow.freezeId" in guide
+    assert "$deploymentSnapshotId = $deploymentGraph.snapshotId" in guide
+    assert "--workflow-freeze-id $workflowFreezeId" in guide
+    assert "--deployment-snapshot-id $deploymentSnapshotId" in guide
+    assert "mandatory for this\nresearch workflow" in guide
+
+
+def test_guide_documents_post_failure_method_evaluation() -> None:
+    guide = GUIDE.read_text(encoding="utf-8")
+
+    assert "run_method_evaluation.py" in guide
+    assert "--comparison $comparisonPath" in guide
+    assert "--evidence $evidencePath" in guide
+    assert "--output $methodEvaluationPath" in guide
+    assert "claims were not probed" in guide
+    assert "exported as `null`" in guide
