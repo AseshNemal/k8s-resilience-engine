@@ -121,10 +121,12 @@ window.DeploymentsDriftWidget = (function () {
             });
             const ready = Object.values(cells).reduce((n, c) => n + c.ready, 0);
             const exposedOn = svc.exposedFailureDomains ?? svc.exposed_failure_domains ?? [];
+            // The graph's own replica concentration: largest share of the ready copies on one node.
+            const concentration = svc.replicaConcentration ?? svc.replica_concentration ?? null;
             let status = "safe";
             if (ready === 0) status = "unavailable";
             else if (exposedOn.length) status = "exposed";
-            return { name: svc.name, cells, ready, status, exposedOn };
+            return { name: svc.name, cells, ready, status, exposedOn, concentration };
         });
         // Pods on a node the graph does not list (or on none) still get a column, so no pod disappears.
         const extra = new Set();
@@ -172,7 +174,7 @@ window.DeploymentsDriftWidget = (function () {
     // -----------------------------------------------------------------------------------------------
 
     const STEP_MS = 2600;
-    const board = { deployment: null, rows: [], columns: [], failed: null, focus: null, timer: null };
+    const board = { deployment: null, rows: [], columns: [], failed: null, focus: null, preview: null, timer: null };
     const hueOf = (name) => window.DeploymentsTopologyWidget?.hueOf?.(name) ?? 215;
     const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -195,6 +197,20 @@ window.DeploymentsDriftWidget = (function () {
         }
         const head = el("span", "wi-node__head");
         head.append(el("span", "wi-node__icon", pending ? "⏳" : "🖥️"), el("strong", null, pending ? "Pending" : shortNode(column)));
+        if (!pending) {
+            // Failure-domain exposure: the services this node alone would take down (from the graph).
+            const takesDown = board.rows.filter((r) => r.exposedOn.includes(column)).map((r) => r.name);
+            const risk = el("span", takesDown.length ? "wi-node__risk wi-node__risk--danger" : "wi-node__risk", takesDown.length ? `💥 ${takesDown.length}` : "✅ 0");
+            risk.title = takesDown.length
+                ? `Single point of failure for ${takesDown.join(", ")}: if ${shortNode(column)} fails, they go down.`
+                : `No service depends on ${shortNode(column)} alone.`;
+            head.appendChild(risk);
+            // Hover = preview: the cards this node would take down are marked before anything is crashed.
+            box.addEventListener("mouseenter", () => { board.preview = column; paint(); });
+            box.addEventListener("mouseleave", () => { board.preview = null; paint(); });
+            box.addEventListener("focus", () => { board.preview = column; paint(); });
+            box.addEventListener("blur", () => { board.preview = null; paint(); });
+        }
         const stamp = el("span", "wi-node__stamp", "✕ DOWN");
         const pods = el("span", "wi-node__pods");
         board.rows.forEach((row) => {
@@ -217,6 +233,7 @@ window.DeploymentsDriftWidget = (function () {
         card.append(
             el("span", "wi-svc__name", row.name),
             el("span", "wi-svc__copies"),
+            concentrationBar(row),
             el("span", "wi-svc__state"),
         );
         card.addEventListener("click", () => {
@@ -224,6 +241,33 @@ window.DeploymentsDriftWidget = (function () {
             paint();
         });
         return card;
+    }
+
+    // Replica concentration as a picture: one piece per node, as wide as its share of the ready copies,
+    // the busiest node's piece solid. The percentage is the graph's own value.
+    function concentrationBar(row) {
+        const box = el("span", "wi-conc");
+        const pct = row.concentration == null ? null : Math.round(row.concentration * 100);
+        const label = el("span", "wi-conc__label");
+        label.append(el("span", null, "Concentration "), el("strong", null, pct == null ? "n/a" : `${pct}%`));
+        const bar = el("span", "wi-conc__bar");
+        const pieces = Object.entries(row.cells)
+            .filter(([node, c]) => node !== PENDING && c.ready > 0)
+            .sort((a, b) => b[1].ready - a[1].ready || a[0].localeCompare(b[0]));
+        const most = pieces.length ? pieces[0][1].ready : 0;
+        pieces.forEach(([node, c]) => {
+            // Every node tied for the most copies is solid, so an even spread does not single one out.
+            const piece = el("span", c.ready === most ? "wi-conc__piece is-busiest" : "wi-conc__piece", shortNode(node));
+            piece.style.flexGrow = String(c.ready);
+            piece.title = `${c.ready} of ${row.ready} ready copies on ${node}`;
+            bar.appendChild(piece);
+        });
+        box.classList.toggle("is-concentrated", pct === 100);
+        box.title = pct == null
+            ? "No ready copy, so no concentration."
+            : `${pct}% of ${row.name}'s ready copies are on its busiest node${pieces.length ? ` (${shortNode(pieces[0][0])})` : ""}.`;
+        box.append(label, bar);
+        return box;
     }
 
     // What one card says, with no node crashed (where its copies are) or after a crash (what is left).
@@ -251,6 +295,11 @@ window.DeploymentsDriftWidget = (function () {
             n.querySelectorAll(".wi-pod").forEach((p) => p.classList.toggle("is-lost", n.dataset.node === board.failed));
         });
         root.querySelectorAll("[data-service]").forEach((n) => n.classList.toggle("is-focus", n.dataset.service === board.focus));
+        const previewing = !board.failed && board.preview;
+        root.querySelectorAll(".wi-svc").forEach((card) => {
+            const row = board.rows.find((r) => r.name === card.dataset.service);
+            card.classList.toggle("is-at-risk", Boolean(previewing && row?.exposedOn.includes(board.preview)));
+        });
 
         board.rows.forEach((row) => {
             const card = root.querySelector(`.wi-svc[data-service="${CSS.escape(row.name)}"]`);
@@ -321,7 +370,7 @@ window.DeploymentsDriftWidget = (function () {
         if (!root) return;
         stopPlay();
         const { columns, rows } = spreadMatrix(deployment);
-        Object.assign(board, { deployment, rows, columns, failed: null, focus: null });
+        Object.assign(board, { deployment, rows, columns, failed: null, focus: null, preview: null });
         root.querySelector("[data-role='whatif-nodes']").replaceChildren(...columns.map(nodeBox));
         root.querySelector("[data-role='whatif-services']").replaceChildren(...rows.map(serviceCard));
         paint();
