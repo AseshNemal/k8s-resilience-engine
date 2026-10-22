@@ -93,10 +93,15 @@ window.DeploymentsAcademicWidget = (function () {
         renderProof(evaluation);
         const failures = document.querySelector("#academic-panel [data-role='acc-failures']");
         if (failures) {
+            // The whole result in one line: every check, then what the real node failures showed.
+            const total = overall(counts);
+            const allMatched = total.compared > 0 && total.correct === total.compared;
             failures.textContent = evaluation.failure_experiments
-                ? `${failureRuns(evaluation)}: ${confusion.down_predicted_down ?? 0} outages caught · ` +
+                ? `${allMatched ? "✅" : "⚠️"} ${total.correct} of ${total.compared} checks matched kubectl · ` +
+                  `${failureRuns(evaluation)} · ${confusion.down_predicted_down ?? 0} outages caught · ` +
                   `${confusion.down_predicted_up ?? 0} missed · ${confusion.up_predicted_down ?? 0} false alarms`
-                : "";
+                : "No real node failure has been recorded yet.";
+            failures.dataset.tone = allMatched ? "ok" : "warn";
         }
 
         const latencyEl = document.getElementById("stat-latency-overhead");
