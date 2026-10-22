@@ -131,10 +131,10 @@ window.DeploymentsIntentWidget = (function () {
                 <td><strong>${svcName}</strong></td>
                 <td>${declaredRep ?? "n/a"}</td>
                 <td><strong style="color: ${replicaMismatch ? 'var(--color-danger, #ef4444)' : 'inherit'};">${readyRep ?? "n/a"}</strong></td>
-                <td><code>${limits}</code></td>
-                <td>${hasAffinity}</td>
-                <td>${hasSpread}</td>
                 <td>${statusHtml}</td>
+                <td class="intent-col--extra"><code>${limits}</code></td>
+                <td class="intent-col--extra">${hasAffinity}</td>
+                <td class="intent-col--extra">${hasSpread}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -145,8 +145,12 @@ window.DeploymentsIntentWidget = (function () {
         }
     }
 
+    // The limits and placement-rule columns are shown only while "Show details" is open.
     function init() {
-        // Will be called with active services by deployments.js
+        const details = document.querySelector("[data-role='intent-details']");
+        const table = document.querySelector("[data-role='intent-table']");
+        if (!details || !table) return;
+        details.addEventListener("toggle", () => table.classList.toggle("intent-table--all", details.open));
     }
 
     return {

@@ -827,6 +827,38 @@
     font-size: 13px;
 }
 .tab-help summary { cursor: pointer; font-weight: 600; }
+
+/* ---- One "Show details" per tab: the demo shows the main picture, the rest waits here ---- */
+.show-details {
+    margin-top: var(--space-lg);
+    border-top: 1px solid var(--color-border);
+    padding-top: var(--space-sm);
+}
+.show-details > summary {
+    cursor: pointer;
+    width: fit-content;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    padding: 4px 0;
+}
+.show-details > summary:hover,
+.show-details > summary:focus-visible { color: var(--color-text); }
+.show-details[open] > summary { margin-bottom: var(--space-md); }
+.show-details__body { display: flex; flex-direction: column; gap: var(--space-md); }
+.show-details__notes { margin: 0; padding-left: 20px; line-height: 1.6; font-size: 13px; color: var(--color-text-muted); }
+.show-details__title { margin: 0; font-size: 0.95rem; }
+.show-details__body .compliance-metric-pill { width: fit-content; }
+.intent-table:not(.intent-table--all) .intent-col--extra { display: none; }
+
+.tab-pane__controls { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--color-text-muted); }
+.topology-select { width: auto; padding: 4px 8px; font-size: 13px; border: 1px solid var(--color-border); border-radius: var(--radius-small); }
+
+/* ---- Experiments tab: one headline, one chip per cell ---- */
+.live-exp-headline { margin: var(--space-md) 0; font-size: 15px; font-weight: 600; }
+.live-exp-table td { vertical-align: middle; }
+.live-exp-table .status-badge { font-size: 13px; }
+.live-exp-legend { margin: var(--space-sm) 0 0 0; font-size: 12px; color: var(--color-text-muted); }
 .tab-help ul { margin: 8px 0 0 0; padding-left: 20px; line-height: 1.6; }
 
 /* ---- Node failure simulation ---- */
@@ -958,7 +990,13 @@
     border-radius: var(--radius-small);
     background: var(--color-surface);
 }
-.evidence-box__title { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; }
+.evidence-box { padding-block: 8px; }
+.evidence-box__title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; list-style: none; }
+.evidence-box__title::-webkit-details-marker { display: none; }
+.evidence-box details[open] .evidence-box__title { margin-bottom: 8px; }
+.evidence-box__more { font-size: 12px; font-weight: 500; color: var(--color-text-muted); text-decoration: underline; }
+.evidence-box details[open] .evidence-box__more { display: none; }
+.accuracy-details > summary { font-size: 1.05rem; color: var(--color-text); }
 .evidence-box__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-success); }
 .evidence-box__grid {
     display: grid;

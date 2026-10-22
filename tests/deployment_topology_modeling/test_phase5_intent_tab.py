@@ -20,7 +20,7 @@ def test_intent_tab_markup_presence(client):
     html = response.text
 
     assert 'id="tab-intent"' in html
-    assert "Declared Manifest Intent vs Live Placement Compliance" in html
+    assert "Does the cluster match the YAML?" in html
     assert 'id="compliance-overall-pill"' in html
     assert 'id="compliance-rate-val"' in html
     assert 'id="intent-comparison-table"' in html
