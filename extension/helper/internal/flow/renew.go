@@ -65,8 +65,8 @@ func renewWith(ctx context.Context, d Deps, cmd string, c clusters.Context, back
 	if err != nil {
 		return fail(cmd, StateError, err.Error())
 	}
-	if _, err := cs.ServerVersion(ctx); err != nil {
-		return fail(cmd, StateClusterUnreachable, "the cluster is not reachable; is Docker Desktop running and the kind cluster started?")
+	if _, refusal := verified(ctx, cmd, c.Name, cs, cluster); refusal != nil {
+		return *refusal
 	}
 
 	report, err := rbac.Inspect(ctx, cs)

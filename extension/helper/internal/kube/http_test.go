@@ -626,3 +626,24 @@ func TestTheTokenRequestFailsWithTheServersReason(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestNodesAreListedWithTheProviderIDTheyReport(t *testing.T) {
+	p := newPKI(t)
+	var path string
+	srv := serve(t, p, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		reply(w, map[string]any{"items": []any{
+			map[string]any{"metadata": map[string]any{"name": "desktop-worker"}, "spec": map[string]any{"providerID": "kind://docker/desktop/desktop-worker"}},
+			map[string]any{"metadata": map[string]any{"name": "bare"}, "spec": map[string]any{}},
+		}})
+	})
+
+	nodes, err := newClient(t, srv, p).List(bg, Nodes, "")
+
+	if err != nil || path != "/api/v1/nodes" || len(nodes) != 2 {
+		t.Fatalf("path %s nodes %+v err %v", path, nodes, err)
+	}
+	if nodes[0].ProviderID != "kind://docker/desktop/desktop-worker" || nodes[1].ProviderID != "" {
+		t.Fatalf("provider ids = %q, %q (an absent one must stay empty, never guessed)", nodes[0].ProviderID, nodes[1].ProviderID)
+	}
+}

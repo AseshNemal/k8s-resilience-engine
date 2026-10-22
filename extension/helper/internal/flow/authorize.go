@@ -16,7 +16,7 @@ import (
 // Authorize is the one-time setup. Order matters, and each step can stop the flow without having
 // changed anything:
 //
-//  1. the context must be a supported local cluster, reachable;
+//  1. the context must be a candidate local cluster that the cluster itself confirms (verify.go);
 //  2. a backend must be reachable (so the user is never asked to approve something that cannot finish);
 //  3. the current RBAC is inspected, and an over-granted service account stops the flow;
 //  4. the user approves in a native dialog showing the exact cluster, permissions and changes;
@@ -31,9 +31,9 @@ func Authorize(ctx context.Context, d Deps, name string) Result {
 	if err != nil {
 		return fail(cmd, StateError, err.Error())
 	}
-	ver, err := cs.ServerVersion(ctx)
-	if err != nil {
-		return fail(cmd, StateClusterUnreachable, "the cluster is not reachable; is Docker Desktop running and the kind cluster started?")
+	verdict, refusal := verified(ctx, cmd, c.Name, cs, cluster)
+	if refusal != nil {
+		return *refusal
 	}
 
 	backend, _, err := d.pickBackend(ctx)
@@ -50,7 +50,7 @@ func Authorize(ctx context.Context, d Deps, name string) Result {
 	}
 	plan := rbac.Plan(report)
 
-	decision, err := d.Prompter.Confirm(ctx, authorizeDialog(c, ver, plan, d.backgroundNote()))
+	decision, err := d.Prompter.Confirm(ctx, authorizeDialog(c, verdict.Version, verdict.Nodes, plan, d.backgroundNote()))
 	switch {
 	case errors.Is(err, approve.ErrNoApprovalChannel), errors.Is(err, approve.ErrUnsupportedPlatform):
 		return fail(cmd, StateApprovalUnavailable, "no approval dialog is available on this system; use the manual connection instead")

@@ -11,9 +11,9 @@ import (
 
 const probeTimeout = 6 * time.Second
 
-// Discover lists the kubeconfig contexts and classifies each. Only supported (local kind) contexts
-// are contacted, with read-only calls: the API version and the extension's own RBAC objects. A
-// remote or unknown cluster in the user's kubeconfig is never touched.
+// Discover lists the kubeconfig contexts and classifies each. Only candidate contexts (kind-* or
+// docker-desktop, https, loopback) are contacted, with read-only calls: the API version, the nodes' provider
+// IDs and the extension's own RBAC objects. A remote or unknown cluster in the user's kubeconfig is never touched.
 func Discover(ctx context.Context, d Deps) Result {
 	list, current, err := d.Clusters.Contexts()
 	if err != nil {
@@ -32,7 +32,7 @@ func Discover(ctx context.Context, d Deps) Result {
 }
 
 func probe(ctx context.Context, d Deps, c clusters.Context, info *ContextInfo) {
-	cs, _, err := d.Clusters.Client(c.Name)
+	cs, cluster, err := d.Clusters.Client(c.Name)
 	if err != nil {
 		info.Reason = err.Error()
 		return
@@ -40,13 +40,21 @@ func probe(ctx context.Context, d Deps, c clusters.Context, info *ContextInfo) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	yes, no := true, false
-	version, err := cs.ServerVersion(ctx)
-	if err != nil {
-		info.Reachable = &no
-		info.Reason = "the cluster is not reachable"
+	v := verifyLocalKind(ctx, cs, cluster)
+	if v.Contacted {
+		if !v.Reachable {
+			// Still a candidate: it may simply not be started yet.
+			info.Reachable, info.Reason = &no, "the cluster is not reachable"
+			return
+		}
+		info.Reachable, info.Version = &yes, v.Version
+	}
+	if !v.Supported {
+		// A candidate by name and address that the cluster does not confirm: not supported, and the
+		// extension's access on it is not even inspected.
+		info.Supported, info.Reason = false, v.Reason
 		return
 	}
-	info.Reachable, info.Version = &yes, version
 
 	report, err := rbac.Inspect(ctx, cs)
 	switch {

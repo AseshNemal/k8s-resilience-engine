@@ -34,6 +34,7 @@ var (
 func newCluster(grant time.Duration) *kubetest.Fake {
 	cs := kubetest.New()
 	cs.GrantTokens(tokenValue, t0, grant)
+	cs.Put(kube.Nodes, kube.Object{Name: "kind-control-plane", ProviderID: "kind://docker/resilience-research/kind-control-plane"})
 	return cs
 }
 

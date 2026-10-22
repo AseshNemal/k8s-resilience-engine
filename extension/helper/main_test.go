@@ -49,6 +49,7 @@ func (b *backend) Disconnect(context.Context) error { return nil }
 func cluster() *kubetest.Fake {
 	cs := kubetest.New()
 	cs.GrantTokens(tokenValue, time.Now(), 8*time.Hour)
+	cs.Put(kube.Nodes, kube.Object{Name: "kind-control-plane", ProviderID: "kind://docker/resilience-research/kind-control-plane"})
 	return cs
 }
 

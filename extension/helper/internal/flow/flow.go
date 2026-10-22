@@ -104,8 +104,15 @@ func fail(cmd string, state State, msg string) Result {
 	return Result{Command: cmd, State: state, Message: msg}
 }
 
-// Classify says whether a context is a local cluster this helper may talk to: a kind cluster whose
-// API server is https on a loopback address. Nothing else is ever contacted.
+// supportedName is the initial candidate allowlist: kind contexts, and Docker Desktop's own context (whose
+// Kubernetes is a kind cluster). A name only makes a context a CANDIDATE; see verifyLocalKind for what decides.
+func supportedName(name string) bool {
+	return strings.HasPrefix(name, "kind-") || name == "docker-desktop"
+}
+
+// Classify is the gate that needs no network: whether a context may be contacted at all. It must name a
+// candidate cluster (kind-* or docker-desktop) and have an https API server on a loopback address. Nothing
+// else is ever contacted; a candidate is then only SUPPORTED once the cluster has been verified (verify.go).
 func Classify(name, server string) (bool, string) {
 	host := hostOf(server)
 	switch {
@@ -115,8 +122,8 @@ func Classify(name, server string) (bool, string) {
 		return false, "the API server is not https"
 	case !kubeconfig.IsLoopback(host):
 		return false, "not a local cluster (only loopback API servers are supported)"
-	case !strings.HasPrefix(name, "kind-"):
-		return false, "not a kind cluster (only kind-* contexts are supported initially)"
+	case !supportedName(name):
+		return false, "not a supported candidate (only kind-* contexts and docker-desktop are supported initially)"
 	}
 	return true, ""
 }
@@ -212,7 +219,7 @@ func describe(changes []rbac.Change) []string {
 
 // authorizeDialog takes the background-job paragraph (empty when this system has no job) and is composed only from facts the helper read itself, and every value that came from
 // the user's kubeconfig is sanitised, so nothing the extension UI sends can appear in it.
-func authorizeDialog(c clusters.Context, version string, plan []rbac.Change, background string) approve.Request {
+func authorizeDialog(c clusters.Context, version string, nodes int, plan []rbac.Change, background string) approve.Request {
 	name := approve.Sanitize(c.Name, 80)
 	server := approve.Sanitize(clusters.HostPort(c.Server), 60)
 	var b strings.Builder
@@ -220,6 +227,7 @@ func authorizeDialog(c clusters.Context, version string, plan []rbac.Change, bac
 	if v := approve.Sanitize(version, 20); v != "" {
 		fmt.Fprintf(&b, " (Kubernetes %s)", v)
 	}
+	fmt.Fprintf(&b, "\nRecognised as a local kind cluster: %d node(s) report a kind provider ID and the API server is on this computer (supporting evidence, not proof).", nodes)
 	b.WriteString("\n\nThe Resilience Engine extension will be able to:\n")
 	b.WriteString(bullet(rbac.Permissions()))
 	if len(plan) == 0 {
