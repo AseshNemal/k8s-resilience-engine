@@ -1,15 +1,20 @@
 /**
  * Phase 5 Physical Topology Widget:
- * Renders interactive node cards, availability zones, and pod chips.
+ * Draws the Service → Pod → Node chain as a picture: services on the left, worker nodes on the right,
+ * one wire from each service to each of its pods. Hover a service to trace it; click a node to fail it.
  * Component: Component 2 - Deployment Topology Modeling
  */
 window.DeploymentsTopologyWidget = (function () {
     "use strict";
 
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const PENDING = "__pending__";
+
     let lastData = null;
     let failedNode = null;
+    let resizeObserver = null;
 
-    // One fixed colour per service (by sorted name), so the same service looks the same on every node.
+    // One fixed colour per service (by sorted name), so a service, its pods and its wires share a colour.
     const SERVICE_HUES = [212, 152, 32, 280, 350, 190, 95, 255, 15, 320];
     let serviceHue = {};
     const shortNode = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
@@ -21,70 +26,93 @@ window.DeploymentsTopologyWidget = (function () {
         });
     }
 
-    function renderLegend() {
-        const legend = document.querySelector("[data-role='service-legend']");
-        if (!legend) return;
-        legend.replaceChildren(...Object.entries(serviceHue).map(([name, hue]) => {
-            const item = document.createElement("span");
-            item.className = "service-legend__item";
-            item.style.setProperty("--svc-hue", hue);
-            item.textContent = name;
-            return item;
-        }));
-        legend.hidden = Object.keys(serviceHue).length === 0;
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
     }
+
+    const readyPods = (svc) => (svc.pods || []).filter((p) => p.ready);
 
     // Same rule as placement_metrics.exposure_status: a service is down after node n fails when it
     // had ready replicas and every one of them was on n (SA(s,{n}) = 0).
-    function simulateFailure(node) {
+    function simulateFailure(services, node) {
         const down = [];
         const degraded = [];
         let unaffected = 0;
-        (lastData.services || []).forEach((svc) => {
-            const readyPods = (svc.pods || []).filter((p) => p.ready);
-            if (readyPods.length === 0) return;
-            const onNode = readyPods.filter((p) => p.node === node).length;
-            if (onNode === readyPods.length) down.push(svc.name);
-            else if (onNode > 0) degraded.push(`${svc.name} (${readyPods.length - onNode}/${readyPods.length} left)`);
+        (services || []).forEach((svc) => {
+            const ready = readyPods(svc);
+            if (ready.length === 0) return;
+            const onNode = ready.filter((p) => p.node === node).length;
+            if (onNode === ready.length) down.push(svc.name);
+            else if (onNode > 0) degraded.push({ name: svc.name, left: ready.length - onNode, of: ready.length });
             else unaffected++;
         });
         return { down, degraded, unaffected };
     }
 
-    function applyFailure(node) {
-        failedNode = failedNode === node ? null : node;
-        const grid = document.getElementById("deployment-zone-grid");
-        const result = document.querySelector("[data-role='failure-sim-result']");
-        grid.querySelectorAll(".node-chip-container").forEach((c) => c.classList.toggle("is-failed", c.dataset.node === failedNode));
-        grid.querySelectorAll(".pod-pill").forEach((p) => p.classList.remove("is-down", "is-lost"));
-        if (!failedNode) {
-            if (result) {
-                result.className = "failure-sim";
-                result.textContent = "👆 Click a node below to see what happens if it fails.";
-            }
-            return;
+    // ---------------------------------------------------------------------------------------------
+    // The picture
+    // ---------------------------------------------------------------------------------------------
+
+    function serviceRow(svc) {
+        const ready = readyPods(svc).length;
+        const total = (svc.pods || []).length;
+        const row = el("div", "topo-svc");
+        row.dataset.service = svc.name;
+        row.style.setProperty("--svc-hue", serviceHue[svc.name]);
+        row.tabIndex = 0;
+        row.title = `${svc.name}: ${ready} of ${total} pods ready. Hover to trace its pods.`;
+        row.append(
+            el("span", "topo-svc__swatch"),
+            el("span", "topo-svc__name", svc.name),
+            el("span", "topo-svc__count", `${ready}/${total}`),
+            el("span", "topo-svc__state"),
+        );
+        return row;
+    }
+
+    function podDot(pod, svcName, nodeName) {
+        const dot = el("span", pod.ready ? "topo-pod" : "topo-pod topo-pod--notready");
+        dot.dataset.service = svcName;
+        dot.dataset.node = nodeName;
+        dot.style.setProperty("--svc-hue", serviceHue[svcName]);
+        dot.title = `Pod: ${pod.name}\nService: ${svcName}\n${pod.ready ? "Ready" : "Not ready"}${pod.node ? `\nNode: ${pod.node}` : ""}`;
+        dot.textContent = svcName.charAt(0).toUpperCase();
+        return dot;
+    }
+
+    function nodeCard(node, pods) {
+        const pending = node.name === PENDING;
+        const card = el("div", pending ? "topo-node topo-node--pending" : "topo-node node-chip-container");
+        card.dataset.node = node.name;
+        card.dataset.zone = node.zone || "No zone label (failure domain = node)";
+        if (!pending) {
+            card.tabIndex = 0;
+            card.setAttribute("role", "button");
+            card.title = `${node.name}: click to simulate its failure`;
         }
-        const sim = simulateFailure(failedNode);
-        grid.querySelectorAll(".pod-pill").forEach((p) => {
-            if (sim.down.includes(p.dataset.service)) p.classList.add("is-down");
-            else if (p.dataset.node === failedNode) p.classList.add("is-lost");
-        });
-        if (result) {
-            result.className = `failure-sim ${sim.down.length ? "failure-sim--danger" : "failure-sim--ok"}`;
-            result.innerHTML = "";
-            const title = document.createElement("strong");
-            title.textContent = `If ${failedNode} fails: `;
-            result.appendChild(title);
-            result.appendChild(document.createTextNode(sim.down.length
-                ? `${sim.down.length} service(s) go down (0 ready replicas): ${sim.down.join(", ")}.`
-                : "no service goes down."));
-            if (sim.degraded.length) {
-                result.appendChild(document.createElement("br"));
-                result.appendChild(document.createTextNode(`Still running with fewer replicas: ${sim.degraded.join(", ")}.`));
-            }
-            result.appendChild(document.createElement("br"));
-            result.appendChild(document.createTextNode(`${sim.unaffected} service(s) have no ready replica on this node. Click the node again to undo.`));
+        const head = el("div", "topo-node__head");
+        head.append(el("span", "topo-node__icon", pending ? "⏳" : "🖥️"), el("strong", "topo-node__name", pending ? "Pending (no node)" : shortNode(node.name)));
+        if (node.ready === false) head.appendChild(el("span", "status-badge status-badge--danger", "NotReady"));
+        if (node.schedulable === false) head.appendChild(el("span", "status-badge status-badge--warning", "Cordoned"));
+        head.appendChild(el("span", "topo-node__failed", "✕ FAILED"));
+        card.appendChild(head);
+
+        if (!pending) {
+            const cpu = node.cpuAvailable ?? node.cpu_available;
+            const mem = node.memoryAvailable ?? node.memory_available;
+            const meta = el("div", "topo-node__meta",
+                `${node.zone ? node.zone + " · " : ""}free ${cpu == null ? "—" : Number(cpu.toFixed(2)) + " vCPU"} · ${mem == null ? "—" : mem.toFixed(1) + " GiB"}`);
+            meta.title = "Allocatable minus requests of scheduled pods";
+            card.appendChild(meta);
         }
+        const tray = el("div", "topo-node__pods");
+        if (!pods.length) tray.appendChild(el("span", "topo-node__empty", "No pods here"));
+        pods.forEach((p) => tray.appendChild(podDot(p.pod, p.service, node.name)));
+        card.appendChild(tray);
+        return card;
     }
 
     function renderZoneGrid(data) {
@@ -92,145 +120,194 @@ window.DeploymentsTopologyWidget = (function () {
         if (!grid || !data?.nodes) return;
         lastData = data;
         failedNode = null;
-        assignServiceColours(data.services || []);
-        renderLegend();
+        const services = [...(data.services || [])].sort((a, b) => a.name.localeCompare(b.name));
+        assignServiceColours(services);
 
-        // Group nodes by zone. Without a zone label the failure domain is the node itself.
-        const NO_ZONE = "No zone label (failure domain = node)";
-        const zoneMap = {};
-        data.nodes.forEach((node) => {
-            const z = node.zone || NO_ZONE;
-            if (!zoneMap[z]) zoneMap[z] = [];
-            zoneMap[z].push(node);
-        });
-
-        // Map pods to nodes
-        const nodePods = {};
-        if (data.services) {
-            data.services.forEach((svc) => {
-                (svc.pods || []).forEach((pod) => {
-                    const n = pod.node || "unassigned";
-                    if (!nodePods[n]) nodePods[n] = [];
-                    nodePods[n].push({
-                        name: pod.name,
-                        service: svc.name,
-                        is_ready: pod.ready,
-                        node: pod.node,
-                    });
-                });
-            });
-        }
-
-        grid.innerHTML = "";
-        const zoneNames = Object.keys(zoneMap).sort((a, b) => a.localeCompare(b));
-        const zoneSelect = document.getElementById("filter-topology-zone");
-        if (zoneSelect) {
-            // Rebuilt on every render so switching sample <-> live does not keep stale zones.
-            zoneSelect.length = 1;
-            zoneSelect.value = "all";
-            zoneNames.forEach((z) => {
-                const opt = document.createElement("option");
-                opt.value = z;
-                opt.textContent = z;
-                zoneSelect.appendChild(opt);
-            });
-        }
-
-        const singleZone = zoneNames.length === 1;
-        zoneNames.forEach((zoneName) => {
-            const nodes = zoneMap[zoneName];
-            const zoneCard = document.createElement("div");
-            zoneCard.className = singleZone ? "zone-card zone-card--wide" : "zone-card";
-            zoneCard.dataset.zone = zoneName;
-
-            let nodesHtml = "";
-            nodes.forEach((n) => {
-                const pods = nodePods[n.name] || [];
-                let podsHtml = "";
-                if (pods.length === 0) {
-                    podsHtml = '<span class="node-card__empty">No pods of the analysed services</span>';
-                } else {
-                    podsHtml = pods.map(podPill).join("");
-                }
-
-                // The API serialises camelCase (cpuAvailable); values are free capacity after pod requests.
-                const cpuRaw = n.cpuAvailable ?? n.cpu_available;
-                const memRaw = n.memoryAvailable ?? n.memory_available;
-                const cpuText = cpuRaw == null ? "—" : Number(cpuRaw.toFixed(2)) + " vCPU";
-                const memText = memRaw == null ? "—" : memRaw.toFixed(1) + " GiB";
-                let nodeState = "";
-                if (n.ready === false) nodeState += '<span class="status-badge status-badge--danger">NotReady</span>';
-                if (n.schedulable === false) nodeState += '<span class="status-badge status-badge--warning">Cordoned</span>';
-
-                nodesHtml += `
-                    <div class="node-chip-container is-clickable" data-node="${n.name}" role="button" tabindex="0" title="${n.name}: click to simulate its failure">
-                        <div class="node-chip__header">
-                            <span class="node-name">🖥️ ${shortNode(n.name)} ${nodeState}</span>
-                            <span class="node-pod-count">${pods.length} pod${pods.length === 1 ? "" : "s"}</span>
-                        </div>
-                        <div class="node-capacity" title="Allocatable minus requests of scheduled pods">free: ${cpuText} · ${memText}</div>
-                        <div class="pod-badge-list">
-                            ${podsHtml}
-                        </div>
-                    </div>
-                `;
-            });
-
-            zoneCard.innerHTML = `
-                <div class="zone-card__header">
-                    <span class="zone-card__title">📍 ${zoneName}</span>
-                    <span class="status-badge">${nodes.length} Nodes</span>
-                </div>
-                <div class="zone-card__body">
-                    ${nodesHtml}
-                </div>
-            `;
-            grid.appendChild(zoneCard);
-        });
-
-        // Pods not on a listed worker (e.g. Pending with no node) would otherwise disappear from the map.
+        // Pods per node; a pod on no listed node (e.g. Pending) goes to a Pending box so it never disappears.
         const known = new Set(data.nodes.map((n) => n.name));
-        const orphans = Object.keys(nodePods).filter((n) => !known.has(n)).flatMap((n) => nodePods[n].map((p) => ({ ...p, node: n })));
-        if (orphans.length) {
-            const card = document.createElement("div");
-            card.className = "zone-card";
-            card.dataset.zone = "all";
-            card.innerHTML = `
-                <div class="zone-card__header">
-                    <span class="zone-card__title">⏳ Not on a worker node</span>
-                    <span class="status-badge">${orphans.length} Pods</span>
-                </div>
-                <div class="zone-card__body"><div class="pod-badge-list">${orphans.map(podPill).join("")}</div></div>
-            `;
-            grid.appendChild(card);
-        }
+        const byNode = {};
+        services.forEach((svc) => (svc.pods || []).forEach((pod) => {
+            const key = pod.node && known.has(pod.node) ? pod.node : PENDING;
+            (byNode[key] = byNode[key] || []).push({ pod, service: svc.name });
+        }));
+        const nodes = [...data.nodes].sort((a, b) => a.name.localeCompare(b.name));
+        if (byNode[PENDING]) nodes.push({ name: PENDING });
 
-        grid.querySelectorAll(".node-chip-container[data-node]").forEach((c) => {
-            c.addEventListener("click", () => applyFailure(c.dataset.node));
-            c.addEventListener("keydown", (e) => {
+        const left = el("div", "topo__services");
+        left.appendChild(el("div", "topo__label", "Services"));
+        services.forEach((svc) => left.appendChild(serviceRow(svc)));
+        const right = el("div", "topo__nodes");
+        right.appendChild(el("div", "topo__label", "Worker nodes · click one to fail it"));
+        nodes.forEach((n) => right.appendChild(nodeCard(n, byNode[n.name] || [])));
+        const wires = document.createElementNS(SVG_NS, "svg");
+        wires.setAttribute("class", "topo__wires");
+        wires.setAttribute("aria-hidden", "true");
+
+        grid.className = "topo";
+        grid.replaceChildren(wires, left, right);
+        fillZoneFilter(nodes);
+        bindInteractions(grid);
+        applyFailure(null);
+        drawWires();
+        // Redraw when the picture changes size, including when its tab is first shown (size 0 → real).
+        resizeObserver?.disconnect();
+        if (window.ResizeObserver) {
+            resizeObserver = new ResizeObserver(() => drawWires());
+            resizeObserver.observe(grid);
+        }
+    }
+
+    // One curved wire from a service's row to each of its pods.
+    function drawWires() {
+        const grid = document.getElementById("deployment-zone-grid");
+        const svg = grid?.querySelector(".topo__wires");
+        if (!svg) return;
+        const box = grid.getBoundingClientRect();
+        svg.setAttribute("viewBox", `0 0 ${Math.max(box.width, 1)} ${Math.max(box.height, 1)}`);
+        const paths = [];
+        grid.querySelectorAll(".topo-pod").forEach((pod) => {
+            if (!pod.offsetParent) return;  // filtered out by zone
+            const row = grid.querySelector(`.topo-svc[data-service="${CSS.escape(pod.dataset.service)}"]`);
+            if (!row) return;
+            const a = row.getBoundingClientRect();
+            const b = pod.getBoundingClientRect();
+            const x1 = a.right - box.left;
+            const y1 = a.top + a.height / 2 - box.top;
+            const x2 = b.left + b.width / 2 - box.left;
+            const y2 = b.top + b.height / 2 - box.top;
+            const bend = Math.max(40, (x2 - x1) * 0.5);
+            const path = document.createElementNS(SVG_NS, "path");
+            path.setAttribute("d", `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
+            path.setAttribute("class", "topo-wire");
+            path.setAttribute("fill", "none");
+            path.dataset.service = pod.dataset.service;
+            path.dataset.node = pod.dataset.node;
+            path.style.setProperty("--svc-hue", serviceHue[pod.dataset.service]);
+            if (pod.classList.contains("topo-pod--notready")) path.classList.add("topo-wire--notready");
+            paths.push(path);
+        });
+        svg.replaceChildren(...paths);
+        paintFailure();
+        paintFocus();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Interactions: hover a service to trace it, click a node to fail it
+    // ---------------------------------------------------------------------------------------------
+
+    let focusedService = null;
+
+    function setFocus(service) {
+        focusedService = service;
+        paintFocus();
+    }
+
+    function paintFocus() {
+        const grid = document.getElementById("deployment-zone-grid");
+        if (!grid) return;
+        grid.classList.toggle("has-focus", Boolean(focusedService));
+        grid.querySelectorAll("[data-service]").forEach((n) => {
+            n.classList.toggle("is-focus", n.dataset.service === focusedService);
+        });
+    }
+
+    function bindInteractions(grid) {
+        grid.querySelectorAll(".topo-svc").forEach((row) => {
+            row.addEventListener("mouseenter", () => setFocus(row.dataset.service));
+            row.addEventListener("focus", () => setFocus(row.dataset.service));
+            row.addEventListener("mouseleave", () => setFocus(null));
+            row.addEventListener("blur", () => setFocus(null));
+        });
+        grid.querySelectorAll(".topo-pod").forEach((pod) => {
+            pod.addEventListener("mouseenter", () => setFocus(pod.dataset.service));
+            pod.addEventListener("mouseleave", () => setFocus(null));
+        });
+        grid.querySelectorAll(".node-chip-container[data-node]").forEach((card) => {
+            card.addEventListener("click", () => applyFailure(card.dataset.node));
+            card.addEventListener("keydown", (e) => {
                 if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    applyFailure(c.dataset.node);
+                    applyFailure(card.dataset.node);
                 }
             });
         });
-        applyFailure(null);
     }
 
-    function podPill(p) {
-        const notReady = p.is_ready === false;
-        const hue = serviceHue[p.service];
-        const classes = hue == null ? "pod-pill" : "pod-pill pod-pill--svc";
-        const styles = [];
-        if (hue != null) styles.push(`--svc-hue: ${hue}`);
-        if (notReady) styles.push("opacity: 0.55", "border-style: dashed");
-        const style = styles.length ? ` style="${styles.join("; ")}"` : "";
-        const nodeLine = p.node ? "&#10;Node: " + p.node : "";
-        const title = `Pod: ${p.name}&#10;Service: ${p.service}&#10;${notReady ? "Not ready" : "Ready"}${nodeLine}`;
-        return `<span class="${classes}"${style} data-service="${p.service}" data-node="${p.node || ""}" title="${title}">
-                    ${p.service}${notReady ? " (not ready)" : ""}
-                </span>`;
+    function applyFailure(node) {
+        failedNode = node == null || failedNode === node ? null : node;
+        paintFailure();
+        describeFailure();
     }
+
+    function paintFailure() {
+        const grid = document.getElementById("deployment-zone-grid");
+        if (!grid || !lastData) return;
+        const sim = failedNode ? simulateFailure(lastData.services, failedNode) : { down: [], degraded: [] };
+        grid.classList.toggle("has-failure", Boolean(failedNode));
+        grid.querySelectorAll(".topo-node").forEach((c) => c.classList.toggle("is-failed", c.dataset.node === failedNode));
+        grid.querySelectorAll(".topo-pod, .topo-wire").forEach((n) => n.classList.toggle("is-lost", n.dataset.node === failedNode));
+        grid.querySelectorAll(".topo-svc").forEach((row) => {
+            const name = row.dataset.service;
+            const degraded = sim.degraded.find((d) => d.name === name);
+            const isDown = sim.down.includes(name);
+            row.classList.toggle("is-down", isDown);
+            row.classList.toggle("is-degraded", Boolean(degraded));
+            let state = "";
+            if (isDown) state = "DOWN";
+            else if (degraded) state = `${degraded.left}/${degraded.of} left`;
+            row.querySelector(".topo-svc__state").textContent = state;
+        });
+    }
+
+    function describeFailure() {
+        const result = document.querySelector("[data-role='failure-sim-result']");
+        if (!result) return;
+        if (!failedNode) {
+            result.className = "failure-sim";
+            result.textContent = "👆 Hover a service to trace its pods. Click a worker node to see what happens if it fails.";
+            return;
+        }
+        const sim = simulateFailure(lastData.services, failedNode);
+        result.className = `failure-sim ${sim.down.length ? "failure-sim--danger" : "failure-sim--ok"}`;
+        const title = el("strong", null, `If ${shortNode(failedNode)} fails: `);
+        const text = sim.down.length
+            ? `${sim.down.length} service(s) go down (0 ready replicas): ${sim.down.join(", ")}.`
+            : "no service goes down.";
+        const extra = sim.degraded.length ? ` Still running with fewer replicas: ${sim.degraded.map((d) => `${d.name} (${d.left}/${d.of})`).join(", ")}.` : "";
+        result.replaceChildren(title, document.createTextNode(text + extra + " Click the node again to undo."));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Zone filter
+    // ---------------------------------------------------------------------------------------------
+
+    function fillZoneFilter(nodes) {
+        const zoneSelect = document.getElementById("filter-topology-zone");
+        if (!zoneSelect) return;
+        const zones = [...new Set(nodes.filter((n) => n.name !== PENDING).map((n) => n.zone || "No zone label (failure domain = node)"))].sort();
+        zoneSelect.length = 1;
+        zoneSelect.value = "all";
+        zones.forEach((z) => zoneSelect.appendChild(new Option(z, z)));
+        zoneSelect.closest(".tab-pane__controls")?.toggleAttribute("hidden", zones.length < 2);
+    }
+
+    function init() {
+        const zoneSelect = document.getElementById("filter-topology-zone");
+        if (zoneSelect) {
+            zoneSelect.addEventListener("change", function () {
+                const selected = this.value;
+                document.querySelectorAll("#deployment-zone-grid .topo-node").forEach((card) => {
+                    card.hidden = !(selected === "all" || card.dataset.zone === selected || card.dataset.node === PENDING);
+                });
+                drawWires();
+            });
+        }
+        window.addEventListener("resize", () => drawWires());
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Replica concentration (Show details)
+    // ---------------------------------------------------------------------------------------------
 
     function renderConcentrationPanel(services) {
         const panel = document.getElementById("deployment-concentration-panel");
@@ -268,25 +345,10 @@ window.DeploymentsTopologyWidget = (function () {
         });
     }
 
-    function init() {
-        const zoneSelect = document.getElementById("filter-topology-zone");
-        if (zoneSelect) {
-            zoneSelect.addEventListener("change", function () {
-                const selected = this.value;
-                document.querySelectorAll(".zone-card").forEach((card) => {
-                    if (selected === "all" || card.dataset.zone === selected) {
-                        card.style.display = "";
-                    } else {
-                        card.style.display = "none";
-                    }
-                });
-            });
-        }
-    }
-
     return {
         init: init,
         renderZoneGrid: renderZoneGrid,
         renderConcentrationPanel: renderConcentrationPanel,
+        simulateFailure: simulateFailure,
     };
 })();

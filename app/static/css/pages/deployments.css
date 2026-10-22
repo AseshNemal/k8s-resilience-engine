@@ -939,32 +939,120 @@
     .verdict__stats { border-left: 0; border-top: 1px solid var(--c2-border-light); }
 }
 
-/* ---- Topology tab: one colour per service ---- */
-.service-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 var(--space-sm) 0; font-size: 12px; color: var(--c2-text-muted); }
-.service-legend__item { display: inline-flex; align-items: center; gap: 6px; }
-.service-legend__item::before {
-    content: "";
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
-    background: hsl(var(--svc-hue) 65% 50%);
+/* ---- Topology tab: Service → Pod → Node picture ---- */
+.topo {
+    --svc-solid: hsl(var(--svc-hue, 215) 65% 48%);
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(170px, 230px) minmax(0, 1fr);
+    column-gap: clamp(60px, 12vw, 180px);
+    padding: 20px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-lg);
+    background: var(--c2-glass-bg);
+    box-shadow: var(--c2-glass-shadow);
 }
-.pod-badge-list .pod-pill--svc {
-    background: hsl(var(--svc-hue) 85% 95%);
-    border-color: hsl(var(--svc-hue) 60% 78%);
-    color: hsl(var(--svc-hue) 70% 30%);
+.topo__wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.topo__services, .topo__nodes { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.topo__services { justify-content: center; }
+.topo__label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--c2-text-muted); }
+
+/* a service: colour swatch, name, ready/total, and its state when a node fails */
+.topo-svc {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "swatch name count" "swatch state state";
+    align-items: center;
+    column-gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid hsl(var(--svc-hue) 55% 80%);
+    border-radius: var(--c2-radius-md);
+    background: hsl(var(--svc-hue) 80% 97%);
+    cursor: default;
+    transition: var(--c2-transition);
 }
-.pod-badge-list .pod-pill--svc:hover { background: hsl(var(--svc-hue) 80% 89%); }
+.topo-svc__swatch { grid-area: swatch; width: 12px; height: 28px; border-radius: 4px; background: hsl(var(--svc-hue) 65% 48%); }
+.topo-svc__name { grid-area: name; font-weight: 700; color: var(--c2-text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topo-svc__count { grid-area: count; font-size: 12px; font-weight: 600; color: var(--c2-text-muted); font-variant-numeric: tabular-nums; }
+.topo-svc__state { grid-area: state; font-size: 11px; font-weight: 800; letter-spacing: 0.04em; }
+.topo-svc__state:empty { display: none; }
+.topo-svc.is-down { border-color: var(--c2-accent-danger); background: color-mix(in srgb, var(--c2-accent-danger) 12%, var(--c2-glass-bg)); }
+.topo-svc.is-down .topo-svc__state { color: var(--c2-accent-danger); }
+.topo-svc.is-down .topo-svc__swatch { background: var(--c2-accent-danger); }
+.topo-svc.is-degraded .topo-svc__state { color: #b45309; }
+.topo-svc:focus-visible { outline: 2px solid hsl(var(--svc-hue) 65% 48%); outline-offset: 2px; }
+
+/* a worker node: a machine with its pods in a tray */
+.topo__nodes { gap: 12px; }
+.topo-node {
+    position: relative;
+    padding: 10px 14px 12px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-md);
+    background: var(--c2-surface-subtle);
+    cursor: pointer;
+    transition: var(--c2-transition);
+}
+.topo-node:hover { border-color: var(--c2-accent-primary); box-shadow: 0 6px 18px rgba(37, 99, 235, 0.12); }
+.topo-node:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
+.topo-node--pending { cursor: default; border-style: dashed; border-color: var(--c2-accent-warning); }
+.topo-node__head { display: flex; align-items: center; gap: 8px; }
+.topo-node__name { font-size: 0.95rem; color: var(--c2-text-main); }
+.topo-node__meta { margin: 2px 0 8px 0; font-size: 11px; color: var(--c2-text-muted); }
+.topo-node__failed { display: none; margin-left: auto; padding: 2px 8px; border-radius: 999px; background: var(--c2-accent-danger); color: #fff; font-size: 11px; font-weight: 800; }
+.topo-node__pods { display: flex; flex-wrap: wrap; gap: 8px; min-height: 30px; align-items: center; }
+.topo-node__empty { font-size: 12px; font-style: italic; color: var(--c2-text-muted); }
+.topo .topo-node.is-failed {
+    opacity: 1;
+    border-color: var(--c2-accent-danger);
+    background:
+        repeating-linear-gradient(45deg, color-mix(in srgb, var(--c2-accent-danger) 8%, transparent) 0 8px, transparent 8px 16px),
+        var(--c2-surface-subtle);
+    box-shadow: none;
+}
+.tab-pane__controls[hidden] { display: none; }
+.topo-node.is-failed .topo-node__failed { display: inline-block; }
+
+/* a pod: a coloured disc with the service's initial */
+.topo-pod {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: hsl(var(--svc-hue) 65% 48%);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 800;
+    box-shadow: 0 0 0 3px hsl(var(--svc-hue) 70% 90%);
+    transition: var(--c2-transition);
+}
+.topo-pod--notready { background: transparent; color: hsl(var(--svc-hue) 60% 40%); border: 2px dashed hsl(var(--svc-hue) 60% 50%); box-shadow: none; }
+.topo-pod.is-lost { background: var(--c2-text-muted); box-shadow: none; opacity: 0.45; }
+
+/* the wires */
+.topo-wire { stroke: hsl(var(--svc-hue) 65% 52%); stroke-width: 2; opacity: 0.55; transition: opacity 0.2s, stroke-width 0.2s; }
+.topo-wire--notready { stroke-dasharray: 4 4; }
+.topo-wire.is-lost { stroke: var(--c2-accent-danger); stroke-dasharray: 6 5; opacity: 0.8; }
+
+/* hover a service: trace it, fade the rest */
+.topo.has-focus .topo-svc:not(.is-focus), .topo.has-focus .topo-pod:not(.is-focus) { opacity: 0.3; }
+.topo.has-focus .topo-wire:not(.is-focus) { opacity: 0.08; }
+.topo.has-focus .topo-wire.is-focus { opacity: 1; stroke-width: 3; }
+.topo-svc.is-focus { box-shadow: 0 0 0 2px hsl(var(--svc-hue) 65% 48%); }
+.topo-pod.is-focus { transform: scale(1.15); }
+
 @media (prefers-color-scheme: dark) {
-    .pod-badge-list .pod-pill--svc {
-        background: hsl(var(--svc-hue) 45% 22%);
-        border-color: hsl(var(--svc-hue) 45% 38%);
-        color: hsl(var(--svc-hue) 80% 85%);
-    }
+    .topo-svc { background: hsl(var(--svc-hue) 35% 18%); border-color: hsl(var(--svc-hue) 35% 32%); }
+    .topo-pod { box-shadow: 0 0 0 3px hsl(var(--svc-hue) 35% 25%); }
 }
-.node-chip__header .node-name { font-size: 0.95rem; }
-.node-pod-count { font-size: 11px; font-weight: 600; color: var(--c2-text-muted); }
-.node-chip-container > .node-capacity { margin: -4px 0 8px 0; }
+@media (prefers-reduced-motion: reduce) {
+    .topo-svc, .topo-node, .topo-pod, .topo-wire { transition: none; }
+}
+@media (max-width: 640px) {
+    .topo { grid-template-columns: 1fr; row-gap: 20px; }
+    .topo__wires { display: none; }
+}
 
 /* ---- Exposed services tab: services × nodes spread map ---- */
 .spread-map-wrap {

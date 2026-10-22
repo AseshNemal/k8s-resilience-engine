@@ -3,7 +3,7 @@
     <div class="tab-pane__header">
         <div>
             <h3 class="tab-pane__title">Where are the pods running?</h3>
-            <p class="tab-pane__desc">Each box is a worker node, each chip a pod. Click a node to see what fails with it.</p>
+            <p class="tab-pane__desc">Each line joins a service to one of its pods, and each pod sits on the worker node that runs it.</p>
         </div>
         <div class="tab-pane__controls">
             <label class="control-label" for="filter-topology-zone">Zone:</label>
@@ -13,10 +13,8 @@
         </div>
     </div>
 
-    <div class="service-legend" data-role="service-legend" aria-label="Service colours" hidden></div>
-
     <div class="failure-sim" data-role="failure-sim-result">
-        👆 Click a node below to see what happens if it fails.
+        👆 Hover a service to trace its pods. Click a worker node to see what happens if it fails.
     </div>
 
     <div class="zone-grid" id="deployment-zone-grid" data-role="deployment-zone-grid">
