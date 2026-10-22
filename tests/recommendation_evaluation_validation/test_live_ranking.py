@@ -97,19 +97,22 @@ def test_a_single_replica_candidate_is_listed_unranked_as_infeasible(monkeypatch
     assert live.report.selected_recommendation_id is None
 
 
-def test_a_fix_that_only_works_together_with_another_is_not_ranked_on_its_own(monkeypatch, use_cluster, evidenced_topology):
-    # Spreading db alone, or cart alone, still leaves the other one dead on w1, so the workflow still fails.
-    # Combined evaluation is outside this phase: each candidate is scored by itself and is shown unranked.
+def test_a_fix_that_only_works_together_with_another_is_not_ranked_on_its_own_but_as_a_pair(
+        monkeypatch, use_cluster, evidenced_topology):
+    # Spreading db alone, or cart alone, still leaves the other one dead on w1, so each is shown unranked. The pair
+    # (test_live_combinations.py) is what improves the workflow and is selected.
     freeze_checkout(monkeypatch, mandatory=("web", "db", "cart"))
     use_cluster(two_concentrated_services())
 
     live = build_live_recommendation("checkout", "w1", "shop")
 
     entries = live.evidence["ranking"]["candidates"]
-    assert len(entries) == 2
-    assert all(e["rank"] is None and e["excluded"] == "NO_PREDICTED_IMPROVEMENT" for e in entries.values())
-    assert live.report.selected_recommendation_id is None
-    assert all(c.feasible and c.risk_reduction == 0 and c.score == 0.0 for c in live.report.recommendations)
+    singles = {i: e for i, e in entries.items() if e["type"] == "TOPOLOGY_SPREAD"}
+    assert len(singles) == 2
+    assert all(e["rank"] is None and e["excluded"] == "NO_PREDICTED_IMPROVEMENT" for e in singles.values())
+    assert live.report.selected_recommendation_id == "rec-checkout-cart+db-combination"
+    assert all(c.feasible and c.risk_reduction == 0 and c.score == 0.0
+               for c in live.report.recommendations if c.type == "TOPOLOGY_SPREAD")
 
 
 def test_a_failed_member_3_prediction_on_the_simulated_graph_is_a_visible_exclusion_not_a_crash(
@@ -223,5 +226,6 @@ def test_a_feasible_candidate_with_no_predicted_gain_is_shown_but_cannot_be_requ
 
     response = request_live(client, db["id"])
 
-    assert db["feasible"] is True and db["score"] == 0.0 and report["selectedRecommendationId"] is None
+    assert db["feasible"] is True and db["score"] == 0.0
+    assert report["selectedRecommendationId"] == "rec-checkout-cart+db-combination"      # the pair, not this change alone
     assert response.status_code == 422 and "not ranked" in response.json()["detail"]

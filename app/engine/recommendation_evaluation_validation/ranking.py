@@ -214,6 +214,27 @@ def _snapshot_problem(snapshot: ImpactSnapshot) -> str | None:
     return None
 
 
+def impact_reductions(before: ImpactSnapshot | None, after: ImpactSnapshot | None,
+                      tolerance: float = DEFAULT_TOLERANCE) -> tuple[float, float] | None:
+    """(target_reduction, cluster_reduction) between two snapshots, as ``rank_candidates`` computes them.
+
+    None when either snapshot is missing or unusable, when they do not describe the same failure, basis and
+    nodes, or when there is no baseline risk to reduce. Used to tell whether a combination's members each matter.
+    """
+    if not isinstance(before, ImpactSnapshot) or not isinstance(after, ImpactSnapshot):
+        return None
+    if _snapshot_problem(before) or _snapshot_problem(after):
+        return None
+    if (before.failed_node, before.basis) != (after.failed_node, after.basis) or set(before.node_blast) != set(after.node_blast):
+        return None
+    mean_before = sum(before.node_blast.values()) / len(before.node_blast)
+    mean_after = sum(after.node_blast.values()) / len(after.node_blast)
+    if before.blast_radius <= tolerance or mean_before <= tolerance:
+        return None
+    return ((before.blast_radius - after.blast_radius) / before.blast_radius,
+            (mean_before - mean_after) / mean_before)
+
+
 def _excluded(candidate: EvaluatedCandidate, reason: ExclusionReason, detail: str,
               components: ScoreComponents | None = None) -> RankedCandidate:
     return RankedCandidate(candidate.id, candidate.type, candidate.service, None, None, components, reason, detail)

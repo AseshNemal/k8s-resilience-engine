@@ -265,6 +265,7 @@ class _Context:
         self._check_workload_kind(movable)
         if self.intent is not None:
             self._read_rules()
+        self._read_existing_anti_affinity()
 
     def need(self, what: str, node: str | None = None) -> None:
         self._missing.setdefault(what, set())
@@ -329,6 +330,32 @@ class _Context:
             self._affinity(term)
         for constraint in intent.topology_spread_constraints:
             self._spread(constraint)
+
+    def _read_existing_anti_affinity(self) -> None:
+        """Other services' required anti-affinity also keeps the moving pods away, not only the service's own.
+
+        The scheduler refuses an incoming pod on a node (or domain) where an existing pod's required
+        anti-affinity term matches it, so a service that refuses this one blocks every node it runs on.
+        """
+        mine = _selector_of(self.service)
+        for other in self.deployment.services:
+            intent = other.declared_intent
+            if other.name == self.service.name or intent is None or not other.pods:
+                continue
+            if intent.pod_anti_affinity_configured and not intent.pod_anti_affinity_rules:
+                self.need(f"pod anti-affinity rules of service {other.name} (flagged but not captured)")
+            for term in required_pod_terms(intent.pod_anti_affinity_rules):
+                labels, key = selector_match_labels(term.get("labelSelector"), term=term), term.get("topologyKey")
+                if labels is None or not key:
+                    self.need(f"pod anti-affinity term of service {other.name} (only matchLabels selectors within "
+                              f"the namespace can be evaluated)")
+                    continue
+                verdict = service_matches(labels, mine)
+                if verdict is None:
+                    self.need(f"pod labels of service {self.service.name} (needed to evaluate the anti-affinity of "
+                              f"{other.name})")
+                elif verdict:
+                    self.anti_blocked.append((key, self._domains_of([other], key), f"{other.name} (its own rule)"))
 
     def _term(self, term: Mapping[str, Any], what: str):
         labels, key = selector_match_labels(term.get("labelSelector"), term=term), term.get("topologyKey")
@@ -474,8 +501,8 @@ class _Context:
     def _check_pod_rules(self, node: NodeModel, block) -> None:
         for key, blocked, others in self.anti_blocked:
             if _label(node, key) in blocked:
-                block("POD_ANTI_AFFINITY", f"{node.name} shares {key} with a pod of {others}, which the "
-                                           f"workload's required anti-affinity forbids")
+                block("POD_ANTI_AFFINITY", f"{node.name} shares {key} with a pod of {others}, which required "
+                                           f"anti-affinity forbids")
         for key, allowed, others in self.affinity_allowed:
             value = _label(node, key)
             if not node.labels:
@@ -546,13 +573,14 @@ class _Search:
 
 
 def _find(ctx: _Context, states: Sequence[_NodeState], replicas: int, fixed: Sequence[PodModel], *,
-          honor_taints: bool, need_spread: bool, budget: int) -> _Search:
+          honor_taints: bool, need_spread: bool, budget: int, quota: Mapping[str, int] | None = None) -> _Search:
     """Depth-first search for a placement of ``replicas`` identical pods, least-loaded node first.
 
     ``need_spread`` requires the finished placement to use at least two nodes. ``honor_taints`` reads every
     spread constraint as ``nodeTaintsPolicy: Honor``: nodes that cannot take pods for taint reasons are then
     not domains. Unverified facts are assumed favourable, so finding nothing means nothing exists, unless the
-    budget ran out, which is reported as such.
+    budget ran out, which is reported as such. ``quota`` (node -> replicas) restricts the search to exactly
+    that arrangement, in any valid order: it asks whether a placement that already exists is legal.
     """
     by_name = {s.node.name: s for s in states}
     domain = {s.node.name for s in states if s.domain is True and not (honor_taints and _taint_excluded(s))}
@@ -577,6 +605,8 @@ def _find(ctx: _Context, states: Sequence[_NodeState], replicas: int, fixed: Seq
         counts = fixed_counts + planned_counts
         rejected: set[str] = set()
         for i in sorted(range(len(names)), key=lambda i: (counts[names[i]], names[i])):
+            if quota is not None and planned_counts[names[i]] >= quota.get(names[i], 0):
+                continue                       # this node already has all the replicas the arrangement gives it
             reason = _rejection(ctx, placeable[i], counts, planned_counts, domain, by_name)
             if reason is not None:
                 rejected.add(reason)
@@ -623,9 +653,15 @@ def check_topology_spread_feasibility(
     *,
     max_skew: int = DEFAULT_MAX_SKEW,
     search_budget: int = DEFAULT_SEARCH_BUDGET,
+    hold_placement: bool = False,
 ) -> FeasibilityResult:
     """Whether spreading the ready replicas of ``service_name`` across worker nodes is schedulable and would
-    survive the loss of any one node. The deployment is only read."""
+    survive the loss of any one node. The deployment is only read.
+
+    With ``hold_placement`` the replicas are not free to move: the question becomes whether the placement they
+    have now satisfies every modelled constraint and spans two nodes. That is how the final state of a virtual
+    change is re-checked, including constraints that another change has since made relevant.
+    """
 
     evidence = evidence if evidence is not None else SchedulingEvidence.from_graph(deployment)
     service = next((item for item in deployment.services if item.name == service_name), None)
@@ -669,9 +705,11 @@ def check_topology_spread_feasibility(
     findings = [blocker for state in states for blocker in state.blockers]
     excluded = any(_taint_excluded(state) for state in states)
 
+    quota = dict(resident) if hold_placement else None
+
     def search(honor_taints: bool, need_spread: bool) -> _Search:
         return _find(ctx, states, len(movable), fixed, honor_taints=honor_taints, need_spread=need_spread,
-                     budget=search_budget)
+                     budget=search_budget, quota=quota)
 
     strict = search(False, True)
     relaxed = search(True, True) if strict.nodes is None and not strict.exhausted and excluded else None

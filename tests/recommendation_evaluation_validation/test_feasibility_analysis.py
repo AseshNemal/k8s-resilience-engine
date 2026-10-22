@@ -737,3 +737,125 @@ def test_an_existing_spread_constraint_and_filtered_out_nodes_depend_on_nodeAffi
 
     assert result.status is INSUFFICIENT
     assert any("nodeAffinityPolicy" in item for item in result.missing_evidence)
+
+
+# --- verifying the placement a service already has (used to re-check both members of a combination) ---------------
+
+def hold(graph, evidence=None, service="db", **options):
+    return check(graph, evidence, service, hold_placement=True, **options)
+
+
+def test_holding_the_placement_accepts_a_valid_spread_exactly_as_it_is():
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n2", "n3")))
+
+    result = hold(graph)
+
+    assert result.status is FEASIBLE
+    assert result.placement == {"db-0": "n1", "db-1": "n2", "db-2": "n3"} and result.pods_to_recreate == ()
+
+
+def test_holding_the_placement_refuses_one_that_is_not_spread_even_though_a_spread_exists():
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n1", "n1")))
+
+    assert check(graph).status is FEASIBLE            # moving the pods would work
+    held = hold(graph)
+
+    assert held.status is INFEASIBLE and held.single_node_resilience is False
+
+
+def test_holding_the_placement_refuses_one_that_breaks_a_cross_service_anti_affinity():
+    cache = make_service("cache", placement=("n2",), intent=make_intent(selector={"app": "cache"}))
+    rules = {"requiredDuringSchedulingIgnoredDuringExecution": [
+        {"labelSelector": {"matchLabels": {"app": "cache"}}, "topologyKey": HOSTNAME}]}
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n2"), intent=make_intent(
+        pod_anti_affinity_configured=True, pod_anti_affinity_rules=rules)), cache)
+
+    assert hold(graph).status is INFEASIBLE           # db-1 sits next to a cache pod it must not share a node with
+
+
+def test_holding_the_placement_refuses_a_pod_on_a_node_it_has_no_toleration_for():
+    evidence = SchedulingEvidence(node_taints={"n1": [], "n2": [DEDICATED], "n3": []})
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n2")))
+
+    assert hold(graph, evidence).status is INFEASIBLE
+
+
+def test_holding_the_placement_refuses_a_skewed_spread():
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n1", "n2")))      # n3 stays empty: skew 2
+
+    assert hold(graph).status is INFEASIBLE
+
+
+def test_holding_the_placement_counts_the_pods_already_there_in_the_nodes_capacity():
+    # n2 has no CPU left because the two replicas on it already use it; keeping them there must be accepted.
+    nodes = [make_node("n1"), make_node("n2", cpu=0.0, memory=0.0), make_node("n3")]
+    graph = make_graph(nodes, make_service(placement=("n2", "n1", "n3")))
+
+    assert hold(graph).status is FEASIBLE
+
+
+def test_holding_the_placement_keeps_unknown_evidence_unknown():
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n2", "n3")))
+
+    result = check_topology_spread_feasibility(graph, "db", SchedulingEvidence(node_taints={}), hold_placement=True)
+
+    assert result.status is INSUFFICIENT and result.feasible is False
+
+
+# --- an existing pod's own required anti-affinity also forbids an incoming pod it matches -------------------------
+
+def refuses(app, key=HOSTNAME):
+    return {"requiredDuringSchedulingIgnoredDuringExecution": [
+        {"labelSelector": {"matchLabels": {"app": app}}, "topologyKey": key}]}
+
+
+def cache_refusing_db(placement=("n2",)):
+    return make_service("cache", placement=placement, intent=make_intent(
+        selector={"app": "cache"}, pod_anti_affinity_configured=True, pod_anti_affinity_rules=refuses("db")))
+
+
+def test_a_node_running_a_pod_that_refuses_the_moving_service_is_not_a_target():
+    nodes = three_nodes() + [make_node("n4")]
+    graph = make_graph(nodes, make_service(placement=("n1", "n1")), cache_refusing_db())
+
+    result = check(graph)
+
+    assert result.status is FEASIBLE and "n2" not in result.placement.values()
+
+
+def test_when_every_alternative_is_refused_by_existing_pods_the_spread_is_infeasible():
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n1", "n1")), cache_refusing_db(("n2",)))
+
+    result = check(graph)
+
+    assert result.status is INFEASIBLE and "POD_ANTI_AFFINITY" in finding_codes(result)
+
+
+def test_an_existing_anti_affinity_that_cannot_be_matched_against_the_moving_pods_is_insufficient():
+    # cache refuses pods labelled tier=web; the db selector says nothing about tier, so it may or may not match.
+    rules = {"requiredDuringSchedulingIgnoredDuringExecution": [
+        {"labelSelector": {"matchLabels": {"tier": "web"}}, "topologyKey": HOSTNAME}]}
+    cache = make_service("cache", placement=("n2",), intent=make_intent(
+        selector={"app": "cache"}, pod_anti_affinity_configured=True, pod_anti_affinity_rules=rules))
+    graph = make_graph(three_nodes(), make_service(), cache)
+
+    result = check(graph)
+
+    assert result.status is INSUFFICIENT and any("anti-affinity of cache" in item for item in result.missing_evidence)
+
+
+def test_an_existing_anti_affinity_aimed_at_someone_else_changes_nothing():
+    graph = make_graph(three_nodes(), make_service(placement=("n1", "n1", "n1")),
+                       make_service("cache", placement=("n2",), intent=make_intent(
+                           selector={"app": "cache"}, pod_anti_affinity_configured=True,
+                           pod_anti_affinity_rules=refuses("cache"))))
+
+    assert check(graph).status is FEASIBLE
+
+
+def test_an_existing_anti_affinity_flagged_but_not_captured_is_insufficient():
+    cache = make_service("cache", placement=("n2",), intent=make_intent(
+        selector={"app": "cache"}, pod_anti_affinity_configured=True))
+    graph = make_graph(three_nodes(), make_service(), cache)
+
+    assert check(graph).status is INSUFFICIENT
