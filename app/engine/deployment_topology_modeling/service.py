@@ -283,8 +283,36 @@ def get_manifest_source() -> dict[str, Any]:
     return {"source": "manifest", "path": shown, "found": target.exists()}
 
 
+LAST_APPLIED_ANNOTATION = "kubectl.kubernetes.io/last-applied-configuration"
+
+
+def _declared_document(item: dict[str, Any]) -> dict[str, Any]:
+    """The declared form of one live Deployment.
+
+    `kubectl apply` stores the manifest it applied in the last-applied-configuration annotation, and
+    `kubectl scale` or `kubectl edit` do not change it, so it still holds what the YAML asked for after
+    the live spec was changed by hand. When it is absent or unreadable, the live spec (without status)
+    is the declared intent, as before.
+    """
+    annotations = (item.get("metadata") or {}).get("annotations") or {}
+    raw = annotations.get(LAST_APPLIED_ANNOTATION)
+    if raw:
+        try:
+            applied = json.loads(raw)
+        except ValueError:
+            applied = None
+        if isinstance(applied, dict) and applied.get("kind") == "Deployment":
+            metadata = {**(applied.get("metadata") or {})}
+            # Applied with `-n`, the stored manifest may carry no namespace; it is the live object's.
+            metadata.setdefault("namespace", (item.get("metadata") or {}).get("namespace"))
+            return {**applied, "metadata": metadata}
+    # List items carry no kind or apiVersion, and status is observed state, not declared intent.
+    return {"apiVersion": "apps/v1", "kind": "Deployment", **{k: v for k, v in item.items() if k != "status"}}
+
+
 def _cluster_declared_intents(namespace: str) -> list[Any]:
-    """Declared intent read from the Deployments of the connected cluster (see the source order above)."""
+    """Declared intent read from the Deployments of the connected cluster (see the source order above):
+    the manifest last applied with kubectl when the cluster kept it, otherwise the live spec."""
     if not discovery.NAMESPACE_PATTERN.match((namespace or "").strip()):
         raise discovery.DiscoveryError(
             "INVALID_NAMESPACE", "The namespace is not a valid Kubernetes namespace name.", http_status=422
@@ -295,10 +323,7 @@ def _cluster_declared_intents(namespace: str) -> list[Any]:
         )
     except ClusterAccessError as exc:
         raise CodedClusterUnavailableError(discovery.classify_access_error(exc)) from None
-    # List items carry no kind or apiVersion, and status is observed state, not declared intent.
-    documents = [{"apiVersion": "apps/v1", "kind": "Deployment", **{k: v for k, v in item.items() if k != "status"}}
-                 for item in items]
-    return parse_declared_intents(documents)
+    return parse_declared_intents([_declared_document(item) for item in items])
 
 
 def _declared_intents(manifest_path: str | None, namespace: str) -> list[Any]:
