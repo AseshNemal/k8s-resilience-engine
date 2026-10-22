@@ -4,6 +4,7 @@ from app.engine.recommendation_evaluation_validation.candidate_generation import
     generate_candidates,
 )
 from app.engine.recommendation_evaluation_validation.feasibility_analyzer import (
+    SchedulingEvidence,
     check_topology_spread_feasibility,
 )
 from app.engine.recommendation_evaluation_validation.metrics import (
@@ -40,6 +41,7 @@ def get_sample_validation() -> ValidationReport:
 def evaluate_first_recommendation(
     deployment: DeploymentGraph,
     failure_impact: FailureImpactReport,
+    evidence: SchedulingEvidence | None = None,
 ) -> SimulationResult:
     """Generate and simulate the first supported recommendation."""
 
@@ -49,13 +51,20 @@ def evaluate_first_recommendation(
     if not candidates:
         raise ValueError("No recommendation candidates generated.")
 
-    return evaluate_candidate(deployment, candidates[0])
+    return evaluate_candidate(deployment, candidates[0], evidence)
 
 
-def evaluate_candidate(deployment: DeploymentGraph, candidate: CandidateSpec) -> SimulationResult:
+def evaluate_candidate(
+    deployment: DeploymentGraph,
+    candidate: CandidateSpec,
+    evidence: SchedulingEvidence | None = None,
+) -> SimulationResult:
     """Check one candidate's feasibility and simulate it on a copy of the deployment.
 
-    The deployment passed in is never changed. Raises ValueError for a recommendation type that is not
+    The deployment passed in is never changed. Only a candidate whose feasibility is verified is simulated,
+    and it is simulated on the placement the feasibility check verified; one that is infeasible or whose
+    evidence is insufficient is reported as not feasible and not simulated. ``evidence`` carries the
+    scheduling facts the graph cannot (node taints). Raises ValueError for a recommendation type that is not
     supported yet, so a caller can skip it instead of guessing an outcome.
     """
 
@@ -68,6 +77,7 @@ def evaluate_candidate(deployment: DeploymentGraph, candidate: CandidateSpec) ->
     feasibility = check_topology_spread_feasibility(
         deployment,
         candidate.service,
+        evidence,
     )
 
     concentration_before = calculate_replica_concentration(
@@ -85,11 +95,13 @@ def evaluate_candidate(deployment: DeploymentGraph, candidate: CandidateSpec) ->
             concentration_after=concentration_before,
             concentration_reduction=0.0,
             simulated_deployment=None,
+            feasibility_status=feasibility.status,
+            feasibility=feasibility,
         )
 
     sim_result = simulate_deployment_change(
         deployment,
-        TopologySpreadMutation(candidate.service),
+        TopologySpreadMutation(candidate.service, feasibility.placement),
     )
 
     concentration_after = calculate_replica_concentration(
@@ -109,4 +121,7 @@ def evaluate_candidate(deployment: DeploymentGraph, candidate: CandidateSpec) ->
             2,
         ),
         simulated_deployment=sim_result.after,
+        feasibility_status=feasibility.status,
+        feasibility=feasibility,
+        pods_to_recreate=feasibility.pods_to_recreate,
     )

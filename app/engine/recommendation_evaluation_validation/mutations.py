@@ -9,6 +9,8 @@ DeploymentGraph is never touched.
 Topology-spread placement logic lives here, not in app/engine/simulation/.
 """
 
+from collections.abc import Mapping
+
 from app.engine.recommendation_evaluation_validation.simulator import (
     simulate_topology_spread,
 )
@@ -22,9 +24,10 @@ class TopologySpreadMutation:
     to simulate_deployment_change().
     """
 
-    def __init__(self, service_name: str) -> None:
+    def __init__(self, service_name: str, placement: Mapping[str, str] | None = None) -> None:
         self._service_name = service_name
+        self._placement = placement
 
     def apply(self, deployment: DeploymentGraph) -> DeploymentGraph:
         """Apply topology-spread redistribution to the working copy."""
-        return simulate_topology_spread(deployment, self._service_name)
+        return simulate_topology_spread(deployment, self._service_name, self._placement)

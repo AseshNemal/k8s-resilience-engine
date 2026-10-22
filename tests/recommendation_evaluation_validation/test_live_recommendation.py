@@ -4,8 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.engine.recommendation_evaluation_validation import live_pipeline
 from app.engine.recommendation_evaluation_validation.approval import ApprovalRepository
+from app.engine.recommendation_evaluation_validation.feasibility_analyzer import SchedulingEvidence
 from app.engine.workflow_dependency_modeling import service as workflow_service
+from app.shared.schemas.deployment import DeclaredPlacementIntent
 from app.shared.schemas.workflow import WorkflowEdge, WorkflowGraph
 from tests.recommendation_evaluation_validation.test_approval_api import (  # noqa: F401  (fixtures)
     client,
@@ -28,6 +31,38 @@ def concentrated_db() -> FakeClusterSource:
     )
 
 
+def add_scheduling_evidence(deployment) -> SchedulingEvidence:
+    """Give a discovered topology the scheduling facts live discovery does not carry yet.
+
+    Discovery returns nodes with no labels and no Ready condition, services with no declared intent, and the
+    NodeModel contract has no taints at all, so the live feasibility check correctly answers
+    INSUFFICIENT_EVIDENCE. Tests that are about something else (the predicted gain, the approval flow, the
+    deep copy) need a verified candidate, so they add exactly the missing facts here: every node Ready and
+    labelled, every service with an intent whose requests fit, and no taints anywhere.
+    """
+    for worker in deployment.nodes:
+        worker.ready, worker.labels = True, {"kubernetes.io/hostname": worker.name}
+    for svc in deployment.services:
+        svc.declared_intent = DeclaredPlacementIntent(
+            declared_replicas=svc.declared_replicas, selector={"app": svc.name},
+            resource_requests=[{"cpu": "100m", "memory": "128Mi"}])
+    return SchedulingEvidence(node_taints={worker.name: [] for worker in deployment.nodes})
+
+
+@pytest.fixture
+def evidenced_topology(monkeypatch):
+    """Live discovery with the scheduling evidence added (see add_scheduling_evidence)."""
+    original = live_pipeline.get_runtime_component_inputs
+
+    def with_evidence(workflow_id, namespace="default"):
+        inputs = original(workflow_id, namespace)
+        evidence = add_scheduling_evidence(inputs.deployment)
+        monkeypatch.setattr(live_pipeline, "scheduling_evidence_for", lambda deployment: evidence)
+        return inputs
+
+    monkeypatch.setattr(live_pipeline, "get_runtime_component_inputs", with_evidence)
+
+
 def freeze_checkout(monkeypatch, mandatory=("web", "db")):
     graph = WorkflowGraph(workflow_id="checkout", criticality=0.9, mandatory_services=list(mandatory),
                           edges=[WorkflowEdge(source="web", target="db")])
@@ -37,7 +72,7 @@ def freeze_checkout(monkeypatch, mandatory=("web", "db")):
     )
 
 
-def test_a_concentrated_service_gets_a_feasible_recommendation_with_a_predicted_gain(client, monkeypatch, use_cluster):
+def test_a_concentrated_service_gets_a_feasible_recommendation_with_a_predicted_gain(client, monkeypatch, use_cluster, evidenced_topology):
     freeze_checkout(monkeypatch)
     use_cluster(concentrated_db())
 
@@ -120,7 +155,7 @@ def test_a_well_spread_cluster_needs_no_recommendation(client, monkeypatch, use_
     assert response.json()["selectedRecommendationId"] is None
 
 
-def test_a_single_replica_service_gets_an_infeasible_candidate_not_silence(client, monkeypatch, use_cluster):
+def test_a_single_replica_service_gets_an_infeasible_candidate_not_silence(client, monkeypatch, use_cluster, evidenced_topology):
     freeze_checkout(monkeypatch)
     use_cluster(two_node_shop())
 
@@ -132,7 +167,7 @@ def test_a_single_replica_service_gets_an_infeasible_candidate_not_silence(clien
     assert response.json()["selectedRecommendationId"] is None
 
 
-def test_a_service_that_cannot_be_spread_is_reported_infeasible_with_no_gain(client, monkeypatch, use_cluster):
+def test_a_service_that_cannot_be_spread_is_reported_infeasible_with_no_gain(client, monkeypatch, use_cluster, evidenced_topology):
     freeze_checkout(monkeypatch)
     one_node = FakeClusterSource(
         nodes=[node("w1")],
@@ -160,12 +195,14 @@ def test_the_real_topology_is_never_changed_by_the_simulation(monkeypatch, use_c
     freeze_checkout(monkeypatch)
     use_cluster(concentrated_db())
     inputs = get_runtime_component_inputs("checkout", "shop")
+    scheduling_evidence = add_scheduling_evidence(inputs.deployment)  # without it nothing would be simulated
     impact = predict_failure_impact(inputs.workflow, inputs.deployment, "w1")
     before = inputs.deployment.model_dump()
 
-    for spec in generate_candidates(CandidateContextBuilder.build(inputs.deployment, impact)):
-        evaluate_candidate(inputs.deployment, spec)
+    results = [evaluate_candidate(inputs.deployment, spec, scheduling_evidence)
+               for spec in generate_candidates(CandidateContextBuilder.build(inputs.deployment, impact))]
 
+    assert results and all(r.simulated_deployment is not None for r in results)
     assert inputs.deployment.model_dump() == before
 
 
@@ -214,7 +251,7 @@ def test_without_a_workflow_nothing_is_computed(client):
 
 
 def test_an_approval_can_be_requested_for_a_live_recommendation_and_is_marked_verified(
-        client, monkeypatch, use_cluster, sqlite_url):
+        client, monkeypatch, use_cluster, sqlite_url, evidenced_topology):
     freeze_checkout(monkeypatch)
     use_cluster(concentrated_db())
     rec_id = client.get(LIVE, params=PARAMS).json()["selectedRecommendationId"]
@@ -241,3 +278,43 @@ def test_nothing_is_applied_to_the_cluster(client, monkeypatch, use_cluster):
     client.get(LIVE, params=PARAMS)
 
     assert all(call.startswith(("nodes", "pods", "raw:")) or call == "workload-namespaces" for call in cluster.calls)
+
+
+def test_without_scheduling_evidence_a_live_candidate_is_not_feasible_and_cannot_be_approved(
+        client, monkeypatch, use_cluster, sqlite_url):
+    freeze_checkout(monkeypatch)
+    use_cluster(concentrated_db())  # live discovery: no node labels, no Ready condition, no intent, no taints
+
+    response = client.get(LIVE, params=PARAMS)
+    live = live_pipeline.build_live_recommendation("checkout", None, "shop")
+
+    (candidate,) = response.json()["recommendations"]
+    assert (candidate["service"], candidate["feasible"], candidate["riskReduction"]) == ("db", False, 0)
+    assert response.json()["selectedRecommendationId"] is None
+    (verdict,) = live.evidence["feasibility"].values()
+    assert verdict["status"] == "INSUFFICIENT_EVIDENCE"
+    assert any("taints" in item for item in verdict["missingEvidence"])
+    assert any("declared placement intent" in item for item in verdict["missingEvidence"])
+    assert verdict["placement"] == {}
+
+    refused = client.post(
+        f"/api/recommendations/{candidate['id']}/request-approval", params=PARAMS,
+        json={"recommendationId": candidate["id"], "proposalVersion": "v1"},
+    )
+    assert refused.status_code == 422
+
+
+def test_with_scheduling_evidence_the_verdict_and_predicted_placement_are_in_the_evidence(
+        monkeypatch, use_cluster, evidenced_topology):
+    freeze_checkout(monkeypatch)
+    use_cluster(concentrated_db())
+
+    live = live_pipeline.build_live_recommendation("checkout", None, "shop")
+
+    (verdict,) = live.evidence["feasibility"].values()
+    assert verdict["status"] == "FEASIBLE" and verdict["singleNodeResilience"] is True
+    assert sorted(verdict["placement"].values()) == ["w1", "w2", "w3"]
+    assert verdict["missingEvidence"] == []
+    assert verdict["notModeled"]  # what the prediction ignores is always disclosed
+    # Adding the constraint moves no running pod: the target is reached by recreating two of the three.
+    assert verdict["requiresPodRecreation"] is True and len(verdict["podsToRecreate"]) == 2

@@ -1,11 +1,23 @@
+from collections.abc import Mapping
+
 from app.shared.schemas.deployment import DeploymentGraph
 
 
 def simulate_topology_spread(
     deployment: DeploymentGraph,
     service_name: str,
+    placement: Mapping[str, str] | None = None,
 ) -> DeploymentGraph:
-    """Distribute a service's ready pods across available nodes."""
+    """Distribute a service's ready pods across available nodes.
+
+    ``placement`` (pod name -> node name) is the placement the feasibility analysis verified. When it is
+    given the pods go exactly there; without it they are spread round-robin over every node, which ignores
+    whether a node can actually take them.
+
+    The result is a TARGET state, not what applying a spread constraint does: that constraint only filters
+    where newly scheduled pods may go and never moves a running pod. Reaching the target means recreating the
+    pods that differ (``FeasibilityResult.pods_to_recreate``).
+    """
 
     service = next(
         (
@@ -33,10 +45,16 @@ def simulate_topology_spread(
             f"No ready pods found for service: {service_name}"
         )
 
+    nodes = {node.name: node for node in deployment.nodes}
     for index, pod in enumerate(ready_pods):
-        target_node = deployment.nodes[
-            index % len(deployment.nodes)
-        ]
+        if placement is not None:
+            if pod.name not in placement or placement[pod.name] not in nodes:
+                raise ValueError(f"No verified placement for pod: {pod.name}")
+            target_node = nodes[placement[pod.name]]
+        else:
+            target_node = deployment.nodes[
+                index % len(deployment.nodes)
+            ]
 
         pod.node = target_node.name
         pod.zone = target_node.zone

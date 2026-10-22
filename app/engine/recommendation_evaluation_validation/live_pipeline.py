@@ -8,6 +8,11 @@ Where each input comes from, all through the other components' public interfaces
 * the candidate changes and their feasibility and simulation are Component 4's own generator, feasibility
   check and what-if simulator, which work on a deep copy and never change the real graph.
 
+A candidate is ``feasible`` only when the feasibility check verified it. A candidate whose scheduling
+constraints cannot be verified from the live evidence (for example node taints, which the topology contract
+does not carry) is reported ``feasible = False`` with its status INSUFFICIENT_EVIDENCE and the missing facts in
+``evidence["feasibility"]``; it is never reported as confirmed feasible, so it cannot be approved.
+
 A recommendation is a prediction about a virtual change, not an observation, and nothing here applies it:
 approving it is a separate step that needs a developer.
 
@@ -25,6 +30,10 @@ from app.engine.recommendation_evaluation_validation.candidate_generation import
     CandidateContextBuilder,
     generate_candidates,
 )
+from app.engine.recommendation_evaluation_validation.feasibility_analyzer import (
+    UNSCHEDULED_NODE,
+    SchedulingEvidence,
+)
 from app.engine.recommendation_evaluation_validation.service import evaluate_candidate
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.recommendation import RecommendationCandidate, RecommendationReport
@@ -39,8 +48,13 @@ CONFIDENCE_MEANING = (
     "It is not the accuracy of the prediction."
 )
 
-# The graph builder gives a pod the scheduler has not placed this node name.
-UNSCHEDULED_NODE = "unscheduled"
+
+def scheduling_evidence_for(deployment) -> SchedulingEvidence:
+    """The scheduling facts the live topology cannot carry (node taints), as far as anything supplies them.
+
+    Nothing reads taints from the cluster yet, so today this is empty and taints are reported unknown.
+    """
+    return SchedulingEvidence.from_graph(deployment)
 
 
 def _invalid(message: str) -> EvidenceError:
@@ -94,9 +108,11 @@ def build_live_recommendation(
 
     candidates: list[RecommendationCandidate] = []
     skipped: list[str] = []
+    feasibility: dict[str, Any] = {}
+    scheduling_evidence = scheduling_evidence_for(deployment)
     for spec in generate_candidates(CandidateContextBuilder.build(deployment, before)):
         try:
-            simulated = evaluate_candidate(deployment, spec)
+            simulated = evaluate_candidate(deployment, spec, scheduling_evidence)
         except ValueError:
             skipped.append(spec.recommendation_type)  # a type the simulator cannot evaluate yet
             continue
@@ -107,8 +123,10 @@ def build_live_recommendation(
             predicted, reduction = after.blast_radius, round(before.blast_radius - after.blast_radius, 2)
         else:
             predicted, reduction = before.blast_radius, 0.0
+        candidate_id = f"rec-{workflow_id}-{spec.service}-{spec.recommendation_type}".lower().replace("_", "-")
+        feasibility[candidate_id] = simulated.feasibility.to_dict()
         candidates.append(RecommendationCandidate(
-            id=f"rec-{workflow_id}-{spec.service}-{spec.recommendation_type}".lower().replace("_", "-"),
+            id=candidate_id,
             type=spec.recommendation_type,
             service=spec.service,
             feasible=simulated.feasible,
@@ -138,6 +156,7 @@ def build_live_recommendation(
         "blastRadiusBefore": before.blast_radius,
         "confidenceMeaning": CONFIDENCE_MEANING,
         "skippedUnsupportedTypes": sorted(set(skipped)),
+        "feasibility": feasibility,
         "isPrediction": True,
     }
     return LiveRecommendation(report=report, evidence=evidence)
