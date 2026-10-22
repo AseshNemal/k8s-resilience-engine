@@ -2,8 +2,10 @@
  * Recommendation Evaluation and Validation page script.
  * Owned by: Member 4 (L.A. Nemal).
  *
- * Reads /api/recommendations/live: the recommendation report generated from the connected cluster's live
- * evidence, or an explicit error saying none exists. It never displays sample recommendations, placements
+ * Works from the connected cluster: recommendation-context.js asks the backend which application and approved frozen
+ * workflow apply (and what evidence is missing), uses the only one automatically and offers a dropdown when there are
+ * several, then this page shows /api/recommendations/live/detail: the recommendation generated from the live
+ * evidence, with the engine's own explanation of each candidate, or an explicit statement of what is missing. It never displays sample recommendations, placements
  * or validation results; all scoring and simulation happen in the Python engine. The display components
  * live in recommendation-render.js and render exactly the evidence passed to them. Evidence that has no
  * producer yet (baseline blast radius, validation results, simulated placement) is passed as null, and each
@@ -24,15 +26,20 @@
     const reloadButton = document.querySelector('[data-role="reload-button"]');
     const sourceBadge = document.querySelector('[data-role="source-badge"]');
     const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
-    // What to recommend for: the recommendation is computed from the connected cluster and this frozen workflow.
-    const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
-    const failedNodeInput = document.querySelector('[data-role="failed-node"]');
-    const namespaceInput = document.querySelector('[data-role="namespace"]');
+    // What to recommend for is chosen by recommendation-context.js (automatically, or from these dropdowns).
+    const namespaceSelect = document.querySelector('[data-role="rec-namespace-select"]');
+    const workflowSelect = document.querySelector('[data-role="rec-workflow-select"]');
+    const nodeSelect = document.querySelector('[data-role="rec-node-select"]');
+    const clusterLine = document.querySelector('[data-role="rec-cluster"]');
+    const evidenceList = document.querySelector('[data-role="rec-evidence"]');
+    const contextModule = window.ResilienceRecommendationContext;
+    let controller = null;
 
     const APPROVAL_BASE = "/api/recommendations";
     const PROPOSAL_VERSION = "v1.0";
     const approvalModal = document.getElementById("approval-modal");
     let currentRecommendation = null;
+    let currentApproval = { ready: false, reason: "" };   // the server's verdict for the selected candidate
 
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
@@ -41,15 +48,13 @@
 
     // ---- Approval gate -------------------------------------------------------------------------------
 
-    // The filled-in inputs as a query string, or "" when none is filled in. Only the filled ones are sent, so
-    // the server (not this page) decides what a missing workflow means.
+    // The inputs an approval request must send, because the server recomputes the recommendation from them. They are
+    // the controller's current choices, so they always belong to the cluster the person is looking at.
     function inputQuery() {
+        const choice = controller ? controller.selection() : { workflowId: "", namespace: "", failedNode: "" };
         const params = new URLSearchParams();
-        [["workflow_id", workflowIdInput], ["failed_node", failedNodeInput], ["namespace", namespaceInput]]
-            .forEach(([name, input]) => {
-                const value = input && typeof input.value === "string" ? input.value.trim() : "";
-                if (value) params.set(name, value);
-            });
+        [["workflow_id", choice.workflowId], ["failed_node", choice.failedNode], ["namespace", choice.namespace]]
+            .forEach(([name, value]) => { if (value) params.set(name, value); });
         const text = params.toString();
         return text ? `?${text}` : "";
     }
@@ -106,9 +111,9 @@
         if (!approval) {
             stateContainer.append(approvalBadge("No Approval Requested", "muted"));
             const request = button("Request Approval", "primary-button", "btn-request-approval", requestApproval);
-            if (!currentRecommendation.feasible) {
+            if (!currentRecommendation.feasible || !currentApproval.ready) {
                 request.disabled = true;
-                request.title = "Recommendation must be feasible";
+                request.title = currentApproval.reason || "Recommendation must be feasible";
             }
             actionsContainer.append(request);
         } else {
@@ -251,60 +256,171 @@
         setMetric(region, "rec-feasible-count", String(summary.feasibleCount));
     }
 
-    async function loadPage() {
-        if (reloadButton) reloadButton.disabled = true;
+    // ---- Cluster, selections and evidence ----------------------------------------------------------------------------
+
+    function fillSelect(select, options, selected, placeholder) {
+        if (!select) return;
+        const items = [];
+        if (placeholder) {
+            const empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = placeholder;
+            items.push(empty);
+        }
+        for (const option of options) {
+            const node = document.createElement("option");
+            node.value = option.value;
+            node.textContent = option.label;
+            if (option.disabled) node.disabled = true;
+            items.push(node);
+        }
+        select.replaceChildren(...items);
+        select.value = selected || "";
+        select.disabled = options.length === 0 || (options.length === 1 && !placeholder);
+    }
+
+    function renderContext(v) {
+        if (clusterLine) {
+            clusterLine.textContent = v.cluster.identity
+                ? `Connected cluster: ${v.cluster.identity}`
+                : (v.evidence.length ? "Connected cluster" : "Looking for the connected cluster…");
+        }
+        fillSelect(namespaceSelect,
+            v.namespaces.map((row) => ({ value: row.namespace, label: `${row.namespace} (${row.services.length} services)` })),
+            v.namespace, v.namespaceChoice === "ambiguous" || !v.namespace ? "Choose an application…" : null);
+        fillSelect(workflowSelect,
+            v.workflows.map((w) => ({ value: w.workflowId, label: w.label, disabled: !w.applicable })),
+            v.workflowId, v.workflowChoice === "choose" || !v.workflowId ? (v.workflows.length ? "Choose a workflow…" : "No approved frozen workflow") : null);
+        fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case (the node whose loss hurts most)");
+        view.renderEvidenceChecklist(evidenceList, v.evidence);
+    }
+
+    // What the person needs when the recommendation cannot be shown: the missing evidence and the exact next action.
+    function blockedDescriptor(v) {
+        if (v.error) {
+            const lines = [...v.error.lines];
+            if (v.error.nextAction) lines.push(`Next: ${v.error.nextAction}`);
+            return { state: "missing-evidence", title: "Required evidence is not available", message: v.error.message, code: v.error.code, lines, retryable: v.error.retryable };
+        }
+        const missing = v.evidence.filter((item) => item.state === "missing" || item.state === "incomplete");
+        const first = missing.find((item) => item.id !== "failureImpact") || missing[0];
+        return {
+            state: "missing-evidence",
+            title: "Required evidence is not available",
+            message: first ? first.detail : "A recommendation cannot be generated yet.",
+            code: null,
+            lines: v.nextActions.map((action) => `Next: ${action}`),
+            retryable: true,
+        };
+    }
+
+    function showDetail(v) {
+        const detail = v.detail;
+        const report = detail.report;
         region.replaceChildren();
-        applyBadge(sourceBadge, { variant: "muted", text: "Loading…" });
+        region.appendChild(template.content.cloneNode(true));
 
-        try {
-            const report = await fetchJson(`/api/recommendations/live${inputQuery()}`);
-            applyBadge(sourceBadge, { variant: "success", text: "Live evidence" });
-            region.appendChild(template.content.cloneNode(true));
+        // Only a candidate the engine selected is put to approval. Without a selection nothing is approvable, even though
+        // the first candidate is still shown below (its placement and why it was not selected).
+        const shown = view.selectedCandidate(report);
+        currentRecommendation = report.selectedRecommendationId ? shown : null;
+        const selected = currentRecommendation && detail.candidates.find((c) => c.id === currentRecommendation.id);
+        currentApproval = selected ? selected.approval : { ready: false, reason: "No candidate is selected." };
 
-            // Evidence next to the report. Only existing producers are used; anything without one is null,
-            // and the matching panel renders an explicit missing-evidence state.
-            const context = {
-                baselineBlastRadius: null,   // producer: a failure-impact result for the same topology (not wired here)
-                validation: null,            // producer: none yet (post-deployment validation)
-                yaml: null,                  // producer: the proposal stored with an approval request
-                currentDeployment: null,     // producer: the topology the candidates were evaluated on (not exposed)
-                simulatedDeployment: null,   // producer: the engine's virtual result (not exposed over HTTP)
-            };
+        // Evidence next to the report: what the engine returned, never anything computed here. Without a YAML generator
+        // and without applied changes there is no YAML proposal and no validation: those panels say so.
+        const context = {
+            baselineBlastRadius: detail.evidence.blastRadiusBefore,
+            validation: null,
+            yaml: null,
+            currentDeployment: detail.currentDeployment,
+            simulatedDeployment: selected ? selected.simulatedDeployment : null,   // only a selected, feasible candidate has one
+        };
+        view.renderOutcome(region.querySelector('[data-role="rec-outcome"]'), detail.outcome);
+        view.renderCandidateDetails(region.querySelector('[data-role="rec-detail-list"]'), detail);
+        showMetrics(view.summarise(report, context));
+        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context);
+        view.renderPlacement(region.querySelector('[data-role="rec-placement-current"]'),
+            region.querySelector('[data-role="rec-placement-predicted"]'), shown, context);
+        view.renderRankingTable(region.querySelector('[data-role="rec-candidate-table-body"]'), report);
+        view.renderValidation(region.querySelector('[data-role="rec-validation"]'), context.validation);
+        view.renderYaml(region.querySelector('[data-role="rec-yaml"]'), context.yaml);
+        initYamlToggle();
+        initJsonPanel(region.querySelector("#rec-raw-recommendation"), detail);
+        updateLastRefreshed(lastRefreshed);
 
-            currentRecommendation = view.selectedCandidate(report);
-            if (currentRecommendation) {
-                const approval = await loadApprovalState();
-                context.yaml = (approval && approval.yamlSnapshot) || null;
-            }
-
-            showMetrics(view.summarise(report, context));
-            view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context);
-            view.renderPlacement(
-                region.querySelector('[data-role="rec-placement-current"]'),
-                region.querySelector('[data-role="rec-placement-predicted"]'),
-                currentRecommendation,
-                context
-            );
-            view.renderRankingTable(region.querySelector('[data-role="rec-candidate-table-body"]'), report);
-            view.renderValidation(region.querySelector('[data-role="rec-validation"]'), context.validation);
-            view.renderYaml(region.querySelector('[data-role="rec-yaml"]'), context.yaml);
-            initYamlToggle();
-            initJsonPanel(region.querySelector("#rec-raw-recommendation"), report);
-            updateLastRefreshed(lastRefreshed);
-        } catch (error) {
-            applyBadge(sourceBadge, { variant: "muted", text: "No live recommendation" });
-            renderStateCard(region, describeError(error), { onRetry: loadPage });
-        } finally {
-            if (reloadButton) reloadButton.disabled = false;
+        if (currentRecommendation) {
+            const requestedFor = currentRecommendation.id;
+            loadApprovalState().then((approval) => {
+                if (!currentRecommendation || currentRecommendation.id !== requestedFor) return;   // a newer view replaced it
+                const yamlPanel = region.querySelector('[data-role="rec-yaml"]');
+                if (yamlPanel && approval && approval.yamlSnapshot) view.renderYaml(yamlPanel, approval.yamlSnapshot);
+            });
+        } else {
+            const container = region.querySelector('[data-role="approval-state-container"]');
+            const actions = region.querySelector('[data-role="approval-actions"]');
+            if (container) container.replaceChildren(approvalBadge("Nothing to approve", "muted"));
+            if (actions) actions.replaceChildren();
         }
     }
 
-    if (reloadButton) {
-        reloadButton.addEventListener("click", loadPage);
+    function render(v) {
+        renderContext(v);
+        const busy = v.status === "loading" || v.status === "loading-recommendation";
+        if (reloadButton) reloadButton.disabled = busy;
+        if (v.status === "ready") {
+            applyBadge(sourceBadge, { variant: "success", text: "Live evidence" });
+            showDetail(v);
+            return;
+        }
+        currentRecommendation = null;
+        currentApproval = { ready: false, reason: "" };
+        if (busy) {
+            applyBadge(sourceBadge, { variant: "muted", text: "Loading…" });
+            region.replaceChildren();
+            const note = document.createElement("p");
+            note.className = "ui-note";
+            note.textContent = v.status === "loading" ? "Reading the connected cluster and the approved workflows…" : "Asking for the current live recommendation…";
+            region.appendChild(note);
+        } else if (v.status === "needs-input") {
+            applyBadge(sourceBadge, { variant: "muted", text: "Choose to continue" });
+            region.replaceChildren();
+            const note = document.createElement("p");
+            note.className = "ui-note";
+            note.textContent = "More than one application or workflow is available, so none was chosen for you. Choose above to continue.";
+            region.appendChild(note);
+        } else {
+            applyBadge(sourceBadge, { variant: "muted", text: "Evidence missing" });
+            renderStateCard(region, blockedDescriptor(v), { onRetry: () => controller.reload() });
+        }
     }
-    [workflowIdInput, failedNodeInput, namespaceInput].forEach((input) => {
-        if (input) input.addEventListener("change", loadPage);
+
+    // The connected cluster's name, when this page runs inside the Docker Desktop extension. A page opened another way
+    // has none, and the cluster is then told apart by the fingerprint the backend reports.
+    async function clusterIdentity() {
+        try {
+            const response = await fetch("/_extension/cluster");
+            if (!response.ok) return "";
+            const body = await response.json();
+            return body && typeof body.context === "string" ? body.context : "";
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    controller = contextModule.createController({
+        // Discovery and the failure-impact prediction run server-side, so the default 8 s is too short.
+        fetchJson: (url) => fetchJson(url, { timeout: 45000 }),
+        clusterIdentity,
+        onUpdate: render,
     });
 
-    document.addEventListener("DOMContentLoaded", loadPage);
+    if (reloadButton) reloadButton.addEventListener("click", () => controller.reload());
+    if (namespaceSelect) namespaceSelect.addEventListener("change", () => controller.selectNamespace(namespaceSelect.value));
+    if (workflowSelect) workflowSelect.addEventListener("change", () => controller.selectWorkflow(workflowSelect.value));
+    if (nodeSelect) nodeSelect.addEventListener("change", () => controller.selectFailedNode(nodeSelect.value));
+    // Choices belong to one cluster: when the connection changes, nothing chosen before is kept.
+    window.addEventListener("resilience-cluster-changed", () => controller.clusterChanged());
+
+    document.addEventListener("DOMContentLoaded", () => controller.start());
 })();

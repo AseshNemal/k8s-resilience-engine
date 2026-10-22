@@ -301,6 +301,82 @@
         );
     }
 
+    // ---- explained recommendation: evidence checklist, outcome and per-candidate detail -------------------------------
+    // Everything below renders what GET /api/recommendations/live/detail returned. Nothing is calculated here: a value
+    // the server did not report is shown as not reported, and "ready for approval" is the server's own verdict.
+
+    const STATE_MARK = { available: "✔", pending: "…", incomplete: "!", missing: "✖" };
+
+    /** One line per piece of evidence a recommendation needs, with the exact next action when it is missing. */
+    function renderEvidenceChecklist(list, items, options) {
+        const doc = documentOf(options);
+        list.replaceChildren(...(items || []).map((item) => {
+            const row = element(doc, "li", undefined, "rec-evidence__item", { "data-state": item.state });
+            row.append(
+                element(doc, "strong", `${STATE_MARK[item.state] || "?"} ${item.label}`, "rec-evidence__label"),
+                element(doc, "span", ` ${item.detail}`, "rec-evidence__detail")
+            );
+            if (item.nextAction && item.state !== "available") {
+                row.append(element(doc, "div", `Next: ${item.nextAction}`, "rec-evidence__next"));
+            }
+            return row;
+        }));
+    }
+
+    /** The overall result. "No candidates" is deliberately worded so that it cannot be read as "healthy". */
+    function renderOutcome(container, outcome, options) {
+        const doc = documentOf(options);
+        container.replaceChildren();
+        if (!outcome) return;
+        const variant = outcome.state === "READY" ? "ready" : outcome.state === "NO_CANDIDATES" ? "no-candidates" : "not-ready";
+        container.append(element(doc, "p", outcome.message, "rec-outcome", { "data-state": variant, role: "status" }));
+    }
+
+    function labelled(doc, label, value) {
+        const row = element(doc, "div", undefined, "rec-detail__row");
+        row.append(element(doc, "span", label, "rec-detail__label"), element(doc, "span", value === null || value === undefined || value === "" ? "not reported" : value, "rec-detail__value"));
+        return row;
+    }
+
+    function placementText(placement) {
+        const rows = Object.entries(placement || {}).flatMap(([service, pods]) =>
+            (pods || []).map((p) => `${service}: ${p.pod} on ${p.node}${p.ready === false ? " (not ready)" : ""}`));
+        return rows.length ? rows.join("; ") : null;
+    }
+
+    /** For each candidate: what is wrong, what to change, whether it is feasible and why, the effect, the cost, the ranking. */
+    function renderCandidateDetails(container, detail, options) {
+        const doc = documentOf(options);
+        container.replaceChildren();
+        if (!detail || !Array.isArray(detail.candidates) || detail.candidates.length === 0) {
+            container.append(missingState(doc, "No candidate was generated", detail && detail.outcome ? detail.outcome.message : "The engine has no candidate for this workflow and failure."));
+            return;
+        }
+        for (const candidate of detail.candidates) {
+            const card = element(doc, "div", undefined, "card rec-detail", { "data-ready": String(candidate.approval.ready) });
+            card.append(element(doc, "h4", `${candidate.service} · ${codeLabel(candidate.type)}`, "rec-detail__title"));
+            card.append(labelled(doc, "Root cause", candidate.rootCause));
+            card.append(labelled(doc, "Recommended change", candidate.recommendedChange));
+            const feasibility = candidate.feasibility || {};
+            card.append(labelled(doc, "Feasibility", `${codeLabel(feasibility.status)}${feasibility.explanation ? ` — ${feasibility.explanation}` : ""}`));
+            for (const finding of feasibility.findings || []) {
+                card.append(labelled(doc, "  finding", `${finding.constraint}: ${finding.status} — ${finding.detail}`));
+            }
+            if ((feasibility.missingEvidence || []).length) card.append(labelled(doc, "Evidence missing", feasibility.missingEvidence.join("; ")));
+            card.append(labelled(doc, "Current placement", placementText(candidate.currentPlacement)));
+            card.append(labelled(doc, "Blast radius", `${percent(candidate.predicted.blastRadiusBefore)} now → ${percent(candidate.predicted.blastRadiusAfter)} predicted (${candidate.predicted.riskReduction} points)`));
+            card.append(labelled(doc, "Cost", `${codeLabel(candidate.cost.resource)} — ${candidate.cost.note || "no note"}; ${candidate.cost.configuration}`));
+            card.append(labelled(doc, "Ranking", candidate.selectionJustification));
+            for (const note of candidate.notes || []) card.append(element(doc, "p", note, "rec-detail__note"));
+            card.append(element(doc, "p",
+                candidate.approval.ready
+                    ? `Ready for approval${candidate.approval.requiresJustification ? " (needs a written justification)" : ""}. Approving does not apply anything.`
+                    : `Not ready for approval: ${candidate.approval.reason || "no reason reported"}`,
+                "rec-detail__approval", { "data-ready": String(candidate.approval.ready) }));
+            container.append(card);
+        }
+    }
+
     window.ResilienceRecommendations = {
         rankCandidates,
         selectedCandidate,
@@ -310,5 +386,8 @@
         renderValidation,
         renderYaml,
         renderPlacement,
+        renderEvidenceChecklist,
+        renderOutcome,
+        renderCandidateDetails,
     };
 })();

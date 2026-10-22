@@ -28,29 +28,31 @@
     </div>
 </div>
 
-<div class="rec-inputs" role="group" aria-label="What to recommend for">
-    <label class="rec-inputs__field" for="rec-workflow-id">
-        <span>Frozen workflow ID</span>
-        <input class="rec-inputs__input" id="rec-workflow-id" data-role="workflow-id" type="text"
-               autocomplete="off" placeholder="ID of an approved, frozen workflow graph">
-    </label>
-    <label class="rec-inputs__field" for="rec-failed-node">
-        <span>Failed node (optional)</span>
-        <input class="rec-inputs__input" id="rec-failed-node" data-role="failed-node" type="text"
-               autocomplete="off" placeholder="Default: the node whose loss hurts most">
-    </label>
-    <label class="rec-inputs__field" for="rec-namespace">
-        <span>Namespace</span>
-        <input class="rec-inputs__input" id="rec-namespace" data-role="namespace" type="text"
-               autocomplete="off" value="default">
-    </label>
-</div>
+<section class="rec-context" aria-label="What to recommend for" data-role="rec-context">
+    <p class="rec-context__cluster" data-role="rec-cluster" role="status" aria-live="polite">Looking for the connected cluster…</p>
+    <div class="rec-inputs" role="group" aria-label="Application, workflow and failure">
+        <label class="rec-inputs__field" for="rec-namespace-select">
+            <span>Application (namespace)</span>
+            <select class="rec-inputs__input" id="rec-namespace-select" data-role="rec-namespace-select" disabled></select>
+        </label>
+        <label class="rec-inputs__field" for="rec-workflow-select">
+            <span>Approved frozen workflow</span>
+            <select class="rec-inputs__input" id="rec-workflow-select" data-role="rec-workflow-select" disabled></select>
+        </label>
+        <label class="rec-inputs__field" for="rec-node-select">
+            <span>Failure to protect against</span>
+            <select class="rec-inputs__input" id="rec-node-select" data-role="rec-node-select" disabled></select>
+        </label>
+    </div>
+    <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
+</section>
 
 <div data-role="page-region">
     {{ loading_state("Asking for the current live recommendation…") }}
 </div>
 
 <template data-role="page-template">
+    <div data-role="rec-outcome"></div>
     <section class="metric-grid" aria-label="Recommendation metrics">
         {{ metric_card("rec-baseline-blast-radius", "Baseline Blast Radius", icon_name="target", icon_color="red") }}
         {{ metric_card("rec-best-predicted-blast-radius", "Best Predicted Blast Radius", icon_name="target", icon_color="green") }}
@@ -65,6 +67,12 @@
         </span>
     </div>
     <div data-role="rec-candidate-list"></div>
+
+    <div class="section-header">
+        <h3 class="section-header__title">Why each candidate is or is not recommended</h3>
+        <span class="section-header__note">Everything here was computed by the recommendation engine from the live evidence; nothing is applied.</span>
+    </div>
+    <div class="stack-md" data-role="rec-detail-list"></div>
 
     <div class="section-header">
         <h3 class="section-header__title">Current vs. Predicted Placement</h3>
@@ -170,5 +178,6 @@
 
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-context.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/recommendations.js') }}" defer></script>
 {% endblock %}

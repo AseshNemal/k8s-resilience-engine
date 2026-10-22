@@ -1,0 +1,67 @@
+# Recommendations page: how it gets its evidence, and what is still missing
+
+Owner: Member 4. The page works from the **currently connected cluster** and the **approved frozen workflows**. A person
+does not type a namespace, a workflow ID or a node: the page asks the backend what is available, uses the only choice
+automatically, offers a dropdown when there are several, and says exactly which evidence is missing when it cannot go on.
+No shared contract or schema is changed, and Components 1, 2 and 3 are only called, never modified.
+
+## What the person sees
+
+1. The page reads the connected cluster's name (inside the extension) and asks `GET /api/recommendations/context`.
+2. **Application.** If exactly one namespace holds applications it is used. With several, a dropdown asks; none is guessed.
+3. **Workflow.** Every approved *and frozen* workflow is listed, with whether it applies to the application's services. The
+   only applicable one is used automatically; with several, a dropdown asks. One that names services that are not in the
+   application, or whose placement is not fully resolved, is listed but cannot be chosen, with the reason.
+4. **Evidence checklist.** Cluster, application, deployment topology (Component 2), approved frozen workflow (Component 1) and
+   failure impact (Component 3), each `available`, `incomplete`, `missing` or `pending`, with the exact next action.
+5. When everything is available the page asks `GET /api/recommendations/live/detail` and shows, per candidate: the root
+   cause, the recommended change, feasibility and why, the current placement, predicted blast radius before and after, the
+   resource and configuration cost, the ranking and why it was or was not selected, and **whether it is ready for approval**
+   (Member 4's own eligibility rule, the one the approval gate enforces).
+6. An optional "failure to protect against" dropdown (the cluster's own nodes) defaults to the node whose loss hurts most.
+
+## Endpoints (both read-only)
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/recommendations/context?namespace=&workflow_id=` | The evidence checklist and the choices. Always answers; a missing piece of evidence is the answer, not an error |
+| `GET /api/recommendations/live/detail?workflow_id=&namespace=&failed_node=` | The explained recommendation. Same inputs and coded errors as `/live` |
+| `GET /api/recommendations/live` | Unchanged: the bare `RecommendationReport` |
+
+## Where each input comes from
+
+| Evidence | Producer (public interface only) |
+| --- | --- |
+| Connected cluster, applications, services, how complete each namespace's topology is | Component 2: `discover_all` |
+| Approved, frozen workflow graphs | Component 1: `list_dependency_assessments` and `get_frozen_workflow_graph` |
+| Frozen workflow + live topology for one recommendation, refusing an incomplete topology | Component 3: `get_runtime_component_inputs` |
+| Blast radius before and after | Component 3: `predict_failure_impact` (never recomputed here) |
+| Candidates, feasibility, simulation, ranking, pair combinations, eligibility | Member 4: `live_pipeline`, `ranking`, `combinations`, `approval.eligibility` |
+
+`LiveRecommendation.details` carries the display detail (root cause, current and simulated placement). It is never stored with an
+approval and is not part of the proposal fingerprint; the `evidence` dict that approvals store is unchanged.
+
+## Rules the page keeps
+
+* Real evidence only. A missing frozen workflow, topology or failure-impact result is reported as missing; nothing is
+  substituted, defaulted or estimated, and no workflow is built.
+* **"No candidate" is not "healthy".** When the evidence is complete and the engine generates no candidate, the page says it is
+  not a finding that the application is resilient: the engine only considers the change types it models.
+* **No replica fix is invented.** Bookinfo's services run a single replica; the engine reports the spread change as infeasible
+  (a spread cannot make one replica survive the loss of its node), predicts no improvement, and selects nothing.
+* Nothing is applied automatically. A request for approval is a separate, explicit click, allowed only for a candidate the
+  server says is ready, and is bound to the live evidence as before.
+* Choices belong to one cluster. When the connected cluster changes (or the same connection reaches another cluster) the
+  namespace, workflow and node choices are cleared, a late answer for an older request is dropped, and no recommendation is
+  requested from a context that does not match its cluster.
+
+## What is still blocked or not built
+
+| Item | Why |
+| --- | --- |
+| A frozen workflow for the connected application | Component 1 must assess, approve and freeze one from real traces. Until then the page shows the missing evidence and says so; it does not build a workflow |
+| A feasible recommendation for single-replica services | There is none to find: more replicas, not a different placement, would be needed, and no feasible change of that kind is produced |
+| Scheduling facts (node taints, readiness, declared intent) | Not carried by the topology contract, so a candidate that depends on them stays `INSUFFICIENT_EVIDENCE` and cannot be approved |
+| Kubernetes YAML proposal | No generator exists. The page says so; no text is invented |
+| Validation (predicted versus measured) | Needs an approved change that has been applied and measured. Nothing is applied automatically |
+| Survivability before/after as a separate figure | Reported blast radius is shown; survivability is not re-derived here |

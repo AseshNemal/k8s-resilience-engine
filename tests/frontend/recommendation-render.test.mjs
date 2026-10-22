@@ -301,6 +301,96 @@ test("a service absent from the supplied topology is stated, not guessed", () =>
     assert.ok(text(current).includes("not found in the supplied topology"));
 });
 
+// ---- the explained recommendation ------------------------------------------------------------------------------------------
+
+const o = { document: undefined };   // replaced per test; kept here so the helpers below read like the ones above
+const detailCandidate = (over = {}) => ({
+    id: "c1", type: "TOPOLOGY_SPREAD", service: "ratings", rootCause: "All replicas run on one node.",
+    recommendedChange: "Add a topologySpreadConstraint", feasibility: { status: "INFEASIBLE", explanation: "single replica", findings: [{ constraint: "TOPOLOGY_SPREAD", status: "INFEASIBLE", detail: "needs two nodes" }], missingEvidence: ["node taints"] },
+    currentPlacement: { ratings: [{ pod: "ratings-1", node: "w1", ready: true }] },
+    predicted: { blastRadiusBefore: 100, blastRadiusAfter: 100, riskReduction: 0 },
+    cost: { resource: "LOW", note: "Adds no replicas.", configuration: "1 Deployment pod-template edit(s)" },
+    selectionJustification: "Not ranked (INFEASIBLE).", notes: ["single replica note"],
+    approval: { ready: false, reason: "not feasible", requiresJustification: false }, ...over,
+});
+
+test("the evidence checklist marks each state and shows the next action only for evidence that is not available", () => {
+    const doc = makeDocument();
+    const list = doc.container();
+    view.renderEvidenceChecklist(list, [
+        { id: "cluster", label: "Connected cluster", state: "available", detail: "answered", nextAction: "ignored for available" },
+        { id: "workflow", label: "Approved frozen workflow", state: "missing", detail: "none frozen", nextAction: "freeze one" },
+        { id: "topology", label: "Deployment topology", state: "incomplete", detail: "ratings not placed", nextAction: "open topology" },
+        { id: "failureImpact", label: "Failure impact", state: "pending", detail: "computed later", nextAction: null },
+    ], { document: doc });
+
+    const shown = text(list);
+    assert.ok(shown.includes("✔ Connected cluster") && shown.includes("✖ Approved frozen workflow") && shown.includes("! Deployment topology") && shown.includes("… Failure impact"));
+    assert.ok(shown.includes("Next: freeze one") && shown.includes("Next: open topology"));
+    assert.ok(!shown.includes("ignored for available"), "an available item has nothing left to do");
+    assert.deepEqual(plain(list.children.map((row) => row.attributes["data-state"])), ["available", "missing", "incomplete", "pending"]);
+});
+
+test("the outcome keeps 'no candidates' apart from 'ready', and an absent outcome shows nothing", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderOutcome(box, { state: "NO_CANDIDATES", message: "not a finding that the application is resilient" }, { document: doc });
+    assert.equal(box.children[0].attributes["data-state"], "no-candidates");
+    assert.ok(text(box).includes("not a finding that the application is resilient"));
+
+    view.renderOutcome(box, { state: "READY", message: "1 candidate can be approved" }, { document: doc });
+    assert.equal(box.children[0].attributes["data-state"], "ready");
+    view.renderOutcome(box, null, { document: doc });
+    assert.equal(box.children.length, 0);
+});
+
+test("each candidate shows root cause, change, feasibility with its findings, placement, effect, cost, ranking and approval", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate()] }, { document: doc });
+
+    const shown = text(box);
+    for (const piece of ["ratings · Topology Spread", "All replicas run on one node.", "Add a topologySpreadConstraint", "Infeasible — single replica",
+        "TOPOLOGY_SPREAD: INFEASIBLE — needs two nodes", "node taints", "ratings: ratings-1 on w1", "100% now → 100% predicted (0 points)",
+        "Low — Adds no replicas.; 1 Deployment pod-template edit(s)", "Not ranked (INFEASIBLE).", "single replica note", "Not ready for approval: not feasible"]) {
+        assert.ok(shown.includes(piece), `missing: ${piece}`);
+    }
+});
+
+test("a ready candidate says approving does not apply anything, and one needing a justification says so", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate({ approval: { ready: true, reason: null, requiresJustification: true } })] }, { document: doc });
+
+    assert.ok(text(box).includes("Ready for approval (needs a written justification). Approving does not apply anything."));
+});
+
+test("a value the server did not report is shown as not reported, never filled in", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate({ rootCause: null, recommendedChange: undefined, currentPlacement: {} })] }, { document: doc });
+
+    const shown = text(box);
+    assert.ok(shown.match(/not reported/g).length >= 3, "root cause, change and placement are all not reported");
+});
+
+test("no candidates is an explicit state carrying the server's own message", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [], outcome: { state: "NO_CANDIDATES", message: "evidence complete, nothing to change" } }, { document: doc });
+    assert.ok(text(box).includes("No candidate was generated") && text(box).includes("evidence complete, nothing to change"));
+    view.renderCandidateDetails(box, null, { document: doc });
+    assert.ok(text(box).includes("No candidate was generated"));
+});
+
+test("text from the server is never written as markup", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate({ rootCause: "<img src=x onerror=alert(1)>" })] }, { document: doc });
+    assert.ok(text(box).includes("<img src=x onerror=alert(1)>"), "shown as text");
+    assert.doesNotMatch(source, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+});
+
 // ---- hygiene ------------------------------------------------------------------------------------------------------------------------------
 
 test("the module fetches nothing and contains no sample, demo or round-robin logic", () => {
