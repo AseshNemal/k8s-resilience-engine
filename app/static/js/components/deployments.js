@@ -63,6 +63,27 @@
         if (element) element.textContent = value;
     }
 
+    // The evidence box: where and when the shown data was read, and a kubectl command to check it.
+    function renderEvidence(body) {
+        const box = document.querySelector('[data-role="evidence-box"]');
+        if (!box) return;
+        const put = (role, text) => {
+            const node = box.querySelector(`[data-role="${role}"]`);
+            if (node) node.textContent = text;
+        };
+        const graph = body.graph || {};
+        const read = new Date(body.capturedAt || graph.timestamp);
+        const evidence = Object.values(body.serviceEvidence || {});
+        const ms = graph.validation?.runtimeOverheadMs;
+        put("evidence-namespace", body.namespace);
+        put("evidence-time", Number.isNaN(read.getTime()) ? "unknown" : read.toLocaleString());
+        put("evidence-snapshot", graph.snapshotId || "n/a");
+        put("evidence-took", ms == null ? "n/a" : `${(ms / 1000).toFixed(2)} s`);
+        put("evidence-complete", `${evidence.filter((e) => e.complete).length} of ${evidence.length}`);
+        put("evidence-command", `kubectl -n ${body.namespace} get pods -o wide`);
+        box.hidden = false;
+    }
+
     const readyCount = (s) => s.readyReplicas ?? s.ready_replicas ?? (s.pods ? s.pods.filter((p) => p.ready).length : 0);
 
     function renderHeadlineMetrics(deployment) {
@@ -94,6 +115,7 @@
             if (applyBadge && describeDiscovery) {
                 applyBadge(sourceBadge, describeDiscovery(body).badge);
             }
+            renderEvidence(body);
 
             renderHeadlineMetrics(deployment);
             const services = deployment.services || [];
@@ -115,6 +137,8 @@
             updateLastRefreshed(lastRefreshed);
         } catch (error) {
             console.error("Failed to load deployment data:", error);
+            const box = document.querySelector('[data-role="evidence-box"]');
+            if (box) box.hidden = true;  // no live data shown, so nothing to vouch for
             if (applyBadge && renderStateCard && describeError && region) {
                 applyBadge(sourceBadge, { variant: "danger", text: "Not showing live data" });
                 renderStateCard(region, describeError(error), { onRetry: loadPage });

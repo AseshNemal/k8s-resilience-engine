@@ -5,11 +5,11 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.15">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.15">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.15">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.15">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.15">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.16">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.16">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.16">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.16">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.16">
 {% endblock %}
 
 {% block content %}
@@ -38,6 +38,19 @@
 
 {# Failure and status messages for the live source (explicit error states, see connection-state.js) #}
 <div data-role="page-region"></div>
+
+{# Where and when this page's data was read, so anyone can check it against the cluster themselves #}
+<section class="evidence-box" data-role="evidence-box" aria-label="Where this page's data comes from" hidden>
+    <div class="evidence-box__title"><span class="evidence-box__dot" aria-hidden="true"></span> Live data: read from the connected Kubernetes cluster, not stored or typed in</div>
+    <dl class="evidence-box__grid">
+        <div><dt>Namespace</dt><dd data-role="evidence-namespace"></dd></div>
+        <div><dt>Read at</dt><dd data-role="evidence-time"></dd></div>
+        <div><dt>Snapshot</dt><dd><code data-role="evidence-snapshot"></code></dd></div>
+        <div><dt>Took</dt><dd data-role="evidence-took"></dd></div>
+        <div><dt>Services resolved</dt><dd data-role="evidence-complete"></dd></div>
+    </dl>
+    <p class="evidence-box__verify">Check it yourself: <code data-role="evidence-command"></code></p>
+</section>
 
 {# Headline metrics #}
 <section class="metric-grid" aria-label="Deployment metrics">
@@ -97,13 +110,13 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.15"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.15"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.16"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.16"></script>
 {% endblock %}

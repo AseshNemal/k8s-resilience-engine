@@ -948,3 +948,24 @@
 .finding-card--muted { border-left-color: var(--color-border); }
 .finding-card__title { display: flex; gap: 6px; align-items: baseline; margin: 0 0 6px 0; font-size: 0.95rem; }
 .finding-card__text { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--color-text-muted); }
+
+/* ---- evidence box: where and when the page's data was read ---- */
+.evidence-box {
+    margin: 0 0 var(--space-lg) 0;
+    padding: 12px 16px;
+    border: 1px solid var(--color-border);
+    border-left: 5px solid var(--color-success);
+    border-radius: var(--radius-small);
+    background: var(--color-surface);
+}
+.evidence-box__title { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; }
+.evidence-box__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-success); }
+.evidence-box__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px 16px;
+    margin: 0;
+}
+.evidence-box__grid dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-muted); }
+.evidence-box__grid dd { margin: 2px 0 0 0; font-size: 13px; }
+.evidence-box__verify { margin: 10px 0 0 0; font-size: 12px; color: var(--color-text-muted); }
