@@ -103,7 +103,7 @@ def test_the_default_source_is_the_backends_own_setting(monkeypatch):
 
 
 def test_the_routes_never_write(client):
-    for path in ("/connection", "/status", "/applications"):
+    for path in ("/connection", "/status", "/applications", "/trace-path"):
         for method in ("post", "put", "patch", "delete"):
             assert getattr(client, method)(f"{BASE}{path}").status_code == 405
 
@@ -111,3 +111,23 @@ def test_the_routes_never_write(client):
 def test_the_status_route_uses_the_modules_state_names(client, monkeypatch):
     use(monkeypatch, FakeSource(services=["a"]))
     assert client.get(f"{BASE}/status").json()["telemetry"]["state"] in {s.value for s in tracing_status.TelemetryState}
+
+
+def test_the_trace_path_route_reports_whether_the_calls_are_linked(client, monkeypatch):
+    from tests.tracing.test_trace_path import full_path
+
+    use(monkeypatch, FakeSource(services=["productpage.bookinfo"], traces={"productpage.bookinfo": [full_path()]}))
+    body = client.get(f"{BASE}/trace-path").json()
+    assert body["verdict"] == "VERIFIED" and body["namespace"] == "bookinfo" and body["completeTraces"] == 1
+
+
+def test_the_trace_path_route_treats_an_unreachable_service_as_a_normal_answer(client, monkeypatch):
+    use(monkeypatch, FakeSource(services_fail=True))
+    response = client.get(f"{BASE}/trace-path", params={"namespace": "bookinfo"})
+    assert response.status_code == 200 and response.json()["verdict"] == "UNREACHABLE"
+
+
+def test_the_trace_path_route_refuses_names_that_are_not_kubernetes_names(client, monkeypatch):
+    source = use(monkeypatch, FakeSource())
+    response = client.get(f"{BASE}/trace-path", params={"namespace": "Bad NS"})
+    assert response.status_code == 422 and response.json()["detail"]["code"] == "INVALID_NAME" and source.calls == []

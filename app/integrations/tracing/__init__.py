@@ -9,12 +9,15 @@ what Jaeger could not say is reported as unknown. The interface is described in 
 from app.integrations.tracing.applications import ServiceState, match_applications
 from app.integrations.tracing.endpoint import TracingConnection, resolve_connection
 from app.integrations.tracing.status import TelemetryState, read_status
+from app.integrations.tracing.trace_path import PathVerdict, verify_trace_path
 
 __all__ = [
+    "PathVerdict",
     "ServiceState",
     "TelemetryState",
     "TracingConnection",
     "match_applications",
     "read_status",
     "resolve_connection",
+    "verify_trace_path",
 ]

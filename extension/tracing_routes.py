@@ -3,6 +3,7 @@
   GET /_extension/tracing/connection    where the query service and the OTLP receivers are
   GET /_extension/tracing/status        whether the query service answers and whether telemetry is arriving
   GET /_extension/tracing/applications  whether the named Kubernetes services are producing traces
+  GET /_extension/tracing/trace-path    whether real traces show the Bookinfo call path, with the calls linked
 
 They only read what Jaeger reports (see app/integrations/tracing). They start nothing, change nothing in a
 cluster, and take no address from the caller: the trace service is the backend's own setting. Starting and
@@ -16,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.integrations.jaeger.client import JaegerClient
 from app.integrations.tracing import match_applications, read_status, resolve_connection
+from app.integrations.tracing.trace_path import verify_trace_path
 from app.integrations.tracing.applications import MAX_SERVICES, valid_name
 
 router = APIRouter(prefix="/_extension/tracing", tags=["Extension tracing"])
@@ -52,3 +54,11 @@ def get_applications(namespace: str = Query(...), service: list[str] = Query(def
         return match_applications(make_source(), namespace, service)
     except ConnectionError:
         raise _coded(503, "TRACE_SERVICE_UNAVAILABLE", "The trace service did not answer.") from None
+
+
+@router.get("/trace-path")
+def get_trace_path(namespace: str = Query(default="bookinfo")) -> dict:
+    # Like /status, an unreachable trace service is a normal answer (verdict UNREACHABLE), so a page can retry.
+    if not valid_name(namespace):
+        raise _coded(422, "INVALID_NAME", "The namespace must be a Kubernetes name.")
+    return verify_trace_path(make_source(), namespace)
