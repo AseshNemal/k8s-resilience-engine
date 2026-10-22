@@ -141,7 +141,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         </div>
         <p class="connect__message" data-role="tracing-message" role="status"></p>
         <ul class="connect__apps" data-role="tracing-endpoints" aria-label="Tested addresses"></ul>
-        <h4 class="section-header__title">Applications</h4>
+        <h4 class="section-header__title" data-role="tracing-apps-title" hidden>Applications</h4>
         <ul class="connect__apps" data-role="tracing-apps" aria-live="polite"></ul>
         <details class="connect__manual" data-role="tracing-guidance" hidden>
             <summary class="section-header__title" data-role="tracing-guidance-title">Set up tracing</summary>

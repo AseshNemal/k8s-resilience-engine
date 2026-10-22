@@ -64,7 +64,9 @@ test("only the state is taken from the helper; the wording shown is this file's 
 
 test("every state the helper can print has its own message", () => {
     for (const state of ["trace-running", "trace-running-external", "trace-stopped", "trace-not-created", "trace-not-ready",
-        "trace-port-in-use", "trace-start-failed", "docker-unavailable"]) {
+        "trace-port-in-use", "trace-start-failed", "docker-unavailable", "trace-image-unavailable", "trace-not-enabled",
+        "trace-recovery-wait", "trace-endpoints-ok", "trace-endpoints-failed", "trace-approval-timed-out", "declined",
+        "approval-unavailable"]) {
         assert.notEqual(T.messageFor(state), T.messageFor("not-a-state"), state);
     }
 });

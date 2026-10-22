@@ -92,7 +92,7 @@ test("a node reaching the receiver is never described as a Pod reaching it", () 
     const pods = (reachable) => P.describeEndpoint({ name: "pods-otlp-http", address: "host.docker.internal:4318", reachable, evidence: "node" });
     assert.match(pods(true).text, /Every node reached it; a Pod itself has not been tested/);
     assert.match(pods(false).text, /cannot send traces here yet/);
-    assert.match(pods(null).text, /Could not be tested here/);
+    assert.match(pods(null).text, /Not tested: that needs the receiver to answer on this computer first/);
     assert.equal(pods(null).state, "unknown");
 });
 

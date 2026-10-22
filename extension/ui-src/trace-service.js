@@ -33,6 +33,7 @@
         "trace-port-in-use": "Another program is using the trace service's ports (16686, 4317 or 4318). Stop it, then try again.",
         "trace-start-failed": "Docker could not start the trace service.",
         "docker-unavailable": "Docker could not be reached, so the trace service cannot be started from here.",
+        "trace-image-unavailable": "Docker could not download the trace service image. Check the network (a proxy or TLS inspection can block it), or run `docker pull jaegertracing/all-in-one:1.56`, then try again.",
         "trace-not-enabled": "Tracing is not turned on yet.",
         "trace-recovery-wait": "The trace service is not answering. It was recreated a moment ago, so it is left alone for a while before another try.",
         "trace-endpoints-ok": "The trace service's query and OTLP receivers answer on this computer.",

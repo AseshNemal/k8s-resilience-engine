@@ -245,7 +245,15 @@ func Validate(ctx context.Context, d Deps) flow.Result {
 	for _, e := range endpoints {
 		hostOK = hostOK && *e.Reachable
 	}
-	endpoints = append(endpoints, podsReach(ctx, d))
+	if *endpoints[1].Reachable { // otlp-http
+		endpoints = append(endpoints, podsReach(ctx, d))
+	} else {
+		// Nothing listens on this computer yet, so a node failing to connect would say nothing about the network.
+		endpoints = append(endpoints, flow.Endpoint{
+			Name: "pods-otlp-http", Address: PodHost + ":" + otlpHTTPPort, Evidence: "node",
+			Note: "The receiver does not answer on this computer yet, so reachability from the cluster was not tested.",
+		})
+	}
 
 	r := result(command, StateEndpointsOK, true, "The trace service's query and OTLP receivers answer on this computer.")
 	if !hostOK {

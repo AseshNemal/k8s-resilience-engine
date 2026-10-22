@@ -606,3 +606,10 @@ textarea.form-input { width: 100%; resize: vertical; }
     .pipeline-stage__io-list { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* The Tracing service card (tracing-panel.js): room between the sentence, the buttons, the checks and the note. */
+[data-role="tracing-card"] .connect__picker { margin: 14px 0 12px; }
+[data-role="tracing-card"] [data-role="tracing-endpoints"] { margin-top: 12px; }
+[data-role="tracing-card"] > .ui-note:last-child { margin-top: 16px; }
+[data-role="tracing-card"] [data-role="tracing-message"] { margin: 0 0 8px; }
+[data-role="tracing-card"] [data-role="tracing-detail"] { margin: 6px 0 0; }

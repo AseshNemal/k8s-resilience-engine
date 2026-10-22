@@ -108,7 +108,7 @@
         if (endpoint.name === "pods-otlp-http") {
             text += state === "ok" ? ". Every node reached it; a Pod itself has not been tested."
                 : state === "fail" ? ". A node could not reach it, so applications in the cluster cannot send traces here yet."
-                : ". Could not be tested here (no Kubernetes node containers were found, or Docker could not be asked).";
+                : ". Not tested: that needs the receiver to answer on this computer first, and a Kubernetes node container to ask.";
         }
         return { state, text };
     }
@@ -294,7 +294,7 @@
     const nodes = {
         headline: part("tracing-headline"), detail: part("tracing-detail"), message: part("tracing-message"),
         enable: part("tracing-enable"), off: part("tracing-off"), check: part("tracing-check"),
-        endpoints: part("tracing-endpoints"), apps: part("tracing-apps"),
+        endpoints: part("tracing-endpoints"), apps: part("tracing-apps"), appsTitle: part("tracing-apps-title"),
         guidance: part("tracing-guidance"), guidanceTitle: part("tracing-guidance-title"),
         guidanceText: part("tracing-guidance-text"), guidanceSnippet: part("tracing-guidance-snippet"), copy: part("tracing-copy"),
     };
@@ -348,6 +348,7 @@
             nodes.check.textContent = "Check connections";
         }
         nodes.endpoints.replaceChildren(...v.endpoints.map((e) => { const li = el("li", "connect__app", e.text); li.dataset.state = e.state; return li; }));
+        nodes.appsTitle.hidden = v.apps.length === 0;   // no heading over an empty list
         nodes.apps.replaceChildren(...v.apps.map((app) => {
             const li = el("li", "connect__app");
             li.dataset.allProducing = String(app.allProducing);

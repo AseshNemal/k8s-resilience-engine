@@ -403,6 +403,51 @@ func TestValidateSaysWhenAnAddressDoesNotAnswer(t *testing.T) {
 	}
 }
 
+func TestNodesAreNotAskedWhileNothingListensOnThisComputer(t *testing.T) {
+	a := newApproved("", approve.Approved) // no container: nothing answers
+	a.open = map[string]bool{}
+	n, d := withNodes(a, "desktop-control-plane\n", 1)
+	d.Probe = func(context.Context) bool { return false }
+	got := Validate(context.Background(), d)
+
+	pods := endpoint(got, "pods-otlp-http")
+	if pods.Reachable != nil || !strings.Contains(pods.Note, "does not answer on this computer yet") {
+		t.Fatalf("a node failing against a closed port says nothing about the network, so it must stay unknown: %+v", pods)
+	}
+	if len(n.execs) != 0 {
+		t.Fatalf("no node should have been asked: %v", n.execs)
+	}
+}
+
+func TestADownloadFailureIsNamedWithoutDockersText(t *testing.T) {
+	for _, text := range []string{
+		"Error response from daemon: Get \"https://registry-1.docker.io/v2/\": x509: certificate signed by unknown authority",
+		"error getting credentials - err: exec: \"docker-credential-desktop\": executable file not found in $PATH",
+		"dial tcp: lookup registry-1.docker.io: no such host",
+	} {
+		a := newApproved("", approve.Approved)
+		a.docker.runResult = execx.Result{ExitCode: 125, Stderr: []byte(text)}
+		got := Start(context.Background(), a.deps())
+		if got.State != StateImageUnavailable || got.OK {
+			t.Fatalf("%q: got %+v", text, got)
+		}
+		if strings.Contains(got.Message, "x509") || strings.Contains(got.Message, "registry") || strings.Contains(got.Message, "credential") {
+			t.Fatalf("Docker's own text leaked: %q", got.Message)
+		}
+		if a.docker.ran("rm") == nil {
+			t.Fatal("the half-made container was not removed")
+		}
+	}
+}
+
+func TestAnUnfamiliarDockerFailureStaysGeneric(t *testing.T) {
+	a := newApproved("", approve.Approved)
+	a.docker.runResult = execx.Result{ExitCode: 125, Stderr: []byte("something nobody has seen before")}
+	if got := Start(context.Background(), a.deps()); got.State != StateStartFailed {
+		t.Fatalf("got %s", got.State)
+	}
+}
+
 func TestPodReachabilityIsUnknownNeverGuessed(t *testing.T) {
 	cases := []struct {
 		name   string

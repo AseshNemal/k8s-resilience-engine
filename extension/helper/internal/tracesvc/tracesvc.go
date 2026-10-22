@@ -55,6 +55,7 @@ const (
 	StatePortInUse        flow.State = "trace-port-in-use"        // something else holds the Jaeger ports
 	StateStartFailed      flow.State = "trace-start-failed"       // Docker refused for another reason
 	StateDockerMissing    flow.State = "docker-unavailable"       // the Docker CLI could not be found or run
+	StateImageUnavailable flow.State = "trace-image-unavailable"  // Docker could not download the image
 	StateNotEnabled       flow.State = "trace-not-enabled"        // the person has not turned tracing on, so nothing was done
 	StateApprovalTimedOut flow.State = "trace-approval-timed-out" // the dialog was not answered, so nothing was started
 	StateRecoveryWait     flow.State = "trace-recovery-wait"      // our container was recreated a moment ago; not again yet
@@ -235,8 +236,12 @@ func create(ctx context.Context, d Deps, command string) *flow.Result {
 	}
 	_, _ = d.Runner.Run(ctx, path, []string{"rm", "-f", ContainerName}, nil)
 	failed := result(command, StateStartFailed, false, "Docker could not start the trace service.")
-	if portTaken(res) {
+	switch {
+	case portTaken(res):
 		failed = portInUse(command)
+	case imageUnavailable(res):
+		failed = result(command, StateImageUnavailable, false,
+			"Docker could not download the trace service image. Check the network (a proxy or TLS inspection can block it), or run `docker pull "+Image+"`, then try again.")
 	}
 	return &failed
 }
@@ -297,4 +302,21 @@ func portTaken(res execx.Result) bool {
 	text := strings.ToLower(string(res.Stderr) + string(res.Stdout))
 	return strings.Contains(text, "port is already allocated") || strings.Contains(text, "address already in use") ||
 		strings.Contains(text, "ports are not available")
+}
+
+// imageUnavailable recognises Docker failing to download the image (no network, a proxy or TLS inspection it does
+// not trust, a rate limit, or its credential helper not being found), so the person is told what to try. Only the
+// verdict is used; the text itself is never returned. These are the usual wordings of Docker's errors, so an
+// unfamiliar one is reported as the generic failure, never as this.
+func imageUnavailable(res execx.Result) bool {
+	text := strings.ToLower(string(res.Stderr) + string(res.Stdout))
+	for _, marker := range []string{
+		"pull access denied", "failed to resolve", "x509", "no such host", "tls handshake", "i/o timeout",
+		"error getting credentials", "toomanyrequests", "failed to do request",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
