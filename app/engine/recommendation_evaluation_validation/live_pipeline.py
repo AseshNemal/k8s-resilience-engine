@@ -261,6 +261,16 @@ def _evaluate_combinations(
     }, details)
 
 
+class EvidenceProvenance(NamedTuple):
+    """Where the inputs of one evaluation came from. ``source`` is what the approval gate trusts or refuses."""
+
+    source: str
+    namespace: str
+    topology_captured_at: str | None
+    topology_status: str | None
+    workflow_freeze_id: str | None
+
+
 def build_live_recommendation(
     workflow_id: str,
     failed_node: str | None = None,
@@ -276,8 +286,33 @@ def build_live_recommendation(
     the most pairs of changes evaluated together; what the budget left out is reported in the evidence.
     """
     inputs = get_runtime_component_inputs(workflow_id, namespace)
-    workflow, deployment = inputs.workflow, inputs.deployment
+    return evaluate_recommendation(
+        inputs.workflow, inputs.deployment,
+        EvidenceProvenance(LIVE_EVIDENCE_SOURCE, inputs.namespace, inputs.topology_captured_at,
+                           inputs.topology_status, inputs.workflow_freeze_id),
+        failed_node, scheduling_evidence=scheduling_evidence_for(inputs.deployment),
+        combination_budget=combination_budget,
+    )
 
+
+def evaluate_recommendation(
+    workflow,
+    deployment,
+    provenance: EvidenceProvenance,
+    failed_node: str | None = None,
+    *,
+    scheduling_evidence: SchedulingEvidence,
+    combination_budget: int = DEFAULT_EVALUATION_BUDGET,
+) -> LiveRecommendation:
+    """The pipeline over a workflow and a topology that are already in hand.
+
+    This is the whole evaluation (candidates, feasibility, virtual simulation, Component 3's before/after,
+    ranking, pairs) with the fetching taken out, so the same code serves the live route and an offline
+    evaluation of captured or controlled artifacts. It reads no cluster and changes neither input. What the
+    result may be used for is decided by ``provenance.source`` alone: only the live route passes
+    ``LIVE_EVIDENCE_SOURCE``, and an approval is refused for any other source.
+    """
+    workflow_id = workflow.workflow_id
     chosen_by = "requested"
     if not failed_node:
         failed_node, chosen_by = _riskiest_node(workflow, deployment), "highest blast radius"
@@ -288,7 +323,6 @@ def build_live_recommendation(
 
     skipped: list[str] = []
     feasibility: dict[str, Any] = {}
-    scheduling_evidence = scheduling_evidence_for(deployment)
     before_snapshot = _impact_snapshot(before)
     evaluated: list[EvaluatedCandidate] = []
     outcomes: dict[str, _Outcome] = {}
@@ -372,12 +406,12 @@ def build_live_recommendation(
         selected_recommendation_id=selected,
     )
     evidence: dict[str, Any] = {
-        "source": LIVE_EVIDENCE_SOURCE,
-        "topologyCapturedAt": inputs.topology_captured_at,
-        "topologyStatus": inputs.topology_status,
-        "namespace": inputs.namespace,
+        "source": provenance.source,
+        "topologyCapturedAt": provenance.topology_captured_at,
+        "topologyStatus": provenance.topology_status,
+        "namespace": provenance.namespace,
         "workflowId": workflow.workflow_id,
-        "workflowFreezeId": inputs.workflow_freeze_id,
+        "workflowFreezeId": provenance.workflow_freeze_id,
         "topologySnapshotId": deployment.snapshot_id,
         "failedNode": failed_node,
         "failedNodeChosen": chosen_by,
