@@ -1270,55 +1270,6 @@
 .wi-svc__count { margin-left: 4px; font-size: 12px; color: var(--c2-text-muted); }
 .wi-svc__state { font-size: 14px; font-weight: 800; color: color-mix(in srgb, var(--tone) 75%, var(--c2-text-main)); }
 
-/* failure-domain exposure: how many services each node alone would take down */
-.wi-node__risk {
-    margin-left: auto;
-    padding: 3px 10px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--c2-accent-success) 14%, transparent);
-    color: #047857;
-    font-size: 12px;
-    font-weight: 800;
-}
-.wi-node__risk--danger { background: color-mix(in srgb, var(--c2-accent-danger) 14%, transparent); color: #b91c1c; }
-
-/* replica concentration: one piece per node, the busiest one solid */
-.wi-conc { display: flex; flex-direction: column; gap: 4px; }
-.wi-conc__label { font-size: 12px; color: var(--c2-text-muted); }
-.wi-conc__label strong { color: var(--c2-text-main); }
-.wi-conc.is-concentrated .wi-conc__label strong { color: var(--c2-accent-danger); }
-.wi-conc__bar { display: flex; gap: 2px; height: 18px; }
-.wi-conc__piece {
-    display: grid;
-    place-items: center;
-    min-width: 0;
-    overflow: hidden;
-    border-radius: 4px;
-    background: hsl(var(--svc-hue) 60% 85%);
-    color: hsl(var(--svc-hue) 60% 25%);
-    font-size: 10px;
-    font-weight: 700;
-    white-space: nowrap;
-}
-.wi-conc__piece.is-busiest { background: hsl(var(--svc-hue) 65% 48%); color: #fff; }
-.wi-conc.is-concentrated .wi-conc__piece.is-busiest { box-shadow: inset 0 0 0 2px var(--c2-accent-danger); }
-
-/* hovering a node: the services it alone would take down shake and turn red, before anything crashes */
-.wi-svc.is-at-risk { --tone: var(--c2-accent-danger); border-color: var(--c2-accent-danger); animation: wi-shake 0.4s ease; }
-@keyframes wi-shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-4px); }
-    75% { transform: translateX(4px); }
-}
-.whatif__legend { margin: -8px 0 0 0; font-size: 12px; color: var(--c2-text-muted); }
-
-@media (prefers-color-scheme: dark) {
-    .wi-node__risk { color: #6ee7b7; }
-    .wi-node__risk--danger { color: #fca5a5; }
-    .wi-conc__piece { background: hsl(var(--svc-hue) 35% 28%); color: hsl(var(--svc-hue) 70% 85%); }
-}
-@media (prefers-reduced-motion: reduce) { .wi-svc.is-at-risk { animation: none; } }
-
 /* click a service card: light up its copies, fade the rest */
 .whatif.has-focus .wi-pod:not(.is-focus), .whatif.has-focus .wi-svc:not(.is-focus) { opacity: 0.3; }
 .wi-pod.is-focus { transform: scale(1.12); box-shadow: 0 0 0 3px hsl(var(--svc-hue) 70% 85%); }
