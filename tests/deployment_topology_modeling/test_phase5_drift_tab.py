@@ -29,9 +29,10 @@ def test_drift_tab_markup_presence(client):
     assert 'id="count-contention-drift"' in html
     assert 'id="count-spread-drift"' in html
 
-    # The services × nodes spread map comes before the list of exposed services
-    assert 'data-role="spread-map"' in html
-    assert html.index('data-role="spread-map"') < html.index('id="spof-workloads-list"')
+    # The what-if board (crash a node, see who survives) comes first; the drill-down list is under Show details
+    for role in ("whatif", "whatif-nodes", "whatif-services", "whatif-play", "whatif-reset", "whatif-headline"):
+        assert f'data-role="{role}"' in html
+    assert html.index('data-role="whatif"') < html.index('id="spof-workloads-list"')
 
     # Lists
     assert 'id="spof-workloads-list"' in html

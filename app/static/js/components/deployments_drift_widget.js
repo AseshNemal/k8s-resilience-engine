@@ -159,8 +159,6 @@ window.DeploymentsDriftWidget = (function () {
         return { left, lost, node, outcome };
     }
 
-    const OUTCOME_ICON = { unaffected: "✅", survives: "✅", fewer: "⚠️", down: "💥", unavailable: "⛔" };
-
     function el(tag, className, text) {
         const node = document.createElement(tag);
         if (className) node.className = className;
@@ -168,77 +166,172 @@ window.DeploymentsDriftWidget = (function () {
         return node;
     }
 
-    let lastDeployment = null;
-    let failedColumn = null;
+    // -----------------------------------------------------------------------------------------------
+    // What-if board: crash a worker node (a picture only, the cluster is not touched) and see which
+    // services keep running. Nodes are drawn with their pods; each service has a card with its copies.
+    // -----------------------------------------------------------------------------------------------
 
-    // One block per ready copy: green survives the failure, grey is lost with the failed node.
-    function copiesMeter(row) {
-        const result = copiesLeft(row, failedColumn);
-        const box = el("div", `copies copies--${result.outcome}`);
-        box.appendChild(el("span", "copies__icon", OUTCOME_ICON[result.outcome]));
-        const blocks = el("span", "copies__blocks");
-        for (let i = 0; i < row.ready; i++) blocks.appendChild(el("span", i < result.left ? "copy" : "copy copy--lost"));
-        box.append(blocks, el("span", "copies__count", row.ready ? `${result.left}/${row.ready}` : "0"));
-        const where = result.node ? shortNode(result.node) : "a node";
-        box.title = result.outcome === "unavailable"
-            ? `${row.name} has no ready copy at all.`
-            : `If ${where} fails, ${row.name} keeps ${result.left} of ${row.ready} ready copies.`;
+    const STEP_MS = 2600;
+    const board = { deployment: null, rows: [], columns: [], failed: null, focus: null, timer: null };
+    const hueOf = (name) => window.DeploymentsTopologyWidget?.hueOf?.(name) ?? 215;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+    function podChip(service, ready) {
+        const chip = el("span", ready ? "wi-pod" : "wi-pod wi-pod--notready", service);
+        chip.dataset.service = service;
+        chip.style.setProperty("--svc-hue", hueOf(service));
+        chip.title = `${service}: ${ready ? "ready copy" : "not ready"}`;
+        return chip;
+    }
+
+    function nodeBox(column) {
+        const pending = column === PENDING;
+        const box = el(pending ? "div" : "button", pending ? "wi-node wi-node--pending" : "wi-node");
+        box.dataset.node = column;
+        if (!pending) {
+            box.type = "button";
+            box.title = `${column}: click to crash it`;
+            box.addEventListener("click", () => { stopPlay(); crash(board.failed === column ? null : column); });
+        }
+        const head = el("span", "wi-node__head");
+        head.append(el("span", "wi-node__icon", pending ? "⏳" : "🖥️"), el("strong", null, pending ? "Pending" : shortNode(column)));
+        const stamp = el("span", "wi-node__stamp", "✕ DOWN");
+        const pods = el("span", "wi-node__pods");
+        board.rows.forEach((row) => {
+            const cell = row.cells[column];
+            if (!cell) return;
+            for (let i = 0; i < cell.ready; i++) pods.appendChild(podChip(row.name, true));
+            for (let i = 0; i < cell.notReady; i++) pods.appendChild(podChip(row.name, false));
+        });
+        if (!pods.childElementCount) pods.appendChild(el("span", "wi-node__empty", "no pods"));
+        box.append(head, pods, stamp);
         return box;
     }
 
-    function failColumn(column) {
-        failedColumn = failedColumn === column ? null : column;
-        if (lastDeployment) renderSpreadMap(lastDeployment);
+    function serviceCard(row) {
+        const card = el("button", "wi-svc");
+        card.type = "button";
+        card.dataset.service = row.name;
+        card.style.setProperty("--svc-hue", hueOf(row.name));
+        card.title = `${row.name}: click to see its copies in the picture`;
+        card.append(
+            el("span", "wi-svc__name", row.name),
+            el("span", "wi-svc__copies"),
+            el("span", "wi-svc__state"),
+        );
+        card.addEventListener("click", () => {
+            board.focus = board.focus === row.name ? null : row.name;
+            paint();
+        });
+        return card;
     }
 
-    function renderSpreadMap(deployment) {
-        const table = document.querySelector("[data-role='spread-map']");
-        if (!table) return;
-        if (deployment !== lastDeployment) failedColumn = null;  // new data: start from no failure
-        lastDeployment = deployment;
-        const { columns, rows } = spreadMatrix(deployment);
-        table.classList.toggle("has-failure", Boolean(failedColumn));
+    // What one card says, with no node crashed (where its copies are) or after a crash (what is left).
+    function cardState(row) {
+        const nodesUsed = Object.keys(row.cells).filter((k) => k !== PENDING && row.cells[k].ready > 0);
+        if (!board.failed) {
+            if (row.status === "unavailable") return { tone: "muted", icon: "⛔", text: "No ready copy" };
+            if (row.status === "exposed") return { tone: "danger", icon: "⚠️", text: `Every copy on ${shortNode(nodesUsed[0] || "one node")}` };
+            return { tone: "ok", icon: "✅", text: `Copies on ${plural(nodesUsed.length, "node")}` };
+        }
+        const r = copiesLeft(row, board.failed);
+        if (r.outcome === "down") return { tone: "danger", icon: "💥", text: "Goes down" };
+        if (r.outcome === "fewer") return { tone: "warn", icon: "⚠️", text: `Keeps running · ${r.left} of ${row.ready} left` };
+        if (r.outcome === "unavailable") return { tone: "muted", icon: "⛔", text: "No ready copy" };
+        return { tone: "ok", icon: "✅", text: "Not affected" };
+    }
 
-        const head = el("tr");
-        head.appendChild(el("th", null, "Service"));
-        columns.forEach((c) => {
-            const th = el("th", "spread-map__node");
-            if (c === PENDING) {
-                th.textContent = "⏳ Pending";
-                th.title = "Pods with no node yet";
-            } else {
-                const failed = c === failedColumn;
-                const btn = el("button", `node-toggle${failed ? " is-failed" : ""}`, `${failed ? "💥" : "🖥️"} ${shortNode(c)}`);
-                btn.type = "button";
-                btn.title = failed ? `${c}: click to bring it back` : `${c}: click to fail it`;
-                btn.setAttribute("aria-pressed", String(failed));
-                btn.addEventListener("click", () => failColumn(c));
-                th.appendChild(btn);
-                if (failed) th.classList.add("is-failed");
+    function paint() {
+        const root = document.querySelector("[data-role='whatif']");
+        if (!root) return;
+        root.classList.toggle("has-failure", Boolean(board.failed));
+        root.classList.toggle("has-focus", Boolean(board.focus));
+        root.querySelectorAll(".wi-node").forEach((n) => n.classList.toggle("is-crashed", n.dataset.node === board.failed));
+        root.querySelectorAll(".wi-node").forEach((n) => {
+            n.querySelectorAll(".wi-pod").forEach((p) => p.classList.toggle("is-lost", n.dataset.node === board.failed));
+        });
+        root.querySelectorAll("[data-service]").forEach((n) => n.classList.toggle("is-focus", n.dataset.service === board.focus));
+
+        board.rows.forEach((row) => {
+            const card = root.querySelector(`.wi-svc[data-service="${CSS.escape(row.name)}"]`);
+            if (!card) return;
+            const state = cardState(row);
+            card.dataset.tone = state.tone;
+            card.querySelector(".wi-svc__state").textContent = `${state.icon} ${state.text}`;
+            // One small pod per ready copy: grey and crossed when it was on the crashed node.
+            const lost = board.failed ? (row.cells[board.failed] || { ready: 0 }).ready : 0;
+            card.querySelector(".wi-svc__copies").replaceChildren(
+                ...Array.from({ length: row.ready }, (_, i) => el("span", i < row.ready - lost ? "wi-copy" : "wi-copy wi-copy--lost")),
+                el("span", "wi-svc__count", `${row.ready} ${row.ready === 1 ? "copy" : "copies"}`),
+            );
+        });
+
+        const headline = root.querySelector("[data-role='whatif-headline']");
+        const exposed = board.rows.filter((r) => r.status === "exposed");
+        if (!board.failed) {
+            headline.textContent = exposed.length
+                ? `⚠️ ${exposed.length} of ${board.rows.length} services have every copy on one node. Click a node to crash it.`
+                : `✅ Every service has copies on more than one node. Click a node to crash it.`;
+        } else {
+            const outcomes = board.rows.map((r) => copiesLeft(r, board.failed).outcome);
+            const down = outcomes.filter((o) => o === "down").length;
+            const running = outcomes.filter((o) => o === "fewer" || o === "unaffected").length;
+            headline.textContent = `💥 ${shortNode(board.failed)} crashed: ${down} service${down === 1 ? "" : "s"} down, ${running} still running.`;
+        }
+        root.querySelector("[data-role='whatif-reset']").hidden = !board.failed;
+    }
+
+    function crash(column) {
+        board.failed = column;
+        paint();
+    }
+
+    function stopPlay() {
+        if (board.timer) clearInterval(board.timer);
+        board.timer = null;
+        const play = document.querySelector("[data-role='whatif-play']");
+        if (play) play.textContent = "▶ Crash each node in turn";
+    }
+
+    // Crash every worker node in turn, then bring them all back.
+    function play() {
+        if (board.timer) {
+            stopPlay();
+            crash(null);
+            return;
+        }
+        const nodes = board.columns.filter((c) => c !== PENDING);
+        if (!nodes.length) return;
+        let step = 0;
+        crash(nodes[0]);
+        document.querySelector("[data-role='whatif-play']").textContent = "■ Stop";
+        board.timer = setInterval(() => {
+            step++;
+            if (step >= nodes.length) {
+                stopPlay();
+                crash(null);
+                return;
             }
-            head.appendChild(th);
-        });
-        head.appendChild(el("th", "spread-map__meter-head", failedColumn ? `Copies left without ${shortNode(failedColumn)}` : "Copies left if its busiest node fails"));
+            crash(nodes[step]);
+        }, STEP_MS);
+    }
 
-        const body = rows.map((row) => {
-            const outcome = copiesLeft(row, failedColumn).outcome;
-            const tr = el("tr", `spread-map__row spread-map__row--${outcome}`);
-            tr.appendChild(el("th", "spread-map__service", row.name)).scope = "row";
-            columns.forEach((c) => {
-                const cell = row.cells[c] || { ready: 0, notReady: 0 };
-                const td = el("td", c === failedColumn ? "spread-map__cell is-failed" : "spread-map__cell");
-                for (let i = 0; i < cell.ready; i++) td.appendChild(el("span", "spread-dot"));
-                for (let i = 0; i < cell.notReady; i++) td.appendChild(el("span", "spread-dot spread-dot--notready"));
-                td.title = `${row.name} on ${c === PENDING ? "no node" : c}: ${cell.ready} ready, ${cell.notReady} not ready`;
-                tr.appendChild(td);
-            });
-            const meter = el("td");
-            meter.appendChild(copiesMeter(row));
-            tr.appendChild(meter);
-            return tr;
-        });
-        table.querySelector("thead").replaceChildren(head);
-        table.querySelector("tbody").replaceChildren(...body);
+    function renderWhatIf(deployment) {
+        const root = document.querySelector("[data-role='whatif']");
+        if (!root) return;
+        stopPlay();
+        const { columns, rows } = spreadMatrix(deployment);
+        Object.assign(board, { deployment, rows, columns, failed: null, focus: null });
+        root.querySelector("[data-role='whatif-nodes']").replaceChildren(...columns.map(nodeBox));
+        root.querySelector("[data-role='whatif-services']").replaceChildren(...rows.map(serviceCard));
+        paint();
+    }
+
+    function initWhatIf() {
+        const root = document.querySelector("[data-role='whatif']");
+        if (!root) return;
+        root.querySelector("[data-role='whatif-play']")?.addEventListener("click", play);
+        root.querySelector("[data-role='whatif-reset']")?.addEventListener("click", () => { stopPlay(); crash(null); });
     }
 
     const zonePrefix = (zone) => (zone ? "Zone: " + zone + " · " : "");
@@ -270,14 +363,15 @@ window.DeploymentsDriftWidget = (function () {
         });
     }
 
+    // The data is loaded by deployments.js; init only wires the what-if buttons.
     function init() {
-        // Loaded by deployments.js once the data source is known.
+        initWhatIf();
     }
 
     return {
         init: init,
         loadDriftSignals: loadDriftSignals,
-        renderSpreadMap: renderSpreadMap,
+        renderWhatIf: renderWhatIf,
         spreadMatrix: spreadMatrix,
         copiesLeft: copiesLeft,
     };

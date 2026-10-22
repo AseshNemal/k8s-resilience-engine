@@ -1,9 +1,11 @@
-{# Tab 2: Resilience Drift & Failure Domain Exposure. One question, one list; the rest is behind "Show details". #}
+{# Tab 2: Exposed services, as a what-if game: crash a worker node, see which services survive.
+   One picture (nodes with their pods) and one card per service; the drill-down and the drift counters
+   are behind "Show details". #}
 <div class="tab-pane" id="tab-drift" role="tabpanel" aria-labelledby="tab-btn-drift" hidden>
     <div class="tab-pane__header">
         <div>
             <h3 class="tab-pane__title">Which services would one node failure take down?</h3>
-            <p class="tab-pane__desc">An exposed service has all its ready copies on one node: if that node fails, the service has 0 ready replicas.</p>
+            <p class="tab-pane__desc">Don't put all your eggs in one basket: a service whose copies all sit on one node goes down with that node.</p>
         </div>
         <div class="spof-alert-badge" id="spof-banner-badge">
             <span class="pulsing-dot"></span>
@@ -11,27 +13,34 @@
         </div>
     </div>
 
-    {# Services × worker nodes, one dot per pod: all dots in one column = exposed #}
-    <div class="table-scroll spread-map-wrap">
-        <table class="spread-map" data-role="spread-map">
-            <thead></thead>
-            <tbody></tbody>
-        </table>
-    </div>
-    <p class="spread-map__legend">👆 Click a node to fail it &nbsp;·&nbsp; <span class="spread-dot"></span> ready copy &nbsp;·&nbsp; <span class="spread-dot spread-dot--notready"></span> not ready &nbsp;·&nbsp; ✅ unaffected &nbsp;⚠️ fewer copies &nbsp;💥 down</p>
+    <section class="whatif" data-role="whatif" aria-label="Fail a worker node and see which services survive">
+        <div class="whatif__bar">
+            <p class="whatif__headline" data-role="whatif-headline" aria-live="polite">👆 Click a worker node to crash it.</p>
+            <div class="whatif__actions">
+                <button type="button" class="whatif__btn whatif__btn--play" data-role="whatif-play">▶ Crash each node in turn</button>
+                <button type="button" class="whatif__btn" data-role="whatif-reset" hidden>↺ Bring it back</button>
+            </div>
+        </div>
 
-    <div class="spof-list" id="spof-workloads-list">
-        <!-- Populated by deployments_drift_widget.js -->
-    </div>
+        {# The baskets: each worker node with the pods it runs #}
+        <div class="whatif__nodes" data-role="whatif-nodes"></div>
+
+        {# One card per service: its copies and what happens to it #}
+        <div class="whatif__services" data-role="whatif-services"></div>
+    </section>
 
     <details class="show-details">
         <summary>Show details</summary>
         <div class="show-details__body">
             <ul class="show-details__notes">
-                <li>A service with 1 replica is always exposed. A service with 3 replicas is exposed only if all 3 are on the same node.</li>
-                <li>Click <strong>Drill Down</strong> on a service to see which node it depends on and why.</li>
-                <li>The counters are the kinds of difference found between the YAML and the cluster (e.g. <strong>Scale drift</strong>: replica count differs).</li>
+                <li>The rule: a service is <strong>exposed</strong> when every one of its ready copies is on the same node. One copy is always exposed; three copies are exposed only when all three are on one node.</li>
+                <li>Crashing a node here is a picture only; nothing in the cluster is changed. The same rule was checked against 4 real node failures (see "How accurate is the model?").</li>
+                <li>Click <strong>Drill Down</strong> on an exposed service to see which node it depends on and why.</li>
             </ul>
+
+            <div class="spof-list" id="spof-workloads-list">
+                <!-- Populated by deployments_drift_widget.js -->
+            </div>
 
             <h4 class="show-details__title">Kinds of drift found (YAML vs cluster)</h4>
             <div class="drift-categories-grid" id="drift-categories-counters">

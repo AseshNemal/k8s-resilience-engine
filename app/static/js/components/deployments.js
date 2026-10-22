@@ -192,7 +192,7 @@
                 window.DeploymentsTopologyWidget.renderConcentrationPanel(services);
             }
 
-            window.DeploymentsDriftWidget?.renderSpreadMap(deployment);
+            window.DeploymentsDriftWidget?.renderWhatIf(deployment);
 
             const rawPanelEl = document.querySelector("#deployment-raw-json");
             if (rawPanelEl) initJsonPanel(rawPanelEl, deployment);
@@ -238,6 +238,7 @@
         if (window.DeploymentsAcademicWidget) window.DeploymentsAcademicWidget.init();
         if (window.DeploymentsTopologyWidget) window.DeploymentsTopologyWidget.init();
         if (window.DeploymentsIntentWidget) window.DeploymentsIntentWidget.init();
+        if (window.DeploymentsDriftWidget) window.DeploymentsDriftWidget.init();
         if (window.DeploymentsLiveExperimentsWidget) window.DeploymentsLiveExperimentsWidget.init();
         if (window.DeploymentsModalManager) window.DeploymentsModalManager.init();
         document.querySelectorAll("[data-goto-tab]").forEach((btn) => {

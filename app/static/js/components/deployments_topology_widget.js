@@ -350,5 +350,7 @@ window.DeploymentsTopologyWidget = (function () {
         renderZoneGrid: renderZoneGrid,
         renderConcentrationPanel: renderConcentrationPanel,
         simulateFailure: simulateFailure,
+        // The colour a service was given on the topology picture, so the other tabs use the same one.
+        hueOf: (name) => serviceHue[name],
     };
 })();
