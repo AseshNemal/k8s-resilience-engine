@@ -1,115 +1,110 @@
-{# Tab 5: Stored results of the live placement-drift runs on KinD #}
+{# Tab 4: Stored results of the live placement-drift runs on KinD. One question, one table; the rest is behind "Show details". #}
 <div class="tab-pane" id="tab-live-experiments" role="tabpanel" aria-labelledby="tab-btn-live-experiments" hidden>
     <div class="tab-pane__header">
         <div>
-            <h3 class="tab-pane__title">Live Placement Drift Experiments (KinD)</h3>
-            <p class="tab-pane__desc">Real disruptions on a local KinD cluster; the Kubernetes scheduler decides placement and the Component 2 model observes T0 and T1. Results are read from the stored run files, so no cluster is needed to view them.</p>
+            <h3 class="tab-pane__title">What happened when we really disrupted the cluster?</h3>
+            <p class="tab-pane__desc">8 real Kubernetes actions, each run 5 times without and with a spread rule. Click a row to see the pods before and after.</p>
         </div>
     </div>
 
-    <details class="tab-help">
-        <summary>ℹ️ What am I looking at?</summary>
-        <ul>
-            <li>Each experiment: deploy 4 services × 3 replicas → snapshot (T0) → one real Kubernetes action → snapshot (T1) → compare.</li>
-            <li>One service (the <strong>target</strong>, named above the results) is disrupted; all 4 services are observed. Each experiment ran 5 times, with and without a spread rule.</li>
-            <li>Two workloads: <strong>stand-in pods</strong> (pause image, a controlled test of where Kubernetes places pods) and the <strong>real Bookinfo app</strong> (the team's benchmark, in its own namespace bookinfo-exp). Switch between them below.</li>
-            <li><strong>Click a row</strong> to see where the pods were before and after (first run).</li>
-        </ul>
-    </details>
+    <div class="workload-switch" role="group" aria-label="Which experiment results to show" data-role="live-exp-workload">
+        <button type="button" class="workload-switch__btn is-active" data-workload="standin" aria-pressed="true">
+            Stand-in pods <span class="workload-switch__sub">controlled test · 80 runs</span>
+        </button>
+        <button type="button" class="workload-switch__btn" data-workload="bookinfo" aria-pressed="false">
+            Bookinfo <span class="workload-switch__sub">real application · 80 runs</span>
+        </button>
+    </div>
 
-    <div class="card card--glass ensemble-card" data-role="live-sim-card" style="margin-bottom: var(--space-lg);">
-        <div style="margin-bottom: var(--space-md);">
-            <span class="status-badge status-badge--warning">Simulated on your connected cluster — a prediction, not an observation</span>
-            <h4 style="font-size: 1.15rem; font-weight: 700; margin: 6px 0 2px 0;">Eight disruptions on your cluster's real topology</h4>
-            <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 0;">
-                The nodes and pods are read from the cluster you are connected to; the disruption and the resulting placement come from a simple fixed rule
-                (a displaced pod goes to the least-loaded worker), not from the Kubernetes scheduler. Nothing in the cluster is changed.
-            </p>
-        </div>
-        <div style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-bottom: var(--space-md);">
-            <div class="form-group" style="min-width: 220px;">
-                <label for="live-sim-namespace" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Namespace</label>
-                <select id="live-sim-namespace" data-role="live-sim-namespace" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" disabled>
-                    <option value="">Loading namespaces…</option>
-                </select>
+    <p class="live-exp-headline" data-role="live-exp-headline" hidden></p>
+
+    <div class="table-scroll">
+        <table class="data-table live-exp-table">
+            <thead>
+                <tr>
+                    <th scope="col">Scenario</th>
+                    <th scope="col">No rule</th>
+                    <th scope="col">Spread rule</th>
+                </tr>
+            </thead>
+            <tbody data-role="live-exp-table-body"></tbody>
+        </table>
+    </div>
+    <p class="live-exp-legend">✅ Safe: target still spread &nbsp;·&nbsp; ⚠️ Exposed: one node failure takes the target down &nbsp;·&nbsp; ⏳ Pods stuck Pending &nbsp;·&nbsp; hover a cell for the numbers</p>
+
+    <details class="show-details">
+        <summary>Show details</summary>
+        <div class="show-details__body">
+            <div>
+                <span class="status-badge status-badge--success">Live cluster observations</span>
+                <span class="status-badge status-badge--muted" data-role="live-exp-target">Target: …</span>
+                <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 6px 0 0 0;" data-role="live-exp-note">Loading…</p>
             </div>
-            <button type="button" class="action-button" data-role="live-sim-run" disabled>Run simulation</button>
-        </div>
-        <output data-role="live-sim-status" aria-live="polite" style="display: block; min-height: 20px; font-size: 12px; color: var(--color-text-muted);"></output>
-        <div class="table-scroll" data-role="live-sim-results" hidden style="margin-top: var(--space-md);">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Scenario</th>
-                        <th scope="col">Outcome</th>
-                        <th scope="col">D_rate</th>
-                        <th scope="col">ΔE (exposure change)</th>
-                        <th scope="col">Services that changed status</th>
-                        <th scope="col">Pod moves</th>
-                    </tr>
-                </thead>
-                <tbody data-role="live-sim-body"></tbody>
-            </table>
-        </div>
-    </div>
+            <ul class="show-details__notes">
+                <li>Each run: deploy 4 services × 3 replicas → snapshot (T0) → one real Kubernetes action on the target → snapshot (T1) → compare. All 4 services are observed.</li>
+                <li><strong>Stand-in pods</strong> use the pause image (a controlled test of where Kubernetes places pods); <strong>Bookinfo</strong> is the team's real benchmark app, in its own namespace bookinfo-exp.</li>
+                <li><strong>D_rate</strong>: share of services whose exposure status changed between T0 and T1. <strong>Compliance</strong>: share of services with a placement rule whose rule is satisfied at T1. <strong>Pods stuck</strong>: the workload was not fully ready within 90 s.</li>
+            </ul>
 
-    <div class="card card--glass ensemble-card">
-        <div class="workload-switch" role="group" aria-label="Which experiment results to show" data-role="live-exp-workload">
-            <button type="button" class="workload-switch__btn is-active" data-workload="standin" aria-pressed="true">
-                Stand-in pods <span class="workload-switch__sub">controlled test · 80 runs</span>
-            </button>
-            <button type="button" class="workload-switch__btn" data-workload="bookinfo" aria-pressed="false">
-                Bookinfo <span class="workload-switch__sub">real application · 80 runs</span>
-            </button>
+            <h4 class="show-details__title">Key findings <span class="findings-heading__sub">generated from the stored runs</span></h4>
+            <div class="findings-grid" data-role="live-exp-findings"></div>
+
+            <div class="ensemble-summary-grid" data-role="live-exp-summary"></div>
+
+            <div data-role="live-exp-compare-card" hidden>
+                <h4 class="show-details__title">Stand-in pods vs the real Bookinfo app</h4>
+                <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 4px 0 var(--space-md) 0;" data-role="live-exp-compare-summary"></p>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Scenario</th>
+                                <th scope="col">Config</th>
+                                <th scope="col">Stand-in pods (target paymentservice)</th>
+                                <th scope="col">Bookinfo (target reviews)</th>
+                                <th scope="col">Same outcome?</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="live-exp-compare-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card card--glass ensemble-card" data-role="live-sim-card">
+                <div style="margin-bottom: var(--space-md);">
+                    <span class="status-badge status-badge--warning">Simulated on your connected cluster — a prediction, not an observation</span>
+                    <h4 style="font-size: 1.05rem; font-weight: 700; margin: 6px 0 2px 0;">Eight disruptions on your cluster's real topology</h4>
+                    <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 0;">
+                        The nodes and pods are read from the cluster you are connected to; the disruption and the resulting placement come from a simple fixed rule
+                        (a displaced pod goes to the least-loaded worker), not from the Kubernetes scheduler. Nothing in the cluster is changed.
+                    </p>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: flex-end; margin-bottom: var(--space-md);">
+                    <div class="form-group" style="min-width: 220px;">
+                        <label for="live-sim-namespace" style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">Namespace</label>
+                        <select id="live-sim-namespace" data-role="live-sim-namespace" class="form-input" style="width: 100%; padding: 8px 12px; border-radius: var(--radius-small); border: 1px solid var(--color-border);" disabled>
+                            <option value="">Loading namespaces…</option>
+                        </select>
+                    </div>
+                    <button type="button" class="action-button" data-role="live-sim-run" disabled>Run simulation</button>
+                </div>
+                <output data-role="live-sim-status" aria-live="polite" style="display: block; min-height: 20px; font-size: 12px; color: var(--color-text-muted);"></output>
+                <div class="table-scroll" data-role="live-sim-results" hidden style="margin-top: var(--space-md);">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Scenario</th>
+                                <th scope="col">Outcome</th>
+                                <th scope="col">D_rate</th>
+                                <th scope="col">ΔE (exposure change)</th>
+                                <th scope="col">Services that changed status</th>
+                                <th scope="col">Pod moves</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="live-sim-body"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <div style="margin-bottom: var(--space-md);">
-            <span class="status-badge status-badge--success">Live cluster observations</span>
-            <span class="status-badge status-badge--muted" data-role="live-exp-target">Target: …</span>
-            <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 6px 0 0 0;" data-role="live-exp-note">Loading…</p>
-        </div>
-
-        <h4 class="findings-heading">Key findings <span class="findings-heading__sub">generated from the stored runs</span></h4>
-        <div class="findings-grid" data-role="live-exp-findings"></div>
-
-        <div class="ensemble-summary-grid" data-role="live-exp-summary"></div>
-
-        <div class="table-scroll" style="margin-top: var(--space-lg);">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Scenario</th>
-                        <th scope="col">Config A: no placement rule</th>
-                        <th scope="col">Config B: topology spread rule</th>
-                    </tr>
-                </thead>
-                <tbody data-role="live-exp-table-body"></tbody>
-            </table>
-        </div>
-
-        <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin-top: var(--space-md);">
-            <strong>Target status</strong>: status of the disrupted service at T1 in each run.
-            <strong>Pods stuck</strong>: runs where the workload did not become fully ready within 90 s (e.g. pods left Pending by the spread rule).
-            <strong>D_rate</strong>: share of services whose exposure status changed between T0 and T1 (mean over runs).
-            <strong>Compliance</strong>: share of services with a placement rule whose rule is satisfied at T1.
-        </p>
-    </div>
-
-    <div class="card card--glass ensemble-card" data-role="live-exp-compare-card" hidden style="margin-top: var(--space-lg);">
-        <h4 style="margin: 0 0 4px 0; font-size: 1rem;">Stand-in pods vs the real Bookinfo app</h4>
-        <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 0 0 var(--space-md) 0;" data-role="live-exp-compare-summary"></p>
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Scenario</th>
-                        <th scope="col">Config</th>
-                        <th scope="col">Stand-in pods (target paymentservice)</th>
-                        <th scope="col">Bookinfo (target reviews)</th>
-                        <th scope="col">Same outcome?</th>
-                    </tr>
-                </thead>
-                <tbody data-role="live-exp-compare-body"></tbody>
-            </table>
-        </div>
-    </div>
+    </details>
 </div>

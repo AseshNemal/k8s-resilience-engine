@@ -24,42 +24,40 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         return `${label}: ${pct(stat.mean)}${ci}`;
     }
 
+    // One verdict per condition for the simple table. Exposed wins over stuck, stuck over safe; a run whose
+    // target ended in any other status (e.g. UNAVAILABLE) is never shown as safe.
+    function cellVerdict(cond) {
+        const ok = cond.runs - cond.failed_runs;
+        const counts = cond.target_status_t1_counts || {};
+        if (ok === 0) return { variant: "danger", text: `Failed ${cond.failed_runs}/${cond.runs}` };
+        if (counts.EXPOSED > 0) return { variant: "danger", text: `⚠️ Exposed ${counts.EXPOSED}/${ok}` };
+        if (cond.unstable_runs > 0) return { variant: "warning", text: `⏳ Pods stuck ${cond.unstable_runs}/${ok}` };
+        if ((counts.NOT_EXPOSED || 0) === ok) return { variant: "success", text: `✅ Safe ${ok}/${ok}` };
+        const other = Object.entries(counts).filter(([s]) => s !== "NOT_EXPOSED").map(([s, n]) => `${s.replace("_", " ")} ${n}/${ok}`);
+        return { variant: "muted", text: other.join(", ") };
+    }
+
+    // Everything behind the verdict, for the cell's tooltip.
+    function cellNumbers(cond) {
+        const ok = cond.runs - cond.failed_runs;
+        const lines = Object.entries(cond.target_status_t1_counts || {}).map(([s, n]) => `Target ${s.replace("_", " ")}: ${n}/${ok} runs`);
+        if (cond.unstable_runs > 0) lines.push(`Pods stuck: ${cond.unstable_runs}/${ok} runs`);
+        if (cond.failed_runs > 0) lines.push(`Failed: ${cond.failed_runs}/${cond.runs} runs`);
+        lines.push(statWithCi("D_rate", cond.d_rate));
+        lines.push(`Exposure rate: ${pct(cond.exposure_rate_t0?.mean)} → ${pct(cond.exposure_rate_t1?.mean)}`);
+        if (cond.compliance_rate_t1?.mean != null) lines.push(`Compliance: ${pct(cond.compliance_rate_t1.mean)}`);
+        return lines.join("\n");
+    }
+
     function renderCell(cond) {
         const td = el("td");
         if (!cond) {
             td.textContent = "not run";
             return td;
         }
-        const ok = cond.runs - cond.failed_runs;
-        const badges = el("div");
-        badges.style.display = "flex";
-        badges.style.flexWrap = "wrap";
-        badges.style.gap = "6px";
-
-        Object.entries(cond.target_status_t1_counts || {}).forEach(([status, count]) => {
-            let variant = "muted";
-            if (status === "EXPOSED") variant = "danger";
-            else if (status === "NOT_EXPOSED") variant = "success";
-            badges.appendChild(el("span", `status-badge status-badge--${variant}`, `${status.replace("_", " ")} ${count}/${ok}`));
-        });
-        if (cond.unstable_runs > 0) {
-            badges.appendChild(el("span", "status-badge status-badge--warning", `Pods stuck ${cond.unstable_runs}/${ok}`));
-        }
-        if (cond.failed_runs > 0) {
-            badges.appendChild(el("span", "status-badge status-badge--danger", `Failed ${cond.failed_runs}/${cond.runs}`));
-        }
-        td.appendChild(badges);
-
-        const details = el("div");
-        details.style.fontSize = "12px";
-        details.style.color = "var(--color-text-muted)";
-        details.style.marginTop = "6px";
-        details.appendChild(el("div", null, statWithCi("D_rate", cond.d_rate)));
-        details.appendChild(el("div", null, `Exposure rate: ${pct(cond.exposure_rate_t0.mean)} → ${pct(cond.exposure_rate_t1.mean)}`));
-        if (cond.compliance_rate_t1?.mean != null) {
-            details.appendChild(el("div", null, `Compliance: ${pct(cond.compliance_rate_t1.mean)}`));
-        }
-        td.appendChild(details);
+        const verdict = cellVerdict(cond);
+        td.appendChild(el("span", `status-badge status-badge--no-dot status-badge--${verdict.variant}`, verdict.text));
+        td.title = cellNumbers(cond);
         return td;
     }
 
@@ -253,13 +251,12 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         [...byScenario.keys()].sort((a, b) => a.localeCompare(b)).forEach((id) => {
             const row = byScenario.get(id);
             const tr = el("tr");
-            const nameCell = el("td");
-            nameCell.appendChild(el("div", null, row.name)).style.fontWeight = "600";
-            nameCell.appendChild(el("code", null, id)).style.fontSize = "11px";
+            const nameCell = el("td", null, row.name);
+            nameCell.style.fontWeight = "600";
             tr.appendChild(nameCell);
             CONFIGS.forEach((cfg) => tr.appendChild(renderCell(row.configs[cfg])));
             tr.className = "live-exp-row";
-            tr.title = "Click to show the pods before and after";
+            tr.title = `${id}: click to show the pods before and after`;
             const detail = detailRow(row, data.target_service);
             detail.hidden = true;
             tr.addEventListener("click", () => {
@@ -372,6 +369,11 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             `${sameCount} of ${standin.conditions.length} conditions gave the same outcome with stand-in pods ` +
             `(${standin.total_runs} runs) and with the real Bookinfo app (${bookinfo.total_runs} runs).`;
         card.hidden = false;
+        const headline = root.querySelector("[data-role='live-exp-headline']");
+        if (headline) {
+            headline.textContent = `Same result on the real Bookinfo app: ${sameCount} of ${standin.conditions.length} conditions`;
+            headline.hidden = false;
+        }
     }
 
     function initWorkloadSwitch() {
@@ -569,7 +571,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     }
 
     return {
-        init: init, load: load, buildFindings: buildFindings, sameOutcome: sameOutcome,
+        init: init, load: load, buildFindings: buildFindings, sameOutcome: sameOutcome, cellVerdict: cellVerdict,
         runSimulation: runSimulation, loadSimulationNamespaces: loadSimulationNamespaces,
     };
 })();

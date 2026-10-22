@@ -31,6 +31,21 @@ test("a different mean D_rate is a different outcome", () => {
     assert.equal(sameOutcome(cond({ EXPOSED: 3, NOT_EXPOSED: 2 }, 0, 0.15), cond({ EXPOSED: 3, NOT_EXPOSED: 2 }, 0, 0.25)), false);
 });
 
+test("the simple table shows one verdict per condition: exposed, then stuck, then safe", () => {
+    // Spread into a plain object: the widget runs in a vm context, whose Object prototype is not this one.
+    const cellVerdict = (c) => ({ ...window.DeploymentsLiveExperimentsWidget.cellVerdict(c) });
+    assert.deepEqual(cellVerdict(cond({ EXPOSED: 5 }, 5, 0.25)), { variant: "danger", text: "⚠️ Exposed 5/5" });
+    assert.deepEqual(cellVerdict(cond({ NOT_EXPOSED: 5 }, 3, 0)), { variant: "warning", text: "⏳ Pods stuck 3/5" });
+    assert.deepEqual(cellVerdict(cond({ NOT_EXPOSED: 5 }, 0, 0)), { variant: "success", text: "✅ Safe 5/5" });
+});
+
+test("a target that ended unavailable is never shown as safe", () => {
+    const { cellVerdict } = window.DeploymentsLiveExperimentsWidget;
+    const verdict = cellVerdict(cond({ NOT_EXPOSED: 3, UNAVAILABLE: 2 }, 0, 0));
+    assert.equal(verdict.variant, "muted");
+    assert.equal(verdict.text, "UNAVAILABLE 2/5");
+});
+
 test("every key finding has a short title and a generated sentence", () => {
     const { buildFindings } = window.DeploymentsLiveExperimentsWidget;
     const stat = (mean) => ({ mean, sd: 0 });
