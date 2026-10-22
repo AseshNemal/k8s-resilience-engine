@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from app.engine.failure_impact_prediction.baseline_manifest import (  # noqa: E4
     parse_method_comparison_artifact,
 )
 from app.engine.failure_impact_prediction.method_evaluation import (  # noqa: E402
+    FailureImpactMethodEvaluation,
     evaluate_failure_impact_methods,
 )
 from app.engine.failure_impact_prediction.method_evaluation_export import (  # noqa: E402
@@ -23,6 +25,7 @@ from app.engine.failure_impact_prediction.method_evaluation_export import (  # n
     write_method_evaluation_artifact,
 )
 from app.engine.failure_impact_prediction.validation_evidence import (  # noqa: E402
+    ObservedFailureEvidence,
     require_complete_observed_outcome,
 )
 from app.engine.failure_impact_prediction.validation_manifest import (  # noqa: E402
@@ -43,13 +46,21 @@ def _read_json_object(path: Path) -> dict[str, object]:
     return payload
 
 
-def evaluate_saved_method_artifacts(
+@dataclass(frozen=True)
+class PreparedMethodEvaluation:
+    """Validated in-memory evaluation and its source provenance."""
+
+    evaluation: FailureImpactMethodEvaluation
+    evidence: ObservedFailureEvidence
+    comparison_generated_at: datetime
+
+
+def prepare_saved_method_evaluation(
     *,
     comparison_payload: Mapping[str, object],
     evidence_payload: Mapping[str, object],
-    evaluated_at: datetime,
-) -> dict[str, object]:
-    """Combine one pre-failure comparison with complete post-failure evidence."""
+) -> PreparedMethodEvaluation:
+    """Validate and evaluate one saved comparison/evidence pair."""
 
     parsed_comparison = parse_method_comparison_artifact(comparison_payload)
     manifest = parse_captured_experiment_manifest(evidence_payload)
@@ -85,10 +96,29 @@ def evaluate_saved_method_artifacts(
         observed_service_scope=manifest.service_capture.expected_services,
         observed_workflow_scope=manifest.workflow_capture.expected_workflows,
     )
-    return build_method_evaluation_export(
-        evaluation,
-        evidence,
+    return PreparedMethodEvaluation(
+        evaluation=evaluation,
+        evidence=evidence,
         comparison_generated_at=parsed_comparison.generated_at,
+    )
+
+
+def evaluate_saved_method_artifacts(
+    *,
+    comparison_payload: Mapping[str, object],
+    evidence_payload: Mapping[str, object],
+    evaluated_at: datetime,
+) -> dict[str, object]:
+    """Combine one pre-failure comparison with complete post-failure evidence."""
+
+    prepared = prepare_saved_method_evaluation(
+        comparison_payload=comparison_payload,
+        evidence_payload=evidence_payload,
+    )
+    return build_method_evaluation_export(
+        prepared.evaluation,
+        prepared.evidence,
+        comparison_generated_at=prepared.comparison_generated_at,
         evaluated_at=evaluated_at,
     )
 
