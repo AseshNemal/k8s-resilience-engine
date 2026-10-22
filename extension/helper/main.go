@@ -11,6 +11,7 @@
 //	resilience-helper authorize <context>
 //	resilience-helper renew <context>
 //	resilience-helper renew-managed
+//	resilience-helper reconnect
 //	resilience-helper agent-status | agent-enable <context> | agent-disable
 //	resilience-helper trace-status | trace-start | trace-stop
 //	resilience-helper revoke <context>
@@ -24,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -31,6 +33,7 @@ import (
 	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/execx"
 	"resilience-engine/helper/internal/flow"
+	"resilience-engine/helper/internal/lock"
 	"resilience-engine/helper/internal/tracesvc"
 	"resilience-engine/helper/internal/transport"
 )
@@ -48,6 +51,17 @@ const (
 	statusTimeout = time.Minute
 )
 
+// realLock is the one lock every connection command takes, in the user's configuration directory, so the
+// page, the background renewal job and a person at a terminal cannot issue tokens or install credentials at the
+// same time. Stale is above the longest command (five minutes) so a crash frees it soon.
+func realLock() lock.Lock {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	return &lock.File{Path: filepath.Join(dir, "resilience-engine", "connect.lock"), Stale: 10 * time.Minute}
+}
+
 func realDeps() flow.Deps {
 	home, _ := os.UserHomeDir()
 	docker := transport.DockerExec{
@@ -61,6 +75,7 @@ func realDeps() flow.Deps {
 		Prompter: approve.Default(),
 		Backends: func() []transport.Backend { return transport.Defaults(runtime.GOOS, home, docker) },
 		Agent:    realAgent(home),
+		Lock:     realLock(),
 	}
 }
 
@@ -129,6 +144,8 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		timeout, do = renewTimeout, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Renew(ctx, d, rest[0]) }
 	case "renew-managed":
 		timeout, do = renewTimeout, flow.RenewManaged
+	case "reconnect":
+		timeout, do = renewTimeout, flow.Reconnect
 	case "revoke":
 		timeout, do = 5*time.Minute, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Revoke(ctx, d, rest[0]) }
 	case "agent-enable":
@@ -165,6 +182,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | agent-status | agent-enable <context> | agent-disable | trace-status | trace-start | trace-stop | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-status | trace-start | trace-stop | revoke <context> | version\n")
 	return 2
 }

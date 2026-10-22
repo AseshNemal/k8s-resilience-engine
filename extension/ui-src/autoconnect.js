@@ -34,11 +34,14 @@
     const BACKOFF_MS = [30000, 60000, 120000, 300000];
     // How long to wait for each helper command before giving up on that call. They sit above the
     // helper's own deadlines (4 minutes for a renewal, a 90 second dialog for an approval).
-    const WAIT_MS = { renew: 330000, authorize: 360000, revoke: 360000, discover: 90000, status: 20000, "agent-status": 45000, "agent-enable": 360000, "agent-disable": 45000 };
+    // When the helper reports there is nothing to reconnect (for example it sees the backend differently), ask
+    // again only after this long, so an unusual state never turns into a request every minute.
+    const IDLE_RETRY_MS = 300000;
+    const WAIT_MS = { renew: 330000, reconnect: 330000, authorize: 360000, revoke: 360000, discover: 90000, status: 20000, "agent-status": 45000, "agent-enable": 360000, "agent-disable": 45000 };
     const DEFAULT_WAIT_MS = 360000;
     const TIMED_OUT = { timedOut: true };
     // Problems a person has to fix. Retrying would not help, so the loop stops until they act.
-    const NEEDS_USER = new Set(["authorization-revoked", "drifted", "over-granted", "rbac-denied", "not-authorized", "unsupported-context"]);
+    const NEEDS_USER = new Set(["authorization-revoked", "drifted", "over-granted", "rbac-denied", "not-authorized", "unsupported-context", "identity-changed"]);
 
     const MESSAGES = {
         connected: "Connected.",
@@ -53,6 +56,8 @@
         drifted: "The extension's access in the cluster was changed from what you approved, so renewal stopped. Review it, then approve again.",
         "authorization-revoked": "The extension's access was removed from the cluster. Approve it again to reconnect.",
         "not-authorized": "The extension is not set up for this cluster. Approve it first.",
+        "identity-changed": "The cluster behind this context is not the one you approved (its address or certificate authority changed), so it was not reconnected. Connect it again to approve it.",
+        busy: "Another connection or renewal is running. This will try again by itself.",
         "backend-unavailable": "The extension backend is not responding yet. This will keep trying.",
         "too-slow": "Docker Desktop is responding very slowly, so the credential could not be renewed yet. It keeps trying by itself; closing other containers or giving Docker more memory makes it faster.",
         "background-unsupported": "Background renewal is not available on this operating system yet. The credential renews while the extension is open.",
@@ -165,6 +170,36 @@
             return snapshot();
         }
 
+        // The connection was lost for a cluster the person approved and has not disconnected: ask the helper to
+        // restore it. The helper checks that it is the same cluster and that the approved read-only access is
+        // still exactly as approved, asks the cluster only for a token, and never recreates removed access.
+        async function reconnect(name) {
+            busy = true;
+            phase = "reconnecting";
+            const result = await runHelper(["reconnect"]);
+            busy = false;
+            if (result.ok && result.state === "connected") {
+                failures = 0;
+                retryAt = 0;
+                blocked = null;
+                set("ready", "");
+                if (env.onRenewed) env.onRenewed();
+            } else if (result.ok) {
+                // Nothing to reconnect (the helper's view differs): wait quietly, do not ask every minute.
+                failures = 0;
+                retryAt = env.now() + IDLE_RETRY_MS;
+                set("needs-setup", "");
+            } else if (NEEDS_USER.has(result.state)) {
+                blocked = { context: name, state: result.state };
+                set("attention", result.state);
+            } else {
+                failures += 1;
+                retryAt = env.now() + BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)];
+                set("retrying", result.state);
+            }
+            return snapshot();
+        }
+
         // One check. It never asks the user anything; it only renews a credential the user already approved.
         // The whole check is single-flight: the 60 second timer and a tab becoming visible can coincide,
         // and both must share one check rather than each fetching the status and each starting a renewal.
@@ -185,11 +220,24 @@
             context = status.context || "";
             expiresAt = status.expiresAt || "";
             if (!status.connected) {
-                blocked = null;
-                failures = 0;
-                retryAt = 0;
-                set("needs-setup", "");
-                return snapshot();
+                const approved = status.approved;
+                if (!approved || approved.disconnectedByUser) {
+                    // Never approved, or the person disconnected it: only the person can connect it.
+                    context = approved ? approved.context || "" : context;
+                    blocked = null;
+                    failures = 0;
+                    retryAt = 0;
+                    set("needs-setup", "");
+                    return snapshot();
+                }
+                context = approved.context || "";
+                if (blocked && blocked.context !== approved.context) blocked = null;
+                if (blocked) {
+                    set("attention", blocked.state);
+                    return snapshot();
+                }
+                if (env.now() < retryAt) return snapshot();
+                return reconnect(approved.context);
             }
             if (!status.managed) {
                 set("manual", "");

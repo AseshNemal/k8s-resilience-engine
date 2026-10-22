@@ -21,6 +21,7 @@ import (
 	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/kube"
 	"resilience-engine/helper/internal/kubeconfig"
+	"resilience-engine/helper/internal/lock"
 	"resilience-engine/helper/internal/rbac"
 	"resilience-engine/helper/internal/token"
 	"resilience-engine/helper/internal/transport"
@@ -47,6 +48,8 @@ const (
 	StateDrifted               State = "drifted"
 	StateAuthorizationGone     State = "authorization-revoked"
 	StateNotAuthorized         State = "not-authorized"
+	StateIdentityChanged       State = "identity-changed" // the cluster behind the context is not the one that was approved
+	StateBusy                  State = "busy"             // another connection or renewal is already running
 	StateBackendUnavailable    State = "backend-unavailable"
 	StateBackendRejected       State = "backend-rejected"
 	StateTooSlow               State = "too-slow"
@@ -69,17 +72,20 @@ type ContextInfo struct {
 
 // Result is the only thing the helper prints. It has no field that can carry a credential.
 type Result struct {
-	OK        bool              `json:"ok"`
-	Command   string            `json:"command"`
-	State     State             `json:"state"`
-	Message   string            `json:"message,omitempty"`
-	Context   string            `json:"context,omitempty"`
-	Transport string            `json:"transport,omitempty"`
-	ExpiresAt string            `json:"expiresAt,omitempty"`
-	RenewAt   string            `json:"renewAt,omitempty"`
-	Changes   []string          `json:"changes,omitempty"`
-	Contexts  []ContextInfo     `json:"contexts,omitempty"`
-	Backend   *transport.Status `json:"backend,omitempty"`
+	OK        bool     `json:"ok"`
+	Command   string   `json:"command"`
+	State     State    `json:"state"`
+	Message   string   `json:"message,omitempty"`
+	Context   string   `json:"context,omitempty"`
+	Transport string   `json:"transport,omitempty"`
+	ExpiresAt string   `json:"expiresAt,omitempty"`
+	RenewAt   string   `json:"renewAt,omitempty"`
+	Changes   []string `json:"changes,omitempty"` // what was created, updated or deleted IN the cluster (RBAC)
+	// TokenRequest is true when the cluster was asked for a read-only token (the TokenRequest API). It is a
+	// different thing from Changes: a token request creates, changes and deletes no object in the cluster.
+	TokenRequest bool              `json:"tokenRequest,omitempty"`
+	Contexts     []ContextInfo     `json:"contexts,omitempty"`
+	Backend      *transport.Status `json:"backend,omitempty"`
 	// Background is the state of the background renewal job: on, off, stale or unsupported.
 	Background string `json:"background,omitempty"`
 }
@@ -91,6 +97,27 @@ type Deps struct {
 	Now      func() time.Time
 	// Agent is the background renewal job. Nil means this build has none.
 	Agent agent.Controller
+	// Lock keeps two connection attempts from running at once (see package lock). Nil means no locking,
+	// which only tests use.
+	Lock lock.Lock
+}
+
+// acquire takes the connection lock for one command. A nil Result means the lock is held and release must be
+// called; otherwise the Result is what the command returns, and nothing was touched.
+func (d Deps) acquire(cmd string) (func(), *Result) {
+	if d.Lock == nil {
+		return func() {}, nil
+	}
+	release, err := d.Lock.Acquire()
+	switch {
+	case errors.Is(err, lock.ErrBusy):
+		r := fail(cmd, StateBusy, "another connection or renewal is already running; this will be tried again")
+		return nil, &r
+	case err != nil:
+		r := fail(cmd, StateError, "the connection lock could not be taken")
+		return nil, &r
+	}
+	return release, nil
 }
 
 func (d Deps) now() time.Time {

@@ -64,7 +64,7 @@ func invoke(t *testing.T, d approve.Decision, b *backend, args ...string) (code 
 
 func TestStdoutIsOneLineOfJSONAndStderrIsEmptyOnEveryOutcome(t *testing.T) {
 	for _, args := range [][]string{
-		{"discover"}, {"status"}, {"version"}, {"renew-managed"}, {"agent-status"}, {"agent-disable"}, {"agent-enable", "kind-resilience-research"},
+		{"discover"}, {"status"}, {"version"}, {"renew-managed"}, {"reconnect"}, {"agent-status"}, {"agent-disable"}, {"agent-enable", "kind-resilience-research"},
 		{"authorize", "kind-resilience-research"}, {"renew", "kind-resilience-research"}, {"revoke", "kind-resilience-research"},
 		{"authorize", "prod"}, {"authorize", "no-such"},
 	} {
@@ -109,7 +109,7 @@ func TestADeclinedAuthorizeStillExitsZeroWithTheOutcomeInTheJSONAndSendsNothing(
 
 func TestBadUsageIsExitCode2WithAShortMessageOnStderrOnly(t *testing.T) {
 	for _, args := range [][]string{
-		{}, {"bogus"}, {"authorize"}, {"renew"}, {"revoke"}, {"renew-managed", "kind-resilience-research"}, {"agent-enable"}, {"agent-status", "x"}, {"agent-disable", "x"}, {"authorize", "a", "b"}, {"discover", "extra"}, {"status", "--x"}, {"version", "1"},
+		{}, {"bogus"}, {"authorize"}, {"renew"}, {"revoke"}, {"renew-managed", "kind-resilience-research"}, {"reconnect", "kind-resilience-research"}, {"agent-enable"}, {"agent-status", "x"}, {"agent-disable", "x"}, {"authorize", "a", "b"}, {"discover", "extra"}, {"status", "--x"}, {"version", "1"},
 	} {
 		code, out, errOut := invoke(t, approve.Approved, &backend{}, args...)
 		if code != 2 || out != "" || !strings.HasPrefix(errOut, "usage:") {
@@ -156,5 +156,26 @@ func TestRenewManagedWithNothingConnectedIsAQuietSuccess(t *testing.T) {
 func TestSlowDockerDeadlinesAreGenerousForUnattendedRenewal(t *testing.T) {
 	if renewTimeout < 4*time.Minute || statusTimeout < time.Minute {
 		t.Fatalf("renew %v status %v are too short for a busy Docker Desktop", renewTimeout, statusTimeout)
+	}
+}
+
+func TestAnAuthorizedInstallCarriesItsOriginAndTheApprovedIdentityButNoClusterIdentityLeaksToOutput(t *testing.T) {
+	b := &backend{}
+	_, out, _ := invoke(t, approve.Approved, b, "authorize", "kind-resilience-research")
+
+	if len(b.got) != 1 || b.got[0].Origin != "authorize" || b.got[0].Identity == nil || len(b.got[0].Identity.CASha256) != 64 {
+		t.Fatalf("install = %+v", b.got)
+	}
+	if !strings.Contains(out, `"tokenRequest":true`) {
+		t.Fatalf("the output must say a token was requested: %s", out)
+	}
+}
+
+func TestReconnectWithNothingApprovedChangesNothingAndSaysSo(t *testing.T) {
+	b := &backend{}
+	code, out, _ := invoke(t, approve.Approved, b, "reconnect")
+
+	if code != 0 || !strings.Contains(out, `"state":"idle"`) || len(b.got) != 0 {
+		t.Fatalf("code %d out %s installs %d", code, out, len(b.got))
 	}
 }
