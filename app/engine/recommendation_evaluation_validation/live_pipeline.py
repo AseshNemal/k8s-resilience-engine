@@ -19,7 +19,13 @@ approving it is a separate step that needs a developer.
 Two numbers in the contract have no ground truth to measure, so they are defined here rather than guessed:
 * ``confidence`` is evidence coverage: the share of the service's declared replicas whose placement was
   actually observed (0 to 1). It says how much of the picture was seen. It is not the accuracy of the model;
-* ``score`` is ``risk_reduction / 100 * confidence``, so a large predicted gain from thin evidence ranks lower.
+* ``score`` is the ranking score of ``ranking.py`` (see its docstring for the formula and the experimental
+  weights). Only a verified FEASIBLE candidate with a predicted improvement gets one and a rank; every other
+  candidate stays in the report with ``score = 0`` and its reason under ``evidence["ranking"]``. The selected
+  recommendation is the top-ranked one. Selecting it is not approving it, and nothing here applies it.
+
+The ranking is single-workflow: it compares the blast radius of the one frozen workflow before and after.
+Each candidate is scored on its own, so two changes that only work together are not found.
 """
 from typing import Any
 
@@ -34,19 +40,47 @@ from app.engine.recommendation_evaluation_validation.feasibility_analyzer import
     UNSCHEDULED_NODE,
     SchedulingEvidence,
 )
+from app.engine.recommendation_evaluation_validation.ranking import (
+    FORMULA_VERSION,
+    SINGLE_WORKFLOW,
+    EvaluatedCandidate,
+    ImpactSnapshot,
+    RankingWeights,
+    rank_candidates,
+)
 from app.engine.recommendation_evaluation_validation.service import evaluate_candidate
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.recommendation import RecommendationCandidate, RecommendationReport
 
 COMPONENT = "recommendation"
 
-# Applying a topology spread constraint restarts the pods that have to move, but adds no replicas.
+# A topology spread constraint adds no replicas, so it needs no extra capacity. The disruption of applying it
+# (a pod-template edit rolls out every pod of the Deployment) is a separate, future operational cost.
 RESOURCE_COST = {"TOPOLOGY_SPREAD": "LOW"}
 
 CONFIDENCE_MEANING = (
     "Evidence coverage: the share of the service's declared replicas whose placement was observed. "
     "It is not the accuracy of the prediction."
 )
+
+
+PLACEMENT_CHURN_MEANING = (
+    "Placement churn: the share of the service's ready replicas whose target node differs from the node they "
+    "run on now. It is not the number of pods a rollout restarts: applying the constraint edits the "
+    "Deployment's pod template, which eventually replaces every pod of that Deployment. That rollout cost is "
+    "not modelled."
+)
+
+
+def _impact_snapshot(report) -> ImpactSnapshot:
+    """Component 3's report for one assumed node failure, reduced to what ranking uses."""
+    return ImpactSnapshot(
+        failed_node=report.failed_node,
+        blast_radius=report.blast_radius,
+        survivability=report.survivability,
+        node_blast={risk.node: risk.blast_radius for risk in report.node_risk_ranking},
+        basis=SINGLE_WORKFLOW,
+    )
 
 
 def scheduling_evidence_for(deployment) -> SchedulingEvidence:
@@ -106,10 +140,12 @@ def build_live_recommendation(
     except ValueError as error:  # an unknown failed node
         raise _invalid(str(error)) from error
 
-    candidates: list[RecommendationCandidate] = []
     skipped: list[str] = []
     feasibility: dict[str, Any] = {}
     scheduling_evidence = scheduling_evidence_for(deployment)
+    before_snapshot = _impact_snapshot(before)
+    evaluated: list[EvaluatedCandidate] = []
+    outcomes: dict[str, tuple[Any, bool, float, float, float]] = {}   # id -> (spec, feasible, predicted, reduction, coverage)
     for spec in generate_candidates(CandidateContextBuilder.build(deployment, before)):
         try:
             simulated = evaluate_candidate(deployment, spec, scheduling_evidence)
@@ -118,31 +154,48 @@ def build_live_recommendation(
             continue
 
         coverage = _coverage(deployment, spec.service)
+        after_snapshot, predicted, reduction = None, before.blast_radius, 0.0
         if simulated.feasible:
-            after = predict_failure_impact(workflow, simulated.simulated_deployment, failed_node)
-            predicted, reduction = after.blast_radius, round(before.blast_radius - after.blast_radius, 2)
-        else:
-            predicted, reduction = before.blast_radius, 0.0
+            try:
+                after = predict_failure_impact(workflow, simulated.simulated_deployment, failed_node)
+            except ValueError:  # Component 3 could not evaluate the simulated deployment: no impact evidence
+                after = None
+            if after is not None:
+                after_snapshot = _impact_snapshot(after)
+                predicted, reduction = after.blast_radius, round(before.blast_radius - after.blast_radius, 2)
         candidate_id = f"rec-{workflow_id}-{spec.service}-{spec.recommendation_type}".lower().replace("_", "-")
         feasibility[candidate_id] = simulated.feasibility.to_dict()
+        outcomes[candidate_id] = (spec, simulated.feasible, predicted, reduction, coverage)
+        service = next((svc for svc in deployment.services if svc.name == spec.service), None)
+        evaluated.append(EvaluatedCandidate(
+            id=candidate_id, type=spec.recommendation_type, service=spec.service, simulation=simulated,
+            before=before_snapshot, after=after_snapshot,
+            ready_replicas=sum(1 for pod in service.pods if pod.ready) if service else 0,
+            confidence=coverage, resource_cost=RESOURCE_COST.get(spec.recommendation_type, "UNKNOWN"),
+        ))
+
+    weights = RankingWeights()
+    ranked = rank_candidates(evaluated, weights)
+    candidates: list[RecommendationCandidate] = []
+    for entry in ranked:
+        spec, feasible, predicted, reduction, coverage = outcomes[entry.id]
         candidates.append(RecommendationCandidate(
-            id=candidate_id,
+            id=entry.id,
             type=spec.recommendation_type,
             service=spec.service,
-            feasible=simulated.feasible,
+            feasible=feasible,
             predicted_blast_radius=predicted,
             risk_reduction=reduction,
             resource_cost=RESOURCE_COST.get(spec.recommendation_type, "UNKNOWN"),
             confidence=coverage,
-            score=round(max(reduction, 0.0) / 100.0 * coverage, 4),
+            score=round(entry.score, 4) if entry.score is not None else 0.0,
         ))
 
-    candidates.sort(key=lambda c: (-c.score, c.service, c.type))
-    best = next((c for c in candidates if c.feasible and c.risk_reduction > 0), None)
+    selected = next((entry.id for entry in ranked if entry.rank == 1), None)
     report = RecommendationReport(
         workflow_id=workflow.workflow_id,
         recommendations=candidates,
-        selected_recommendation_id=best.id if best else None,
+        selected_recommendation_id=selected,
     )
     evidence: dict[str, Any] = {
         "source": LIVE_EVIDENCE_SOURCE,
@@ -157,6 +210,15 @@ def build_live_recommendation(
         "confidenceMeaning": CONFIDENCE_MEANING,
         "skippedUnsupportedTypes": sorted(set(skipped)),
         "feasibility": feasibility,
+        "ranking": {
+            "formulaVersion": FORMULA_VERSION,
+            "weights": weights.to_dict(),
+            "basis": SINGLE_WORKFLOW,
+            "placementChurnMeaning": PLACEMENT_CHURN_MEANING,
+            "selectedCandidate": selected,
+            "candidates": {entry.id: entry.to_dict() for entry in ranked},
+            "combinedCandidates": "not evaluated: each candidate is scored on its own",
+        },
         "isPrediction": True,
     }
     return LiveRecommendation(report=report, evidence=evidence)

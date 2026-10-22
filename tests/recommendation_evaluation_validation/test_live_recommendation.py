@@ -86,7 +86,9 @@ def test_a_concentrated_service_gets_a_feasible_recommendation_with_a_predicted_
     assert candidate["riskReduction"] == pytest.approx(100.0)
     assert candidate["predictedBlastRadius"] == pytest.approx(0.0)
     assert candidate["confidence"] == pytest.approx(1.0)
-    assert candidate["score"] == pytest.approx(1.0)
+    # The score is the ranking formula, no longer risk_reduction * confidence: full benefit and full evidence,
+    # discounted for placement churn (2 of the 3 ready replicas get a new target node): 1 - 0.3 * 2/3 = 0.8.
+    assert candidate["score"] == pytest.approx(0.8)
     assert report["selectedRecommendationId"] == candidate["id"]
     assert report["workflowId"] == "checkout"
 
