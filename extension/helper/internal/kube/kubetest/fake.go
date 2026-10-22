@@ -8,6 +8,7 @@ package kubetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"sync"
@@ -35,6 +36,7 @@ type Fake struct {
 	actions []Action
 	fails   []failure
 	token   TokenFunc
+	nextUID int
 	Version string
 }
 
@@ -120,7 +122,7 @@ func (f *Fake) Writes() (writes []string, tokenRequests int) {
 		switch a.Verb {
 		case "token":
 			tokenRequests++
-		case "create", "update", "delete":
+		case "create", "update", "delete", "patch":
 			writes = append(writes, a.Verb+" "+a.Resource)
 		}
 	}
@@ -286,4 +288,116 @@ func (f *Fake) CreateToken(_ context.Context, namespace, serviceAccount string, 
 	return issue(namespace, serviceAccount, seconds)
 }
 
-var _ kube.Client = (*Fake)(nil)
+// ---- kube.RawWriter --------------------------------------------------------------------------------
+
+func rawString(m map[string]any, path ...string) string {
+	var cur any = m
+	for _, p := range path {
+		next, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = next[p]
+	}
+	s, _ := cur.(string)
+	return s
+}
+
+// CreateRaw implements kube.RawWriter. The stored object is built from the document the way the server's answer
+// would be, and receives a fresh UID.
+func (f *Fake) CreateRaw(_ context.Context, r kube.Resource, namespace string, body map[string]any) (string, error) {
+	name := rawString(body, "metadata", "name")
+	if !r.Namespaced {
+		namespace = ""
+	}
+	if err := f.begin("create", r.Plural, namespace, name); err != nil {
+		return "", err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	k := key(r.Plural, namespace, name)
+	if _, taken := f.objects[k]; taken {
+		return "", kube.NewAPIError(http.StatusConflict, "AlreadyExists", r.Plural+` "`+name+`" already exists`)
+	}
+	f.nextUID++
+	uid := fmt.Sprintf("uid-%d", f.nextUID)
+	doc := map[string]any{}
+	for k, v := range body {
+		doc[k] = v
+	}
+	meta := map[string]any{}
+	if existing, ok := body["metadata"].(map[string]any); ok {
+		for k, v := range existing {
+			meta[k] = v
+		}
+	}
+	meta["uid"] = uid
+	if namespace != "" {
+		meta["namespace"] = namespace
+	}
+	doc["metadata"] = meta
+	obj, err := kube.ObjectFromRaw(doc)
+	if err != nil {
+		return "", err
+	}
+	f.objects[k] = copyObject(*obj)
+	return uid, nil
+}
+
+// DeleteRaw implements kube.RawWriter, including the UID precondition.
+func (f *Fake) DeleteRaw(_ context.Context, r kube.Resource, namespace, name, uid string) error {
+	if !r.Namespaced {
+		namespace = ""
+	}
+	if err := f.begin("delete", r.Plural, namespace, name); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	k := key(r.Plural, namespace, name)
+	o, ok := f.objects[k]
+	if !ok {
+		return notFound(r, name)
+	}
+	if uid != "" && o.UID != uid {
+		return kube.NewAPIError(http.StatusConflict, "Conflict", "Precondition failed: UID in precondition does not match")
+	}
+	delete(f.objects, k)
+	return nil
+}
+
+// PatchLabels implements kube.RawWriter.
+func (f *Fake) PatchLabels(_ context.Context, r kube.Resource, namespace, name string, set map[string]*string) error {
+	if !r.Namespaced {
+		namespace = ""
+	}
+	if err := f.begin("patch", r.Plural, namespace, name); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	k := key(r.Plural, namespace, name)
+	o, ok := f.objects[k]
+	if !ok {
+		return notFound(r, name)
+	}
+	labels := map[string]string{}
+	for key, value := range o.Labels {
+		labels[key] = value
+	}
+	for key, value := range set {
+		if value == nil {
+			delete(labels, key)
+		} else {
+			labels[key] = *value
+		}
+	}
+	o.Labels = labels
+	f.objects[k] = o
+	return nil
+}
+
+var (
+	_ kube.Client    = (*Fake)(nil)
+	_ kube.RawWriter = (*Fake)(nil)
+)

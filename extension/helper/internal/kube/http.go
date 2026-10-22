@@ -99,6 +99,10 @@ func (r Resource) path(namespace, name string) (string, error) {
 }
 
 func (c *httpClient) do(ctx context.Context, method, path string, in, out any) error {
+	return c.doType(ctx, method, path, "application/json", in, out)
+}
+
+func (c *httpClient) doType(ctx context.Context, method, path, contentType string, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		encoded, err := json.Marshal(in)
@@ -113,7 +117,7 @@ func (c *httpClient) do(ctx context.Context, method, path string, in, out any) e
 	}
 	req.Header.Set("Accept", "application/json")
 	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	if c.bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
@@ -213,6 +217,54 @@ func (c *httpClient) Delete(ctx context.Context, r Resource, namespace, name str
 	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
+func (c *httpClient) CreateRaw(ctx context.Context, r Resource, namespace string, body map[string]any) (string, error) {
+	if r.Namespaced && namespace == "" {
+		return "", fmt.Errorf("a %s needs a namespace", r.Kind)
+	}
+	path, err := r.path(namespace, "")
+	if err != nil {
+		return "", err
+	}
+	var created struct {
+		Metadata struct {
+			UID string `json:"uid"`
+		} `json:"metadata"`
+	}
+	if err := c.do(ctx, http.MethodPost, path, body, &created); err != nil {
+		return "", err
+	}
+	return created.Metadata.UID, nil
+}
+
+func (c *httpClient) DeleteRaw(ctx context.Context, r Resource, namespace, name, uid string) error {
+	path, err := r.path(namespace, name)
+	if err != nil {
+		return err
+	}
+	var options any
+	if uid != "" {
+		options = map[string]any{"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": map[string]any{"uid": uid}}
+	}
+	return c.do(ctx, http.MethodDelete, path, options, nil)
+}
+
+func (c *httpClient) PatchLabels(ctx context.Context, r Resource, namespace, name string, set map[string]*string) error {
+	path, err := r.path(namespace, name)
+	if err != nil {
+		return err
+	}
+	labels := make(map[string]any, len(set))
+	for k, v := range set {
+		if v == nil {
+			labels[k] = nil
+		} else {
+			labels[k] = *v
+		}
+	}
+	patch := map[string]any{"metadata": map[string]any{"labels": labels}}
+	return c.doType(ctx, http.MethodPatch, path, "application/merge-patch+json", patch, nil)
+}
+
 func (c *httpClient) CreateToken(ctx context.Context, namespace, serviceAccount string, expirationSeconds int64) (Token, error) {
 	path, err := ServiceAccounts.path(namespace, serviceAccount)
 	if err != nil {
@@ -243,6 +295,12 @@ func (c *httpClient) CreateToken(ctx context.Context, namespace, serviceAccount 
 	return token, nil
 }
 
+// ObjectFromRaw builds an Object from a server document. It is what Get and List use, exported so a fake cluster can
+// answer exactly as the server would.
+func ObjectFromRaw(raw map[string]any) (*Object, error) { return objectFromRaw(raw) }
+
+var _ RawWriter = (*httpClient)(nil)
+
 // ---- translating between Object and the server's JSON --------------------------------------------
 
 func objectFromRaw(raw map[string]any) (*Object, error) {
@@ -255,6 +313,7 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 			Name      string            `json:"name"`
 			Namespace string            `json:"namespace"`
 			Labels    map[string]string `json:"labels"`
+			UID       string            `json:"uid"`
 		} `json:"metadata"`
 		Spec struct {
 			ProviderID string `json:"providerID"`
@@ -314,6 +373,7 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 		Name:            wire.Metadata.Name,
 		Namespace:       wire.Metadata.Namespace,
 		Labels:          wire.Metadata.Labels,
+		UID:             wire.Metadata.UID,
 		Rules:           wire.Rules,
 		AggregationRule: aggregation,
 		RoleRef:         wire.RoleRef,

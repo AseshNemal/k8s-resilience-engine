@@ -106,6 +106,9 @@ type Object struct {
 	Name      string
 	Namespace string
 	Labels    map[string]string
+	// UID is metadata.uid as the server reported it. It identifies this exact object: a deleted and recreated
+	// object with the same name has another one. Empty for an object that was not read from the server.
+	UID string
 
 	Rules           []PolicyRule
 	AggregationRule bool // the object has an aggregationRule, so it can gain permissions from other roles
@@ -133,6 +136,11 @@ type Object struct {
 	raw map[string]any
 }
 
+// Raw returns the object exactly as the server sent it, or nil for an object that was not read from the server. The
+// map is the caller's to read and must not be modified; it is how a caller looks at fields this package does not model
+// (a custom resource's spec, a CRD's versions).
+func (o *Object) Raw() map[string]any { return o.raw }
+
 // Token is a ServiceAccount token as the TokenRequest API returned it. ExpiresAt is zero when the
 // server did not report one.
 type Token struct {
@@ -149,6 +157,20 @@ type Reader interface {
 	Get(ctx context.Context, r Resource, namespace, name string) (*Object, error)
 	// List reads a collection. For a namespaced kind, namespace "" lists every namespace.
 	List(ctx context.Context, r Resource, namespace string) ([]Object, error)
+}
+
+// RawWriter creates, deletes and relabels objects given as JSON documents. It is separate from Client on purpose: only
+// the installation mechanism for the Bookinfo tracing setup (package traceinstall) uses it, and only through a writer
+// that checks an allow-list before every request. Nothing that plans or reads takes one.
+type RawWriter interface {
+	// CreateRaw posts body (a complete object) to the collection and returns the UID the server assigned.
+	// The server rejects a taken name with AlreadyExists.
+	CreateRaw(ctx context.Context, r Resource, namespace string, body map[string]any) (uid string, err error)
+	// DeleteRaw deletes one object. A non-empty uid is sent as a precondition, so the server refuses (Conflict) to
+	// delete an object that is not the one the caller created.
+	DeleteRaw(ctx context.Context, r Resource, namespace, name, uid string) error
+	// PatchLabels changes labels with a JSON merge patch: a nil value removes the label, nothing else is touched.
+	PatchLabels(ctx context.Context, r Resource, namespace, name string, set map[string]*string) error
 }
 
 // Client is what the helper needs from a cluster.
