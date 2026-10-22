@@ -35,22 +35,89 @@ the prediction baseline for that experiment.
 The scripts refuse missing, malformed, incomplete, or mismatched evidence. They
 also refuse to overwrite existing artifacts.
 
-## 1. Enter the real experiment identifiers
+## Build the pre-failure method comparison
 
-The following PowerShell prompts prevent example paths and identifiers from
-being mistaken for real values:
+Component 3 must compare the proposed cross-layer method with the three
+planned research baselines:
+
+1. replica-count-only analysis;
+2. deployment-only exposure analysis;
+3. dependency-only workflow analysis;
+4. proposed cross-layer analysis.
+
+Create this artifact before failure injection. The dependency-only scenario is
+a service-failure hypothesis declared in advance. Never populate it from the
+failures observed after the experiment, because that would leak ground truth
+into the baseline.
+
+### A. Capture the exact upstream graphs
+
+The frozen-workflow endpoint returns an evidence envelope, so save its `graph`
+member. The live-deployment endpoint already returns a bare `DeploymentGraph`.
 
 ```powershell
+$baseUrl = "http://127.0.0.1:8000"
 $runId = Read-Host "Unique experiment ID"
 $workflowId = Read-Host "Frozen workflow ID"
 $failedNode = Read-Host "Worker node selected for the experiment"
 $namespace = Read-Host "Kubernetes namespace"
-$serviceName = Read-Host "Expected service to probe"
-$workflowProbe = Read-Host "Expected workflow to execute"
+$dependencyScenarioService = Read-Host "Service declared unavailable in the dependency-only scenario"
 
 $captureRoot = Join-Path (Resolve-Path ".\experiments\failure_impact_validation").Path "captures"
 $runDirectory = Join-Path $captureRoot $runId
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
+
+$workflowPath = Join-Path $runDirectory "workflow-graph.json"
+$deploymentPath = Join-Path $runDirectory "deployment-graph.json"
+$comparisonPath = Join-Path $runDirectory "method-comparison.json"
+
+foreach ($path in @($workflowPath, $deploymentPath, $comparisonPath)) {
+    if (Test-Path -LiteralPath $path) {
+        throw "Refusing to overwrite existing experiment artifact: $path"
+    }
+}
+
+$escapedWorkflowId = [Uri]::EscapeDataString($workflowId)
+$escapedNamespace = [Uri]::EscapeDataString($namespace)
+$frozenWorkflow = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/workflows/$escapedWorkflowId/frozen"
+$deploymentGraph = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/deployments/live?namespace=$escapedNamespace"
+
+$utf8NoBom = [Text.UTF8Encoding]::new($false)
+$workflowJson = $frozenWorkflow.graph | ConvertTo-Json -Depth 100
+$deploymentJson = $deploymentGraph | ConvertTo-Json -Depth 100
+[IO.File]::WriteAllText($workflowPath, $workflowJson + [Environment]::NewLine, $utf8NoBom)
+[IO.File]::WriteAllText($deploymentPath, $deploymentJson + [Environment]::NewLine, $utf8NoBom)
+```
+
+Stop if either request fails. Do not replace an unavailable frozen workflow or
+live deployment with a sample graph.
+
+### B. Generate the comparison artifact
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_method_comparison.py `
+  --workflow $workflowPath `
+  --deployment $deploymentPath `
+  --failed-node $failedNode `
+  --dependency-scenario-service $dependencyScenarioService `
+  --output $comparisonPath
+```
+
+For a dependency scenario containing several services, repeat
+`--dependency-scenario-service` once for each service. The generated artifact
+records each method's evidence scope so a replica vulnerability is not
+misreported as an observed service failure, and deployment-only analysis is not
+misreported as a workflow prediction.
+
+## 1. Enter the real experiment identifiers
+
+Continue in the same PowerShell session used for the method comparison. The
+following prompts declare the complete probe set before failure injection:
+
+```powershell
+$serviceName = Read-Host "Expected service to probe"
+$workflowProbe = Read-Host "Expected workflow to execute"
 
 $predictionPath = Join-Path $runDirectory "prediction.json"
 $evidencePath = Join-Path $runDirectory "evidence.json"
