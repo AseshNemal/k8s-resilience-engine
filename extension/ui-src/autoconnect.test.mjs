@@ -571,3 +571,84 @@ test("a person's own setup or removal is refused while a reconnect is running, s
     assert.equal(removal.ok, false);
     assert.deepEqual(plain(w.calls.map((c) => c.args)), [["reconnect"]], "no authorize or revoke may start beside it");
 });
+
+// ------------------------------------------------------------------ the cluster list on the Connect page
+
+const found = (name, extra = {}) => ({ name, server: "127.0.0.1:50345", supported: true, reachable: true, serverVersion: "v1.36.1", authorization: "absent", ...extra });
+
+test("a newly found supported cluster is listed as Not connected, ready for the person to connect", () => {
+    const badge = A.clusterBadge(found("docker-desktop"), { connected: false });
+    assert.deepEqual(plain(badge), { kind: "not-connected", text: "Not connected", connectable: true });
+});
+
+test("the cluster the extension is connected to says Connected, and no other cluster does", () => {
+    const status = { connected: true, managed: true, context: "docker-desktop", state: "ok" };
+    assert.equal(A.clusterBadge(found("docker-desktop"), status).kind, "connected");
+    assert.equal(A.clusterBadge(found("kind-other"), status).kind, "not-connected");
+});
+
+test("a connection added by hand does not make any listed cluster look connected", () => {
+    const status = { connected: true, managed: false, state: "ok" };
+    assert.equal(A.clusterBadge(found("docker-desktop"), status).kind, "not-connected");
+});
+
+test("an approved cluster that the extension is reconnecting by itself says so", () => {
+    const status = { connected: false, approved: { context: "docker-desktop", disconnectedByUser: false } };
+    const badge = A.clusterBadge(found("docker-desktop", { authorization: "approved" }), status);
+    assert.equal(badge.kind, "reconnecting");
+    assert.match(badge.text, /approved earlier/i);
+});
+
+test("a cluster the person disconnected says so and waits for them to connect it again", () => {
+    const status = { connected: false, approved: { context: "docker-desktop", disconnectedByUser: true } };
+    const badge = A.clusterBadge(found("docker-desktop"), status);
+    assert.equal(badge.kind, "disconnected");
+    assert.match(badge.text, /disconnected/i);
+    assert.equal(badge.connectable, true);
+});
+
+test("an approval for another context does not describe this one", () => {
+    const status = { connected: false, approved: { context: "kind-other", disconnectedByUser: false } };
+    assert.equal(A.clusterBadge(found("docker-desktop"), status).kind, "not-connected");
+});
+
+test("access that was changed or widened in the cluster is flagged for the person, not silently repaired", () => {
+    for (const authorization of ["drifted", "over-granted"]) {
+        const badge = A.clusterBadge(found("docker-desktop", { authorization }), { connected: false });
+        assert.equal(badge.kind, "attention");
+        assert.equal(badge.connectable, authorization === "drifted", "a widened grant must be removed first");
+    }
+});
+
+test("unsupported and unreachable clusters cannot be connected, and say which", () => {
+    assert.deepEqual(plain(A.clusterBadge(found("prod", { supported: false }), null)), { kind: "unsupported", text: "Not supported", connectable: false });
+    assert.deepEqual(plain(A.clusterBadge(found("docker-desktop", { reachable: false }), null)), { kind: "unreachable", text: "Not reachable", connectable: false });
+});
+
+test("a badge never contains anything from the kubeconfig", () => {
+    const hostile = found("<img src=x onerror=alert(1)>", { authorization: "<b>x</b>" });
+    assert.doesNotMatch(JSON.stringify(A.clusterBadge(hostile, { connected: false })), /img|onerror|<b>/);
+});
+
+test("finding clusters only ever runs the read-only discover command: a new cluster is never connected or changed by being found", async () => {
+    const listing = JSON.stringify({ ok: true, command: "discover", state: "connected", contexts: [{ name: "docker-desktop", server: "127.0.0.1:50345", supported: true, reachable: true, authorization: "absent" }] });
+    const w = world({ statuses: [{ connected: false }], helper: listing });
+
+    const first = await w.controller.discover();
+    await w.controller.tick();
+    await w.controller.discover();
+
+    assert.equal(first.contexts[0].name, "docker-desktop");
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["discover"], ["discover"]], "nothing but discover: no authorize, no reconnect");
+});
+
+test("a newly found cluster is connected only by the person's own action, which runs the normal authorize with its native dialog", async () => {
+    const w = world({ statuses: [{ connected: false }], helper: JSON.stringify({ ok: true, command: "authorize", state: "connected", context: "docker-desktop" }) });
+    await w.controller.tick();
+    assert.equal(w.calls.length, 0);
+
+    const result = await w.controller.setup("docker-desktop");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(plain(w.calls.map((c) => c.args)), [["authorize", "docker-desktop"]]);
+});

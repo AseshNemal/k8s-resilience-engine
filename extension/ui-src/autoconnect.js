@@ -95,6 +95,26 @@
         return MESSAGES[state] || MESSAGES.error;
     }
 
+    // How one cluster found on this computer is described in the Connect page's list. `context` is the
+    // helper's discover answer for it and `status` is the backend's connection status. Only fixed wording is
+    // returned: the names in a kubeconfig are never part of it. Only one cluster is connected at a time, so a
+    // cluster is "Connected" only when the managed connection is for exactly this context.
+    function clusterBadge(context, status) {
+        if (!context.supported) return { kind: "unsupported", text: "Not supported", connectable: false };
+        if (context.reachable !== true) return { kind: "unreachable", text: "Not reachable", connectable: false };
+        if (status && status.connected && status.managed && status.context === context.name) {
+            return { kind: "connected", text: "Connected", connectable: false };
+        }
+        const approved = status && status.approved && status.approved.context === context.name ? status.approved : null;
+        if (approved && approved.disconnectedByUser) {
+            return { kind: "disconnected", text: "Disconnected by you · connect to approve again", connectable: true };
+        }
+        if (approved) return { kind: "reconnecting", text: "Approved earlier · reconnecting", connectable: false };
+        if (context.authorization === "drifted") return { kind: "attention", text: "Access changed in the cluster · connect to review it", connectable: true };
+        if (context.authorization === "over-granted") return { kind: "attention", text: "Another binding gives it extra access · remove that first", connectable: false };
+        return { kind: "not-connected", text: "Not connected", connectable: true };
+    }
+
     // The helper prints one JSON line. Docker Desktop may hand it back as stdout of a resolved call or
     // inside a rejection, so both are read; anything unreadable becomes "helper-unavailable".
     function parseHelperOutput(text) {
@@ -352,7 +372,7 @@
     }
 
     window.__resilienceAuto = {
-        ENABLED_PLATFORMS, POLL_MS, PENDING_POLL_MS, BACKOFF_MS, WAIT_MS, platformOf, platformSupport, helperFile, messageFor, parseHelperOutput, createController,
+        ENABLED_PLATFORMS, POLL_MS, PENDING_POLL_MS, BACKOFF_MS, WAIT_MS, platformOf, platformSupport, helperFile, messageFor, clusterBadge, parseHelperOutput, createController,
     };
     if (!window.document || !window.document.addEventListener) return;
 
