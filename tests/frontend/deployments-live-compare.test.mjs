@@ -81,7 +81,11 @@ test("every key finding has a short title and a generated sentence", () => {
     });
     const titles = findings.map((f) => f.title);
     assert.ok(titles.includes("Exposed while Kubernetes reported it healthy"));
-    assert.ok(titles.includes("Rule obeyed, service still exposed"));
+    assert.ok(titles.includes("Following the topology spread rule still left reviews exposed"));
+    // The rule was kept by leaving pods Pending, and the card says so, with the counts from the runs.
+    const obeyed = findings.find((f) => f.key === "rule-obeyed-exposed");
+    assert.match(obeyed.text, /leaving reviews' other copies Pending \(5\/5 runs\)/);
+    assert.equal(obeyed.scenario, "08");
     assert.ok(titles.includes("The spread rule left pods Pending"));
     for (const f of findings) {
         assert.ok(f.title && f.text, JSON.stringify(f));

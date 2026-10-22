@@ -1508,7 +1508,23 @@
 .exp-hero__body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .exp-hero__eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--hero-tone); }
 .exp-hero__title { margin: 0; font-size: 1.15rem; text-wrap: balance; color: var(--c2-text-main); }
-.exp-hero__text { margin: 0; font-size: 13px; line-height: 1.55; color: var(--c2-text-muted); max-width: 80ch; }
+.exp-hero__text { margin: 0; font-size: 14px; line-height: 1.6; color: var(--c2-text-main); max-width: 85ch; }
+.exp-hero__show {
+    align-self: flex-start;
+    margin-top: 6px;
+    padding: 6px 14px;
+    border: 1px solid color-mix(in srgb, var(--hero-tone) 50%, transparent);
+    border-radius: 999px;
+    background: var(--c2-glass-bg);
+    color: var(--c2-text-main);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--c2-transition);
+}
+.exp-hero__show:hover { background: color-mix(in srgb, var(--hero-tone) 12%, var(--c2-glass-bg)); }
+.exp-hero__show:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
 
 /* ---- Experiments tab: pick one of the stored runs ---- */
 .run-picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px 0; }

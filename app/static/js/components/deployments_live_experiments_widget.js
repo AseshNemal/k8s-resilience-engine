@@ -85,6 +85,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     }
 
     const CONFIG_LABELS = { "A-no-rule": "no placement rule", "B-spread": "topology spread rule" };
+    const possessive = (name) => (name.endsWith("s") ? `${name}'` : `${name}'s`);
 
     // Each sentence is derived from the stored counts; nothing here is typed in by hand.
     function buildFindings(data) {
@@ -106,12 +107,22 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             });
         });
 
+        // The rule was satisfied in every run, yet the target ended exposed. When pods were left Pending,
+        // that is how the rule was kept: the copies it could not place never ran.
         conds.filter((c) => c.target_became_exposed > 0 && c.compliance_rate_t1?.mean === 1).forEach((c) => {
+            const rule = CONFIG_LABELS[c.config] || "placement rule";
+            const exposedRuns = `${c.target_became_exposed}/${okRuns(c)} runs`;
             findings.push({
                 key: "rule-obeyed-exposed",
                 severity: "danger",
-                title: "Rule obeyed, service still exposed",
-                text: `${label(c)}: the declared rule was satisfied (compliance ${pct(c.compliance_rate_t1.mean)}), yet ${target} was exposed. Rule compliance alone did not mean resilience.`,
+                scenario: c.scenario_id,
+                title: `Following the ${rule} still left ${target} exposed`,
+                text: c.unstable_runs > 0
+                    ? `${c.scenario_name}, with the ${rule}: Kubernetes obeyed the rule by leaving ${possessive(target)} other copies Pending ` +
+                      `(${c.unstable_runs}/${okRuns(c)} runs). The copies left running sat on a single node, so one node failure ` +
+                      `would take ${target} down (${exposedRuns}).`
+                    : `${c.scenario_name}, with the ${rule}: the rule was satisfied, yet every ready copy of ${target} sat on ` +
+                      `one node, so one node failure would take it down (${exposedRuns}).`,
             });
         });
 
@@ -180,7 +191,21 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         icon.setAttribute("aria-hidden", "true");
         const body = el("div", "exp-hero__body");
         body.append(el("span", "exp-hero__eyebrow", "Main finding"), el("h4", "exp-hero__title", f.title), el("p", "exp-hero__text", f.text));
+        if (f.scenario) {
+            // Straight to the evidence: open that scenario's before/after pods in the table below.
+            const show = el("button", "exp-hero__show", "👁 Show me the pods");
+            show.type = "button";
+            show.addEventListener("click", () => openScenario(f.scenario));
+            body.appendChild(show);
+        }
         container.replaceChildren(icon, body);
+    }
+
+    function openScenario(scenarioId) {
+        const row = document.querySelector(`#tab-live-experiments .live-exp-row[data-scenario="${CSS.escape(scenarioId)}"]`);
+        if (!row) return;
+        if (!row.classList.contains("is-open")) row.click();
+        row.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     // How much was run for the workload on show, counted from its stored results.
@@ -349,6 +374,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             tr.appendChild(nameCell);
             CONFIGS.forEach((cfg) => tr.appendChild(renderCell(row.configs[cfg])));
             tr.className = "live-exp-row";
+            tr.dataset.scenario = id;
             tr.title = `${id}: click to show the pods before and after`;
             const detail = detailRow(row, data.target_service);
             detail.hidden = true;
