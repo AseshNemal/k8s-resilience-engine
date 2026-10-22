@@ -915,6 +915,33 @@
     .verdict__stats { border-left: 0; border-top: 1px solid var(--c2-border-light); }
 }
 
+/* ---- Topology tab: one colour per service ---- */
+.service-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 var(--space-sm) 0; font-size: 12px; color: var(--c2-text-muted); }
+.service-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+.service-legend__item::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: hsl(var(--svc-hue) 65% 50%);
+}
+.pod-badge-list .pod-pill--svc {
+    background: hsl(var(--svc-hue) 85% 95%);
+    border-color: hsl(var(--svc-hue) 60% 78%);
+    color: hsl(var(--svc-hue) 70% 30%);
+}
+.pod-badge-list .pod-pill--svc:hover { background: hsl(var(--svc-hue) 80% 89%); }
+@media (prefers-color-scheme: dark) {
+    .pod-badge-list .pod-pill--svc {
+        background: hsl(var(--svc-hue) 45% 22%);
+        border-color: hsl(var(--svc-hue) 45% 38%);
+        color: hsl(var(--svc-hue) 80% 85%);
+    }
+}
+.node-chip__header .node-name { font-size: 0.95rem; }
+.node-pod-count { font-size: 11px; font-weight: 600; color: var(--c2-text-muted); }
+.node-chip-container > .node-capacity { margin: -4px 0 8px 0; }
+
 /* ---- Exposed services tab: services × nodes spread map ---- */
 .spread-map-wrap {
     border: 1px solid var(--c2-border-light);

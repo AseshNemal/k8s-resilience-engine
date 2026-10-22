@@ -9,6 +9,31 @@ window.DeploymentsTopologyWidget = (function () {
     let lastData = null;
     let failedNode = null;
 
+    // One fixed colour per service (by sorted name), so the same service looks the same on every node.
+    const SERVICE_HUES = [212, 152, 32, 280, 350, 190, 95, 255, 15, 320];
+    let serviceHue = {};
+    const shortNode = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
+
+    function assignServiceColours(services) {
+        serviceHue = {};
+        [...new Set(services.map((s) => s.name))].sort((a, b) => a.localeCompare(b)).forEach((name, i) => {
+            serviceHue[name] = SERVICE_HUES[i % SERVICE_HUES.length];
+        });
+    }
+
+    function renderLegend() {
+        const legend = document.querySelector("[data-role='service-legend']");
+        if (!legend) return;
+        legend.replaceChildren(...Object.entries(serviceHue).map(([name, hue]) => {
+            const item = document.createElement("span");
+            item.className = "service-legend__item";
+            item.style.setProperty("--svc-hue", hue);
+            item.textContent = name;
+            return item;
+        }));
+        legend.hidden = Object.keys(serviceHue).length === 0;
+    }
+
     // Same rule as placement_metrics.exposure_status: a service is down after node n fails when it
     // had ready replicas and every one of them was on n (SA(s,{n}) = 0).
     function simulateFailure(node) {
@@ -67,6 +92,8 @@ window.DeploymentsTopologyWidget = (function () {
         if (!grid || !data?.nodes) return;
         lastData = data;
         failedNode = null;
+        assignServiceColours(data.services || []);
+        renderLegend();
 
         // Group nodes by zone. Without a zone label the failure domain is the node itself.
         const NO_ZONE = "No zone label (failure domain = node)";
@@ -136,11 +163,12 @@ window.DeploymentsTopologyWidget = (function () {
                 if (n.schedulable === false) nodeState += '<span class="status-badge status-badge--warning">Cordoned</span>';
 
                 nodesHtml += `
-                    <div class="node-chip-container is-clickable" data-node="${n.name}" role="button" tabindex="0" title="Click to simulate the failure of ${n.name}">
+                    <div class="node-chip-container is-clickable" data-node="${n.name}" role="button" tabindex="0" title="${n.name}: click to simulate its failure">
                         <div class="node-chip__header">
-                            <span class="node-name">🖥️ ${n.name} ${nodeState}</span>
-                            <span class="node-capacity" title="Allocatable minus requests of scheduled pods">free: ${cpuText} · ${memText}</span>
+                            <span class="node-name">🖥️ ${shortNode(n.name)} ${nodeState}</span>
+                            <span class="node-pod-count">${pods.length} pod${pods.length === 1 ? "" : "s"}</span>
                         </div>
+                        <div class="node-capacity" title="Allocatable minus requests of scheduled pods">free: ${cpuText} · ${memText}</div>
                         <div class="pod-badge-list">
                             ${podsHtml}
                         </div>
@@ -191,10 +219,15 @@ window.DeploymentsTopologyWidget = (function () {
 
     function podPill(p) {
         const notReady = p.is_ready === false;
-        const style = notReady ? ' style="opacity: 0.55; border-style: dashed;"' : "";
+        const hue = serviceHue[p.service];
+        const classes = hue == null ? "pod-pill" : "pod-pill pod-pill--svc";
+        const styles = [];
+        if (hue != null) styles.push(`--svc-hue: ${hue}`);
+        if (notReady) styles.push("opacity: 0.55", "border-style: dashed");
+        const style = styles.length ? ` style="${styles.join("; ")}"` : "";
         const nodeLine = p.node ? "&#10;Node: " + p.node : "";
         const title = `Pod: ${p.name}&#10;Service: ${p.service}&#10;${notReady ? "Not ready" : "Ready"}${nodeLine}`;
-        return `<span class="pod-pill" data-service="${p.service}" data-node="${p.node || ""}"${style} title="${title}">
+        return `<span class="${classes}"${style} data-service="${p.service}" data-node="${p.node || ""}" title="${title}">
                     ${p.service}${notReady ? " (not ready)" : ""}
                 </span>`;
     }
