@@ -872,6 +872,12 @@ def _run_placement(run: dict[str, Any]) -> dict[str, Any]:
         "t1": pods(run["t1"]),
         "concentration_t0": concentration(run["t0"]),
         "concentration_t1": concentration(run["t1"]),
+        # The run's own measurements, as stored by the runner (placement_metrics); None when not recorded.
+        "d_rate": run.get("d_rate"),
+        "exposure_rate_t0": run.get("exposure_rate_t0"),
+        "exposure_rate_t1": run.get("exposure_rate_t1"),
+        "compliance_rate_t1": run.get("compliance_rate_t1"),
+        "changed_services": run.get("changed_services") or [],
     }
 
 

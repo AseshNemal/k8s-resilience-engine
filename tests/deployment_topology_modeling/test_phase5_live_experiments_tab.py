@@ -87,6 +87,27 @@ def test_every_successful_run_is_served_in_repetition_order(tmp_path):
     assert condition["runs"] == 2  # the stored count is not replaced by the list
 
 
+def test_each_run_carries_its_stored_measurements(tmp_path):
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "results_dir": str(tmp_path), "total_runs": 1,
+        "conditions": [_condition("08_constrained_resources", "B-spread", True)],
+    }), encoding="utf-8")
+    snap = {"reviews": {"ready_replicas": 1, "replica_concentration": 1.0, "pods": [["r0", "w3", True]]}}
+    (tmp_path / "08_constrained_resources__B-spread__run1.json").write_text(json.dumps({
+        "repetition": 1, "action": {"action": "fill"}, "stable_after_disruption": False,
+        "target_status_t0": "NOT_EXPOSED", "target_status_t1": "EXPOSED", "t0": snap, "t1": snap,
+        "d_rate": 0.25, "exposure_rate_t0": 0.0, "exposure_rate_t1": 0.25, "compliance_rate_t1": 1.0,
+        "changed_services": ["reviews"],
+    }), encoding="utf-8")
+
+    (run,) = service.get_live_experiment_results(tmp_path)["conditions"][0]["run_placements"]
+
+    assert run["d_rate"] == pytest.approx(0.25)
+    assert (run["exposure_rate_t0"], run["exposure_rate_t1"]) == (pytest.approx(0.0), pytest.approx(0.25))
+    assert run["compliance_rate_t1"] == pytest.approx(1.0)
+    assert run["changed_services"] == ["reviews"]
+
+
 def test_missing_results_return_none(tmp_path):
     assert service.get_live_experiment_results(tmp_path) is None
 
