@@ -33,7 +33,17 @@ This is an early-stage scaffold, not a working system yet:
   `metrics.py` computes replica concentration, `simulator.py` + `virtual_model.py` run the
   what-if simulation on a deep-copied `DeploymentGraph` (never mutating the original), and
   `service.py` ties them together as `evaluate_first_recommendation()` → `SimulationResult`.
-  Ranking, YAML generation, and calling Member 3's evaluator are still unbuilt.
+  Beyond that, Member 4 now has: candidate strategies `TOPOLOGY_SPREAD`, `REPLICA_INCREASE` (single-replica
+  services only) and `POD_ANTI_AFFINITY` (hardens existing soft anti-affinity) judged by one constraint search
+  (`strategy_feasibility.py`); ranking (`ranking.py`) and bounded pairs (`combinations.py`) that call Member 3's
+  `predict_failure_impact`; a YAML proposal generator (`yaml_proposal.py`, minimal Deployment patches, refused for
+  anything not verified feasible and ranked) whose text the approval gate generates itself and re-checks when a
+  request is decided; and a validation run (`validation/`) that compares a fixed prediction with a controlled
+  failure in a TEST environment through an injected executor. **No real executor exists**: only the test double
+  in `tests/support/member4_test_cluster.py` can run it, so nothing has been validated against a real cluster.
+  The offline harness and benchmark (`tests/support/member4_*.py`, `experiments/member4_offline_benchmark/`,
+  see `docs/MEMBER4_OFFLINE_VALIDATION.md`) are test/research only and stamp a non-live evidence source the
+  approval gate refuses.
 - `app/api/*.py` routes serve live evidence only. Topology comes from `discovery.py` (Member 2),
   which reads the connected cluster through `app/integrations/kubernetes/client.py` and returns the
   unchanged `DeploymentGraph` inside a status envelope (`/api/deployments/discovery`); failure
@@ -41,7 +51,7 @@ This is an early-stage scaffold, not a working system yet:
   when either is missing or incomplete; recommendations are computed live (`/api/recommendations/live?workflow_id=…`,
   `live_pipeline.py`: Member 4's generator, feasibility check and simulator over Member 3's runtime inputs, with
   `confidence` defined as evidence coverage) and report `RECOMMENDATION_EVIDENCE_UNAVAILABLE` when no workflow is
-  named; YAML proposals and validation reports are still unbuilt. The `/sample`, demo, fixture-simulation and Jaeger-seed routes were
+  named. YAML proposals are generated for an approvable candidate; validation reports are produced only by the offline run. The `/sample`, demo, fixture-simulation and Jaeger-seed routes were
   removed from the product (the deployments page has no sample toggle, the failure-impact page no fixture
   modes). Member 2's scripted chaos/benchmark dry-run routes remain, labelled; see the real-data rule below.
   Declared intent comes from, in order: a manifest path the caller names, `RESILIENCE_MANIFEST_PATH` (set on
