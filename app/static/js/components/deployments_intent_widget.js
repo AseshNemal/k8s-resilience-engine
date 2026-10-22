@@ -183,8 +183,7 @@ window.DeploymentsIntentWidget = (function () {
     }
 
     function seatEl(seat) {
-        const labels = { ok: shortNode(seat.pod?.node), notready: shortNode(seat.pod?.node), missing: "✕", extra: `+ ${shortNode(seat.pod?.node)}` };
-        const node = el("span", `plan-seat plan-seat--${seat.kind}`, labels[seat.kind]);
+        const node = el("span", `plan-seat plan-seat--${seat.kind}`);
         const titles = {
             ok: `${seat.pod?.name} is running and ready on ${seat.pod?.node}`,
             notready: `${seat.pod?.name} exists on ${seat.pod?.node || "no node"} but is not ready`,
@@ -218,22 +217,34 @@ window.DeploymentsIntentWidget = (function () {
         const head = el("button", "plan-card__head");
         head.type = "button";
         head.setAttribute("aria-expanded", "false");
-        head.append(el("span", "plan-card__name", item.service_name || "unknown"), el("span", "plan-card__verdict", verdict));
+        head.title = "Click for its pods per node and its declared rules";
 
-        const booked = el("div", "plan-row");
-        booked.append(el("span", "plan-row__label", "📄 YAML asks for"));
-        const bookedSeats = el("span", "plan-row__seats");
-        for (let i = 0; i < (declared ?? 0); i++) bookedSeats.appendChild(el("span", "plan-seat plan-seat--booked"));
-        booked.append(bookedSeats, el("span", "plan-row__count", declared == null ? "n/a" : `${declared}`));
+        // The box is what the YAML asks for: one slot per declared copy. Pods fill it from the left;
+        // a slot with no ready pod is missing, and pods past the box are extra.
+        const track = el("span", "plan-track");
+        const box = el("span", "plan-box");
+        box.dataset.label = declared == null ? "YAML ?" : `YAML ${declared}`;
+        const outside = el("span", "plan-outside");
+        planSeats(declared ?? 0, pods).forEach((seat) => (seat.kind === "extra" ? outside : box).appendChild(seatEl(seat)));
+        track.append(box, outside);
 
-        const running = el("div", "plan-row");
-        running.append(el("span", "plan-row__label", "🖥️ Cluster runs"));
-        const runningSeats = el("span", "plan-row__seats");
-        planSeats(declared ?? 0, pods).forEach((seat) => runningSeats.appendChild(seatEl(seat)));
-        running.append(runningSeats, el("span", "plan-row__count", ready == null ? "n/a" : `${ready} ready`));
+        const numbers = el("span", "plan-card__numbers");
+        numbers.append(
+            el("strong", null, declared == null ? "n/a" : `${declared}`),
+            el("span", null, " in YAML → "),
+            el("strong", null, ready == null ? "n/a" : `${ready}`),
+            el("span", null, " ready"),
+        );
+        head.append(el("span", "plan-card__name", item.service_name || "unknown"), track, numbers, el("span", "plan-card__verdict", verdict));
 
-        // Declared placement rules, shown when the card is opened.
+        // Opened: the pods per node, then the declared placement rules.
         const rules = el("div", "plan-card__rules");
+        const byNode = {};
+        pods.forEach((p) => (byNode[shortNode(p.node)] = byNode[shortNode(p.node)] || []).push(p));
+        Object.keys(byNode).sort().forEach((node) => {
+            const ok = byNode[node].filter((p) => p.ready).length;
+            rules.appendChild(ruleChip(`🖥️ ${node}`, `${ok} ready${byNode[node].length > ok ? `, ${byNode[node].length - ok} not ready` : ""}`, "ok"));
+        });
         const spread = item.spread_constraints?.length > 0;
         const anti = Boolean(item.pod_anti_affinity_configured);
         const compliant = item.is_topology_compliant;
@@ -251,7 +262,7 @@ window.DeploymentsIntentWidget = (function () {
             head.setAttribute("aria-expanded", String(!rules.hidden));
         });
 
-        card.append(head, booked, running, rules);
+        card.append(head, rules);
         return { card, tone, name: item.service_name, verdict };
     }
 
@@ -269,7 +280,7 @@ window.DeploymentsIntentWidget = (function () {
         const matched = cards.filter((c) => c.tone === "ok").length;
         if (!cards.length) headline.textContent = "No declared intent to compare.";
         else if (!differ.length) headline.textContent = `✅ ${matched} of ${cards.length} services run exactly what the YAML asks for.`;
-        else headline.textContent = `⚠️ ${differ.length} of ${cards.length} services differ from the YAML: ${differ.map((c) => `${c.name} (${c.verdict.replace(/^\S+\s/, "")})`).join(", ")}.`;
+        else headline.textContent = `⚠️ ${differ.length} of ${cards.length} services differ from the YAML.`;
         headline.dataset.tone = differ.length ? "danger" : "ok";
     }
 
