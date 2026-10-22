@@ -40,7 +40,8 @@ def main() -> None:
     out = args.out or ROOT / "experiments" / "single-node-failure" / f"bookinfo-exp-{stamp}"
     recorder = GroundTruthRecorder(kube, list(BOOKINFO.deployments), out)
     nodes = args.nodes or kube.worker_nodes()
-    setup = None if args.no_mixed_setup else MixedSetup()
+    # The no-rule config first: a spread rule would keep the concentrated reviews pods Pending.
+    setup = None if args.no_mixed_setup else MixedSetup(manifest=BOOKINFO.configs["A-no-rule"])
 
     print(f"Recording ground truth in {BOOKINFO.namespace} on {args.context}; failing {', '.join(nodes)}; results -> {out}", flush=True)
     try:

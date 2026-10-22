@@ -35,7 +35,11 @@ def docker(*args: str) -> None:
 @dataclass
 class MixedSetup:
     """Replica layout that gives the recording both outcomes: services that one node failure takes
-    down (one replica, or every replica on one node) and services that survive it."""
+    down (one replica, or every replica on one node) and services that survive it.
+
+    `manifest` is applied first: it must declare no spread rule, or the scheduler refuses to put every
+    replica on one node and the concentrated pods stay Pending (as in the stored spread-rule runs)."""
+    manifest: str | None = None
     single_replica: tuple[str, ...] = ("details-v1", "ratings-v1")
     concentrate: str | None = "reviews-v1"
     restore_replicas: int = 3
@@ -75,6 +79,9 @@ class GroundTruthRecorder:
     # --- setup --------------------------------------------------------------------------------
 
     def apply_mixed_setup(self, setup: MixedSetup) -> None:
+        if setup.manifest:
+            self.kube.apply(setup.manifest)
+            self.kube.wait_until_stable(self.deployments, timeout_s=self.recover_timeout_s)
         for deployment in setup.single_replica:
             self.kube.scale(deployment, 1)
         if setup.concentrate:

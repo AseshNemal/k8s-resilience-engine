@@ -9,6 +9,7 @@ import pytest
 from experiments.placement_drift.exceptions import ChaosSafetyError, ScenarioExecutionError
 from experiments.placement_drift.live.ground_truth_recorder import (
     GroundTruthRecorder,
+    MixedSetup,
     ready_endpoints_on,
     service_availability,
 )
@@ -80,6 +81,26 @@ def test_the_node_is_started_again_even_when_detection_times_out(tmp_path):
     with pytest.raises(ScenarioExecutionError):
         make(tmp_path, kube, docker_calls).fail_node(tmp_path / "w1", "w1")
     assert docker_calls[-1] == ("start", "w1")
+
+
+def test_the_mixed_setup_applies_the_no_rule_config_first_and_uncordons_afterwards(tmp_path):
+    calls = []
+
+    class SetupKube:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: calls.append((name, *args))
+
+        def worker_nodes(self):
+            return ["w1", "w2", "w3"]
+
+    GroundTruthRecorder(SetupKube(), ["reviews-v1"], tmp_path).apply_mixed_setup(
+        MixedSetup(manifest="config-a-no-rule.yaml"))
+
+    assert calls[0] == ("apply", "config-a-no-rule.yaml")
+    names = [c[0] for c in calls]
+    assert names.index("cordon") < names.index("rollout_restart") < names.index("uncordon")
+    assert ("uncordon", "w2") in calls and ("uncordon", "w3") in calls
+    assert ("cordon", "w1") not in calls  # the one node that takes every reviews replica
 
 
 def test_only_worker_nodes_are_stopped(tmp_path):
