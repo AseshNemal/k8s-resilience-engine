@@ -72,6 +72,7 @@ func newEnv(t *testing.T) *env {
 	tools.GOOS, tools.GOARCH = runtime.GOOS, runtime.GOARCH
 	rec := &recordingExec{out: richRender()}
 	tools.Exec = rec
+	tools.ReviewedDigest = digestOfRender(t, richRender())
 	e := &env{t: t, clock: clock, sim: cluster, prompter: &fakePrompter{decision: approve.Approved}, fetcher: fetch, exec: rec,
 		meas:    bookinfotrace.Measurements{VMLimitMiB: f(3917), VMUsedMiB: f(2025), SwapUsedMiB: f(2689), IstiodMiB: f(150), SidecarMaxMiB: f(60)},
 		address: bookinfotrace.Address{IPv4: "192.168.65.254", Port: "4317", Nodes: []string{"desktop-control-plane"}},
@@ -139,3 +140,17 @@ func bookinfotraceGather(e *env) (bookinfotrace.Snapshot, error) {
 }
 
 func f(v float64) *float64 { return &v }
+
+// digestOfRender is the content digest of a fake render, which the test world treats as the reviewed one.
+func digestOfRender(t *testing.T, out []byte) string {
+	t.Helper()
+	manifests, err := parseRendered(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := RenderDigest(manifests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}

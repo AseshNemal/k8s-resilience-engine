@@ -19,6 +19,8 @@ var ErrPreviewTooLong = fmt.Errorf("the preview is too long to show in full")
 type DialogExtras struct {
 	// Download is non-empty when a tool has to be downloaded first: what and from where.
 	Download string
+	// IstioDigest is the content digest of the Istio objects that will be applied; the setup refuses any render that differs.
+	IstioDigest string
 }
 
 // ApplyDialog is the approval for the cluster changes. It lists every change in the preview, in order, so what is
@@ -44,6 +46,9 @@ func ApplyDialog(p PlanResult, extras DialogExtras) (approve.Request, error) {
 			fmt.Fprintf(&b, " %s: %s;", d.Workload, d.Effect)
 		}
 		b.WriteString(" usually under a minute each (not measured).")
+	}
+	if extras.IstioDigest != "" {
+		fmt.Fprintf(&b, "\n\nThe Istio objects must match the reviewed content (SHA-256 %.12s…); if they differ nothing is applied.", extras.IstioDigest)
 	}
 	if extras.Download != "" {
 		fmt.Fprintf(&b, "\n\nAlso downloads %s", approve.Sanitize(extras.Download, 120))

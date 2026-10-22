@@ -53,6 +53,14 @@ func ArtifactFor(goos, goarch string) (Artifact, error) {
 	return Artifact{}, ErrUnsupportedPlatform{goos, goarch}
 }
 
+// ReviewedRenderDigest is the RenderDigest of the 32 objects that istioctl 1.31.2 renders for the reviewed
+// install-minimal.yaml, recorded on 2026-10-22 (darwin/arm64) and stable across repeated renders. The setup applies
+// nothing unless the render it is about to apply has exactly this digest: the approval is for this content, not for
+// objects that merely have the same names. It is a constant of the helper on purpose; a different istioctl, config or
+// platform that renders anything differently is refused before any write, and the new digest must be reviewed and
+// recorded here.
+const ReviewedRenderDigest = "356fdee1b2e4a1bf56635f37f4e8583d91823e8d2f1bf111a106b382317704e6"
+
 // ---- embedded manifests ------------------------------------------------------------------------------
 
 // The manifests are copies of the files in the k8s-bookinfo repository (tracing/ and, for reviews-v2, the unmodified

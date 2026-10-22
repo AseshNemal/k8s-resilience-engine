@@ -16,6 +16,9 @@ func TestTheRealIstioctlRendersExactlyTheReviewedObjects(t *testing.T) {
 	env := ToolEnv{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Dir: t.TempDir(), Exec: RealExec{}}
 	manifests, err := env.Render(bg, bin)
 	if err != nil || len(manifests) != 32 {
-		t.Fatalf("%d %v", len(manifests), err)
+		t.Fatalf("%d %v", len(manifests), err) // includes a render whose content differs from the reviewed digest
+	}
+	if digest, _ := RenderDigest(manifests); digest != ReviewedRenderDigest {
+		t.Fatalf("the real render has digest %s, not the reviewed %s", digest, ReviewedRenderDigest)
 	}
 }

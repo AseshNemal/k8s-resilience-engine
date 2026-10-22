@@ -251,7 +251,7 @@ func renderOf(refs []ObjectRef) []byte {
 
 func TestTheRenderRunsOfflineWithACleanEnvironmentAndMatchesTheReviewedList(t *testing.T) {
 	rec := &recordingExec{out: renderOf(ExpectedIstioObjects())}
-	env := ToolEnv{GOOS: "linux", GOARCH: "amd64", Dir: t.TempDir(), Exec: rec}
+	env := ToolEnv{GOOS: "linux", GOARCH: "amd64", Dir: t.TempDir(), Exec: rec, ReviewedDigest: digestOfRender(t, rec.out)}
 	manifests, err := env.Render(bg, "/tools/istioctl")
 	if err != nil || len(manifests) != 32 {
 		t.Fatalf("%d %v", len(manifests), err)

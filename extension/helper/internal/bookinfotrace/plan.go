@@ -174,11 +174,12 @@ func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, con
 		p.Warnings = append(p.Warnings, fmt.Sprintf("This computer is already using %.0f MiB of swap. The setup is gated on how much more it swaps, but close other applications first.", *baseline.SwapUsedMiB))
 	}
 
-	_, v2 := f.Deployments[c.CreatedFromOriginal.Name]
-	if v2 {
-		p.Warnings = append(p.Warnings, "reviews-v2 is already deployed. It is left as it is and Undo will not remove it.")
+	// An existing reviews-v2 has a Pod without a sidecar, and this setup does not restart Pods it did not plan to. The
+	// ratings calls would then never be traced, so the setup would "succeed" without being able to do what it is for.
+	if _, v2 := f.Deployments[c.CreatedFromOriginal.Name]; v2 {
+		p.block("REVIEWS_V2_EXISTS", "%s already exists, so its Pod has no sidecar and the calls it makes to ratings could not be traced. Remove it (this setup creates it itself, with a sidecar) and plan again.", c.CreatedFromOriginal.Name)
 	}
-	p.Preview = Steps(StepInputs{JaegerIPv4: address, PodsToRecreate: recreate, ReviewsV2Exists: v2})
+	p.Preview = Steps(StepInputs{JaegerIPv4: address, PodsToRecreate: recreate})
 	p.Ready = len(p.Blockers) == 0
 	return p
 }

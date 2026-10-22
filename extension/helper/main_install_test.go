@@ -93,7 +93,7 @@ func useInstall(t *testing.T, decision approve.Decision) (dir string, fetch *sta
 			Cluster:  c,
 			Prompter: prompter{decision},
 			Store:    traceinstall.Store{Dir: filepath.Join(dir, "bookinfo-tracing")},
-			Tools: traceinstall.ToolEnv{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Dir: filepath.Join(dir, "tools"), Fetcher: fetch, Exec: renderExec{renderAll()},
+			Tools: traceinstall.ToolEnv{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Dir: filepath.Join(dir, "tools"), Fetcher: fetch, Exec: renderExec{renderAll()}, ReviewedDigest: renderDigest(t, renderAll()),
 				Lookup: func(string, string) (traceinstall.Artifact, error) {
 					return traceinstall.Artifact{Asset: "istioctl-1.31.2-test.tar.gz", SHA256: hex.EncodeToString(sum[:]), Kind: "tar.gz", Binary: "istioctl"}, nil
 				}},
@@ -264,3 +264,12 @@ func TestUndoAndVerifyWithoutASetupChangeNothing(t *testing.T) {
 }
 
 var _ = errors.New
+
+func renderDigest(t *testing.T, out []byte) string {
+	t.Helper()
+	digest, err := traceinstall.DigestOfRendered(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}

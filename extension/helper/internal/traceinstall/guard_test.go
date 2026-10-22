@@ -11,7 +11,7 @@ import (
 const install = "0123456789abcdef0123456789abcdef"
 
 func guardOver(f *kubetest.Fake) *Guard {
-	return NewGuard(f, install, PlannedInventory(false), []string{"ratings-v1-abc"})
+	return NewGuard(f, install, PlannedInventory(), []string{"ratings-v1-abc"})
 }
 
 func doc(apiVersion, kind, ns, name string) map[string]any {
@@ -139,7 +139,7 @@ func TestStampChangesOnlyTheLabelsAndLeavesTheOriginalAlone(t *testing.T) {
 }
 
 func TestEveryRenderedAndConfiguredKindHasAResource(t *testing.T) {
-	for _, e := range PlannedInventory(false) {
+	for _, e := range PlannedInventory() {
 		if _, err := ResourceFor(e.Ref.APIVersion, e.Ref.Kind); err != nil {
 			t.Errorf("%s: %v", e.Ref, err)
 		}
@@ -147,12 +147,9 @@ func TestEveryRenderedAndConfiguredKindHasAResource(t *testing.T) {
 }
 
 func TestThePlannedInventoryIsTheReviewedListPlusTheBookinfoObjects(t *testing.T) {
-	inv := PlannedInventory(false)
+	inv := PlannedInventory()
 	if len(inv) != 1+32+2+1+2+1 { // istio-system, Istio's 32, ServiceEntry+Telemetry, reviews-v2, DR+VS, client Pod
 		t.Fatalf("%d entries", len(inv))
-	}
-	if without := PlannedInventory(true); len(without) != len(inv)-1 {
-		t.Fatal("an existing reviews-v2 must not be in the inventory")
 	}
 	for _, e := range inv {
 		if e.State != EntryPlanned {
@@ -163,7 +160,7 @@ func TestThePlannedInventoryIsTheReviewedListPlusTheBookinfoObjects(t *testing.T
 
 func TestTheInventoryIsInCreationOrderSoUndoCanWalkItBackwards(t *testing.T) {
 	var kinds []string
-	for _, e := range PlannedInventory(false) {
+	for _, e := range PlannedInventory() {
 		if e.Stage == StageIstio {
 			kinds = append(kinds, e.Ref.Kind)
 		}

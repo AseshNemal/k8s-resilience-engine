@@ -81,13 +81,13 @@ type Change struct {
 
 // StepInputs are the facts a preview needs that are not constants.
 type StepInputs struct {
-	JaegerIPv4      string   // the rediscovered, validated address; empty when it could not be
-	PodsToRecreate  []string // the live Pod names that would be deleted so they come back with a sidecar
-	ReviewsV2Exists bool     // already deployed: it is left alone, and Undo will not remove what it did not create
+	JaegerIPv4     string   // the rediscovered, validated address; empty when it could not be
+	PodsToRecreate []string // the live Pod names that would be deleted so they come back with a sidecar
 }
 
-// Steps is the exact, ordered preview. The order is the order they would run in: the route goes after reviews-v2 is
-// Ready, and the label goes before the Pods are recreated.
+// Steps is the exact, ordered preview of the setup. The order is the order they would run in: the route goes after
+// reviews-v2 is Ready, and the label goes before the Pods are recreated. The temporary client Pod that sends test traffic
+// is not a step of the setup: it is created only by "Run test traffic", which has its own approval.
 func Steps(in StepInputs) []Change {
 	c := Contract
 	address := in.JaegerIPv4
@@ -106,19 +106,12 @@ func Steps(in StepInputs) []Change {
 		{Action: "recreate", Kind: "Pod", Namespace: c.Namespace, Name: strings.Join(in.PodsToRecreate, ", "),
 			Detail: "deleted one at a time, each waits for its replacement to be Ready; they return with a sidecar", Restarts: in.PodsToRecreate},
 	}
-	if in.ReviewsV2Exists {
-		steps = append(steps, Change{Action: "keep", Kind: "Deployment", Namespace: c.Namespace, Name: c.CreatedFromOriginal.Name,
-			Detail: "already deployed: left as it is, and not removed by Undo"})
-	} else {
-		steps = append(steps, Change{Action: "create", Kind: "Deployment", Namespace: c.Namespace, Name: c.CreatedFromOriginal.Name,
-			Detail: "from the unmodified bookinfo.yaml (" + c.CreatedFromOriginal.Selector + "); gets a sidecar at creation"})
-	}
+	steps = append(steps, Change{Action: "create", Kind: "Deployment", Namespace: c.Namespace, Name: c.CreatedFromOriginal.Name,
+		Detail: "from the unmodified bookinfo.yaml (" + c.CreatedFromOriginal.Selector + "); gets a sidecar at creation"})
 	steps = append(steps,
 		Change{Action: "create", Kind: "DestinationRule", Namespace: c.Namespace, Name: c.object("DestinationRule").Name, Detail: "subsets v1 and v2 of reviews"},
 		Change{Action: "create", Kind: "VirtualService", Namespace: c.Namespace, Name: c.object("VirtualService").Name,
 			Detail: "every request for reviews goes to reviews-v2, so each trace includes ratings"},
-		Change{Action: "create", Kind: "Pod", Namespace: c.Namespace, Name: c.object("Pod").Name,
-			Detail: "temporary: sends real requests to productpage, then is deleted"},
 	)
 	for i := range steps {
 		steps[i].Step = i + 1

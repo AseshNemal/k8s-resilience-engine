@@ -89,7 +89,7 @@ func Apply(ctx context.Context, d Deps, p Params) Outcome {
 		o.Plan = &plan
 		return o
 	}
-	extras := bookinfotrace.DialogExtras{}
+	extras := bookinfotrace.DialogExtras{IstioDigest: d.Tools.Reviewed()}
 	if needDownload {
 		extras.Download = "istioctl " + IstioVersion + " from github.com/istio/istio (about 30 MB, checked against a built-in SHA-256, stored privately). It is only used to render the Istio objects offline."
 	}
@@ -128,15 +128,14 @@ func Apply(ctx context.Context, d Deps, p Params) Outcome {
 	if err != nil {
 		return fail(StateError, "an installation ID could not be made. Nothing was changed.")
 	}
-	_, reviewsExists := facts.Deployments[bookinfotrace.Contract.CreatedFromOriginal.Name]
 	snapshot := bookinfotrace.TakeSnapshot(facts, p.ContextName, d.clock().Now().UTC().Format("2006-01-02T15:04:05Z"))
-	rec = NewRecord(id, p.Identity, again, snapshot, bookinfotrace.Fingerprint(again), PlannedInventory(reviewsExists), d.clock().Now())
+	rec = NewRecord(id, p.Identity, again, snapshot, bookinfotrace.Fingerprint(again), d.Tools.Reviewed(), PlannedInventory(), d.clock().Now())
 	if err := d.Store.Save(rec, d.clock().Now()); err != nil {
 		return recordProblem(err)
 	}
 
 	r := newRun(d, rec)
-	if err := r.stages(ctx, istioObjects, docs, reviewsExists); err != nil {
+	if err := r.stages(ctx, istioObjects, docs); err != nil {
 		return r.abort(ctx, err)
 	}
 	rec.Phase = PhaseApplied
@@ -196,7 +195,12 @@ func alreadyApplied(ctx context.Context, d Deps, rec *Record) Outcome {
 }
 
 // stages runs the staged setup. Each stage ends with a gate.
-func (r *run) stages(ctx context.Context, istio []Manifest, docs documents, reviewsExists bool) error {
+func (r *run) stages(ctx context.Context, istio []Manifest, docs documents) error {
+	// The approval was for the content with this digest. Check the objects about to be written once more, right before
+	// the first write, so nothing that changed them since the render can be applied.
+	if digest, err := RenderDigest(istio); err != nil || digest != r.rec.RenderDigest {
+		return failed("the Istio objects changed after they were approved, so nothing was applied")
+	}
 	r.stage("memory check")
 	if err := r.gate(ctx, bookinfotrace.Gate0, "memory check before starting"); err != nil {
 		return err
@@ -247,27 +251,25 @@ func (r *run) stages(ctx context.Context, istio []Manifest, docs documents, revi
 			return err
 		}
 	}
-	if !reviewsExists {
-		r.log("create reviews-v2", "started", "")
-		if err := r.create(ctx, docs.reviewsV2); err != nil {
-			return err
-		}
-		if err := r.waitUntil(ctx, "reviews-v2", r.d.Timeouts.Pod, func(ctx context.Context) (bool, error) {
-			pods, err := r.podsOf(ctx, "reviews", "v2")
-			for _, p := range pods {
-				if isReady(p) {
-					if !hasSidecar(p) {
-						return false, failed("reviews-v2 started without a sidecar")
-					}
-					return true, nil
-				}
-			}
-			return false, err
-		}); err != nil {
-			return err
-		}
-		r.log("create reviews-v2", "done", "")
+	r.log("create reviews-v2", "started", "")
+	if err := r.create(ctx, docs.reviewsV2); err != nil {
+		return err
 	}
+	if err := r.waitUntil(ctx, "reviews-v2", r.d.Timeouts.Pod, func(ctx context.Context) (bool, error) {
+		pods, err := r.podsOf(ctx, "reviews", "v2")
+		for _, p := range pods {
+			if isReady(p) {
+				if !hasSidecar(p) {
+					return false, failed("reviews-v2 started without a sidecar")
+				}
+				return true, nil
+			}
+		}
+		return false, err
+	}); err != nil {
+		return err
+	}
+	r.log("create reviews-v2", "done", "")
 
 	r.stage(StageRoute)
 	for _, doc := range []map[string]any{docs.destinationRule, docs.virtualService} {

@@ -265,3 +265,29 @@ func TestTheRecordKeepsTheJournalOfWhatHappened(t *testing.T) {
 		}
 	}
 }
+
+// The Undo dialog lists the Pods that will restart. If they cannot be read, the person must not be asked to approve a
+// list that silently leaves them out.
+func TestUndoRefusesToAskWhenThePodsItWouldRestartCannotBeListed(t *testing.T) {
+	e := applied(t)
+	e.sim.failList["list:pods"] = fmt.Errorf("SECRET-LIST-TEXT")
+	asked := len(e.prompter.requests)
+	out := e.undo()
+	if out.OK || out.State != StateError || !strings.Contains(out.Message, "Pods could not be read") || strings.Contains(out.Message, "SECRET") {
+		t.Fatalf("%+v", out)
+	}
+	if len(e.prompter.requests) != asked {
+		t.Fatal("the person was asked to approve an incomplete list")
+	}
+	if len(e.sim.writes) != 0 {
+		t.Fatalf("nothing may change: %v", e.sim.writes)
+	}
+	if e.record().Phase != PhaseApplied {
+		t.Fatal("the record must stay as it was")
+	}
+	// once the cluster can be read again, Undo works
+	delete(e.sim.failList, "list:pods")
+	if again := e.undo(); !again.OK {
+		t.Fatalf("%+v", again)
+	}
+}

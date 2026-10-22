@@ -28,7 +28,7 @@ func TestTheWorstCaseFitsInTheMeasuredHeadroomButNotByAMile(t *testing.T) {
 
 func TestThePreviewIsOrderedAndNumbered(t *testing.T) {
 	steps := Steps(StepInputs{JaegerIPv4: "192.168.65.254", PodsToRecreate: []string{"details-x", "productpage-y", "ratings-z"}})
-	order := []string{"Istio 1.31.2 (minimal profile)", "ServiceEntry", "Telemetry", "Namespace", "Pod", "Deployment", "DestinationRule", "VirtualService", "Pod"}
+	order := []string{"Istio 1.31.2 (minimal profile)", "ServiceEntry", "Telemetry", "Namespace", "Pod", "Deployment", "DestinationRule", "VirtualService"}
 	if len(steps) != len(order) {
 		t.Fatalf("%d steps", len(steps))
 	}
@@ -67,16 +67,12 @@ func TestAnUndiscoveredAddressIsShownAsSuchNeverAsADefault(t *testing.T) {
 	}
 }
 
-func TestAnExistingReviewsV2IsKeptNotRecreatedOrRemoved(t *testing.T) {
-	for _, s := range Steps(StepInputs{ReviewsV2Exists: true}) {
-		if s.Name == "reviews-v2" {
-			if s.Action != "keep" || !strings.Contains(s.Detail, "not removed by Undo") {
-				t.Fatalf("got %+v", s)
-			}
-			return
+func TestThePreviewNeverContainsTheTestTrafficPod(t *testing.T) {
+	for _, s := range Steps(StepInputs{}) {
+		if s.Name == "trace-demo-client" {
+			t.Fatalf("the client Pod is created by Run test traffic, which has its own approval: %+v", s)
 		}
 	}
-	t.Fatal("reviews-v2 is missing from the preview")
 }
 
 func TestTheAllowListNamesOnlyWhatTheSetupCreates(t *testing.T) {

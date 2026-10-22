@@ -22,7 +22,7 @@ func identity() ClusterIdentity {
 func someRecord() *Record {
 	plan := bookinfotrace.PlanResult{Restarts: []string{"ratings-v1-x"}, Jaeger: &bookinfotrace.Address{IPv4: "192.168.65.254"}}
 	inv := []Entry{{Ref: ObjectRef{APIVersion: "v1", Kind: "Namespace", Name: "istio-system"}, Stage: "istio", State: EntryPlanned}}
-	return NewRecord("id-1", identity(), plan, bookinfotrace.Snapshot{Context: "docker-desktop"}, "fp", inv, epoch)
+	return NewRecord("id-1", identity(), plan, bookinfotrace.Snapshot{Context: "docker-desktop"}, "fp", "digest", inv, epoch)
 }
 
 func TestARecordRoundTripsAndKeepsTheBindingAndDigest(t *testing.T) {

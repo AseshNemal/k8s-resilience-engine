@@ -464,28 +464,48 @@ func TestApplyingTwiceIsIdempotentAndNoticesAMissingPiece(t *testing.T) {
 	}
 }
 
-func TestAnExistingReviewsV2IsLeftAloneAndNotRemoved(t *testing.T) {
+func TestAnExistingReviewsV2StopsTheSetupBeforeAnyDialogOrWrite(t *testing.T) {
 	e := newEnv(t)
 	one := 1
 	e.sim.put(kube.Deployments, kube.Object{Name: "reviews-v2", Namespace: "bookinfo", Replicas: &one, ReadyReplicas: &one, SpecDigest: "digest-v2"})
 	ready := true
 	e.sim.put(kube.Pods, kube.Object{Name: "reviews-v2-pre", Namespace: "bookinfo", Labels: map[string]string{"app": "reviews", "version": "v2"}, Containers: []string{"reviews"}, Ready: &ready, Phase: "Running"})
-	for k := range e.sim.objs {
-		e.sim.baseKeys[k] = true
-	}
-	facts, _ := bookinfotraceGather(e)
-	e.base = facts
-	if out := e.apply(); !out.OK {
+	out := e.apply()
+	if out.State != StatePlanBlocked || out.Plan == nil {
 		t.Fatalf("%+v", out)
 	}
-	if indexOf(e.sim.writes, "create Deployment bookinfo/reviews-v2") >= 0 {
-		t.Fatal("an existing reviews-v2 was created again")
+	blocked := false
+	for _, b := range out.Plan.Blockers {
+		blocked = blocked || b.Code == "REVIEWS_V2_EXISTS"
 	}
-	if out := e.undo(); !out.OK {
+	if !blocked || len(e.prompter.requests) != 0 || len(e.sim.writes) != 0 {
+		t.Fatalf("blocked=%v dialogs=%d writes=%v", blocked, len(e.prompter.requests), e.sim.writes)
+	}
+	if _, kept := e.sim.get(kube.Deployments, "bookinfo", "reviews-v2"); !kept {
+		t.Fatal("the existing reviews-v2 was touched")
+	}
+}
+
+// If reviews-v2 appears between the plan and the creation, the create finds the name taken: it is never adopted.
+func TestAReviewsV2ThatAppearsAfterTheApprovalIsNeverAdopted(t *testing.T) {
+	e := newEnv(t)
+	e.sim.failWrite = map[int]error{}
+	e.prompter.hook = nil
+	one := 1
+	created := false
+	e.clock.onSleep = func(int) {
+		if !created && indexOf(e.sim.writes, "patch namespaces bookinfo") >= 0 { // after the label, before reviews-v2
+			created = true
+			e.sim.put(kube.Deployments, kube.Object{Name: "reviews-v2", Namespace: "bookinfo", UID: "someone-elses", Replicas: &one, ReadyReplicas: &one})
+			e.sim.baseKeys[key("deployments", "bookinfo", "reviews-v2")] = true
+		}
+	}
+	out := e.apply()
+	if out.OK || !created {
 		t.Fatalf("%+v", out)
 	}
-	if _, ok := e.sim.get(kube.Deployments, "bookinfo", "reviews-v2"); !ok {
-		t.Fatal("Undo removed a reviews-v2 it did not create")
+	if dep, ok := e.sim.get(kube.Deployments, "bookinfo", "reviews-v2"); !ok || dep.obj.UID != "someone-elses" {
+		t.Fatal("somebody else's reviews-v2 was touched")
 	}
 }
 
@@ -518,5 +538,110 @@ func TestNoClusterTextReachesAnyOutcomeOrTheRecordWhenReadsFail(t *testing.T) {
 				t.Errorf("%s failing during %s leaked cluster text:\n%s", plural, phase, raw)
 			}
 		}
+	}
+}
+
+// ---- the approval is for the exact content of the Istio objects, not just their names ----
+
+func TestARenderWithTheSameNamesButDifferentContentIsRefusedBeforeAnyWrite(t *testing.T) {
+	widened := strings.Replace(string(richRender()),
+		"kind: ClusterRole\nmetadata:\n  name: istiod-clusterrole-istio-system\n",
+		"kind: ClusterRole\nmetadata:\n  name: istiod-clusterrole-istio-system\nrules:\n- apiGroups: ['*']\n  resources: ['*']\n  verbs: ['*']\n", 1)
+	if widened == string(richRender()) {
+		t.Fatal("the test did not change the render")
+	}
+	e := newEnv(t)
+	e.exec.out = []byte(widened) // every name, kind and count is the reviewed one; one object grants everything
+	out := e.apply()
+	if out.OK || out.State != StateToolUnavailable || !strings.Contains(out.Message, "differ in content from the reviewed render") {
+		t.Fatalf("%+v", out)
+	}
+	e.assertNothingWritten()
+}
+
+func TestAChangedImageOrAnyOtherFieldIsAlsoRefused(t *testing.T) {
+	for name, edit := range map[string]func(string) string{
+		"an added field": func(s string) string {
+			return strings.Replace(s, "kind: ServiceAccount\nmetadata:\n  name: istiod\n", "kind: ServiceAccount\nmetadata:\n  name: istiod\nautomountServiceAccountToken: false\n", 1)
+		},
+		"a changed label": func(s string) string {
+			return strings.Replace(s, "kind: Service\nmetadata:\n  name: istiod\n", "kind: Service\nmetadata:\n  name: istiod\n  labels:\n    extra: x\n", 1)
+		},
+	} {
+		e := newEnv(t)
+		changed := edit(string(richRender()))
+		if changed == string(richRender()) {
+			t.Fatalf("%s: the test did not change the render", name)
+		}
+		e.exec.out = []byte(changed)
+		if out := e.apply(); out.State != StateToolUnavailable {
+			t.Errorf("%s: %+v", name, out)
+		}
+		e.assertNothingWritten()
+	}
+}
+
+func TestFormattingDifferencesDoNotChangeTheDigest(t *testing.T) {
+	plain := richRender()
+	crlf := []byte("# generated\r\n" + strings.ReplaceAll(string(plain), "\n", "\r\n"))
+	reordered := strings.Replace(string(plain), "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:", "kind: CustomResourceDefinition\napiVersion: apiextensions.k8s.io/v1\nmetadata:", 1)
+	a, err := DigestOfRendered(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, variant := range map[string][]byte{"Windows line endings and a comment": crlf, "key order": []byte(reordered)} {
+		got, err := DigestOfRendered(variant)
+		if err != nil || got != a {
+			t.Errorf("%s changed the digest: %v %v", name, got, err)
+		}
+	}
+	e := newEnv(t)
+	e.exec.out = crlf
+	if out := e.apply(); !out.OK {
+		t.Fatalf("a formatting-only difference must not stop the setup: %+v", out)
+	}
+}
+
+func TestObjectsChangedInMemoryAfterTheRenderAreCaughtBeforeTheFirstWrite(t *testing.T) {
+	e := newEnv(t)
+	manifests, err := e.deps.Tools.Render(bg, "istioctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := NewRecord(install, e.params.Identity, bookinfotrace.PlanResult{}, bookinfotrace.Snapshot{}, "fp", e.deps.Tools.Reviewed(), PlannedInventory(), e.clock.Now())
+	if err := e.deps.Store.Save(rec, e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	manifests[3].Body["rules"] = []any{map[string]any{"verbs": []any{"*"}}} // changed after it was approved
+	r := newRun(e.deps, rec)
+	err = r.stages(bg, manifests, documents{})
+	if err == nil || !strings.Contains(err.Error(), "changed after they were approved") {
+		t.Fatalf("%v", err)
+	}
+	if len(e.sim.writes) != 0 {
+		t.Fatalf("something was written: %v", e.sim.writes)
+	}
+}
+
+func TestTheDialogAndTheRecordCarryTheContentDigest(t *testing.T) {
+	e := newEnv(t)
+	e.apply()
+	digest := e.deps.Tools.Reviewed()
+	if body := e.prompter.requests[0].Body; !strings.Contains(body, digest[:12]) || !strings.Contains(body, "must match the reviewed content") {
+		t.Fatalf("the approval does not show what the content must match:\n%s", body)
+	}
+	if rec := e.record(); rec.RenderDigest != digest {
+		t.Fatalf("the record binds %q, not the approved %q", rec.RenderDigest, digest)
+	}
+}
+
+func TestTheContentCheckCannotBeSwitchedOffAndProductionUsesTheCompiledInDigest(t *testing.T) {
+	if (ToolEnv{}).Reviewed() != ReviewedRenderDigest || len(ReviewedRenderDigest) != 64 {
+		t.Fatal("an unset digest must mean the compiled-in one, never 'no check'")
+	}
+	// a render with no matching reviewed digest is refused
+	env := ToolEnv{GOOS: "linux", Dir: t.TempDir(), Exec: &recordingExec{out: richRender()}}
+	if _, err := env.Render(bg, "istioctl"); !errors.Is(err, ErrRenderContentDiffer) {
+		t.Fatalf("%v", err)
 	}
 }

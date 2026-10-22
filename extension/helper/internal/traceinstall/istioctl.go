@@ -43,6 +43,17 @@ type ToolEnv struct {
 	Exec         Exec
 	Lookup       func(goos, goarch string) (Artifact, error) // ArtifactFor unless a test pins another
 	Getenv       func(string) string                         // for the few variables Windows needs
+	// ReviewedDigest is the RenderDigest a render must have. Empty means ReviewedRenderDigest; there is no way to turn
+	// the content check off. Tests that render fake objects set their own.
+	ReviewedDigest string
+}
+
+// Reviewed is the digest a render has to match.
+func (e ToolEnv) Reviewed() string {
+	if e.ReviewedDigest != "" {
+		return e.ReviewedDigest
+	}
+	return ReviewedRenderDigest
 }
 
 func (e ToolEnv) artifact() (Artifact, error) {
@@ -61,6 +72,7 @@ var (
 	ErrStorage             = errors.New("the private tool directory is not usable")
 	ErrRenderFailed        = errors.New("istioctl could not render the Istio objects")
 	ErrRenderUnexpected    = errors.New("the rendered Istio objects are not exactly the reviewed list")
+	ErrRenderContentDiffer = errors.New("the rendered Istio objects differ in content from the reviewed render, so nothing was applied")
 )
 
 type verifiedFile struct {
@@ -322,6 +334,31 @@ var kindOrder = map[string]int{
 	"Role": 6, "RoleBinding": 7, "Service": 8, "Deployment": 9, "ValidatingWebhookConfiguration": 10, "MutatingWebhookConfiguration": 11,
 }
 
+// RenderDigest is the SHA-256 of the complete content of the rendered objects, not just their names: every field of
+// every object, in creation order, as canonical JSON (parsed first, so line endings, key order and YAML formatting
+// cannot change it). Two renders have the same digest only if they would create exactly the same objects.
+func RenderDigest(manifests []Manifest) (string, error) {
+	bodies := make([]map[string]any, 0, len(manifests))
+	for _, m := range manifests {
+		bodies = append(bodies, m.Body)
+	}
+	canonical, err := json.Marshal(bodies)
+	if err != nil {
+		return "", ErrRenderFailed
+	}
+	return sha(canonical), nil
+}
+
+// DigestOfRendered parses the output of `istioctl manifest generate` and returns its RenderDigest. It is how the
+// reviewed digest is recomputed when a new istioctl, config or platform is reviewed.
+func DigestOfRendered(out []byte) (string, error) {
+	manifests, err := parseRendered(out)
+	if err != nil {
+		return "", err
+	}
+	return RenderDigest(manifests)
+}
+
 // creationBefore orders objects the way they are created. The inventory uses the same order, so Undo, which walks it
 // backwards, removes the webhooks first and the namespace last.
 func creationBefore(a, b ObjectRef) bool {
@@ -361,7 +398,14 @@ func (e ToolEnv) Render(ctx context.Context, bin string) ([]Manifest, error) {
 	if err != nil || code != 0 {
 		return nil, ErrRenderFailed
 	}
-	return parseRendered(out)
+	manifests, err := parseRendered(out)
+	if err != nil {
+		return nil, err
+	}
+	if digest, err := RenderDigest(manifests); err != nil || digest != e.Reviewed() {
+		return nil, ErrRenderContentDiffer
+	}
+	return manifests, nil
 }
 
 func parseRendered(out []byte) ([]Manifest, error) {

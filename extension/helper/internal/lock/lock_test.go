@@ -169,3 +169,71 @@ func TestAFileThatCannotBeCreatedInAnExistingDirectoryIsARealErrorToo(t *testing
 		t.Fatalf("err = %v, want a real error, not a busy lock", err)
 	}
 }
+
+// Two waiters can both judge the same old lock stale. Whoever is slower must not then delete the lock the faster one
+// has just taken: that would leave two holders of a lock whose only job is to allow one.
+func TestTwoWaitersThatBothSeeAStaleLockCannotBothTakeItOver(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "setup.lock")
+	if err := os.WriteFile(path, []byte("999999\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	a, b := &File{Path: path, Stale: time.Hour}, &File{Path: path, Stale: time.Hour}
+
+	var releaseA func()
+	var errA error
+	// B has decided the lock is stale and pauses; meanwhile A takes the lock over completely.
+	afterStaleCheck = func() {
+		afterStaleCheck = nil
+		releaseA, errA = a.Acquire()
+	}
+	defer func() { afterStaleCheck = nil }()
+	releaseB, errB := b.Acquire()
+
+	if errA != nil {
+		t.Fatalf("the first waiter should have taken over the stale lock: %v", errA)
+	}
+	if errB == nil {
+		releaseB()
+		t.Fatal("both waiters hold the lock")
+	}
+	if !errors.Is(errB, ErrBusy) {
+		t.Fatalf("%v", errB)
+	}
+	// and A really still holds it: a third caller is refused, and A's release frees it
+	if _, err := (&File{Path: path, Stale: time.Hour}).Acquire(); !errors.Is(err, ErrBusy) {
+		t.Fatalf("the lock was lost: %v", err)
+	}
+	releaseA()
+	if release, err := (&File{Path: path, Stale: time.Hour}).Acquire(); err != nil {
+		t.Fatalf("%v", err)
+	} else {
+		release()
+	}
+}
+
+func TestAClaimLeftBehindByACrashedTakeoverDoesNotBlockForever(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "setup.lock")
+	old := time.Now().Add(-3 * time.Hour)
+	for _, p := range []string{path, path + ".takeover"} {
+		if err := os.WriteFile(p, []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lock := &File{Path: path, Stale: time.Hour}
+	var release func()
+	var err error
+	for i := 0; i < 3 && release == nil; i++ { // the first try may only clear the old claim
+		release, err = lock.Acquire()
+	}
+	if release == nil {
+		t.Fatalf("a takeover claim from a crashed process blocked the lock: %v", err)
+	}
+	release()
+}

@@ -82,24 +82,26 @@ type FailureInfo struct {
 // Record is the durable state of one installation. It holds facts and names, never a credential, a kubeconfig
 // fragment, a token or text a cluster returned.
 type Record struct {
-	Version         int                        `json:"version"`
-	InstallationID  string                     `json:"installationId"`
-	Cluster         ClusterIdentity            `json:"cluster"`
-	IstioVersion    string                     `json:"istioVersion"`
-	StartedAt       string                     `json:"startedAt"`
-	UpdatedAt       string                     `json:"updatedAt"`
-	Phase           Phase                      `json:"phase"`
-	PlanFingerprint string                     `json:"planFingerprint"`
-	Baseline        bookinfotrace.Measurements `json:"baseline"`
-	Snapshot        bookinfotrace.Snapshot     `json:"snapshot"`
-	PlannedPods     []string                   `json:"plannedPods"`
-	JaegerIPv4      string                     `json:"jaegerIpv4"`
-	Inventory       []Entry                    `json:"inventory"`
-	LabelApplied    bool                       `json:"labelApplied"`
-	Recreated       []string                   `json:"recreated"` // app names whose Pod this run deleted
-	Steps           []StepLog                  `json:"steps"`
-	Failure         *FailureInfo               `json:"failure,omitempty"`
-	Remaining       []string                   `json:"remaining,omitempty"`
+	Version         int             `json:"version"`
+	InstallationID  string          `json:"installationId"`
+	Cluster         ClusterIdentity `json:"cluster"`
+	IstioVersion    string          `json:"istioVersion"`
+	StartedAt       string          `json:"startedAt"`
+	UpdatedAt       string          `json:"updatedAt"`
+	Phase           Phase           `json:"phase"`
+	PlanFingerprint string          `json:"planFingerprint"`
+	// RenderDigest is the content digest of the Istio objects the person approved (see ReviewedRenderDigest).
+	RenderDigest string                     `json:"renderDigest"`
+	Baseline     bookinfotrace.Measurements `json:"baseline"`
+	Snapshot     bookinfotrace.Snapshot     `json:"snapshot"`
+	PlannedPods  []string                   `json:"plannedPods"`
+	JaegerIPv4   string                     `json:"jaegerIpv4"`
+	Inventory    []Entry                    `json:"inventory"`
+	LabelApplied bool                       `json:"labelApplied"`
+	Recreated    []string                   `json:"recreated"` // app names whose Pod this run deleted
+	Steps        []StepLog                  `json:"steps"`
+	Failure      *FailureInfo               `json:"failure,omitempty"`
+	Remaining    []string                   `json:"remaining,omitempty"`
 	// Binding ties the facts that must never change after the run starts (identity, installation ID, baseline,
 	// snapshot, the planned inventory) together. Digest covers the whole file and changes on every save.
 	Binding string `json:"binding"`
@@ -126,7 +128,8 @@ func (r *Record) bindingDigest() string {
 		Snapshot bookinfotrace.Snapshot
 		Refs     []ObjectRef
 		Pods     []string
-	}{r.InstallationID, r.Cluster, r.Baseline, r.Snapshot, refs, r.PlannedPods})
+		Render   string
+	}{r.InstallationID, r.Cluster, r.Baseline, r.Snapshot, refs, r.PlannedPods, r.RenderDigest})
 }
 
 func (r *Record) integrityDigest() string {
@@ -136,9 +139,9 @@ func (r *Record) integrityDigest() string {
 }
 
 // NewRecord starts a record. The inventory is the complete list of objects the run may own, all "planned".
-func NewRecord(id string, cluster ClusterIdentity, plan bookinfotrace.PlanResult, snapshot bookinfotrace.Snapshot, fingerprint string, inventory []Entry, now time.Time) *Record {
+func NewRecord(id string, cluster ClusterIdentity, plan bookinfotrace.PlanResult, snapshot bookinfotrace.Snapshot, fingerprint, renderDigest string, inventory []Entry, now time.Time) *Record {
 	r := &Record{Version: recordVersion, InstallationID: id, Cluster: cluster, IstioVersion: IstioVersion, StartedAt: now.UTC().Format(time.RFC3339),
-		Phase: PhaseApplying, PlanFingerprint: fingerprint, Baseline: plan.Baseline, Snapshot: snapshot, PlannedPods: append([]string(nil), plan.Restarts...),
+		Phase: PhaseApplying, PlanFingerprint: fingerprint, RenderDigest: renderDigest, Baseline: plan.Baseline, Snapshot: snapshot, PlannedPods: append([]string(nil), plan.Restarts...),
 		Inventory: inventory, Recreated: []string{}, Steps: []StepLog{}}
 	if plan.Jaeger != nil {
 		r.JaegerIPv4 = plan.Jaeger.IPv4

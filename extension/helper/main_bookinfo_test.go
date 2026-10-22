@@ -98,7 +98,7 @@ func TestThePlanOfTheRealBenchmarkIsReadyAndChangesNothing(t *testing.T) {
 		t.Fatalf("%v", v)
 	}
 	plan := v["plan"].(map[string]any)
-	if plan["ready"] != true || len(plan["preview"].([]any)) != 9 || len(plan["restarts"].([]any)) != 3 {
+	if plan["ready"] != true || len(plan["preview"].([]any)) != 8 || len(plan["restarts"].([]any)) != 3 {
 		t.Fatalf("%v", plan)
 	}
 	if jaeger := plan["jaeger"].(map[string]any); jaeger["ipv4"] != "192.168.65.254" {

@@ -31,7 +31,7 @@ func TestTheRealBenchmarkIsReadyToPlan(t *testing.T) {
 	if !p.Ready || len(p.Blockers) != 0 {
 		t.Fatalf("blockers: %v", codes(p))
 	}
-	if len(p.Preview) != 9 || p.Preview[0].Step != 1 || p.Preview[8].Step != 9 {
+	if len(p.Preview) != 8 || p.Preview[0].Step != 1 || p.Preview[7].Step != 8 {
 		t.Fatalf("preview: %+v", p.Preview)
 	}
 	want := []string{"ratings-v1-9bff6cb79-dc6k5", "details-v1-65bd58d55f-b7zln", "productpage-v1-7498b5bd44-jbskx"} // leaf first
@@ -161,19 +161,31 @@ func TestHeavySwapIsAWarningNotASilence(t *testing.T) {
 	}
 }
 
-func TestAnExistingReviewsV2IsKeptAndSaidSo(t *testing.T) {
+func TestAnExistingReviewsV2BlocksThePlanBecauseItsPodHasNoSidecar(t *testing.T) {
 	facts := benchmarkFacts()
 	facts.Deployments["reviews-v2"] = DeploymentFact{Replicas: i(1), ReadyReplicas: i(1)}
 	p := BuildPlan(facts, okAddress(), nil, roomy(), "x")
-	if !p.Ready || len(p.Warnings) == 0 {
-		t.Fatalf("%v %v", p.Ready, p.Warnings)
+	if p.Ready {
+		t.Fatal("a plan that cannot trace the ratings calls must not be ready")
 	}
-	kept := false
+	found := false
+	for _, b := range p.Blockers {
+		if b.Code == "REVIEWS_V2_EXISTS" {
+			found = true
+			for _, want := range []string{"reviews-v2", "no sidecar", "ratings", "plan again"} {
+				if !strings.Contains(b.Message, want) {
+					t.Errorf("the blocker does not say %q: %s", want, b.Message)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("blockers: %v", codes(p))
+	}
 	for _, s := range p.Preview {
-		kept = kept || (s.Name == "reviews-v2" && s.Action == "keep")
-	}
-	if !kept {
-		t.Fatal("the preview must say reviews-v2 is kept")
+		if s.Action == "keep" {
+			t.Errorf("a plan that is blocked must not promise to keep reviews-v2: %+v", s)
+		}
 	}
 }
 

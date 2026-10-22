@@ -80,9 +80,9 @@ func virtualSvcRef() ObjectRef {
 func reviewsV2Ref() ObjectRef { return bookinfoRef("apps/v1", "Deployment", "reviews-v2") }
 func clientPodRef() ObjectRef { return bookinfoRef("v1", "Pod", "trace-demo-client") }
 
-// PlannedInventory is the complete list of objects the run may own, in creation order. reviews-v2 is left out when it
-// already exists (it is then never created, and never removed).
-func PlannedInventory(reviewsV2Exists bool) []Entry {
+// PlannedInventory is the complete list of objects the run may own, in creation order. reviews-v2 is always in it: Plan
+// refuses to proceed when one already exists, so this setup always creates it itself (with a sidecar).
+func PlannedInventory() []Entry {
 	var inv []Entry
 	add := func(stage string, ref ObjectRef) {
 		inv = append(inv, Entry{Ref: ref, Stage: stage, State: EntryPlanned})
@@ -95,9 +95,7 @@ func PlannedInventory(reviewsV2Exists bool) []Entry {
 	}
 	add(StageConfig, serviceEntryRef())
 	add(StageConfig, telemetryRef())
-	if !reviewsV2Exists {
-		add(StageWorkload, reviewsV2Ref())
-	}
+	add(StageWorkload, reviewsV2Ref())
 	add(StageRoute, destRuleRef())
 	add(StageRoute, virtualSvcRef())
 	add(StageVerify, clientPodRef())

@@ -335,7 +335,11 @@ func Undo(ctx context.Context, d Deps, p Params) Outcome {
 			if w.App != app {
 				continue
 			}
-			pods, _ := r.podsOf(ctx, app, w.Version)
+			pods, err := r.podsOf(ctx, app, w.Version)
+			if err != nil {
+				// The dialog lists the Pods that restart. Without that list the person cannot give an informed approval.
+				return fail(StateError, "The "+app+" Pods could not be read, so the list of Pods that would restart cannot be shown for approval. Nothing was changed.")
+			}
 			for _, pod := range pods {
 				if hasSidecar(pod) {
 					restarts = append(restarts, pod.Name)

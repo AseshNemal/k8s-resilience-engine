@@ -25,6 +25,9 @@ type Lock interface {
 	Acquire() (release func(), err error)
 }
 
+// afterStaleCheck lets a test pause a waiter between "this lock is stale" and "take it over". It is nil in production.
+var afterStaleCheck func()
+
 // File is a Lock backed by an exclusively created file.
 type File struct {
 	Path string
@@ -54,9 +57,47 @@ func (f *File) Acquire() (func(), error) {
 		if time.Since(info.ModTime()) < f.Stale {
 			return nil, ErrBusy
 		}
-		os.Remove(f.Path) // left behind by a helper that never finished
+		if afterStaleCheck != nil {
+			afterStaleCheck()
+		}
+		if !f.takeOver(info) {
+			return nil, ErrBusy
+		}
 	}
 	return nil, ErrBusy
+}
+
+// claimStale is how old a takeover claim must be before it is treated as left behind by a process that died while
+// taking over. A takeover takes milliseconds.
+const claimStale = time.Minute
+
+// takeOver removes a lock that was left behind by a helper that never finished. Deciding that a lock is stale and
+// removing it are two steps, and between them another waiter may have removed the same file and created a new, live
+// lock; deleting that one would leave two holders. So the removal happens under a claim file that only one waiter can
+// create at a time, and inside the claim the file is looked at again: it is removed only if it is still the very file
+// that was judged stale and is still old. It reports whether the caller may now try to create the lock.
+func (f *File) takeOver(seen os.FileInfo) bool {
+	claim := f.Path + ".takeover"
+	handle, err := os.OpenFile(claim, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		// Another waiter is taking over right now. A claim that is itself ancient was left by a crash: clear it so the
+		// next attempt can proceed.
+		if info, statErr := os.Stat(claim); statErr == nil && time.Since(info.ModTime()) > claimStale {
+			os.Remove(claim)
+		}
+		return false
+	}
+	handle.Close()
+	defer os.Remove(claim)
+
+	now, err := os.Stat(f.Path)
+	if err != nil {
+		return true // already gone: the caller creates it
+	}
+	if !os.SameFile(seen, now) || time.Since(now.ModTime()) < f.Stale {
+		return false // replaced by a live holder in the meantime
+	}
+	return os.Remove(f.Path) == nil
 }
 
 // releaser frees the lock once. A holder that was taken over (stale) and releases late must not delete
