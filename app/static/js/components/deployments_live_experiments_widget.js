@@ -99,6 +99,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
                 ? "while every replica was Ready and the rollout reported complete"
                 : `while pods were stuck Pending in ${c.unstable_runs}/${okRuns(c)} runs`;
             findings.push({
+                key: c.unstable_runs === 0 ? "exposed-healthy" : "exposed-pending",
                 severity: "danger",
                 title: c.unstable_runs === 0 ? "Exposed while Kubernetes reported it healthy" : "Exposed, with pods stuck Pending",
                 text: `${label(c)}: ${target} went from NOT_EXPOSED to EXPOSED in ${c.target_became_exposed}/${okRuns(c)} runs, ${health}.`,
@@ -107,6 +108,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
         conds.filter((c) => c.target_became_exposed > 0 && c.compliance_rate_t1?.mean === 1).forEach((c) => {
             findings.push({
+                key: "rule-obeyed-exposed",
                 severity: "danger",
                 title: "Rule obeyed, service still exposed",
                 text: `${label(c)}: the declared rule was satisfied (compliance ${pct(c.compliance_rate_t1.mean)}), yet ${target} was exposed. Rule compliance alone did not mean resilience.`,
@@ -117,6 +119,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const stuckList = stuck.map((c) => label(c) + " " + c.unstable_runs + "/" + okRuns(c)).join("; ");
         if (stuck.length) {
             findings.push({
+                key: "rule-left-pending",
                 severity: "warning",
                 title: "The spread rule left pods Pending",
                 text: "Pods stayed Pending (workload not fully ready within 90 s) in: " + stuckList + ".",
@@ -125,6 +128,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
         const unchanged = conds.filter((c) => c.d_rate?.mean === 0 && c.target_became_exposed === 0);
         findings.push({
+            key: "routine-unchanged",
             severity: "success",
             title: "Routine operations kept services spread",
             text: `In ${unchanged.length} of ${conds.length} conditions no service changed exposure status in any run (D_rate 0).`,
@@ -132,6 +136,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
         const repeatable = conds.filter((c) => c.d_rate?.sd === 0).length;
         findings.push({
+            key: "repeatable",
             severity: "muted",
             title: "Repeatable in every run",
             text: `${repeatable} of ${conds.length} conditions gave the same D_rate in every repetition.`,
@@ -151,6 +156,59 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             card.append(title, el("p", "finding-card__text", f.text));
             container.appendChild(card);
         });
+    }
+
+    // The headline card: the most telling finding the runs support, in this order of preference.
+    const HERO_ORDER = ["rule-obeyed-exposed", "exposed-healthy", "exposed-pending", "rule-left-pending", "routine-unchanged"];
+
+    function heroFinding(data) {
+        const findings = buildFindings(data);
+        for (const key of HERO_ORDER) {
+            const found = findings.find((f) => f.key === key);
+            if (found) return found;
+        }
+        return findings[0] || null;
+    }
+
+    function renderHero(container, data) {
+        if (!container) return;
+        const f = heroFinding(data);
+        container.hidden = !f;
+        if (!f) return;
+        container.className = `exp-hero exp-hero--${f.severity}`;
+        const icon = el("span", "exp-hero__icon", FINDING_ICONS[f.severity] || "");
+        icon.setAttribute("aria-hidden", "true");
+        const body = el("div", "exp-hero__body");
+        body.append(el("span", "exp-hero__eyebrow", "Main finding"), el("h4", "exp-hero__title", f.title), el("p", "exp-hero__text", f.text));
+        container.replaceChildren(icon, body);
+    }
+
+    // How much was run, across every workload with stored results.
+    function scaleFacts(results) {
+        const conds = results.flatMap((r) => r.conditions);
+        const scenarios = new Set(conds.map((c) => c.scenario_id)).size;
+        const configs = new Set(conds.map((c) => c.config)).size;
+        const reps = conds.length ? Math.max(...conds.map((c) => c.runs)) : 0;
+        return [
+            { value: results.reduce((n, r) => n + r.total_runs, 0), label: "real runs on a live cluster" },
+            { value: scenarios, label: "disruptions" },
+            { value: configs, label: "placement configs" },
+            { value: reps, label: "repetitions each" },
+            { value: results.length, label: results.length === 1 ? "workload" : "workloads" },
+        ];
+    }
+
+    async function renderScale() {
+        const container = document.querySelector("#tab-live-experiments [data-role='live-exp-scale']");
+        if (!container) return;
+        const results = (await Promise.all(["standin", "bookinfo"].map(fetchResults))).filter((r) => !r.missing);
+        if (!results.length) return;
+        container.replaceChildren(...scaleFacts(results).map((fact) => {
+            const item = el("div", "exp-scale__item");
+            item.append(el("dt", "exp-scale__label", fact.label), el("dd", "exp-scale__value", String(fact.value)));
+            return item;
+        }));
+        container.hidden = false;
     }
 
     // One placement snapshot as node columns; pods without a node are shown as Pending.
@@ -212,27 +270,65 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         return wrap;
     }
 
+    // The action line and the before → after placement of one stored run.
+    function runView(run, target) {
+        const view = el("div", "live-exp-run");
+        view.appendChild(el("p", "ui-note", `Action: ${run.action.action}${run.stable_after_disruption ? "" : " · did not settle within 90 s"}`));
+        const pair = el("div", "placement-pair");
+        const c0 = (run.concentration_t0 || {})[target];
+        const c1 = (run.concentration_t1 || {})[target];
+        pair.append(
+            placementGrid("Before (T0)", run.t0, target, run.target_status_t0, c0, null),
+            el("div", "placement-pair__arrow", "→"),
+            placementGrid("After (T1)", run.t1, target, run.target_status_t1, c1, c0),
+        );
+        view.appendChild(pair);
+        return view;
+    }
+
+    // One button per stored run; the chosen run's placement is shown below the buttons.
+    function runPicker(runs, target, configLabel) {
+        const picker = el("div", "run-picker");
+        picker.setAttribute("role", "group");
+        picker.setAttribute("aria-label", `Run of ${configLabel}`);
+        const slot = el("div");
+        const buttons = runs.map((run, i) => {
+            const btn = el("button", "run-picker__btn", `Run ${run.repetition}`);
+            btn.type = "button";
+            btn.title = `${target} at T1: ${String(run.target_status_t1).replace("_", " ")}`;
+            btn.classList.add(run.target_status_t1 === "EXPOSED" ? "run-picker__btn--danger" : "run-picker__btn--ok");
+            btn.addEventListener("click", (event) => {
+                event.stopPropagation();  // the click selects a run; it must not close the row
+                show(i);
+            });
+            return btn;
+        });
+        function show(i) {
+            buttons.forEach((b, j) => {
+                b.classList.toggle("is-active", i === j);
+                b.setAttribute("aria-pressed", String(i === j));
+            });
+            slot.replaceChildren(runView(runs[i], target));
+        }
+        picker.append(...buttons);
+        show(0);
+        return [picker, slot];
+    }
+
     function detailRow(row, target) {
         const tr = el("tr", "live-exp-detail");
         const td = el("td");
         td.colSpan = 3;
         CONFIGS.forEach((cfg) => {
-            const run = row.configs[cfg]?.example_run;
+            const cond = row.configs[cfg];
+            const runs = cond?.run_placements?.length ? cond.run_placements : [cond?.example_run].filter(Boolean);
             const box = el("div", "live-exp-detail__config");
-            box.appendChild(el("h5", null, `${CONFIG_LABELS[cfg] || cfg} — run ${run ? run.repetition : "n/a"}`));
-            if (!run) {
+            const label = CONFIG_LABELS[cfg] || cfg;
+            box.appendChild(el("h5", null, `${label[0].toUpperCase()}${label.slice(1)} · ${runs.length} stored run${runs.length === 1 ? "" : "s"}`));
+            if (!runs.length) {
                 box.appendChild(el("p", "ui-note", "No stored run."));
             } else {
-                box.appendChild(el("p", "ui-note", `Action: ${run.action.action}${run.stable_after_disruption ? "" : " · did not settle within 90 s"}`));
-                const pair = el("div", "placement-pair");
-                const c0 = (run.concentration_t0 || {})[target];
-                const c1 = (run.concentration_t1 || {})[target];
-                pair.append(
-                    placementGrid("Before (T0)", run.t0, target, run.target_status_t0, c0, null),
-                    el("div", "placement-pair__arrow", "→"),
-                    placementGrid("After (T1)", run.t1, target, run.target_status_t1, c1, c0),
-                );
-                box.appendChild(pair);
+                box.append(...runPicker(runs, target, label));
             }
             td.appendChild(box);
         });
@@ -303,6 +399,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             }
             note.textContent = `${data.evidence_note} Source: ${data.results_source}`;
             if (target) target.textContent = `Target: ${data.target_service}`;
+            renderHero(root.querySelector("[data-role='live-exp-hero']"), data);
             renderFindings(root.querySelector("[data-role='live-exp-findings']"), data);
             renderSummary(root.querySelector("[data-role='live-exp-summary']"), data);
             renderTable(root.querySelector("[data-role='live-exp-table-body']"), data);
@@ -567,11 +664,13 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         initWorkloadSwitch();
         load().catch((err) => console.warn("Failed to load live experiment results:", err));
         renderComparison().catch((err) => console.warn("Failed to compare the experiment results:", err));
+        renderScale().catch((err) => console.warn("Failed to count the experiment runs:", err));
         initSimulation();
     }
 
     return {
         init: init, load: load, buildFindings: buildFindings, sameOutcome: sameOutcome, cellVerdict: cellVerdict,
+        heroFinding: heroFinding, scaleFacts: scaleFacts,
         runSimulation: runSimulation, loadSimulationNamespaces: loadSimulationNamespaces,
     };
 })();

@@ -7,6 +7,9 @@
         </div>
     </div>
 
+    {# How much was run, counted from the stored results #}
+    <dl class="exp-scale" data-role="live-exp-scale" hidden></dl>
+
     <div class="workload-switch" role="group" aria-label="Which experiment results to show" data-role="live-exp-workload">
         <button type="button" class="workload-switch__btn is-active" data-workload="standin" aria-pressed="true">
             Stand-in pods <span class="workload-switch__sub">controlled test · 80 runs</span>
@@ -15,6 +18,9 @@
             Bookinfo <span class="workload-switch__sub">real application · 80 runs</span>
         </button>
     </div>
+
+    {# The strongest finding of the shown workload, generated from its stored runs #}
+    <article class="exp-hero" data-role="live-exp-hero" hidden></article>
 
     <p class="live-exp-headline" data-role="live-exp-headline" hidden></p>
 

@@ -46,6 +46,27 @@ test("a target that ended unavailable is never shown as safe", () => {
     assert.equal(verdict.text, "UNAVAILABLE 2/5");
 });
 
+test("the main finding prefers 'rule obeyed, still exposed' and falls back to the calm finding", () => {
+    const { heroFinding } = window.DeploymentsLiveExperimentsWidget;
+    const stat = (mean) => ({ mean, sd: 0 });
+    const condition = (config, exposed, unstable) => ({
+        scenario_id: "08", scenario_name: "08", config, runs: 5, failed_runs: 0, unstable_runs: unstable,
+        target_became_exposed: exposed ? 5 : 0, d_rate: stat(exposed ? 0.25 : 0),
+        compliance_rate_t1: stat(config === "B-spread" ? 1 : null),
+    });
+    const exposedBoth = { target_service: "reviews", conditions: [condition("A-no-rule", true, 0), condition("B-spread", true, 5)] };
+    assert.equal(heroFinding(exposedBoth).key, "rule-obeyed-exposed");
+    const calm = { target_service: "reviews", conditions: [condition("A-no-rule", false, 0)] };
+    assert.equal(heroFinding(calm).key, "routine-unchanged");
+});
+
+test("the run count adds up every workload's stored runs", () => {
+    const { scaleFacts } = window.DeploymentsLiveExperimentsWidget;
+    const conds = ["01", "02"].flatMap((id) => ["A-no-rule", "B-spread"].map((config) => ({ scenario_id: id, config, runs: 5 })));
+    const facts = scaleFacts([{ total_runs: 20, conditions: conds }, { total_runs: 20, conditions: conds }]);
+    assert.deepEqual([...facts.map((f) => f.value)], [40, 2, 2, 5, 2]);  // copied out of the vm context
+});
+
 test("every key finding has a short title and a generated sentence", () => {
     const { buildFindings } = window.DeploymentsLiveExperimentsWidget;
     const stat = (mean) => ({ mean, sd: 0 });

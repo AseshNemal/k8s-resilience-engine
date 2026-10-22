@@ -854,6 +854,93 @@
 .tab-pane__controls { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--color-text-muted); }
 .topology-select { width: auto; padding: 4px 8px; font-size: 13px; border: 1px solid var(--color-border); border-radius: var(--radius-small); }
 
+/* ---- Experiments tab: how much was run ---- */
+.exp-scale {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(4, 1fr);
+    margin: 0 0 var(--space-lg) 0;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-md);
+    background: var(--c2-glass-bg);
+    overflow: hidden;
+}
+.exp-scale__item {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-end;
+    gap: 2px;
+    padding: 14px 18px;
+    border-left: 1px solid var(--c2-border-light);
+}
+.exp-scale__item:first-child {
+    border-left: 0;
+    background: color-mix(in srgb, var(--c2-accent-primary) 9%, transparent);
+}
+.exp-scale__value {
+    margin: 0;
+    font-size: 1.6rem;
+    font-weight: 800;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--c2-text-main);
+}
+.exp-scale__item:first-child .exp-scale__value { font-size: 2.1rem; color: var(--c2-accent-primary-hover); }
+.exp-scale__label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--c2-text-muted); }
+@media (max-width: 760px) {
+    .exp-scale { grid-template-columns: repeat(2, 1fr); }
+    .exp-scale__item:first-child { grid-column: 1 / -1; }
+    .exp-scale__item { border-left: 0; border-top: 1px solid var(--c2-border-light); }
+    .exp-scale__item:first-child { border-top: 0; }
+}
+
+/* ---- Experiments tab: the main finding ---- */
+.exp-hero {
+    --hero-tone: var(--c2-accent-primary);
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    margin: var(--space-lg) 0 0 0;
+    padding: 18px 20px;
+    border: 1px solid color-mix(in srgb, var(--hero-tone) 35%, transparent);
+    border-radius: var(--c2-radius-md);
+    background: color-mix(in srgb, var(--hero-tone) 8%, var(--c2-glass-bg));
+}
+.exp-hero--danger { --hero-tone: var(--c2-accent-danger); }
+.exp-hero--warning { --hero-tone: var(--c2-accent-warning); }
+.exp-hero--success { --hero-tone: var(--c2-accent-success); }
+.exp-hero__icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    font-size: 22px;
+    background: color-mix(in srgb, var(--hero-tone) 16%, transparent);
+}
+.exp-hero__body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.exp-hero__eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--hero-tone); }
+.exp-hero__title { margin: 0; font-size: 1.15rem; text-wrap: balance; color: var(--c2-text-main); }
+.exp-hero__text { margin: 0; font-size: 13px; line-height: 1.55; color: var(--c2-text-muted); max-width: 80ch; }
+
+/* ---- Experiments tab: pick one of the stored runs ---- */
+.run-picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px 0; }
+.run-picker__btn {
+    padding: 4px 12px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: 999px;
+    background: var(--c2-glass-bg);
+    color: var(--c2-text-main);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.run-picker__btn::before { content: "●"; margin-right: 6px; font-size: 9px; vertical-align: 1px; }
+.run-picker__btn--ok::before { color: var(--c2-accent-success); }
+.run-picker__btn--danger::before { color: var(--c2-accent-danger); }
+.run-picker__btn.is-active { border-color: var(--c2-accent-primary); background: color-mix(in srgb, var(--c2-accent-primary) 12%, transparent); }
+.run-picker__btn:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
+
 /* ---- Experiments tab: one headline, one chip per cell ---- */
 .live-exp-headline { margin: var(--space-md) 0; font-size: 15px; font-weight: 600; }
 .live-exp-table td { vertical-align: middle; }
