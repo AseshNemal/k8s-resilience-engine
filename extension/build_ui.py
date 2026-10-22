@@ -158,6 +158,34 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         </p>
     </section>
 
+    <section class="card" aria-labelledby="bookinfo-title" data-role="bookinfo-card" hidden>
+        <h3 class="section-header__title" id="bookinfo-title">Bookinfo tracing (Istio sidecars)</h3>
+        <p class="connect__lead" data-role="bookinfo-headline" role="status" aria-live="polite"></p>
+        <div class="connect__picker">
+            <button type="button" class="secondary-button" data-role="bookinfo-plan" disabled>Plan</button>
+            <button type="button" class="primary-button" data-role="bookinfo-enable" disabled>Enable Bookinfo tracing</button>
+            <button type="button" class="secondary-button" data-role="bookinfo-verify" disabled>Verify</button>
+            <button type="button" class="danger-button" data-role="bookinfo-undo" disabled>Undo</button>
+        </div>
+        <p class="connect__message" data-role="bookinfo-message" role="status" aria-live="polite"></p>
+        <div data-role="bookinfo-details"></div>
+        <ul class="connect__apps" data-role="bookinfo-steps" aria-live="polite" aria-label="Progress"></ul>
+        <div data-role="bookinfo-trace" hidden>
+            <h4 class="section-header__title" data-role="bookinfo-trace-headline" role="status"></h4>
+            <ul class="connect__apps" data-role="bookinfo-trace-lines"></ul>
+        </div>
+        <p class="ui-note">
+            Plan only reads the cluster and shows exactly what would change. Enable tracing and Undo open a system dialog
+            that lists every change, the Pods that restart (and what is unavailable while they do) and what is rolled back
+            if a step fails; nothing is changed unless you approve there. This uses your own kubeconfig inside the helper
+            on this computer, only for that one command: the extension's read-only access is not changed. It installs
+            Istio 1.31.2 with no gateways, adds a sidecar to the Bookinfo Pods and sends their traces to the Jaeger above.
+            Verify sends real requests from a temporary Pod and reports only the traces Jaeger actually received: nothing
+            is simulated or invented. Undo removes only what this setup created and checks the result against a snapshot
+            taken before.
+        </p>
+    </section>
+
     <details class="card connect__manual" data-role="manual-details" open>
         <summary class="section-header__title" id="connect-new-title">Advanced: use a kubeconfig file</summary>
         <ol class="connect__steps">
@@ -248,7 +276,7 @@ def _connect_page(index_html: str) -> str:
     html, count = re.subn(r'<main class="page" id="main-content">.*?</main>', lambda _m: CONNECT_MAIN, html, count=1, flags=re.S)
     if count != 1:
         raise SystemExit("Could not find the main content area for the Connect page.")
-    scripts = "connect.js connect-auto.js trace-service.js tracing-panel.js".split()
+    scripts = "connect.js connect-auto.js trace-service.js tracing-panel.js bookinfo-tracing.js".split()
     return html.replace("</body>", "".join(f'<script src="{name}" defer></script>\n' for name in scripts) + "</body>", 1)
 
 

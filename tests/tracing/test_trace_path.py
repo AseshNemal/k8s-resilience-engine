@@ -154,3 +154,30 @@ def test_only_reads_are_made_and_a_bad_namespace_asks_nothing():
     with pytest.raises(ValueError):
         verify_trace_path(untouched, "Bad NS", now=NOW)
     assert untouched.calls == []
+
+
+def test_services_that_delivered_spans_are_reported_by_name():
+    answer = verify_trace_path(source(full_path()), NS, now=NOW)
+    assert answer["servicesReporting"] == ["productpage", "details", "reviews", "ratings"]
+    assert answer["missingServices"] == []
+
+
+def test_a_service_with_no_span_is_listed_as_missing_not_assumed():
+    # ratings never delivered anything: its Pod did not reach the trace service (or has no sidecar)
+    partial = trace(
+        span("c1", "trace-demo-client.bookinfo"),
+        span("p1", "productpage.bookinfo", "c1"),
+        span("p2", "productpage.bookinfo", "p1"),
+        span("d1", "details.bookinfo", "p2"),
+        span("p3", "productpage.bookinfo", "p1"),
+        span("r1", "reviews.bookinfo", "p3"),
+    )
+    answer = verify_trace_path(source(partial), NS, now=NOW)
+    assert answer["servicesReporting"] == ["productpage", "details", "reviews"]
+    assert answer["missingServices"] == ["ratings"]
+    assert answer["verdict"] == "PARTIAL"
+
+
+def test_without_traces_every_expected_service_is_missing():
+    answer = verify_trace_path(source(), NS, now=NOW)
+    assert answer["servicesReporting"] == [] and answer["missingServices"] == ["productpage", "details", "reviews", "ratings"]

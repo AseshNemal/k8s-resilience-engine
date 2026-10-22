@@ -161,7 +161,7 @@ def test_the_page_says_nothing_happens_without_approval_in_a_system_dialog(built
     assert "nothing is changed unless you approve there" in page
 
 
-@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js", "namespaces.js", "tracing-panel.js"])
+@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js", "namespaces.js", "tracing-panel.js", "bookinfo-tracing.js"])
 def test_the_new_scripts_never_write_html_or_log(script):
     source = (UI_SRC / script).read_text(encoding="utf-8")
     # Comments may discuss these APIs (they explain why they are not used); only code is checked.
@@ -326,3 +326,34 @@ def test_the_image_ships_the_tracing_routes_and_script():
     dockerfile = (UI_SRC.parents[1] / "extension" / "Dockerfile").read_text(encoding="utf-8")
     assert "extension/tracing_routes.py" in dockerfile
     assert "extension/ui-src/tracing-panel.js" in dockerfile
+
+
+# ---- the Bookinfo tracing card ----------------------------------------------------------------------------------
+
+def test_the_connect_page_has_every_hook_the_bookinfo_script_uses(built):
+    page = (built / "connect.html").read_text(encoding="utf-8")
+    code = (UI_SRC / "bookinfo-tracing.js").read_text(encoding="utf-8")
+    roles = set(re.findall(r'part\("([a-z-]+)"\)', code)) | {"bookinfo-card"}
+    assert roles, "the script names no hooks"
+    for role in roles:
+        assert f'data-role="{role}"' in page, f"the Connect page lacks data-role={role!r}"
+
+
+def test_only_the_connect_page_carries_the_bookinfo_card_and_script(built):
+    for name in ("index.html", "workflows.html", "deployments.html", "failure-impacts.html", "recommendations.html", "connect.html"):
+        page = (built / name).read_text(encoding="utf-8")
+        assert ('data-role="bookinfo-card"' in page) == (name == "connect.html"), name
+        assert ('src="bookinfo-tracing.js"' in page) == (name == "connect.html"), name
+
+
+def test_the_four_controls_start_disabled_and_the_card_says_what_it_does_not_do(built):
+    page = (built / "connect.html").read_text(encoding="utf-8")
+    for role in ("bookinfo-plan", "bookinfo-enable", "bookinfo-verify", "bookinfo-undo"):
+        assert re.search(rf'<button[^>]*data-role="{role}"[^>]*disabled', page), f"{role} must start disabled"
+    for sentence in ("Plan only reads the cluster", "nothing is changed unless you approve there", "nothing\n            is simulated or invented", "read-only access is not changed"):
+        assert sentence in page, sentence
+
+
+def test_the_image_ships_the_bookinfo_script():
+    dockerfile = (UI_SRC.parent / "Dockerfile").read_text(encoding="utf-8")
+    assert "extension/ui-src/bookinfo-tracing.js" in dockerfile
