@@ -1,82 +1,54 @@
-{# Model validation: shows measured accuracy only when independent ground truth is available. #}
-<section class="academic-validation-panel" id="academic-panel" aria-label="Model validation against kubectl">
-    <div class="academic-card">
-        <div class="academic-card__header">
-            <div class="academic-card__title-group">
-                <span class="academic-badge academic-badge--primary">MODEL VALIDATION (kubectl ground truth)</span>
-                <h3 class="academic-card__title">Model Accuracy & Runtime Metrics</h3>
-            </div>
-            <div class="academic-card__status">
-                <span class="status-pill status-pill--warning" id="academic-overall-status">
-                    Accuracy not measured against ground truth
-                </span>
+{# Model validation: the model's answers against kubectl ground truth, as pictures. Accuracy is shown only
+   when independent ground truth exists, always with how much was checked. #}
+<section class="academic-validation-panel acc" id="academic-panel" aria-label="Model validation against kubectl">
+    <div class="acc__head">
+        <div>
+            <span class="academic-badge academic-badge--primary">MODEL VALIDATION (kubectl ground truth)</span>
+            <h3 class="acc__title">Model Accuracy &amp; Runtime Metrics</h3>
+            <p class="acc__sample" id="academic-overall-status">Accuracy not measured against ground truth</p>
+        </div>
+        <button type="button" class="academic-copy-btn" id="btn-copy-accuracy-json" title="Copy the raw validation JSON">📋 Copy JSON</button>
+    </div>
+
+    {# One ring per measure: the share of the model's answers that kubectl confirms #}
+    <div class="acc__rings">
+        <figure class="acc-ring" data-measure="service_pod" data-target="0.98">
+            <div class="acc-ring__dial"><svg viewBox="0 0 120 120" aria-hidden="true"></svg><span class="acc-ring__value" id="stat-svc-pod-acc">Not measured</span></div>
+            <figcaption><strong>Service → Pod</strong><span class="acc-ring__count"></span><span class="acc-ring__target">Self-chosen target ≥ 98%</span></figcaption>
+        </figure>
+        <figure class="acc-ring" data-measure="pod_node" data-target="0.98">
+            <div class="acc-ring__dial"><svg viewBox="0 0 120 120" aria-hidden="true"></svg><span class="acc-ring__value" id="stat-pod-node-acc">Not measured</span></div>
+            <figcaption><strong>Pod → Node</strong><span class="acc-ring__count"></span><span class="acc-ring__target">Self-chosen target ≥ 98%</span></figcaption>
+        </figure>
+        <figure class="acc-ring" data-measure="owner" data-target="0.98">
+            <div class="acc-ring__dial"><svg viewBox="0 0 120 120" aria-hidden="true"></svg><span class="acc-ring__value" id="stat-owner-acc">Not measured</span></div>
+            <figcaption><strong>Pod → Deployment</strong><span class="acc-ring__count"></span><span class="acc-ring__target">Self-chosen target ≥ 98%</span></figcaption>
+        </figure>
+        <figure class="acc-ring" data-measure="exposure" data-target="0.95">
+            <div class="acc-ring__dial"><svg viewBox="0 0 120 120" aria-hidden="true"></svg><span class="acc-ring__value" id="stat-conc-acc">Not measured</span></div>
+            <figcaption><strong>Predicts outages</strong><span class="acc-ring__count"></span><span class="acc-ring__target">Self-chosen target ≥ 95%</span></figcaption>
+        </figure>
+    </div>
+
+    {# Each real node failure, per service: what the model predicted vs what kubectl showed #}
+    <div class="acc__lower">
+        <div class="acc-matrix" data-role="acc-matrix">
+            <h4 class="acc-matrix__title">When a node really failed, was the model right?</h4>
+            <div class="acc-matrix__grid">
+                <span></span>
+                <span class="acc-matrix__col">Model said <strong>down</strong></span>
+                <span class="acc-matrix__col">Model said <strong>stays up</strong></span>
+                <span class="acc-matrix__row">Really went <strong>down</strong></span>
+                <span class="acc-cell acc-cell--right" data-cell="down_predicted_down"><b>–</b><small>caught</small></span>
+                <span class="acc-cell acc-cell--wrong" data-cell="down_predicted_up"><b>–</b><small>missed</small></span>
+                <span class="acc-matrix__row">Really <strong>stayed up</strong></span>
+                <span class="acc-cell acc-cell--wrong" data-cell="up_predicted_down"><b>–</b><small>false alarm</small></span>
+                <span class="acc-cell acc-cell--right" data-cell="up_predicted_up"><b>–</b><small>correct</small></span>
             </div>
         </div>
-
-        <div class="academic-grid">
-            <div class="academic-stat">
-                <span class="academic-stat__label">Service-to-Pod Mapping</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-svc-pod-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
-                </div>
-            </div>
-
-            <div class="academic-stat">
-                <span class="academic-stat__label">Pod-to-Node Placement</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-pod-node-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
-                </div>
-            </div>
-
-            <div class="academic-stat">
-                <span class="academic-stat__label">Owner Reference Resolution</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-owner-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
-                </div>
-            </div>
-
-            <div class="academic-stat">
-                <span class="academic-stat__label">Concentration Detection</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-conc-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 95%</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
-                </div>
-            </div>
-
-            <div class="academic-stat">
-                <span class="academic-stat__label">Execution Latency</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-latency-overhead">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target &lt; 50 ms</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill academic-stat__fill--accent" style="width: 0%;"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="academic-card__footer">
-            <span class="academic-footnote">
-                Accuracy is reported only after comparison with independent ground-truth data.
-            </span>
-            <button type="button" class="academic-copy-btn" id="btn-copy-accuracy-json" title="Copy the raw validation JSON">
-                📋 Copy JSON
-            </button>
+        <div class="acc-facts">
+            <div class="acc-fact"><span class="acc-fact__value" id="stat-latency-overhead">Not measured</span><span class="acc-fact__label">to build the model from the recording · Self-chosen target &lt; 50 ms</span></div>
+            <p class="academic-footnote">Accuracy is reported only after comparison with independent ground-truth data: <code>kubectl get pods -o wide</code>, EndpointSlices, the API server's selector query, and which services kept a ready endpoint after a real node failure.</p>
         </div>
     </div>
 </section>

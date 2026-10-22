@@ -27,6 +27,11 @@ def test_academic_panel_rendered_in_html(client):
     assert 'id="stat-conc-acc"' in html
     assert 'id="stat-latency-overhead"' in html
     assert 'id="btn-copy-accuracy-json"' in html
+    # One ring per measure, read from the counts the ground-truth endpoint returns, and the 2×2 of outcomes.
+    for measure in ("service_pod", "pod_node", "owner", "exposure"):
+        assert f'data-measure="{measure}"' in html
+    for cell in ("down_predicted_down", "down_predicted_up", "up_predicted_down", "up_predicted_up"):
+        assert f'data-cell="{cell}"' in html
 
 
 def test_accuracy_endpoint_returns_valid_certificate(client):

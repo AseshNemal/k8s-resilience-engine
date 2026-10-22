@@ -1056,6 +1056,77 @@
     .topo__wires { display: none; }
 }
 
+/* ---- Model accuracy: rings and the node-failure 2×2 ---- */
+.acc {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    padding: 20px 22px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-lg);
+    background: var(--c2-glass-bg);
+    box-shadow: var(--c2-glass-shadow);
+}
+.acc__head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-md); flex-wrap: wrap; }
+.acc__title { margin: 6px 0 2px 0; font-size: 1.15rem; color: var(--c2-text-main); }
+.acc__sample { margin: 0; font-size: 13px; color: var(--c2-text-muted); max-width: 80ch; }
+.acc__rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-md); }
+.acc-ring { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.acc-ring__dial { position: relative; width: 120px; height: 120px; }
+.acc-ring__dial svg { width: 100%; height: 100%; }
+.acc-ring__track { stroke: var(--c2-border-light); stroke-width: 10; }
+.acc-ring__fill { stroke: var(--c2-accent-success); stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.6s ease; }
+.acc-ring.is-below-target .acc-ring__fill { stroke: var(--c2-accent-warning); }
+.acc-ring__tick { stroke: var(--c2-text-main); stroke-width: 2; }
+.acc-ring.is-unmeasured .acc-ring__tick { stroke: var(--c2-text-muted); opacity: 0.5; }
+.acc-ring__value {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 1.25rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--c2-text-main);
+}
+.acc-ring.is-unmeasured .acc-ring__value { font-size: 12px; font-weight: 600; color: var(--c2-text-muted); }
+.acc-ring figcaption { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--c2-text-muted); }
+.acc-ring figcaption strong { font-size: 14px; color: var(--c2-text-main); }
+.acc-ring__count { font-weight: 600; color: var(--c2-text-main); }
+.acc-ring__target { font-size: 11px; }
+.acc__lower { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--space-lg); align-items: start; }
+@media (max-width: 860px) { .acc__lower { grid-template-columns: 1fr; } }
+.acc-matrix__title { margin: 0 0 10px 0; font-size: 0.95rem; color: var(--c2-text-main); }
+.acc-matrix__grid { display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: stretch; }
+.acc-matrix__col, .acc-matrix__row { display: block; align-self: center; font-size: 12px; color: var(--c2-text-muted); }
+.acc-matrix__col { text-align: center; }
+.acc-matrix__row { padding-right: 6px; }
+.acc-facts .academic-footnote { margin: 0; font-size: 12px; line-height: 1.55; color: var(--c2-text-muted); }
+.acc-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 8px;
+    border-radius: var(--c2-radius-md);
+    border: 1px solid transparent;
+}
+.acc-cell b { font-size: 1.8rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.acc-cell small { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.acc-cell--right { background: color-mix(in srgb, var(--c2-accent-success) 14%, transparent); color: #047857; border-color: color-mix(in srgb, var(--c2-accent-success) 35%, transparent); }
+.acc-cell--wrong { background: color-mix(in srgb, var(--c2-accent-danger) 12%, transparent); color: #b91c1c; border-color: color-mix(in srgb, var(--c2-accent-danger) 35%, transparent); }
+.acc-cell.is-zero { opacity: 0.45; }
+.acc-cell--wrong.is-zero { background: transparent; border-style: dashed; }
+.acc-facts { display: flex; flex-direction: column; gap: var(--space-md); }
+.acc-fact { display: flex; flex-direction: column; gap: 2px; }
+.acc-fact__value { font-size: 1.6rem; font-weight: 800; color: var(--c2-text-main); font-variant-numeric: tabular-nums; }
+.acc-fact__label { font-size: 12px; color: var(--c2-text-muted); }
+@media (prefers-color-scheme: dark) {
+    .acc-cell--right { color: #6ee7b7; }
+    .acc-cell--wrong { color: #fca5a5; }
+}
+@media (prefers-reduced-motion: reduce) { .acc-ring__fill { transition: none; } }
+
 /* ---- Exposed services tab: services × nodes spread map ---- */
 .spread-map-wrap {
     border: 1px solid var(--c2-border-light);
