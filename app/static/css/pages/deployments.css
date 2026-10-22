@@ -1816,7 +1816,6 @@
     background: var(--color-surface, #fff);
     box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
 }
-.accuracy-details > summary { font-size: 1.05rem; color: var(--color-text); }
 .evidence-box__grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -1829,3 +1828,44 @@
 
 /* ---- main output: DeploymentGraph ---- */
 .main-output__desc { margin: 0 0 var(--space-md) 0; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); max-width: 900px; }
+
+/* Output tab: inputs -> Component 2 -> DeploymentGraph -> Component 3 */
+.flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin: 0 0 var(--space-lg) 0;
+    padding: 24px 20px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-lg);
+    background: var(--c2-glass-bg);
+    box-shadow: var(--c2-glass-shadow);
+}
+.flow__inputs { display: flex; flex-direction: column; gap: 10px; }
+.flow__arrow { font-size: 1.8rem; color: var(--c2-accent-primary); }
+.flow-box {
+    --tone: var(--c2-text-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 150px;
+    max-width: 190px;
+    padding: 12px 14px;
+    border: 2px solid color-mix(in srgb, var(--tone) 45%, transparent);
+    border-radius: var(--c2-radius-md);
+    background: color-mix(in srgb, var(--tone) 7%, var(--c2-glass-bg));
+    text-align: center;
+    font-size: 12px;
+    color: var(--c2-text-muted);
+}
+.flow-box strong { font-size: 0.95rem; color: var(--c2-text-main); }
+.flow-box b { color: var(--c2-text-main); }
+.flow-box code { font-size: 11px; }
+.flow-box__icon { font-size: 1.5rem; }
+.flow-box--me { --tone: var(--c2-accent-primary); }
+.flow-box--output { --tone: var(--c2-accent-success); min-width: 180px; border-width: 3px; }
+.flow-box--next { --tone: var(--c2-accent-purple); }
+@media (max-width: 900px) { .flow { flex-direction: column; } .flow__arrow { transform: rotate(90deg); } }

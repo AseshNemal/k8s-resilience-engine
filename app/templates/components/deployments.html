@@ -4,11 +4,11 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.40">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.40">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.40">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.40">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.40">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.41">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.41">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.41">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.41">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.41">
 {% endblock %}
 
 {% block content %}
@@ -89,6 +89,12 @@
         <button type="button" class="tab-nav-btn" id="tab-btn-live-experiments" role="tab" aria-selected="false" aria-controls="tab-live-experiments" data-target="tab-live-experiments">
             <span class="tab-icon">🧪</span> Experiments
         </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-output" role="tab" aria-selected="false" aria-controls="tab-output" data-target="tab-output">
+            <span class="tab-icon">📦</span> Output
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-accuracy" role="tab" aria-selected="false" aria-controls="tab-accuracy" data-target="tab-accuracy">
+            <span class="tab-icon">🎯</span> Accuracy
+        </button>
     </nav>
 </div>
 
@@ -104,26 +110,52 @@
 
     {# Tab 4: Live KinD experiment results #}
     {% include "components/deployments_live_experiments_tab.html" %}
-</div>
 
-{# The component's main output, the contract Component 3 reads #}
-<section class="main-output" aria-labelledby="main-output-title">
-    <div class="section-header" style="margin-top: var(--space-xl);">
-        <h3 class="section-header__title" id="main-output-title">Main output: DeploymentGraph</h3>
+    {# Tab 5: The component's main output, the contract Component 3 reads #}
+    <div class="tab-pane" id="tab-output" role="tabpanel" aria-labelledby="tab-btn-output" hidden>
+        <section class="main-output" aria-labelledby="main-output-title">
+            <div class="tab-pane__header">
+                <div>
+                    <h3 class="tab-pane__title" id="main-output-title">Main output: DeploymentGraph</h3>
+                    <p class="tab-pane__desc">What goes in, what comes out, and who uses it.</p>
+                </div>
+            </div>
+            {# The hand-off as a picture: inputs, this component, its output, the component that reads it #}
+            <div class="flow" aria-label="Component 2 inputs and output">
+                <div class="flow__inputs">
+                    <div class="flow-box flow-box--input"><span class="flow-box__icon">📄</span><strong>YAML</strong><span>what was declared</span></div>
+                    <div class="flow-box flow-box--input"><span class="flow-box__icon">🖥️</span><strong>Live cluster</strong><span>where pods really run</span></div>
+                </div>
+                <span class="flow__arrow" aria-hidden="true">➜</span>
+                <div class="flow-box flow-box--me"><span class="flow-box__icon">🧩</span><strong>Component 2</strong><span>Deployment topology modeling</span></div>
+                <span class="flow__arrow" aria-hidden="true">➜</span>
+                <div class="flow-box flow-box--output">
+                    <span class="flow-box__icon">📦</span><strong>DeploymentGraph</strong>
+                    <span><b data-role="output-services">…</b> services · <b data-role="output-nodes">…</b> nodes</span>
+                    <code data-role="output-snapshot">…</code>
+                </div>
+                <span class="flow__arrow" aria-hidden="true">➜</span>
+                <div class="flow-box flow-box--next"><span class="flow-box__icon">🔮</span><strong>Component 3</strong><span>predicts which workflows fail when a node fails</span></div>
+            </div>
+            <p class="main-output__desc">
+                Read at <span data-role="output-time">…</span>. Component 3 gets it from <code>get_live_deployment_graph()</code>
+                or <code>GET /api/deployments/live</code>; it is the same graph every other tab shows.
+            </p>
+            {{ raw_json_panel("deployment-raw-json", "Show the DeploymentGraph JSON") }}
+        </section>
     </div>
-    <p class="main-output__desc">
-        The JSON below is what this component hands on. <strong>Component 3</strong> reads it (<code>get_live_deployment_graph()</code>,
-        or <code>GET /api/deployments/live</code>) to predict which business workflows fail when a worker node fails.
-        It is the graph shown on this page: snapshot <code data-role="output-snapshot">…</code>, read at <span data-role="output-time">…</span>.
-    </p>
-    {{ raw_json_panel("deployment-raw-json", "Show the DeploymentGraph JSON") }}
-</section>
 
-{# Model validation against kubectl ground truth, collapsed: the numbers belong in the presentation #}
-<details class="show-details accuracy-details">
-    <summary>How accurate is the model?</summary>
-    {% include "components/deployments_academic_panel.html" %}
-</details>
+    {# Tab 6: Model validation against kubectl ground truth #}
+    <div class="tab-pane" id="tab-accuracy" role="tabpanel" aria-labelledby="tab-btn-accuracy" hidden>
+        <div class="tab-pane__header">
+            <div>
+                <h3 class="tab-pane__title">How accurate is the model?</h3>
+                <p class="tab-pane__desc">The model's answers checked against kubectl, including real node failures.</p>
+            </div>
+        </div>
+        {% include "components/deployments_academic_panel.html" %}
+    </div>
+</div>
 
 {# Service exposure drill-down #}
 {% include "components/deployments_modal_violation.html" %}
@@ -131,13 +163,13 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.40"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.40"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.41"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.41"></script>
 {% endblock %}

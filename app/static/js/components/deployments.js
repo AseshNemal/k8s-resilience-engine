@@ -83,8 +83,10 @@
         put("evidence-command", `kubectl -n ${body.namespace} get pods -o wide`);
         put("evidence-line", `read at ${Number.isNaN(read.getTime()) ? "unknown time" : read.toLocaleTimeString()}`);
         box.hidden = false;
-        // The main-output section names the same snapshot, so the JSON can be matched to what the page shows.
+        // The Output tab names the same snapshot, so the JSON can be matched to what the page shows.
         document.querySelectorAll('[data-role="output-snapshot"]').forEach((n) => { n.textContent = graph.snapshotId || "n/a"; });
+        document.querySelectorAll('[data-role="output-services"]').forEach((n) => { n.textContent = (graph.services || []).length; });
+        document.querySelectorAll('[data-role="output-nodes"]').forEach((n) => { n.textContent = (graph.nodes || []).length; });
         document.querySelectorAll('[data-role="output-time"]').forEach((n) => {
             n.textContent = box.querySelector('[data-role="evidence-time"]').textContent;
         });
