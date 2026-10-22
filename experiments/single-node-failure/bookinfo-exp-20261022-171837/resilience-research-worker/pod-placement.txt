@@ -1,0 +1,9 @@
+NAME                              READY   STATUS    RESTARTS   AGE    IP             NODE                          NOMINATED NODE   READINESS GATES
+details-v1-c6c6cd7d5-txfgn        1/1     Running   0          111s   10.244.1.144   resilience-research-worker2   <none>           <none>
+productpage-v1-656d587f97-4ct6x   1/1     Running   0          112s   10.244.3.175   resilience-research-worker    <none>           <none>
+productpage-v1-656d587f97-g78d2   1/1     Running   0          116s   10.244.1.142   resilience-research-worker2   <none>           <none>
+productpage-v1-656d587f97-gsc95   1/1     Running   0          107s   10.244.2.145   resilience-research-worker3   <none>           <none>
+ratings-v1-69cf94fb77-slc7k       1/1     Running   0          115s   10.244.1.143   resilience-research-worker2   <none>           <none>
+reviews-v1-577c679ff5-7dl6z       1/1     Running   0          42s    10.244.3.176   resilience-research-worker    <none>           <none>
+reviews-v1-577c679ff5-ff49t       1/1     Running   0          29s    10.244.3.178   resilience-research-worker    <none>           <none>
+reviews-v1-577c679ff5-vnlwl       1/1     Running   0          36s    10.244.3.177   resilience-research-worker    <none>           <none>

@@ -1,0 +1,5 @@
+NAME                                STATUS     ROLES           AGE     VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                       KERNEL-VERSION                              CONTAINER-RUNTIME
+resilience-research-control-plane   Ready      control-plane   2d16h   v1.37.0   172.18.0.2    <none>        Debian GNU/Linux 13 (trixie)   6.18.54.1-microsoft-standard-WSL2 (amd64)   containerd://2.3.4
+resilience-research-worker          Ready      <none>          2d16h   v1.37.0   172.18.0.5    <none>        Debian GNU/Linux 13 (trixie)   6.18.54.1-microsoft-standard-WSL2 (amd64)   containerd://2.3.4
+resilience-research-worker2         Ready      <none>          2d16h   v1.37.0   172.18.0.3    <none>        Debian GNU/Linux 13 (trixie)   6.18.54.1-microsoft-standard-WSL2 (amd64)   containerd://2.3.4
+resilience-research-worker3         NotReady   <none>          2d16h   v1.37.0   172.18.0.4    <none>        Debian GNU/Linux 13 (trixie)   6.18.54.1-microsoft-standard-WSL2 (amd64)   containerd://2.3.4

@@ -1,0 +1,8 @@
+details-v1 details-v1-c6c6cd7d5-txfgn
+productpage-v1 productpage-v1-656d587f97-4ct6x
+productpage-v1 productpage-v1-656d587f97-g78d2
+productpage-v1 productpage-v1-656d587f97-gsc95
+ratings-v1 ratings-v1-69cf94fb77-slc7k
+reviews-v1 reviews-v1-577c679ff5-7dl6z
+reviews-v1 reviews-v1-577c679ff5-ff49t
+reviews-v1 reviews-v1-577c679ff5-vnlwl
