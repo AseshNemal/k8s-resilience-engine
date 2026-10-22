@@ -284,7 +284,64 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     function currentRun() {
         const cond = player.scenario?.configs[player.config];
         const runs = cond?.run_placements?.length ? cond.run_placements : [cond?.example_run].filter(Boolean);
-        return { runs, run: runs[Math.min(player.run, runs.length - 1)] };
+        return { cond, runs, run: runs[Math.min(player.run, runs.length - 1)] };
+    }
+
+    // ---- this run's measurements, as stored by the runner, with the mean over the condition's runs ----
+
+    const pctText = (v) => (v == null ? "n/a" : `${Math.round(v * 100)}%`);
+
+    function miniBar(value, className) {
+        const bar = el("span", `xp-mini ${className || ""}`);
+        const fill = el("span", "xp-mini__fill");
+        fill.style.height = `${Math.max(value ?? 0, 0) * 100}%`;
+        bar.appendChild(fill);
+        return bar;
+    }
+
+    function beforeAfter(before, after, danger) {
+        const box = el("span", "xp-ba");
+        box.append(miniBar(before, ""), el("span", "xp-ba__arrow", "→"), miniBar(after, danger && after > before ? "xp-mini--bad" : ""));
+        return box;
+    }
+
+    function metricTile(label, value, picture, foot, tip) {
+        const tile = el("div", "xp-metric");
+        tile.title = tip;
+        tile.append(el("span", "xp-metric__label", label), el("span", "xp-metric__value", value), picture, el("span", "xp-metric__foot", foot));
+        return tile;
+    }
+
+    function renderMetrics(box, run, cond, target) {
+        const services = Object.keys(run.t1 || {}).sort();
+        const changed = new Set(run.changed_services || []);
+        const dots = el("span", "xp-dots");
+        services.forEach((svc) => {
+            const d = el("span", changed.has(svc) ? "xp-dot-svc is-changed" : "xp-dot-svc");
+            d.title = `${svc}: ${changed.has(svc) ? "exposure status changed" : "no change"}`;
+            dots.appendChild(d);
+        });
+        const mean = (stat) => (stat?.mean == null ? "n/a" : pctText(stat.mean));
+        const c0 = (run.concentration_t0 || {})[target]?.ratio ?? null;
+        const c1 = (run.concentration_t1 || {})[target]?.ratio ?? null;
+        const ruled = run.compliance_rate_t1 != null;
+
+        box.replaceChildren(
+            metricTile("D_rate", pctText(run.d_rate), dots,
+                changed.size ? `changed: ${[...changed].join(", ")} · mean ${mean(cond?.d_rate)}` : `no service changed · mean ${mean(cond?.d_rate)}`,
+                "Placement drift rate: the share of services whose exposure status changed between before (T0) and after (T1)."),
+            metricTile("Exposure rate", `${pctText(run.exposure_rate_t0)} → ${pctText(run.exposure_rate_t1)}`,
+                beforeAfter(run.exposure_rate_t0, run.exposure_rate_t1, true),
+                `before → after · mean after ${mean(cond?.exposure_rate_t1)}`,
+                "The share of services that one node failure would take down, before and after the action."),
+            metricTile(`${target} concentration`, `${pctText(c0)} → ${pctText(c1)}`,
+                beforeAfter(c0, c1, true),
+                "share of its ready copies on the busiest node",
+                `Replica concentration of ${target}: 100% means every ready copy sits on one node.`),
+            metricTile("Rule compliance", ruled ? pctText(run.compliance_rate_t1) : "no rule", el("span", "xp-rule", ruled ? "📐" : "—"),
+                ruled ? `services meeting their spread rule · mean ${mean(cond?.compliance_rate_t1)}` : "this config declares no placement rule",
+                "Of the services that declare a spread rule, the share whose rule is satisfied after the action."),
+        );
     }
 
     function paintPlayer() {
@@ -303,7 +360,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             b.setAttribute("aria-pressed", String(on));
         });
 
-        const { runs, run } = currentRun();
+        const { cond, runs, run } = currentRun();
         const chosen = Math.min(player.run, runs.length - 1);
         root.querySelector("[data-role='xp-runs']").replaceChildren(...runs.map((r, i) => {
             const cls = `xp-run${i === chosen ? " is-active" : ""}${r.target_status_t1 === "EXPOSED" ? " xp-run--danger" : ""}`;
@@ -324,6 +381,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             after.replaceChildren();
             action.replaceChildren(el("span", "xp-action__text", "No stored run"));
             verdict.replaceChildren();
+            root.querySelector("[data-role='xp-metrics']")?.replaceChildren();
             return;
         }
         const nodes = allNodes(run);
@@ -332,6 +390,8 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         after.replaceChildren(snapshotView("After", run.t1, target, nodes, hues));
         action.replaceChildren(el("span", "xp-action__arrow", "➜"), el("code", "xp-action__text", run.action.action));
         verdict.replaceChildren(...runVerdict(run, target).map((p) => el("span", `xp-verdict xp-verdict--${p.tone}`, p.text)));
+        const metrics = root.querySelector("[data-role='xp-metrics']");
+        if (metrics) renderMetrics(metrics, run, cond, target);
     }
 
     function selectScenario(scenario) {

@@ -1647,6 +1647,32 @@
 .xp-action__arrow { font-size: 2rem; color: var(--c2-accent-primary); }
 .xp-action__text { padding: 6px 8px; border-radius: var(--c2-radius-sm); background: var(--c2-surface-subtle); font-size: 11px; text-align: center; word-break: break-word; }
 .xp__verdict { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+
+/* this run's measurements: four tiles, each with a small picture */
+.xp__metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.xp-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-md);
+    background: var(--c2-glass-bg);
+    cursor: help;
+}
+.xp-metric__label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--c2-text-muted); }
+.xp-metric__value { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c2-text-main); }
+.xp-metric__foot { font-size: 11.5px; color: var(--c2-text-muted); }
+.xp-dots { display: flex; gap: 5px; min-height: 26px; align-items: center; }
+.xp-dot-svc { width: 12px; height: 12px; border-radius: 50%; background: var(--c2-border-light); }
+.xp-dot-svc.is-changed { background: var(--c2-accent-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c2-accent-danger) 20%, transparent); }
+.xp-ba { display: flex; align-items: flex-end; gap: 6px; height: 26px; }
+.xp-ba__arrow { font-size: 12px; color: var(--c2-text-muted); align-self: center; }
+.xp-mini { position: relative; width: 18px; height: 26px; border-radius: 4px; background: var(--c2-surface-subtle); border: 1px solid var(--c2-border-light); overflow: hidden; }
+.xp-mini__fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--c2-accent-primary); transition: height 0.5s ease; }
+.xp-mini--bad .xp-mini__fill { background: var(--c2-accent-danger); }
+.xp-rule { font-size: 18px; min-height: 26px; display: flex; align-items: center; }
+@media (prefers-reduced-motion: reduce) { .xp-mini__fill { transition: none; } }
 .xp-verdict { padding: 6px 14px; border-radius: 999px; font-size: 14px; font-weight: 800; }
 .xp-verdict--ok { background: color-mix(in srgb, var(--c2-accent-success) 14%, transparent); color: #047857; }
 .xp-verdict--danger { background: color-mix(in srgb, var(--c2-accent-danger) 14%, transparent); color: #b91c1c; }
