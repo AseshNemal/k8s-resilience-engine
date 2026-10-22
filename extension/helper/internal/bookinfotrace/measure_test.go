@@ -4,6 +4,8 @@ import (
 	"context"
 	"math"
 	"testing"
+
+	"resilience-engine/helper/internal/execx"
 )
 
 func near(a, b float64) bool { return math.Abs(a-b) < 0.01 }
@@ -126,4 +128,48 @@ func TestNoIstiodYetIsUnknownNotZero(t *testing.T) {
 	if m := Measure(context.Background(), r.deps()); m.IstiodMiB != nil {
 		t.Fatal("unreadable output is unknown")
 	}
+}
+
+func TestWindowsSwapIsTheSumOfThePageFilesAndUnknownWhenItCannotBeRead(t *testing.T) {
+	for text, want := range map[string]float64{"2048\r\n": 2048, " 1024.5 ": 1024.5, "0": 0} {
+		if got, err := parseSwapWindows(text); err != nil || got != want {
+			t.Errorf("%q: %v %v", text, got, err)
+		}
+	}
+	for _, text := range []string{"", "\r\n", "NaN-ish", "-5", "1,024"} {
+		if _, err := parseSwapWindows(text); err == nil {
+			t.Errorf("%q must not be read as a number", text)
+		}
+	}
+
+	var shell string
+	var args []string
+	d := Deps{GOOS: "windows", Getenv: func(k string) string { return map[string]string{"SystemRoot": `C:\Windows`}[k] },
+		Runner: runnerFunc(func(name string, a []string) (string, int) { shell, args = name, a; return "3000\r\n", 0 })}
+	got := HostSwapUsedMiB(context.Background(), d)
+	if got == nil || *got != 3000 {
+		t.Fatalf("%v", got)
+	}
+	if shell != `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` || args[0] != "-NoProfile" || args[1] != "-NonInteractive" || args[3] != pageFileScript {
+		t.Fatalf("%q %v", shell, args)
+	}
+
+	for name, deps := range map[string]Deps{
+		"no SystemRoot": {GOOS: "windows", Getenv: func(string) string { return "" }, Runner: runnerFunc(func(string, []string) (string, int) { return "1", 0 })},
+		"no Getenv":     {GOOS: "windows", Runner: runnerFunc(func(string, []string) (string, int) { return "1", 0 })},
+		"exit code":     {GOOS: "windows", Getenv: d.Getenv, Runner: runnerFunc(func(string, []string) (string, int) { return "1", 1 })},
+		"no page file":  {GOOS: "windows", Getenv: d.Getenv, Runner: runnerFunc(func(string, []string) (string, int) { return "", 0 })},
+	} {
+		if v := HostSwapUsedMiB(context.Background(), deps); v != nil {
+			t.Errorf("%s: unknown must stay nil, got %v", name, *v)
+		}
+	}
+}
+
+// runnerFunc adapts a function to execx.Runner for single-purpose tests.
+type runnerFunc func(name string, args []string) (string, int)
+
+func (f runnerFunc) Run(_ context.Context, name string, args []string, _ []byte) (execx.Result, error) {
+	out, code := f(name, args)
+	return execx.Result{Stdout: []byte(out), ExitCode: code}, nil
 }

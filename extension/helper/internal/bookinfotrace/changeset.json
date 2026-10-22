@@ -24,9 +24,9 @@
     "selector": "app=reviews,version=v2"
   },
   "recreatedWorkloads": [
-    { "app": "productpage", "version": "v1" },
+    { "app": "ratings", "version": "v1" },
     { "app": "details", "version": "v1" },
-    { "app": "ratings", "version": "v1" }
+    { "app": "productpage", "version": "v1" }
   ],
   "requiredWorkloads": ["productpage-v1", "details-v1", "ratings-v1", "reviews-v1"],
   "memoryMiB": { "istiodLimit": 512, "sidecarLimit": 128, "sidecars": 4, "reviewsV2Estimate": 115, "clientPod": 144 }

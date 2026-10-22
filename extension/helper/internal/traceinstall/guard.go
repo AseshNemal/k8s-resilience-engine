@@ -114,3 +114,23 @@ func (g *Guard) SetInjection(ctx context.Context, on bool) error {
 	}
 	return g.w.PatchLabels(ctx, resNamespace, "", bookinfotrace.Contract.Namespace, map[string]*string{injectionLabel: value})
 }
+
+// DeleteSidecarPod removes a Pod of one of the workloads this setup restarts that carries a sidecar, so Undo can let
+// its Deployment recreate it without one. The Pod's identity is checked here, not trusted from the caller.
+func (g *Guard) DeleteSidecarPod(ctx context.Context, pod kube.Object) error {
+	c := bookinfotrace.Contract
+	okWorkload := false
+	for _, w := range c.RecreatedWorkloads {
+		if pod.Labels["app"] == w.App && pod.Labels["version"] == w.Version {
+			okWorkload = true
+		}
+	}
+	sidecar := false
+	for _, name := range pod.Containers {
+		sidecar = sidecar || name == "istio-proxy"
+	}
+	if !okWorkload || !sidecar || pod.Namespace != c.Namespace || pod.UID == "" {
+		return fmt.Errorf("%w: pod %s", ErrNotAllowed, pod.Name)
+	}
+	return g.w.DeleteRaw(ctx, resPod, c.Namespace, pod.Name, pod.UID)
+}

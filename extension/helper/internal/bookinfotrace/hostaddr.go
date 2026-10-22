@@ -16,6 +16,7 @@ type Deps struct {
 	FindDocker func() (string, error)
 	GOOS       string
 	ReadFile   func(string) ([]byte, error)
+	Getenv     func(string) string // only SystemRoot is read, to find Windows PowerShell
 }
 
 const (

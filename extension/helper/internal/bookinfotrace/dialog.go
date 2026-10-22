@@ -15,9 +15,17 @@ const maxBody = 1800
 // ErrPreviewTooLong means the exact preview does not fit in the dialog.
 var ErrPreviewTooLong = fmt.Errorf("the preview is too long to show in full")
 
+// DialogExtras are facts the approval must disclose that are not part of the plan itself.
+type DialogExtras struct {
+	// Download is non-empty when a tool has to be downloaded first: what and from where.
+	Download string
+}
+
 // ApplyDialog is the approval for the cluster changes. It lists every change in the preview, in order, so what is
-// approved is exactly what the Plan showed. It never says "may": these are the changes.
-func ApplyDialog(p PlanResult) (approve.Request, error) {
+// approved is exactly what the Plan showed. It never says "may": these are the changes. It also says which Pods will be
+// unavailable and for how long they may be, and that a failed step rolls back what this run created: that consent is
+// part of this approval.
+func ApplyDialog(p PlanResult, extras DialogExtras) (approve.Request, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Cluster: %s\n\nThis sets up Istio tracing for the Bookinfo demo. It CHANGES the cluster, in this order:\n", approve.Sanitize(p.Context, 60))
 	for _, c := range p.Preview {
@@ -30,7 +38,17 @@ func ApplyDialog(p PlanResult) (approve.Request, error) {
 		}
 		fmt.Fprintf(&b, "%s\n", line)
 	}
-	fmt.Fprintf(&b, "\nMemory is checked after the Istio install and again at the end. If it is too high the setup stops, says why, and removes only what this run created. ")
+	if len(p.Disruptions) > 0 {
+		b.WriteString("\nDOWNTIME: each Pod above is deleted and unavailable until its replacement is Ready (one replica each, so nothing takes over):")
+		for _, d := range p.Disruptions {
+			fmt.Fprintf(&b, " %s: %s;", d.Workload, d.Effect)
+		}
+		b.WriteString(" usually under a minute each (not measured).")
+	}
+	if extras.Download != "" {
+		fmt.Fprintf(&b, "\n\nAlso downloads %s", approve.Sanitize(extras.Download, 120))
+	}
+	b.WriteString("\n\nMemory is checked after the Istio install, while waiting and at the end. If a check fails or any step errors, the setup stops, says why, and removes only what this run created: you approve that here. ")
 	b.WriteString("Your Jaeger container is not changed. The extension's read-only Kubernetes access is not changed: this uses your own kubeconfig, inside the helper, for this setup only. Everything can be undone from the extension.")
 	body := b.String()
 	if len([]rune(body)) > maxBody {
@@ -54,7 +72,7 @@ func UndoDialog(contextName string, removeReviewsV2 bool, restarts []string) (ap
 	fmt.Fprintf(&b, "%d. recreate %d Pods without a sidecar, one at a time: %s\n", step, len(restarts), strings.Join(restarts, ", "))
 	step++
 	fmt.Fprintf(&b, "%d. delete the Telemetry and ServiceEntry\n%d. uninstall Istio and delete its namespace and CRDs\n", step, step+1)
-	b.WriteString("\nThe original Bookinfo Deployments are not edited. Afterwards the result is checked against the snapshot taken before the setup. Jaeger is not changed.")
+	b.WriteString("\nOnly objects this setup recorded as created are deleted, each by its recorded ID; anything else is left alone and reported. The original Bookinfo Deployments are not edited. Afterwards the result is checked against the snapshot taken before the setup. Jaeger is not changed.")
 	body := b.String()
 	if len([]rune(body)) > maxBody {
 		return approve.Request{}, ErrPreviewTooLong

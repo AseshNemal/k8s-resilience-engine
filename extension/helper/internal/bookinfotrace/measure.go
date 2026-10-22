@@ -96,6 +96,34 @@ func parseSwapLinux(meminfo string) (float64, error) {
 	return (total - free) / 1024, nil
 }
 
+// parseSwapWindows reads the one number Windows PowerShell prints for the page file's current usage, in MB.
+func parseSwapWindows(output string) (float64, error) {
+	text := strings.TrimSpace(output)
+	if text == "" {
+		return 0, fmt.Errorf("no page file figure")
+	}
+	n, err := strconv.ParseFloat(text, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("unreadable page file figure")
+	}
+	return n, nil
+}
+
+// windowsPowerShell is the Windows PowerShell that ships with every supported Windows, found from SystemRoot.
+func windowsPowerShell(d Deps) (string, bool) {
+	if d.Getenv == nil {
+		return "", false
+	}
+	root := d.Getenv("SystemRoot")
+	if root == "" {
+		return "", false
+	}
+	return root + `\System32\WindowsPowerShell\v1.0\powershell.exe`, true
+}
+
+// pageFileScript sums the current usage (MB) of every page file. It is a constant: nothing from outside reaches it.
+const pageFileScript = "(Get-CimInstance Win32_PageFileUsage | Measure-Object -Property CurrentUsage -Sum).Sum"
+
 // HostSwapUsedMiB reads this computer's swap in use. Other systems return nil: unknown, never zero.
 func HostSwapUsedMiB(ctx context.Context, d Deps) *float64 {
 	var value float64
@@ -110,6 +138,16 @@ func HostSwapUsedMiB(ctx context.Context, d Deps) *float64 {
 			return nil
 		}
 		value, err = parseSwapDarwin(string(res.Stdout))
+	case "windows":
+		shell, ok := windowsPowerShell(d)
+		if !ok || d.Runner == nil {
+			return nil
+		}
+		res, runErr := d.Runner.Run(ctx, shell, []string{"-NoProfile", "-NonInteractive", "-Command", pageFileScript}, nil)
+		if runErr != nil || res.ExitCode != 0 {
+			return nil
+		}
+		value, err = parseSwapWindows(string(res.Stdout))
 	case "linux":
 		if d.ReadFile == nil {
 			return nil

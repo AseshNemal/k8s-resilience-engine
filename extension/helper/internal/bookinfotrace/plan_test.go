@@ -34,7 +34,7 @@ func TestTheRealBenchmarkIsReadyToPlan(t *testing.T) {
 	if len(p.Preview) != 9 || p.Preview[0].Step != 1 || p.Preview[8].Step != 9 {
 		t.Fatalf("preview: %+v", p.Preview)
 	}
-	want := []string{"details-v1-65bd58d55f-b7zln", "productpage-v1-7498b5bd44-jbskx", "ratings-v1-9bff6cb79-dc6k5"}
+	want := []string{"ratings-v1-9bff6cb79-dc6k5", "details-v1-65bd58d55f-b7zln", "productpage-v1-7498b5bd44-jbskx"} // leaf first
 	if strings.Join(p.Restarts, ",") != strings.Join(want, ",") {
 		t.Fatalf("restarts: %v", p.Restarts)
 	}

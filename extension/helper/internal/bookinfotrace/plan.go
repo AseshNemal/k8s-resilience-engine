@@ -26,6 +26,7 @@ type PlanResult struct {
 	Warnings          []string     `json:"warnings"`
 	Preview           []Change     `json:"preview"`
 	Restarts          []string     `json:"restarts"`
+	Disruptions       []Disruption `json:"disruptions"`
 	Jaeger            *Address     `json:"jaeger"`
 	Baseline          Measurements `json:"baseline"`
 	Gate0             Decision     `json:"gate0"`
@@ -44,18 +45,54 @@ func hasSidecar(containers []string) bool {
 	return false
 }
 
-// podsToRecreate picks the live Pods of the workloads that need a sidecar, in a fixed order.
+// podsToRecreate picks the live Pods of the workloads that need a sidecar, in the contract's order: the workloads
+// nothing else depends on first (ratings, then details, then productpage), so a Pod that is down interrupts as little
+// of the page as possible. Several Pods of one workload are ordered by name.
 func podsToRecreate(f Facts) []string {
 	var names []string
 	for _, w := range Contract.RecreatedWorkloads {
+		var ofWorkload []string
 		for _, p := range f.Pods {
 			if p.App == w.App && p.Version == w.Version {
-				names = append(names, p.Name)
+				ofWorkload = append(ofWorkload, p.Name)
+			}
+		}
+		sort.Strings(ofWorkload)
+		names = append(names, ofWorkload...)
+	}
+	return names
+}
+
+// Disruption says what a person using the application will notice while one Pod is recreated. The estimate of how
+// long is deliberately not a number: it was not measured on this machine.
+type Disruption struct {
+	Workload string `json:"workload"`
+	Pod      string `json:"pod"`
+	Effect   string `json:"effect"`
+}
+
+// effects are the visible consequences in Bookinfo itself. The application has one replica of each service, so while a
+// Pod is being replaced nothing else serves its requests.
+var effects = map[string]string{
+	"ratings":     "the reviews show \"ratings unavailable\"",
+	"details":     "the product page shows no book details",
+	"productpage": "the Bookinfo web page does not load",
+}
+
+func disruptionsFor(f Facts, pods []string) []Disruption {
+	out := []Disruption{}
+	for _, name := range pods {
+		for _, p := range f.Pods {
+			if p.Name == name {
+				effect := effects[p.App]
+				if effect == "" {
+					effect = "requests to it fail"
+				}
+				out = append(out, Disruption{Workload: p.App, Pod: name, Effect: effect})
 			}
 		}
 	}
-	sort.Strings(names)
-	return names
+	return out
 }
 
 // BuildPlan is pure: it turns facts and readings into a preview and the reasons to stop. addrErr is the reason the
@@ -63,7 +100,7 @@ func podsToRecreate(f Facts) []string {
 func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, contextName string) PlanResult {
 	c := Contract
 	p := PlanResult{Context: contextName, IstioVersion: c.IstioVersion, KubernetesVersion: f.ServerVersion, Baseline: baseline, Jaeger: addr,
-		Blockers: []Blocker{}, Warnings: []string{}}
+		Blockers: []Blocker{}, Warnings: []string{}, Disruptions: []Disruption{}}
 
 	switch {
 	case f.KubernetesMinor == 0:
@@ -114,6 +151,7 @@ func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, con
 		p.block("WORKLOAD_NOT_READY", "Expected one Pod each for %d workloads to recreate, found %d.", len(c.RecreatedWorkloads), len(recreate))
 	}
 	p.Restarts = recreate
+	p.Disruptions = disruptionsFor(f, recreate)
 
 	address := ""
 	switch {
