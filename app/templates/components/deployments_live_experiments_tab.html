@@ -11,8 +11,8 @@
         <summary>ℹ️ What am I looking at?</summary>
         <ul>
             <li>Each experiment: deploy 4 services × 3 replicas → snapshot (T0) → one real Kubernetes action → snapshot (T1) → compare.</li>
-            <li>Only <strong>paymentservice</strong> is disrupted; all 4 services are observed. Each experiment ran 5 times, with and without a spread rule.</li>
-            <li>The services are lightweight stand-ins (pause image): they test where Kubernetes places pods, not the application itself.</li>
+            <li>One service (the <strong>target</strong>, named above the results) is disrupted; all 4 services are observed. Each experiment ran 5 times, with and without a spread rule.</li>
+            <li>Two workloads: <strong>stand-in pods</strong> (pause image, a controlled test of where Kubernetes places pods) and the <strong>real Bookinfo app</strong> (the team's benchmark, in its own namespace bookinfo-exp). Switch between them below.</li>
             <li><strong>Click a row</strong> to see where the pods were before and after (first run).</li>
         </ul>
     </details>
@@ -54,8 +54,17 @@
     </div>
 
     <div class="card card--glass ensemble-card">
+        <div class="workload-switch" role="group" aria-label="Which experiment results to show" data-role="live-exp-workload">
+            <button type="button" class="workload-switch__btn is-active" data-workload="standin" aria-pressed="true">
+                Stand-in pods <span class="workload-switch__sub">controlled test · 80 runs</span>
+            </button>
+            <button type="button" class="workload-switch__btn" data-workload="bookinfo" aria-pressed="false">
+                Bookinfo <span class="workload-switch__sub">real application · 80 runs</span>
+            </button>
+        </div>
         <div style="margin-bottom: var(--space-md);">
             <span class="status-badge status-badge--success">Live cluster observations</span>
+            <span class="status-badge status-badge--muted" data-role="live-exp-target">Target: …</span>
             <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 6px 0 0 0;" data-role="live-exp-note">Loading…</p>
         </div>
 
@@ -85,5 +94,24 @@
             <strong>D_rate</strong>: share of services whose exposure status changed between T0 and T1 (mean over runs).
             <strong>Compliance</strong>: share of services with a placement rule whose rule is satisfied at T1.
         </p>
+    </div>
+
+    <div class="card card--glass ensemble-card" data-role="live-exp-compare-card" hidden style="margin-top: var(--space-lg);">
+        <h4 style="margin: 0 0 4px 0; font-size: 1rem;">Stand-in pods vs the real Bookinfo app</h4>
+        <p class="ensemble-panel__desc" style="font-size: 12px; color: var(--color-text-muted); margin: 0 0 var(--space-md) 0;" data-role="live-exp-compare-summary"></p>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Scenario</th>
+                        <th scope="col">Config</th>
+                        <th scope="col">Stand-in pods (target paymentservice)</th>
+                        <th scope="col">Bookinfo (target reviews)</th>
+                        <th scope="col">Same outcome?</th>
+                    </tr>
+                </thead>
+                <tbody data-role="live-exp-compare-body"></tbody>
+            </table>
+        </div>
     </div>
 </div>

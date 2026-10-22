@@ -262,31 +262,117 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         });
     }
 
-    async function load() {
+    // Stored results per workload ("standin" = the controlled runs, "bookinfo" = the real-application runs).
+    const resultsCache = {};
+
+    async function fetchResults(workload) {
+        if (!resultsCache[workload]) {
+            const resp = await fetch(`/api/deployments/benchmarks/live-experiments?workload=${encodeURIComponent(workload)}`);
+            resultsCache[workload] = resp.ok ? await resp.json() : { missing: true, status: resp.status };
+        }
+        return resultsCache[workload];
+    }
+
+    function markActiveWorkload(root, workload) {
+        root.querySelectorAll("[data-role='live-exp-workload'] [data-workload]").forEach((btn) => {
+            const active = btn.dataset.workload === workload;
+            btn.classList.toggle("is-active", active);
+            btn.setAttribute("aria-pressed", String(active));
+        });
+    }
+
+    async function load(workload = "standin") {
         const root = document.getElementById("tab-live-experiments");
         if (!root) return;
         const note = root.querySelector("[data-role='live-exp-note']");
-        const summary = root.querySelector("[data-role='live-exp-summary']");
-        const tbody = root.querySelector("[data-role='live-exp-table-body']");
-        const findings = root.querySelector("[data-role='live-exp-findings']");
+        const target = root.querySelector("[data-role='live-exp-target']");
+        markActiveWorkload(root, workload);
 
         try {
-            const resp = await fetch("/api/deployments/benchmarks/live-experiments");
-            if (!resp.ok) {
-                note.textContent = resp.status === 404
-                    ? "No live experiment results stored yet. Run experiments/placement_drift/run_live_experiments.py."
-                    : `Could not load live experiment results (HTTP ${resp.status}).`;
+            const data = await fetchResults(workload);
+            if (data.missing) {
+                note.textContent = data.status === 404
+                    ? "No live experiment results stored for this workload yet. Run experiments/placement_drift/run_live_experiments.py."
+                    : `Could not load live experiment results (HTTP ${data.status}).`;
                 return;
             }
-            const data = await resp.json();
             note.textContent = `${data.evidence_note} Source: ${data.results_source}`;
-            renderFindings(findings, data);
-            renderSummary(summary, data);
-            renderTable(tbody, data);
+            if (target) target.textContent = `Target: ${data.target_service}`;
+            renderFindings(root.querySelector("[data-role='live-exp-findings']"), data);
+            renderSummary(root.querySelector("[data-role='live-exp-summary']"), data);
+            renderTable(root.querySelector("[data-role='live-exp-table-body']"), data);
         } catch (err) {
             console.warn("Failed to load live experiment results:", err);
             note.textContent = "Could not load live experiment results.";
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Stand-in pods vs Bookinfo: the same condition, side by side. "Same" compares what the runs observed:
+    // the target's status at T1, whether pods were left unsettled, and the mean D_rate.
+    // ---------------------------------------------------------------------------------------------------------
+
+    const conditionKey = (c) => `${c.scenario_id}|${c.config}`;
+
+    function outcomeText(cond) {
+        const ok = cond.runs - cond.failed_runs;
+        const statuses = Object.entries(cond.target_status_t1_counts || {})
+            .map(([status, count]) => `${status.replace("_", " ")} ${count}/${ok}`);
+        if (cond.unstable_runs > 0) statuses.push(`pods stuck ${cond.unstable_runs}/${ok}`);
+        return `${statuses.join(", ")} · D_rate ${pct(cond.d_rate?.mean)}`;
+    }
+
+    function sameOutcome(a, b) {
+        return JSON.stringify(Object.keys(a.target_status_t1_counts || {}).sort())
+                === JSON.stringify(Object.keys(b.target_status_t1_counts || {}).sort())
+            && (a.unstable_runs > 0) === (b.unstable_runs > 0)
+            && a.d_rate?.mean === b.d_rate?.mean;
+    }
+
+    function compareRow(scenarioName, standinCond, bookinfoCond) {
+        const tr = el("tr");
+        tr.appendChild(el("td", null, scenarioName));
+        tr.appendChild(el("td", null, CONFIG_LABELS[standinCond.config] || standinCond.config));
+        tr.appendChild(el("td", null, outcomeText(standinCond)));
+        tr.appendChild(el("td", null, bookinfoCond ? outcomeText(bookinfoCond) : "not run"));
+        const same = Boolean(bookinfoCond) && sameOutcome(standinCond, bookinfoCond);
+        const verdict = el("td");
+        verdict.appendChild(el("span", `status-badge status-badge--${same ? "success" : "warning"}`, same ? "✓ Same" : "Different"));
+        tr.appendChild(verdict);
+        return { tr, same };
+    }
+
+    async function renderComparison() {
+        const root = document.getElementById("tab-live-experiments");
+        const card = root?.querySelector("[data-role='live-exp-compare-card']");
+        if (!card) return;
+        const [standin, bookinfo] = await Promise.all([fetchResults("standin"), fetchResults("bookinfo")]);
+        if (standin.missing || bookinfo.missing) return;
+
+        const byKey = new Map(bookinfo.conditions.map((c) => [conditionKey(c), c]));
+        const tbody = card.querySelector("[data-role='live-exp-compare-body']");
+        tbody.replaceChildren();
+        let sameCount = 0;
+        [...standin.conditions]
+            .sort((a, b) => conditionKey(a).localeCompare(conditionKey(b)))
+            .forEach((c) => {
+                const { tr, same } = compareRow(c.scenario_name, c, byKey.get(conditionKey(c)));
+                if (same) sameCount++;
+                tbody.appendChild(tr);
+            });
+        card.querySelector("[data-role='live-exp-compare-summary']").textContent =
+            `${sameCount} of ${standin.conditions.length} conditions gave the same outcome with stand-in pods ` +
+            `(${standin.total_runs} runs) and with the real Bookinfo app (${bookinfo.total_runs} runs).`;
+        card.hidden = false;
+    }
+
+    function initWorkloadSwitch() {
+        const root = document.getElementById("tab-live-experiments");
+        root?.querySelectorAll("[data-role='live-exp-workload'] [data-workload]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                load(btn.dataset.workload).catch((err) => console.warn("Failed to load live experiment results:", err));
+            });
+        });
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -468,12 +554,14 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     }
 
     function init() {
+        initWorkloadSwitch();
         load().catch((err) => console.warn("Failed to load live experiment results:", err));
+        renderComparison().catch((err) => console.warn("Failed to compare the experiment results:", err));
         initSimulation();
     }
 
     return {
-        init: init, load: load, buildFindings: buildFindings,
+        init: init, load: load, buildFindings: buildFindings, sameOutcome: sameOutcome,
         runSimulation: runSimulation, loadSimulationNamespaces: loadSimulationNamespaces,
     };
 })();

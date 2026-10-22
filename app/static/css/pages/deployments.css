@@ -895,3 +895,33 @@
     font: inherit;
 }
 .namespace-picker__select:focus-visible { outline: 2px solid var(--color-primary, #2563eb); outline-offset: 1px; }
+
+/* ---- Live Experiments: stand-in pods / Bookinfo switch ---- */
+.workload-switch {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: var(--space-md);
+}
+.workload-switch__btn {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+.workload-switch__btn:hover { border-color: var(--color-primary, #2563eb); }
+.workload-switch__btn:focus-visible { outline: 2px solid var(--color-primary, #2563eb); outline-offset: 1px; }
+.workload-switch__btn.is-active {
+    border-color: var(--color-primary, #2563eb);
+    background: var(--color-surface-soft);
+    box-shadow: inset 0 -3px 0 var(--color-primary, #2563eb);
+}
+.workload-switch__sub { font-size: 11px; font-weight: 400; color: var(--color-text-muted); }

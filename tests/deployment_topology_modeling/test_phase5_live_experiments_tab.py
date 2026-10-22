@@ -134,3 +134,11 @@ def test_endpoint_serves_the_requested_workload(client, tmp_path, monkeypatch):
     assert real_app["conditions"][0]["scenario_id"] == "08_constrained_resources"
     assert real_app["available_workloads"] == ["standin", "bookinfo"]
     assert client.get("/api/deployments/benchmarks/live-experiments?workload=other").status_code == 422
+
+
+def test_tab_offers_both_workloads_and_a_comparison(client):
+    html = client.get("/components/deployments").text
+    assert 'data-workload="standin"' in html
+    assert 'data-workload="bookinfo"' in html
+    assert 'data-role="live-exp-compare-card"' in html
+    assert 'data-role="live-exp-target"' in html
