@@ -24,22 +24,26 @@ def test_deployments_page_renders_tab_navigation(client):
     # Verify all 4 tab buttons exist with correct ARIA roles
     assert 'id="tab-btn-topology"' in html
     assert 'data-target="tab-topology"' in html
-    assert 'Physical Topology Map' in html
+    assert '</span> Topology' in html
 
     assert 'id="tab-btn-intent"' in html
     assert 'data-target="tab-intent"' in html
-    assert 'Declared Intent Compliance' in html
+    assert '</span> Declared vs live' in html
 
     assert 'id="tab-btn-drift"' in html
     assert 'data-target="tab-drift"' in html
-    assert 'Resilience Drift & SPOFs' in html
+    assert '</span> Exposed services' in html
+
+    # The demo order: where pods run → what one node failure takes down → YAML vs cluster → experiments.
+    order = [html.index(f'id="tab-btn-{tab}"') for tab in ("topology", "drift", "intent", "live-experiments")]
+    assert order == sorted(order)
 
     # Dry-run scenarios are not shown on the dashboard (scripted, not evidence).
     assert 'id="tab-btn-scenarios"' not in html
 
     assert 'id="tab-btn-live-experiments"' in html
     assert 'data-target="tab-live-experiments"' in html
-    assert 'Live Experiments' in html
+    assert '</span> Experiments' in html
 
 
 def test_deployments_page_contains_all_tab_panes(client):

@@ -5,11 +5,11 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.17">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.17">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.17">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.17">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.17">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.18">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.18">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.18">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.18">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.18">
 {% endblock %}
 
 {% block content %}
@@ -41,7 +41,8 @@
 
 {# Where and when this page's data was read, so anyone can check it against the cluster themselves #}
 <section class="evidence-box" data-role="evidence-box" aria-label="Where this page's data comes from" hidden>
-    <div class="evidence-box__title"><span class="evidence-box__dot" aria-hidden="true"></span> Live data: read from the connected Kubernetes cluster, not stored or typed in</div>
+    <details>
+    <summary class="evidence-box__title"><span class="evidence-box__dot" aria-hidden="true"></span> Live data from the cluster · <span data-role="evidence-line"></span> <span class="evidence-box__more">How to check</span></summary>
     <dl class="evidence-box__grid">
         <div><dt>Namespace</dt><dd data-role="evidence-namespace"></dd></div>
         <div><dt>Read at</dt><dd data-role="evidence-time"></dd></div>
@@ -49,7 +50,8 @@
         <div><dt>Took</dt><dd data-role="evidence-took"></dd></div>
         <div><dt>Services resolved</dt><dd data-role="evidence-complete"></dd></div>
     </dl>
-    <p class="evidence-box__verify">Check it yourself: <code data-role="evidence-command"></code></p>
+    <p class="evidence-box__verify">Read from the connected Kubernetes cluster, not stored or typed in. Check it yourself: <code data-role="evidence-command"></code></p>
+    </details>
 </section>
 
 {# Headline metrics #}
@@ -64,16 +66,16 @@
 <div class="dashboard-tabs-wrapper">
     <nav class="dashboard-tabs-nav" role="tablist" aria-label="Deployment Dashboard Tabs">
         <button type="button" class="tab-nav-btn active" id="tab-btn-topology" role="tab" aria-selected="true" aria-controls="tab-topology" data-target="tab-topology">
-            <span class="tab-icon">🌐</span> Physical Topology Map
-        </button>
-        <button type="button" class="tab-nav-btn" id="tab-btn-intent" role="tab" aria-selected="false" aria-controls="tab-intent" data-target="tab-intent">
-            <span class="tab-icon">📋</span> Declared Intent Compliance
+            <span class="tab-icon">🌐</span> Topology
         </button>
         <button type="button" class="tab-nav-btn" id="tab-btn-drift" role="tab" aria-selected="false" aria-controls="tab-drift" data-target="tab-drift">
-            <span class="tab-icon">⚠️</span> Resilience Drift & SPOFs
+            <span class="tab-icon">⚠️</span> Exposed services
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-intent" role="tab" aria-selected="false" aria-controls="tab-intent" data-target="tab-intent">
+            <span class="tab-icon">📋</span> Declared vs live
         </button>
         <button type="button" class="tab-nav-btn" id="tab-btn-live-experiments" role="tab" aria-selected="false" aria-controls="tab-live-experiments" data-target="tab-live-experiments">
-            <span class="tab-icon">🧪</span> Live Experiments
+            <span class="tab-icon">🧪</span> Experiments
         </button>
     </nav>
 </div>
@@ -82,11 +84,11 @@
     {# Tab 1: Topology Map #}
     {% include "components/deployments_topology_tab.html" %}
 
-    {# Tab 2: Declared Intent vs Live Compliance #}
-    {% include "components/deployments_intent_tab.html" %}
-
-    {# Tab 3: Resilience Drift & Failure Domain Exposure #}
+    {# Tab 2: Exposed services (resilience drift & failure domain exposure) #}
     {% include "components/deployments_drift_tab.html" %}
+
+    {# Tab 3: Declared vs live #}
+    {% include "components/deployments_intent_tab.html" %}
 
     {# Tab 4: Live KinD experiment results #}
     {% include "components/deployments_live_experiments_tab.html" %}
@@ -105,11 +107,11 @@
     {{ raw_json_panel("deployment-raw-json", "Show the DeploymentGraph JSON") }}
 </section>
 
-{# Model validation against kubectl ground truth #}
-<div class="section-header" style="margin-top: var(--space-xl);">
-    <h3 class="section-header__title">How accurate is the model?</h3>
-</div>
-{% include "components/deployments_academic_panel.html" %}
+{# Model validation against kubectl ground truth, collapsed: the numbers belong in the presentation #}
+<details class="show-details accuracy-details">
+    <summary>How accurate is the model?</summary>
+    {% include "components/deployments_academic_panel.html" %}
+</details>
 
 {# Service exposure drill-down #}
 {% include "components/deployments_modal_violation.html" %}
@@ -117,13 +119,13 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.17"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.17"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.18"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.18"></script>
 {% endblock %}

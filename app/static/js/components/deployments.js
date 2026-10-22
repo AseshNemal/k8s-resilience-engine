@@ -81,6 +81,7 @@
         put("evidence-took", ms == null ? "n/a" : `${(ms / 1000).toFixed(2)} s`);
         put("evidence-complete", `${evidence.filter((e) => e.complete).length} of ${evidence.length}`);
         put("evidence-command", `kubectl -n ${body.namespace} get pods -o wide`);
+        put("evidence-line", `namespace ${body.namespace} · read at ${box.querySelector('[data-role="evidence-time"]').textContent}`);
         box.hidden = false;
         // The main-output section names the same snapshot, so the JSON can be matched to what the page shows.
         document.querySelectorAll('[data-role="output-snapshot"]').forEach((n) => { n.textContent = graph.snapshotId || "n/a"; });
