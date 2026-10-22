@@ -91,17 +91,28 @@ window.DeploymentsAcademicWidget = (function () {
         });
 
         renderProof(evaluation);
+
+        // One line: did the model predict the outages of the real node failures? (the cards below)
         const failures = document.querySelector("#academic-panel [data-role='acc-failures']");
         if (failures) {
-            // The whole result in one line: every check, then what the real node failures showed.
-            const total = overall(counts);
-            const allMatched = total.compared > 0 && total.correct === total.compared;
-            failures.textContent = evaluation.failure_experiments
-                ? `${allMatched ? "✅" : "⚠️"} ${total.correct} of ${total.compared} checks matched kubectl · ` +
-                  `${failureRuns(evaluation)} · ${confusion.down_predicted_down ?? 0} outages caught · ` +
-                  `${confusion.down_predicted_up ?? 0} missed · ${confusion.up_predicted_down ?? 0} false alarms`
-                : "No real node failure has been recorded yet.";
-            failures.dataset.tone = allMatched ? "ok" : "warn";
+            const outages = counts.exposure;
+            const allRight = Boolean(outages && outages.compared && outages.correct === outages.compared);
+            const runs = evaluation.failure_experiments || 0;
+            if (!runs) failures.textContent = "No real node failure has been recorded yet.";
+            else if (allRight) failures.textContent = `✅ The model predicted every outage correctly · ${failureRuns(evaluation)} on Bookinfo`;
+            else failures.textContent = `⚠️ ${outages.correct} of ${outages.compared} predictions came true · ${failureRuns(evaluation)}`;
+            failures.dataset.tone = allRight ? "ok" : "warn";
+        }
+
+        // The other checks, which have no picture of their own: one line, the numbers under Show details.
+        const other = document.querySelector("#academic-panel [data-role='acc-other']");
+        if (other) {
+            const parts = ["service_pod", "pod_node", "owner"].map((m) => counts[m]).filter(Boolean);
+            const correct = parts.reduce((n, c) => n + c.correct, 0);
+            const compared = parts.reduce((n, c) => n + c.compared, 0);
+            other.textContent = compared
+                ? `Also checked: which service, node and Deployment each pod belongs to · ${correct} of ${compared} correct`
+                : "";
         }
 
         const latencyEl = document.getElementById("stat-latency-overhead");
@@ -119,12 +130,11 @@ window.DeploymentsAcademicWidget = (function () {
     }
 
     // -----------------------------------------------------------------------------------------------
-    // The proof: one real node failure at a time, the model's prediction next to what Kubernetes showed.
+    // The proof: one card per real node failure, the services the model said would go down next to the
+    // ones that really went down. A card opens to every service of that failure.
     // -----------------------------------------------------------------------------------------------
 
     const shortNode = (node) => String(node).replace(/^.*-(worker\d*|control-plane)$/, "$1");
-    let proofCases = [];
-    let proofIndex = 0;
 
     // The checks of each node failure together, in node order.
     function failureCases(checks) {
@@ -139,62 +149,76 @@ window.DeploymentsAcademicWidget = (function () {
             .map(([node, items]) => ({ node, checks: [...items].sort((a, b) => a.service.localeCompare(b.service)) }));
     }
 
-    function outcomePill(available) {
-        const span = document.createElement("span");
-        span.className = `proof-pill ${available ? "proof-pill--up" : "proof-pill--down"}`;
-        span.textContent = available ? "✅ stays up" : "💥 goes down";
-        return span;
+    function make(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
     }
 
-    function paintProof() {
-        const picker = document.querySelector("#academic-panel [data-role='acc-proof-picker']");
-        const rows = document.querySelector("#academic-panel [data-role='acc-proof-rows']");
-        if (!picker || !rows) return;
-        picker.querySelectorAll("button").forEach((b, i) => {
-            b.classList.toggle("is-active", i === proofIndex);
-            b.setAttribute("aria-pressed", String(i === proofIndex));
-        });
-        const chosen = proofCases[proofIndex];
-        if (!chosen) {
-            rows.replaceChildren();
-            return;
-        }
-        const head = document.createElement("div");
-        head.className = "proof-row proof-row--head";
-        ["Service", "🧩 Model predicted", "🖥️ Kubernetes showed", "Match"].forEach((t) => {
-            const s = document.createElement("span");
-            s.textContent = t;
-            head.appendChild(s);
-        });
-        const body = chosen.checks.map((c) => {
-            const row = document.createElement("div");
+    // The services listed as chips, or "nothing" when none went down.
+    function downList(label, services) {
+        const line = make("div", "proof-line");
+        line.appendChild(make("span", "proof-line__label", label));
+        const chips = make("span", "proof-line__chips");
+        if (services.length) services.forEach((s) => chips.appendChild(make("span", "proof-chip", `💥 ${s}`)));
+        else chips.appendChild(make("span", "proof-none", "nothing"));
+        line.appendChild(chips);
+        return line;
+    }
+
+    function outcomePill(available) {
+        return make("span", `proof-pill ${available ? "proof-pill--up" : "proof-pill--down"}`, available ? "✅ up" : "💥 down");
+    }
+
+    // Opened card: every service of that failure, predicted against observed.
+    function serviceRows(checks) {
+        const box = make("div", "proof-rows");
+        const head = make("div", "proof-row proof-row--head");
+        ["Service", "Model said", "Really", ""].forEach((t) => head.appendChild(make("span", null, t)));
+        box.appendChild(head);
+        checks.forEach((c) => {
             const match = c.predicted_available === c.observed_available;
-            row.className = `proof-row${match ? "" : " proof-row--miss"}`;
-            const name = document.createElement("strong");
-            name.textContent = c.service;
-            const verdict = document.createElement("span");
-            verdict.className = "proof-match";
-            verdict.textContent = match ? "✅" : "❌";
-            row.append(name, outcomePill(c.predicted_available), outcomePill(c.observed_available), verdict);
-            return row;
+            const row = make("div", `proof-row${match ? "" : " proof-row--miss"}`);
+            row.append(make("strong", null, c.service), outcomePill(c.predicted_available), outcomePill(c.observed_available),
+                make("span", "proof-match", match ? "✅" : "❌"));
+            box.appendChild(row);
         });
-        rows.replaceChildren(head, ...body);
+        return box;
+    }
+
+    function proofCard(failure) {
+        const predicted = failure.checks.filter((c) => !c.predicted_available).map((c) => c.service);
+        const observed = failure.checks.filter((c) => !c.observed_available).map((c) => c.service);
+        const allMatch = failure.checks.every((c) => c.predicted_available === c.observed_available);
+
+        const card = make("article", `proof-card${allMatch ? "" : " proof-card--miss"}`);
+        const rows = serviceRows(failure.checks);
+        rows.hidden = true;
+        const more = make("button", "proof-card__more", "Every service ▾");
+        more.type = "button";
+        more.setAttribute("aria-expanded", "false");
+        more.addEventListener("click", () => {
+            rows.hidden = !rows.hidden;
+            card.classList.toggle("is-open", !rows.hidden);
+            more.setAttribute("aria-expanded", String(!rows.hidden));
+            more.textContent = rows.hidden ? "Every service ▾" : "Every service ▴";
+        });
+        card.append(
+            make("h4", "proof-card__title", `💥 ${failure.node.split(", ").map(shortNode).join(" + ")} switched off`),
+            downList("🧩 Model said will go down", predicted),
+            downList("🖥️ Really went down", observed),
+            make("span", "proof-card__verdict", allMatch ? "✅ Prediction came true" : "❌ Prediction was wrong"),
+            more,
+            rows,
+        );
+        return card;
     }
 
     function renderProof(evaluation) {
-        const picker = document.querySelector("#academic-panel [data-role='acc-proof-picker']");
-        if (!picker) return;
-        proofCases = failureCases(evaluation.exposure_checks);
-        proofIndex = 0;
-        picker.replaceChildren(...proofCases.map((c, i) => {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "proof-pick";
-            btn.textContent = `💥 ${c.node.split(", ").map(shortNode).join(" + ")} switched off`;
-            btn.addEventListener("click", () => { proofIndex = i; paintProof(); });
-            return btn;
-        }));
-        paintProof();
+        const box = document.querySelector("#academic-panel [data-role='acc-proof-cards']");
+        if (!box) return;
+        box.replaceChildren(...failureCases(evaluation.exposure_checks).map(proofCard));
     }
 
     function failureRuns(evaluation) {

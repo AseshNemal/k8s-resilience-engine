@@ -4,12 +4,13 @@
 <section class="academic-validation-panel acc" id="academic-panel" aria-label="Model validation against kubectl">
     <p class="acc__summary" data-role="acc-failures">Reading the recorded node failures…</p>
 
-    {# The proof: for each real node failure, what the model predicted next to what Kubernetes then showed #}
+    {# The proof: one card per real node failure, the services the model said would go down next to the ones
+       that really went down. A card opens to every service of that failure. #}
     <section class="proof" data-role="acc-proof" aria-label="Model prediction against what really happened">
-        <h4 class="proof__title">We predicted, then really switched a node off</h4>
-        <div class="proof__picker" role="group" aria-label="Which node failure" data-role="acc-proof-picker"></div>
-        <div class="proof__table" data-role="acc-proof-rows"></div>
+        <div class="proof__cards" data-role="acc-proof-cards"></div>
     </section>
+
+    <p class="acc__other" data-role="acc-other"></p>
 
     <details class="show-details">
         <summary>Show details</summary>

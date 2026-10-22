@@ -1842,49 +1842,55 @@
 /* ---- main output: DeploymentGraph ---- */
 .main-output__desc { margin: 0 0 var(--space-md) 0; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); max-width: 900px; }
 
-/* Accuracy tab: per real node failure, the model's prediction next to what Kubernetes showed */
-.proof { display: flex; flex-direction: column; gap: 12px; padding-top: 14px; border-top: 1px solid var(--c2-border-light); }
-.proof__title { margin: 0; font-size: 1rem; color: var(--c2-text-main); }
-.proof__picker { display: flex; flex-wrap: wrap; gap: 8px; }
-.proof-pick {
-    padding: 7px 14px;
-    border: 1px solid var(--c2-border-light);
-    border-radius: 999px;
-    background: var(--c2-glass-bg);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--c2-text-main);
-    cursor: pointer;
-    transition: var(--c2-transition);
-}
-.proof-pick:hover { border-color: var(--c2-accent-danger); }
-.proof-pick.is-active { background: var(--c2-accent-danger); border-color: var(--c2-accent-danger); color: #fff; }
-.proof-pick:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
-.proof__table { display: flex; flex-direction: column; gap: 6px; }
-.proof-row {
-    display: grid;
-    grid-template-columns: minmax(110px, 1fr) minmax(150px, 1.2fr) minmax(150px, 1.2fr) 60px;
-    align-items: center;
+/* Accuracy tab: one card per real node failure, predicted outages next to the ones that really happened */
+.proof__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-md); align-items: start; }
+.proof-card {
+    display: flex;
+    flex-direction: column;
     gap: 12px;
-    padding: 10px 14px;
+    padding: 16px 18px;
     border: 1px solid var(--c2-border-light);
+    border-top: 4px solid var(--c2-accent-success);
     border-radius: var(--c2-radius-md);
     background: var(--c2-glass-bg);
-    animation: plan-in 0.3s ease both;
+    box-shadow: var(--c2-glass-shadow);
 }
-.proof-row--head { padding-block: 4px; border: 0; background: transparent; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--c2-text-muted); animation: none; }
-.proof-row--miss { border-color: var(--c2-accent-danger); }
-.proof-pill { justify-self: start; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+.proof-card--miss { border-top-color: var(--c2-accent-danger); }
+.proof-card__title { margin: 0; font-size: 1rem; color: var(--c2-text-main); }
+.proof-line { display: flex; flex-direction: column; gap: 6px; }
+.proof-line__label { font-size: 12px; font-weight: 600; color: var(--c2-text-muted); }
+.proof-line__chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; align-items: center; }
+.proof-chip { padding: 4px 12px; border-radius: 999px; background: color-mix(in srgb, var(--c2-accent-danger) 14%, transparent); color: #b91c1c; font-size: 13px; font-weight: 700; }
+.proof-none { font-size: 13px; font-style: italic; color: var(--c2-text-muted); }
+.proof-card__verdict { align-self: flex-start; padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 800; background: color-mix(in srgb, var(--c2-accent-success) 14%, transparent); color: #047857; }
+.proof-card--miss .proof-card__verdict { background: color-mix(in srgb, var(--c2-accent-danger) 14%, transparent); color: #b91c1c; }
+.proof-card__more {
+    align-self: flex-start;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c2-accent-primary-hover);
+    cursor: pointer;
+}
+.proof-card__more:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
+.proof-rows { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px dashed var(--c2-border-light); }
+.proof-rows[hidden] { display: none; }
+.proof-row { display: grid; grid-template-columns: minmax(0, 1.3fr) 1fr 1fr 24px; align-items: center; gap: 6px; font-size: 13px; }
+.proof-row--head { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--c2-text-muted); }
+.proof-row--miss { color: #b91c1c; }
+.proof-pill { justify-self: start; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .proof-pill--up { background: color-mix(in srgb, var(--c2-accent-success) 14%, transparent); color: #047857; }
 .proof-pill--down { background: color-mix(in srgb, var(--c2-accent-danger) 14%, transparent); color: #b91c1c; }
-.proof-match { font-size: 18px; text-align: center; }
-@keyframes plan-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.proof-match { text-align: center; }
+.acc__other { margin: 0; font-size: 13px; color: var(--c2-text-muted); }
+.acc__other:empty { display: none; }
 @media (prefers-color-scheme: dark) {
-    .proof-pill--up { color: #6ee7b7; }
-    .proof-pill--down { color: #fca5a5; }
+    .proof-chip, .proof-pill--down, .proof-card--miss .proof-card__verdict { color: #fca5a5; }
+    .proof-card__verdict, .proof-pill--up { color: #6ee7b7; }
 }
-@media (prefers-reduced-motion: reduce) { .proof-row { animation: none; } }
 
 /* Output tab: inputs -> Component 2 -> DeploymentGraph -> Component 3 */
 .flow {
