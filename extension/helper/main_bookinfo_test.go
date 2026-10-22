@@ -173,18 +173,6 @@ func TestThePlanCommandTakesExactlyOneContextArgument(t *testing.T) {
 	}
 }
 
-func TestThereIsNoApplyOrUndoCommandYet(t *testing.T) {
-	for _, command := range []string{"trace-bookinfo-apply", "trace-bookinfo-undo", "trace-bookinfo-verify"} {
-		code, out, errOut := invokeOn(t, bookinfoCluster(), command, "kind-resilience-research")
-		if code != 2 || out != "" || !strings.HasPrefix(errOut, "usage:") {
-			t.Errorf("%s must not exist yet: code %d stdout %q", command, code, out)
-		}
-	}
-	if !strings.Contains(usageText(t), "trace-bookinfo-plan") {
-		t.Error("the usage line must name the plan command")
-	}
-}
-
 func usageText(t *testing.T) string {
 	t.Helper()
 	_, _, errOut := invokeOn(t, bookinfoCluster(), "bogus")

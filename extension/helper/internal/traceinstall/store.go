@@ -279,3 +279,20 @@ func (s Store) ForContext(contextName string) []ClusterIdentity {
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out
 }
+
+// LatestFor returns the most recently updated valid record saved for a context name, without contacting any cluster.
+// The page uses it to show where a setup stands; Apply, Undo and Verify never use it, because they act only on the
+// record of the cluster they actually reached.
+func (s Store) LatestFor(contextName string) (*Record, error) {
+	var newest *Record
+	for _, id := range s.ForContext(contextName) {
+		rec, err := s.Load(id)
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil && (newest == nil || rec.UpdatedAt > newest.UpdatedAt) {
+			newest = rec
+		}
+	}
+	return newest, nil
+}

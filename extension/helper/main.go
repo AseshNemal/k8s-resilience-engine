@@ -15,6 +15,8 @@
 //	resilience-helper agent-status | agent-enable <context> | agent-disable
 //	resilience-helper trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop
 //	resilience-helper trace-bookinfo-plan <context>      (read-only: previews the Bookinfo tracing setup, changes nothing)
+//	resilience-helper trace-bookinfo-apply | -undo | -verify <context>   (change the cluster only after a native approval; see main_bookinfo.go)
+//	resilience-helper trace-bookinfo-status <context>    (reads the saved record only)
 //	resilience-helper revoke <context>
 //	resilience-helper version
 package main
@@ -59,6 +61,7 @@ func realBookinfo() bookinfotrace.Deps {
 		},
 		GOOS:     runtime.GOOS,
 		ReadFile: os.ReadFile,
+		Getenv:   os.Getenv,
 	}
 }
 
@@ -181,12 +184,17 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		return usage(stderr)
 	}
 	command, rest := args[0], args[1:]
-	needsContext := command == "authorize" || command == "renew" || command == "revoke" || command == "agent-enable" || command == "trace-bookinfo-plan"
+	needsContext := command == "authorize" || command == "renew" || command == "revoke" || command == "agent-enable" || command == "trace-bookinfo-plan" || isBookinfoInstall(command)
 	switch {
 	case needsContext && len(rest) != 1:
 		return usage(stderr)
 	case !needsContext && len(rest) != 0:
 		return usage(stderr)
+	}
+
+	if isBookinfoInstall(command) {
+		emit(stdout, runBookinfoInstall(command, rest[0], deps))
+		return 0
 	}
 
 	if command == "trace-bookinfo-plan" {
@@ -261,6 +269,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-bookinfo-plan <context> | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-bookinfo-plan <context> | trace-bookinfo-apply <context> | trace-bookinfo-undo <context> | trace-bookinfo-verify <context> | trace-bookinfo-status <context> | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
 	return 2
 }
