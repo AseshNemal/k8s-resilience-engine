@@ -1013,21 +1013,23 @@
 .tab-pane__controls[hidden] { display: none; }
 .topo-node.is-failed .topo-node__failed { display: inline-block; }
 
-/* a pod: a coloured disc with the service's initial */
+/* a pod: a coloured pill with its service's name */
 .topo-pod {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px 5px 9px;
+    border-radius: 999px;
     background: hsl(var(--svc-hue) 65% 48%);
     color: #fff;
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 700;
+    white-space: nowrap;
     box-shadow: 0 0 0 3px hsl(var(--svc-hue) 70% 90%);
     transition: var(--c2-transition);
 }
-.topo-pod--notready { background: transparent; color: hsl(var(--svc-hue) 60% 40%); border: 2px dashed hsl(var(--svc-hue) 60% 50%); box-shadow: none; }
+.topo-pod::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.85; }
+.topo-pod--notready { background: transparent; color: hsl(var(--svc-hue) 60% 38%); border: 2px dashed hsl(var(--svc-hue) 60% 50%); box-shadow: none; }
 .topo-pod.is-lost { background: var(--c2-text-muted); box-shadow: none; opacity: 0.45; }
 
 /* the wires */
@@ -1040,7 +1042,7 @@
 .topo.has-focus .topo-wire:not(.is-focus) { opacity: 0.08; }
 .topo.has-focus .topo-wire.is-focus { opacity: 1; stroke-width: 3; }
 .topo-svc.is-focus { box-shadow: 0 0 0 2px hsl(var(--svc-hue) 65% 48%); }
-.topo-pod.is-focus { transform: scale(1.15); }
+.topo-pod.is-focus { transform: scale(1.08); }
 
 @media (prefers-color-scheme: dark) {
     .topo-svc { background: hsl(var(--svc-hue) 35% 18%); border-color: hsl(var(--svc-hue) 35% 32%); }

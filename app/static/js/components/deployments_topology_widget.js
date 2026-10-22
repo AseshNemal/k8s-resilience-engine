@@ -79,7 +79,7 @@ window.DeploymentsTopologyWidget = (function () {
         dot.dataset.node = nodeName;
         dot.style.setProperty("--svc-hue", serviceHue[svcName]);
         dot.title = `Pod: ${pod.name}\nService: ${svcName}\n${pod.ready ? "Ready" : "Not ready"}${pod.node ? `\nNode: ${pod.node}` : ""}`;
-        dot.textContent = svcName.charAt(0).toUpperCase();
+        dot.textContent = svcName;
         return dot;
     }
 
@@ -173,7 +173,7 @@ window.DeploymentsTopologyWidget = (function () {
             const b = pod.getBoundingClientRect();
             const x1 = a.right - box.left;
             const y1 = a.top + a.height / 2 - box.top;
-            const x2 = b.left + b.width / 2 - box.left;
+            const x2 = b.left + 6 - box.left;  // just inside the pod's left edge
             const y2 = b.top + b.height / 2 - box.top;
             const bend = Math.max(40, (x2 - x1) * 0.5);
             const path = document.createElementNS(SVG_NS, "path");
