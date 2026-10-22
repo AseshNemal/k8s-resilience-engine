@@ -460,26 +460,30 @@ def get_manifest_service_detail(service_name: str, namespace: str = "default") -
 # Validation
 # ---------------------------------------------------------------------------------------------
 
+def _pooled_ground_truth():
+    """Every stored kubectl recording under experiments/single-node-failure, pooled by counts
+    (see ground_truth_evaluation)."""
+    from app.engine.deployment_topology_modeling.ground_truth_evaluation import evaluate_recordings, recording_dirs
+    return evaluate_recordings(recording_dirs())
+
+
 def get_academic_accuracy_certificate() -> ModelAccuracyCertificate:
-    """Accuracy against the stored, kubectl-inspected KinD snapshot in
-    experiments/single-node-failure/concentrated-baseline (see ground_truth_evaluation)."""
-    from app.engine.deployment_topology_modeling.ground_truth_evaluation import evaluate_snapshot
-    return evaluate_snapshot().certificate
+    """Accuracy against the stored, kubectl-inspected KinD recordings (pooled)."""
+    return _pooled_ground_truth().certificate
 
 
 def get_ground_truth_evaluation() -> dict[str, Any]:
-    from app.engine.deployment_topology_modeling.ground_truth_evaluation import (
-        KIND_CONCENTRATED_BASELINE,
-        evaluate_snapshot,
-    )
-    evaluation = evaluate_snapshot()
+    pooled = _pooled_ground_truth()
     return {
-        "ground_truth_source": KIND_CONCENTRATED_BASELINE.relative_to(PROJECT_ROOT).as_posix(),
-        "pods_evaluated": evaluation.pods_evaluated,
-        "services_evaluated": evaluation.services_evaluated,
-        "failure_experiments": evaluation.failure_experiments,
-        "certificate": evaluation.certificate.model_dump(),
-        "exposure_checks": evaluation.exposure_checks,
+        "ground_truth_source": ", ".join(r["source"] for r in pooled.recordings),
+        "recordings": pooled.recordings,
+        "pods_evaluated": sum(r["pods"] for r in pooled.recordings),
+        "services_evaluated": sum(r["services"] for r in pooled.recordings),
+        "failure_experiments": sum(r["failure_runs"] for r in pooled.recordings),
+        "counts": {k: {"correct": c, "compared": n} for k, (c, n) in pooled.counts.items()},
+        "exposure_confusion": pooled.confusion,
+        "certificate": pooled.certificate.model_dump(),
+        "exposure_checks": pooled.exposure_checks,
     }
 
 
