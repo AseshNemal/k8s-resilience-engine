@@ -3,26 +3,15 @@
     <div class="tab-pane__header">
         <div>
             <h3 class="tab-pane__title">What happened when we really disrupted the cluster?</h3>
-            <p class="tab-pane__desc">8 real Kubernetes actions, each run 5 times without and with a spread rule. Click a row to see the pods before and after.</p>
+            <p class="tab-pane__desc">The Bookinfo app on a live KinD cluster: 8 real Kubernetes actions, each run 5 times without and with a spread rule. Click a row to see the pods before and after.</p>
         </div>
     </div>
 
-    {# How much was run, counted from the stored results #}
+    {# How much was run for the workload on show, counted from its stored results #}
     <dl class="exp-scale" data-role="live-exp-scale" hidden></dl>
-
-    <div class="workload-switch" role="group" aria-label="Which experiment results to show" data-role="live-exp-workload">
-        <button type="button" class="workload-switch__btn is-active" data-workload="standin" aria-pressed="true">
-            Stand-in pods <span class="workload-switch__sub">controlled test · 80 runs</span>
-        </button>
-        <button type="button" class="workload-switch__btn" data-workload="bookinfo" aria-pressed="false">
-            Bookinfo <span class="workload-switch__sub">real application · 80 runs</span>
-        </button>
-    </div>
 
     {# The strongest finding of the shown workload, generated from its stored runs #}
     <article class="exp-hero" data-role="live-exp-hero" hidden></article>
-
-    <p class="live-exp-headline" data-role="live-exp-headline" hidden></p>
 
     <div class="table-scroll">
         <table class="data-table live-exp-table">
@@ -41,6 +30,18 @@
     <details class="show-details">
         <summary>Show details</summary>
         <div class="show-details__body">
+            <div>
+                <h4 class="show-details__title">Which runs are shown</h4>
+                <p class="live-exp-headline" data-role="live-exp-headline" hidden></p>
+                <div class="workload-switch" role="group" aria-label="Which experiment results to show" data-role="live-exp-workload">
+                    <button type="button" class="workload-switch__btn" data-workload="standin" aria-pressed="false">
+                        Stand-in pods <span class="workload-switch__sub">controlled test · 80 runs</span>
+                    </button>
+                    <button type="button" class="workload-switch__btn is-active" data-workload="bookinfo" aria-pressed="true">
+                        Bookinfo <span class="workload-switch__sub">real application · 80 runs</span>
+                    </button>
+                </div>
+            </div>
             <div>
                 <span class="status-badge status-badge--success">Live cluster observations</span>
                 <span class="status-badge status-badge--muted" data-role="live-exp-target">Target: …</span>

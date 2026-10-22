@@ -1016,7 +1016,7 @@
     display: flex;
     gap: 16px;
     align-items: flex-start;
-    margin: var(--space-lg) 0 0 0;
+    margin: 0 0 var(--space-lg) 0;
     padding: 18px 20px;
     border: 1px solid color-mix(in srgb, var(--hero-tone) 35%, transparent);
     border-radius: var(--c2-radius-md);

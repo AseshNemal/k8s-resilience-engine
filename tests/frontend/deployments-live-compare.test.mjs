@@ -60,11 +60,11 @@ test("the main finding prefers 'rule obeyed, still exposed' and falls back to th
     assert.equal(heroFinding(calm).key, "routine-unchanged");
 });
 
-test("the run count adds up every workload's stored runs", () => {
+test("the run count is the shown workload's own stored runs", () => {
     const { scaleFacts } = window.DeploymentsLiveExperimentsWidget;
     const conds = ["01", "02"].flatMap((id) => ["A-no-rule", "B-spread"].map((config) => ({ scenario_id: id, config, runs: 5 })));
-    const facts = scaleFacts([{ total_runs: 20, conditions: conds }, { total_runs: 20, conditions: conds }]);
-    assert.deepEqual([...facts.map((f) => f.value)], [40, 2, 2, 5, 2]);  // copied out of the vm context
+    const facts = scaleFacts({ total_runs: 20, target_service: "reviews", conditions: conds });
+    assert.deepEqual([...facts.map((f) => f.value)], [20, 2, 2, 5, "reviews"]);  // copied out of the vm context
 });
 
 test("every key finding has a short title and a generated sentence", () => {

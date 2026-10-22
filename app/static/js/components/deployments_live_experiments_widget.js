@@ -183,27 +183,24 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         container.replaceChildren(icon, body);
     }
 
-    // How much was run, across every workload with stored results.
-    function scaleFacts(results) {
-        const conds = results.flatMap((r) => r.conditions);
+    // How much was run for the workload on show, counted from its stored results.
+    function scaleFacts(data) {
+        const conds = data.conditions;
         const scenarios = new Set(conds.map((c) => c.scenario_id)).size;
         const configs = new Set(conds.map((c) => c.config)).size;
         const reps = conds.length ? Math.max(...conds.map((c) => c.runs)) : 0;
         return [
-            { value: results.reduce((n, r) => n + r.total_runs, 0), label: "real runs on a live cluster" },
+            { value: data.total_runs, label: "real runs on a live cluster" },
             { value: scenarios, label: "disruptions" },
             { value: configs, label: "placement configs" },
             { value: reps, label: "repetitions each" },
-            { value: results.length, label: results.length === 1 ? "workload" : "workloads" },
+            { value: data.target_service, label: "target service" },
         ];
     }
 
-    async function renderScale() {
-        const container = document.querySelector("#tab-live-experiments [data-role='live-exp-scale']");
+    function renderScale(container, data) {
         if (!container) return;
-        const results = (await Promise.all(["standin", "bookinfo"].map(fetchResults))).filter((r) => !r.missing);
-        if (!results.length) return;
-        container.replaceChildren(...scaleFacts(results).map((fact) => {
+        container.replaceChildren(...scaleFacts(data).map((fact) => {
             const item = el("div", "exp-scale__item");
             item.append(el("dt", "exp-scale__label", fact.label), el("dd", "exp-scale__value", String(fact.value)));
             return item;
@@ -382,7 +379,10 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         });
     }
 
-    async function load(workload = "standin") {
+    // The page opens on the real Bookinfo runs; the stand-in runs are one switch away under Show details.
+    const DEFAULT_WORKLOAD = "bookinfo";
+
+    async function load(workload = DEFAULT_WORKLOAD) {
         const root = document.getElementById("tab-live-experiments");
         if (!root) return;
         const note = root.querySelector("[data-role='live-exp-note']");
@@ -399,6 +399,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             }
             note.textContent = `${data.evidence_note} Source: ${data.results_source}`;
             if (target) target.textContent = `Target: ${data.target_service}`;
+            renderScale(root.querySelector("[data-role='live-exp-scale']"), data);
             renderHero(root.querySelector("[data-role='live-exp-hero']"), data);
             renderFindings(root.querySelector("[data-role='live-exp-findings']"), data);
             renderSummary(root.querySelector("[data-role='live-exp-summary']"), data);
@@ -664,7 +665,6 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         initWorkloadSwitch();
         load().catch((err) => console.warn("Failed to load live experiment results:", err));
         renderComparison().catch((err) => console.warn("Failed to compare the experiment results:", err));
-        renderScale().catch((err) => console.warn("Failed to count the experiment runs:", err));
         initSimulation();
     }
 
