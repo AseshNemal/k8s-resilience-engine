@@ -68,6 +68,25 @@ def test_example_run_carries_placement_and_concentration(tmp_path):
     assert run["concentration_t1"]["paymentservice"] == {"ratio": pytest.approx(0.6667), "ready_replicas": 3}
 
 
+def test_every_successful_run_is_served_in_repetition_order(tmp_path):
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "results_dir": str(tmp_path), "total_runs": 3,
+        "conditions": [_condition("02_scale_up", "A-no-rule", False)],
+    }), encoding="utf-8")
+    snap = {"reviews": {"ready_replicas": 1, "replica_concentration": 1.0, "pods": [["r0", "w1", True]]}}
+    for rep, failed in ((2, False), (1, False), (3, True)):  # written out of order; run 3 failed
+        (tmp_path / f"02_scale_up__A-no-rule__run{rep}.json").write_text(json.dumps({
+            "repetition": rep, "failed": failed, "action": {"action": "kubectl scale"}, "stable_after_disruption": True,
+            "target_status_t0": "EXPOSED", "target_status_t1": "EXPOSED", "t0": snap, "t1": snap,
+        }), encoding="utf-8")
+
+    condition = service.get_live_experiment_results(tmp_path)["conditions"][0]
+
+    assert [r["repetition"] for r in condition["run_placements"]] == [1, 2]
+    assert condition["example_run"] == condition["run_placements"][0]
+    assert condition["runs"] == 2  # the stored count is not replaced by the list
+
+
 def test_missing_results_return_none(tmp_path):
     assert service.get_live_experiment_results(tmp_path) is None
 

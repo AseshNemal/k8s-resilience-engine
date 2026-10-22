@@ -816,32 +816,33 @@ def get_parametric_ensemble_markdown_report() -> str:
 # Live KinD experiments (stored results; reading them needs no cluster)
 # ---------------------------------------------------------------------------------------------
 
-def _example_run(results_dir: Path, scenario_id: str, config: str) -> dict[str, Any] | None:
-    """Pod placement at T0 and T1 of the first successful stored run of one condition."""
-    for path in sorted(results_dir.glob(f"{scenario_id}__{config}__run*.json")):
-        run = json.loads(path.read_text(encoding="utf-8"))
-        if run.get("failed"):
-            continue
-        pods = lambda snap: {  # noqa: E731
-            svc: [{"name": p[0], "node": p[1], "ready": p[2]} for p in info["pods"]] for svc, info in snap.items()
-        }
-        # Stored by the run (placement_metrics.concentration_ratio); None when a service had no ready replica.
-        concentration = lambda snap: {  # noqa: E731
-            svc: {"ratio": info["replica_concentration"], "ready_replicas": info["ready_replicas"]}
-            for svc, info in snap.items()
-        }
-        return {
-            "repetition": run["repetition"],
-            "action": run["action"],
-            "stable_after_disruption": run["stable_after_disruption"],
-            "target_status_t0": run["target_status_t0"],
-            "target_status_t1": run["target_status_t1"],
-            "t0": pods(run["t0"]),
-            "t1": pods(run["t1"]),
-            "concentration_t0": concentration(run["t0"]),
-            "concentration_t1": concentration(run["t1"]),
-        }
-    return None
+def _run_placement(run: dict[str, Any]) -> dict[str, Any]:
+    """Pod placement at T0 and T1 of one stored run, as stored."""
+    pods = lambda snap: {  # noqa: E731
+        svc: [{"name": p[0], "node": p[1], "ready": p[2]} for p in info["pods"]] for svc, info in snap.items()
+    }
+    # Stored by the run (placement_metrics.concentration_ratio); None when a service had no ready replica.
+    concentration = lambda snap: {  # noqa: E731
+        svc: {"ratio": info["replica_concentration"], "ready_replicas": info["ready_replicas"]}
+        for svc, info in snap.items()
+    }
+    return {
+        "repetition": run["repetition"],
+        "action": run["action"],
+        "stable_after_disruption": run["stable_after_disruption"],
+        "target_status_t0": run["target_status_t0"],
+        "target_status_t1": run["target_status_t1"],
+        "t0": pods(run["t0"]),
+        "t1": pods(run["t1"]),
+        "concentration_t0": concentration(run["t0"]),
+        "concentration_t1": concentration(run["t1"]),
+    }
+
+
+def _condition_runs(results_dir: Path, scenario_id: str, config: str) -> list[dict[str, Any]]:
+    """Every successful stored run of one condition, in repetition order (failed runs are left out)."""
+    runs = [json.loads(p.read_text(encoding="utf-8")) for p in results_dir.glob(f"{scenario_id}__{config}__run*.json")]
+    return [_run_placement(r) for r in sorted(runs, key=lambda r: r["repetition"]) if not r.get("failed")]
 
 
 def _live_evidence_note(workload: str) -> tuple[str, list[str]]:
@@ -892,14 +893,16 @@ def get_live_experiment_results(results_dir: Path | None = None, workload: str =
     if not summary_file.exists():
         return None
     summary = json.loads(summary_file.read_text(encoding="utf-8"))
-    conditions = [
-        {
+    conditions = []
+    for c in summary["conditions"]:
+        # "runs" is already the stored run count, so the placements of every run get their own key.
+        placements = _condition_runs(results_dir, c["scenario_id"], c["config"])
+        conditions.append({
             **c,
             "scenario_name": SCENARIOS_BY_ID[c["scenario_id"]].name if c["scenario_id"] in SCENARIOS_BY_ID else c["scenario_id"],
-            "example_run": _example_run(results_dir, c["scenario_id"], c["config"]),
-        }
-        for c in summary["conditions"]
-    ]
+            "example_run": placements[0] if placements else None,
+            "run_placements": placements,
+        })
     try:
         source = str(results_dir.relative_to(PROJECT_ROOT))
     except ValueError:
