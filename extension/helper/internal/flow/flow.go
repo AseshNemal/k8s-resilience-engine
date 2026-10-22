@@ -88,6 +88,27 @@ type Result struct {
 	Backend      *transport.Status `json:"backend,omitempty"`
 	// Background is the state of the background renewal job: on, off, stale or unsupported.
 	Background string `json:"background,omitempty"`
+	// Trace is set by the trace-service commands only (package tracesvc); every other command leaves it nil.
+	Trace *TraceDetails `json:"trace,omitempty"`
+}
+
+// TraceDetails is what the trace-service commands add to a Result: whether the person turned tracing on, and
+// which addresses were checked. Like the rest of Result it is built from types that cannot hold a credential.
+type TraceDetails struct {
+	Enabled   bool       `json:"enabled"`
+	Endpoints []Endpoint `json:"endpoints,omitempty"`
+}
+
+// Endpoint is one address that was tested. Reachable is nil when the test could not be made: unknown is never
+// reported as reachable or as unreachable. Evidence says what the test really proves: "host" (this computer
+// reached it) or "node" (a Kubernetes node container reached it, which Pods leaving that node share, but which
+// is not the same as a Pod having done so).
+type Endpoint struct {
+	Name      string `json:"name"`
+	Address   string `json:"address"`
+	Reachable *bool  `json:"reachable"`
+	Evidence  string `json:"evidence"`
+	Note      string `json:"note,omitempty"`
 }
 
 type Deps struct {

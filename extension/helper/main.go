@@ -13,7 +13,7 @@
 //	resilience-helper renew-managed
 //	resilience-helper reconnect
 //	resilience-helper agent-status | agent-enable <context> | agent-disable
-//	resilience-helper trace-status | trace-start | trace-stop
+//	resilience-helper trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop
 //	resilience-helper revoke <context>
 //	resilience-helper version
 package main
@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -84,8 +85,24 @@ func realDeps() flow.Deps {
 func realTrace() tracesvc.Deps {
 	home, _ := os.UserHomeDir()
 	client := &http.Client{Timeout: 2 * time.Second}
+	config, err := os.UserConfigDir()
+	if err != nil {
+		config = os.TempDir()
+	}
 	return tracesvc.Deps{
-		Runner: execx.Real{},
+		Runner:   execx.Real{},
+		Store:    tracesvc.FileStore{Path: filepath.Join(config, "resilience-engine", "tracing.json")},
+		Prompter: approve.Default(),
+		Agent:    realAgent(home),
+		// A connection test only: it opens the port and closes it, and sends nothing.
+		Dial: func(ctx context.Context, address string) bool {
+			conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", address)
+			if err != nil {
+				return false
+			}
+			_ = conn.Close()
+			return true
+		},
 		FindDocker: func() (string, error) {
 			return transport.FindDocker(exec.LookPath, os.Stat, runtime.GOOS, home)
 		},
@@ -143,7 +160,12 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 	case "renew":
 		timeout, do = renewTimeout, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Renew(ctx, d, rest[0]) }
 	case "renew-managed":
-		timeout, do = renewTimeout, flow.RenewManaged
+		// The background job runs this. It also keeps the trace service up, but only if the person turned it on.
+		timeout, do = renewTimeout, func(ctx context.Context, d flow.Deps) flow.Result {
+			result := flow.RenewManaged(ctx, d)
+			_ = tracesvc.Ensure(ctx, traceDeps())
+			return result
+		}
 	case "reconnect":
 		timeout, do = renewTimeout, flow.Reconnect
 	case "revoke":
@@ -156,6 +178,13 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		timeout, do = 30*time.Second, flow.DisableBackground
 	case "trace-status":
 		timeout, do = 30*time.Second, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Status(ctx, traceDeps()) }
+	case "trace-enable":
+		// Shows the approval dialog and may pull the image, so it gets the same long limit as a first start.
+		timeout, do = 5*time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Enable(ctx, traceDeps()) }
+	case "trace-ensure":
+		timeout, do = 5*time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Ensure(ctx, traceDeps()) }
+	case "trace-validate":
+		timeout, do = time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Validate(ctx, traceDeps()) }
 	case "trace-start":
 		// The first start may pull the image, so this is the longest of the three.
 		timeout, do = 5*time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Start(ctx, traceDeps()) }
@@ -182,6 +211,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-status | trace-start | trace-stop | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
 	return 2
 }
