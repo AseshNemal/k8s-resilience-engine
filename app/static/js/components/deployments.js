@@ -113,6 +113,46 @@
         );
     }
 
+    // The small picture under each key figure. Services take the colour the topology picture gave them.
+    function renderStatViz(deployment) {
+        const services = deployment.services || [];
+        const nodes = deployment.nodes || [];
+        const shortNode = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
+        const dot = (className, title, hue) => {
+            const span = document.createElement("span");
+            span.className = className;
+            span.title = title;
+            if (hue != null) span.style.setProperty("--svc-hue", hue);
+            return span;
+        };
+        const put = (name, children) => {
+            const box = document.querySelector(`[data-viz="${name}"]`);
+            if (box) box.replaceChildren(...children);
+        };
+        const hueOf = (name) => window.DeploymentsTopologyWidget?.hueOf?.(name);
+
+        put("nodes", nodes.map((n) => dot("viz-node", `${shortNode(n.name)}${n.ready === false ? " (not ready)" : ""}`)));
+        put("services", services.map((s) => dot("viz-svc", s.name, hueOf(s.name) ?? 210)));
+
+        const total = services.reduce((n, s) => n + (s.pods || []).length, 0);
+        const ready = services.reduce((n, s) => n + readyCount(s), 0);
+        const bar = dot("viz-bar", `${ready} of ${total} pods ready`);
+        const fill = dot("viz-bar__fill", "");
+        fill.style.width = total ? `${(ready / total) * 100}%` : "0%";
+        bar.appendChild(fill);
+        put("pods", [bar]);
+
+        const evaluated = services.filter((s) => readyCount(s) > 0);
+        put("exposed", [(() => {
+            const segs = dot("viz-segs", "");
+            evaluated.forEach((s) => {
+                const isExposed = exposedDomains(s).length > 0;
+                segs.appendChild(dot(`viz-seg ${isExposed ? "viz-seg--bad" : "viz-seg--ok"}`, `${s.name}: ${isExposed ? "exposed" : "safe"}`));
+            });
+            return segs;
+        })()]);
+    }
+
     // The sentence at the top of the page, from the same rule as the Exposed services tab.
     function verdictFor(services) {
         const evaluated = services.filter((s) => readyCount(s) > 0);
@@ -193,6 +233,7 @@
                 window.DeploymentsTopologyWidget.renderZoneGrid(deployment);
                 window.DeploymentsTopologyWidget.renderConcentrationPanel(services);
             }
+            renderStatViz(deployment);  // after the topology picture, so the service colours match it
 
             window.DeploymentsDriftWidget?.renderWhatIf(deployment);
 

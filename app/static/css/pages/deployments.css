@@ -935,6 +935,40 @@
     .verdict__stat:nth-child(n + 3) { border-top: 1px solid var(--c2-border-light); }
 }
 
+/* a little colour: a soft wash in the verdict's tone behind the answer */
+.verdict__main { background: linear-gradient(100deg, color-mix(in srgb, var(--verdict-tone) 10%, transparent) 0%, transparent 70%); }
+
+/* each figure has its own colour: the icon, the hover tint and its small picture */
+.verdict__stat { --stat-tone: var(--c2-accent-primary); gap: 4px; padding-block: 12px 14px; }
+.verdict__stat--nodes { --stat-tone: #3b82f6; }
+.verdict__stat--services { --stat-tone: #14b8a6; }
+.verdict__stat--pods { --stat-tone: var(--c2-accent-success); }
+.verdict__stat--exposed { --stat-tone: var(--verdict-tone); }
+.verdict__stat:hover { background: color-mix(in srgb, var(--stat-tone) 7%, transparent); }
+.verdict__stat:hover .verdict__stat-value { transform: translateY(-1px); }
+.verdict__stat-value { transition: transform 0.15s ease; }
+.verdict__stat-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 6px;
+    border-radius: 6px;
+    font-size: 11px;
+    background: color-mix(in srgb, var(--stat-tone) 15%, transparent);
+    vertical-align: -5px;
+}
+.verdict__stat-viz { display: flex; align-self: stretch; align-items: center; gap: 4px; min-height: 10px; flex-wrap: wrap; }
+.viz-node { width: 16px; height: 10px; border-radius: 3px; background: color-mix(in srgb, #3b82f6 70%, transparent); }
+.viz-svc { width: 10px; height: 10px; border-radius: 50%; background: hsl(var(--svc-hue) 65% 50%); }
+.viz-bar { position: relative; width: 100%; max-width: 160px; height: 8px; border-radius: 999px; background: var(--c2-border-light); overflow: hidden; }
+.viz-bar__fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--c2-accent-success); transition: width 0.6s ease; }
+.viz-segs { display: flex; gap: 3px; width: 100%; max-width: 160px; }
+.viz-seg { flex: 1; height: 8px; border-radius: 3px; }
+.viz-seg--bad { background: var(--c2-accent-danger); }
+.viz-seg--ok { background: var(--c2-accent-success); }
+@media (prefers-reduced-motion: reduce) { .viz-bar__fill, .verdict__stat-value { transition: none; } }
+
 /* ---- Topology tab: Service → Pod → Node picture ---- */
 .topo {
     --svc-solid: hsl(var(--svc-hue, 215) 65% 48%);
