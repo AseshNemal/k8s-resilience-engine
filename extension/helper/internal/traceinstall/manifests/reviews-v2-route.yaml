@@ -1,0 +1,40 @@
+# Sends every request for "reviews" to reviews-v2, so each demo trace includes the ratings dependency
+# (productpage -> reviews-v2 -> ratings). Deploying v2 next to v1 is not enough: the reviews Service selects both
+# versions, so without a route about half of the requests would reach reviews-v1, which never calls ratings.
+#
+# Applied to the calling sidecars, so it needs the injection step first. reviews-v1 stays deployed and untouched.
+# FQDN hosts, so the short name "reviews" cannot be read as another namespace's service.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: trace-demo-reviews
+  namespace: bookinfo
+  labels:
+    app.kubernetes.io/managed-by: resilience-tracing
+    resilience.sliit/tracing-setup: bookinfo
+spec:
+  host: reviews.bookinfo.svc.cluster.local
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: trace-demo-reviews
+  namespace: bookinfo
+  labels:
+    app.kubernetes.io/managed-by: resilience-tracing
+    resilience.sliit/tracing-setup: bookinfo
+spec:
+  hosts:
+    - reviews.bookinfo.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: reviews.bookinfo.svc.cluster.local
+            subset: v2

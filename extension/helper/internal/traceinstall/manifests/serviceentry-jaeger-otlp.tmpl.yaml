@@ -1,0 +1,28 @@
+# Tells the sidecars in "bookinfo" where the existing Jaeger container's OTLP gRPC receiver is.
+#
+# This is a TEMPLATE. __JAEGER_OTLP_IPV4__ is never written by hand and never assumed. The extension helper
+# rediscovers it from inside the cluster nodes (the IPv4 address of host.docker.internal) and only uses it after
+# a TCP connection to port 4317 succeeds from every node it asked. Apply checks it again just before applying,
+# and Verify compares it with a fresh rediscovery, so a changed address is reported, not silently trusted.
+# A STATIC address avoids Pod-side DNS and IPv6 answers: the pod network is IPv4 only.
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: trace-demo-jaeger-otlp
+  namespace: bookinfo
+  labels:
+    app.kubernetes.io/managed-by: resilience-tracing
+    resilience.sliit/tracing-setup: bookinfo
+spec:
+  hosts:
+    - jaeger-otlp.tracing.internal
+  exportTo:
+    - "."                      # visible to this namespace only
+  location: MESH_EXTERNAL
+  resolution: STATIC
+  ports:
+    - number: 4317
+      name: grpc-otlp
+      protocol: GRPC
+  endpoints:
+    - address: __JAEGER_OTLP_IPV4__

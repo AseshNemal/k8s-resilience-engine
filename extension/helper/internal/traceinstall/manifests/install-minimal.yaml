@@ -1,0 +1,43 @@
+# Istio 1.31.2, minimal profile: istiod only. No ingress or egress gateway, no CNI plugin, no addons.
+#
+# Rendered and validated offline with istioctl 1.31.2 (see tracing/README.md); never applied by this file alone.
+# It is installed only by the approved Apply step, to the docker-desktop cluster, and removed by Undo.
+#
+# Memory is capped on purpose. istiod's real usage is not published by Istio, so these limits bound the worst
+# case instead of trusting an estimate: istiod 512 Mi, each sidecar 128 Mi. The staged gates in
+# tracing/README.md measure the real usage before the sidecars are added.
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: resilience-tracing-minimal
+  namespace: istio-system
+spec:
+  profile: minimal
+  hub: docker.io/istio        # istio/pilot:1.31.2 and istio/proxyv2:1.31.2 exist for linux/arm64 and linux/amd64
+  tag: 1.31.2
+  components:
+    pilot:
+      k8s:
+        replicaCount: 1
+        resources:
+          requests: { cpu: 50m, memory: 128Mi }
+          limits: { cpu: 500m, memory: 512Mi }
+  values:
+    pilot:
+      autoscaleEnabled: false   # one istiod, never scaled up behind your back
+    global:
+      proxy:
+        resources:
+          requests: { cpu: 10m, memory: 40Mi }
+          limits: { cpu: 200m, memory: 128Mi }
+  meshConfig:
+    # Tracing stays off everywhere until a Telemetry resource names the provider below. The only one this setup
+    # creates is namespace-scoped, in "bookinfo".
+    enableTracing: true
+    extensionProviders:
+      - name: jaeger-otlp
+        opentelemetry:
+          # The host name of the ServiceEntry in tracing/istio/serviceentry-jaeger-otlp.tmpl.yaml, which points at the
+          # Jaeger container already managed by the extension (OTLP over gRPC, port 4317). Istio allows one exporter.
+          service: jaeger-otlp.tracing.internal
+          port: 4317
