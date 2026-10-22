@@ -915,6 +915,35 @@
     .verdict__stats { border-left: 0; border-top: 1px solid var(--c2-border-light); }
 }
 
+/* ---- Exposed services tab: services × nodes spread map ---- */
+.spread-map-wrap {
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-md);
+    background: var(--c2-glass-bg);
+}
+.spread-map { width: 100%; border-collapse: collapse; font-size: 13px; }
+.spread-map th, .spread-map td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--c2-border-light); }
+.spread-map thead th { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--c2-text-muted); font-weight: 600; }
+.spread-map tbody tr:last-child > * { border-bottom: 0; }
+.spread-map__node, .spread-map__cell { text-align: center !important; border-left: 1px dashed var(--c2-border-light); }
+.spread-map__service { font-weight: 700; color: var(--c2-text-main); }
+.spread-map__row--exposed { background: color-mix(in srgb, var(--c2-accent-danger) 7%, transparent); }
+.spread-map__row--exposed .spread-dot { background: var(--c2-accent-danger); }
+.spread-map__row--unavailable { opacity: 0.7; }
+.spread-map__cell { white-space: nowrap; }
+.spread-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin: 0 2px;
+    border-radius: 50%;
+    background: var(--c2-accent-success);
+    vertical-align: middle;
+}
+.spread-dot--notready { background: transparent; border: 2px dashed var(--c2-text-muted); }
+.spread-map__legend { margin: var(--space-sm) 0 var(--space-md) 0; font-size: 12px; color: var(--c2-text-muted); }
+.spread-map__legend .spread-dot { width: 10px; height: 10px; }
+
 /* ---- Experiments tab: how much was run ---- */
 .exp-scale {
     display: grid;

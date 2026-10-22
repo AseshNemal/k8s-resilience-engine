@@ -173,6 +173,8 @@
                 window.DeploymentsTopologyWidget.renderConcentrationPanel(services);
             }
 
+            window.DeploymentsDriftWidget?.renderSpreadMap(deployment);
+
             const rawPanelEl = document.querySelector("#deployment-raw-json");
             if (rawPanelEl) initJsonPanel(rawPanelEl, deployment);
 

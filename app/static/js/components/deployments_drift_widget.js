@@ -70,10 +70,7 @@ window.DeploymentsDriftWidget = (function () {
         if (!container) return;
 
         container.innerHTML = "";
-        if (spofs.length === 0) {
-            container.innerHTML = '<span class="node-card__empty">✅ No exposed services: every service has ready copies on more than one node.</span>';
-            return;
-        }
+        if (spofs.length === 0) return;  // the spread map above already shows every service as safe
 
         spofs.forEach((s) => {
             const item = document.createElement("div");
@@ -101,6 +98,85 @@ window.DeploymentsDriftWidget = (function () {
             });
             container.appendChild(item);
         });
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // Spread map: services × worker nodes, one dot per pod. A row whose ready dots all sit in one
+    // column is exposed. The status is the graph's own (exposedFailureDomains), not recomputed here.
+    // -----------------------------------------------------------------------------------------------
+
+    const PENDING = "__pending__";
+    const shortNode = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
+
+    function spreadMatrix(deployment) {
+        const services = deployment.services || [];
+        const nodes = (deployment.nodes || []).map((n) => n.name);
+        const rows = services.map((svc) => {
+            const cells = {};
+            (svc.pods || []).forEach((pod) => {
+                const key = pod.node || PENDING;
+                const cell = (cells[key] = cells[key] || { ready: 0, notReady: 0 });
+                if (pod.ready) cell.ready++;
+                else cell.notReady++;
+            });
+            const ready = Object.values(cells).reduce((n, c) => n + c.ready, 0);
+            const exposedOn = svc.exposedFailureDomains ?? svc.exposed_failure_domains ?? [];
+            let status = "safe";
+            if (ready === 0) status = "unavailable";
+            else if (exposedOn.length) status = "exposed";
+            return { name: svc.name, cells, ready, status, exposedOn };
+        });
+        // Pods on a node the graph does not list (or on none) still get a column, so no pod disappears.
+        const extra = new Set();
+        rows.forEach((r) => Object.keys(r.cells).forEach((k) => { if (!nodes.includes(k)) extra.add(k); }));
+        const columns = [...nodes, ...[...extra].sort((a, b) => (a === PENDING) - (b === PENDING) || a.localeCompare(b))];
+        const order = { exposed: 0, unavailable: 1, safe: 2 };
+        rows.sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
+        return { columns, rows };
+    }
+
+    const STATUS_TEXT = { safe: "✅ Safe", exposed: "⚠️ Exposed", unavailable: "⛔ No ready replica" };
+    const STATUS_VARIANT = { safe: "success", exposed: "danger", unavailable: "muted" };
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
+    }
+
+    function renderSpreadMap(deployment) {
+        const table = document.querySelector("[data-role='spread-map']");
+        if (!table) return;
+        const { columns, rows } = spreadMatrix(deployment);
+        const head = el("tr");
+        head.appendChild(el("th", null, "Service"));
+        columns.forEach((c) => {
+            const th = el("th", "spread-map__node", c === PENDING ? "⏳ Pending" : `🖥️ ${shortNode(c)}`);
+            th.title = c === PENDING ? "Pods with no node yet" : c;
+            head.appendChild(th);
+        });
+        head.appendChild(el("th", null, "If one node fails"));
+        const body = rows.map((row) => {
+            const tr = el("tr", `spread-map__row spread-map__row--${row.status}`);
+            tr.appendChild(el("th", "spread-map__service", row.name)).scope = "row";
+            columns.forEach((c) => {
+                const cell = row.cells[c] || { ready: 0, notReady: 0 };
+                const td = el("td", "spread-map__cell");
+                for (let i = 0; i < cell.ready; i++) td.appendChild(el("span", "spread-dot"));
+                for (let i = 0; i < cell.notReady; i++) td.appendChild(el("span", "spread-dot spread-dot--notready"));
+                td.title = `${row.name} on ${c === PENDING ? "no node" : c}: ${cell.ready} ready, ${cell.notReady} not ready`;
+                tr.appendChild(td);
+            });
+            const verdict = el("td");
+            const badge = el("span", `status-badge status-badge--no-dot status-badge--${STATUS_VARIANT[row.status]}`, STATUS_TEXT[row.status]);
+            if (row.status === "exposed") badge.title = `Goes down if ${row.exposedOn.join(" or ")} fails`;
+            verdict.appendChild(badge);
+            tr.appendChild(verdict);
+            return tr;
+        });
+        table.querySelector("thead").replaceChildren(head);
+        table.querySelector("tbody").replaceChildren(...body);
     }
 
     const zonePrefix = (zone) => (zone ? "Zone: " + zone + " · " : "");
@@ -139,5 +215,7 @@ window.DeploymentsDriftWidget = (function () {
     return {
         init: init,
         loadDriftSignals: loadDriftSignals,
+        renderSpreadMap: renderSpreadMap,
+        spreadMatrix: spreadMatrix,
     };
 })();

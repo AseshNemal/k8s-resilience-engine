@@ -11,6 +11,15 @@
         </div>
     </div>
 
+    {# Services × worker nodes, one dot per pod: all dots in one column = exposed #}
+    <div class="table-scroll spread-map-wrap">
+        <table class="spread-map" data-role="spread-map">
+            <thead></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    <p class="spread-map__legend"><span class="spread-dot"></span> ready replica &nbsp;·&nbsp; <span class="spread-dot spread-dot--notready"></span> not ready &nbsp;·&nbsp; a service is exposed when every ready dot is in one column</p>
+
     <div class="spof-list" id="spof-workloads-list">
         <!-- Populated by deployments_drift_widget.js -->
     </div>
