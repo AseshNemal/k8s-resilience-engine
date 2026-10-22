@@ -1344,6 +1344,95 @@
 }
 @media (prefers-reduced-motion: reduce) { .conc-meter__fill, .risk-row { transition: none; } }
 
+/* ---- Declared vs live: booked seats (YAML) against filled seats (running pods) ---- */
+.plan {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+    border: 1px solid var(--c2-border-light);
+    border-radius: var(--c2-radius-lg);
+    background: var(--c2-glass-bg);
+    box-shadow: var(--c2-glass-shadow);
+}
+.plan__headline { margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--c2-text-main); text-wrap: balance; }
+.plan__headline[data-tone="danger"] { color: #b91c1c; }
+.plan__source { margin: -6px 0 0 0; font-size: 12px; color: var(--c2-text-muted); }
+.plan__source:empty { display: none; }
+.plan__legend { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--c2-text-muted); }
+.plan__legend .plan-seat { min-width: 18px; height: 18px; padding: 0; font-size: 10px; }
+.plan__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: var(--space-md); align-items: start; }
+
+.plan-card {
+    --tone: var(--c2-accent-success);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+    border: 2px solid color-mix(in srgb, var(--tone) 35%, var(--c2-border-light));
+    border-radius: var(--c2-radius-md);
+    background: color-mix(in srgb, var(--tone) 5%, var(--c2-glass-bg));
+}
+.plan-card--danger { --tone: var(--c2-accent-danger); }
+.plan-card--warn { --tone: var(--c2-accent-warning); }
+.plan-card--muted { --tone: var(--c2-text-muted); }
+.plan-card.is-open { box-shadow: 0 0 0 2px var(--tone); }
+.plan-card__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: var(--c2-text-main);
+    text-align: left;
+    cursor: pointer;
+}
+.plan-card__head::after { content: "▾"; color: var(--c2-text-muted); }
+.plan-card.is-open .plan-card__head::after { content: "▴"; }
+.plan-card__head:focus-visible { outline: 2px solid var(--c2-accent-primary); outline-offset: 2px; }
+.plan-card__name { font-weight: 800; font-size: 1rem; }
+.plan-card__verdict { margin-left: auto; font-size: 13px; font-weight: 800; color: color-mix(in srgb, var(--tone) 80%, var(--c2-text-main)); }
+
+.plan-row { display: grid; grid-template-columns: 120px minmax(0, 1fr) 64px; align-items: center; gap: 10px; }
+.plan-row__label { font-size: 12px; font-weight: 600; color: var(--c2-text-muted); }
+.plan-row__seats { display: flex; flex-wrap: wrap; gap: 6px; }
+.plan-row__count { text-align: right; font-size: 12px; font-weight: 700; color: var(--c2-text-main); font-variant-numeric: tabular-nums; }
+
+/* a seat: one copy */
+.plan-seat {
+    display: inline-grid;
+    place-items: center;
+    min-width: 64px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    animation: plan-seat-in 0.35s ease both;
+}
+.plan-seat--booked { border: 2px dashed var(--c2-text-muted); background: transparent; }
+.plan-seat--ok { background: var(--c2-accent-success); color: #fff; }
+.plan-seat--notready { border: 2px dashed var(--c2-accent-warning); color: #b45309; background: color-mix(in srgb, var(--c2-accent-warning) 10%, transparent); }
+.plan-seat--missing { border: 2px dashed var(--c2-accent-danger); color: var(--c2-accent-danger); background: color-mix(in srgb, var(--c2-accent-danger) 8%, transparent); }
+.plan-seat--extra { background: var(--c2-accent-warning); color: #fff; }
+@keyframes plan-seat-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+.plan-card__rules { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--c2-border-light); }
+.plan-card__rules[hidden] { display: none; }
+.plan-rule { display: inline-flex; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; background: var(--c2-surface-subtle); border: 1px solid var(--c2-border-light); }
+.plan-rule strong { color: var(--c2-text-main); }
+.plan-rule--ok { border-color: color-mix(in srgb, var(--c2-accent-success) 50%, transparent); }
+.plan-rule--danger { border-color: var(--c2-accent-danger); color: #b91c1c; }
+@media (prefers-color-scheme: dark) {
+    .plan__headline[data-tone="danger"] { color: #fca5a5; }
+    .plan-seat--notready { color: #fcd34d; }
+}
+@media (prefers-reduced-motion: reduce) { .plan-seat { animation: none; } }
+
 /* ---- Experiments tab: how much was run ---- */
 .exp-scale {
     display: grid;

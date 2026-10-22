@@ -25,6 +25,12 @@ window.DeploymentsIntentWidget = (function () {
             } else {
                 note.textContent = `The named manifest ${src.path} does not exist, so there is no declared intent to compare.`;
             }
+            const short = document.querySelector("[data-role='plan-source']");
+            if (short) {
+                short.textContent = src.source === "cluster"
+                    ? "📄 The YAML here is the cluster's own Deployment spec (no manifest file found), so a kubectl scale changes both rows."
+                    : `📄 The YAML here is ${src.path}.`;
+            }
         } catch (err) {
             console.warn("Could not load manifest source:", err);
         }
@@ -143,18 +149,135 @@ window.DeploymentsIntentWidget = (function () {
         if (matchEl) {
             matchEl.textContent = comparedCount > 0 ? `${compliantCount} / ${comparedCount}` : "n/a";
         }
+        renderPlanCards(intents, liveMap);
     }
 
-    // The limits and placement-rule columns are shown only while "Show details" is open.
-    function init() {
-        const details = document.querySelector("[data-role='intent-details']");
-        const table = document.querySelector("[data-role='intent-table']");
-        if (!details || !table) return;
-        details.addEventListener("toggle", () => table.classList.toggle("intent-table--all", details.open));
+    // ---------------------------------------------------------------------------------------------
+    // The picture: per service, the copies the YAML asks for (booked seats) and the pods really
+    // running (filled seats). Same matching as the table: declared vs live READY replicas.
+    // ---------------------------------------------------------------------------------------------
+
+    const shortNode = (node) => (node || "no node").replace(/^.*-(worker\d*|control-plane)$/, "$1");
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
     }
+
+    // One seat per position: within what the YAML asks for a seat is ready, not ready or missing;
+    // past it, a running pod is extra.
+    function planSeats(declared, pods) {
+        const live = [...pods.filter((p) => p.ready), ...pods.filter((p) => !p.ready)];
+        const seats = [];
+        for (let i = 0; i < Math.max(declared, live.length); i++) {
+            const pod = live[i];
+            let kind = "missing";
+            if (i >= declared) kind = "extra";
+            else if (pod) kind = pod.ready ? "ok" : "notready";
+            seats.push({ kind, pod });
+        }
+        return seats;
+    }
+
+    function seatEl(seat) {
+        const labels = { ok: shortNode(seat.pod?.node), notready: shortNode(seat.pod?.node), missing: "✕", extra: `+ ${shortNode(seat.pod?.node)}` };
+        const node = el("span", `plan-seat plan-seat--${seat.kind}`, labels[seat.kind]);
+        const titles = {
+            ok: `${seat.pod?.name} is running and ready on ${seat.pod?.node}`,
+            notready: `${seat.pod?.name} exists on ${seat.pod?.node || "no node"} but is not ready`,
+            missing: "The YAML asks for this copy, but no ready pod fills it",
+            extra: `${seat.pod?.name} is running beyond what the YAML asks for`,
+        };
+        node.title = titles[seat.kind];
+        return node;
+    }
+
+    function ruleChip(label, value, tone) {
+        const chip = el("span", `plan-rule plan-rule--${tone}`);
+        chip.append(el("strong", null, label), el("span", null, value));
+        return chip;
+    }
+
+    function planCard(item, live) {
+        const declared = item.expected_replicas ?? item.declared_replicas ?? null;
+        const pods = live && Array.isArray(live.pods) ? live.pods : [];
+        const ready = live ? liveReadyReplicas(live) : null;
+        let tone = "muted";
+        let verdict = "Not observed in the cluster";
+        if (declared != null && ready != null) {
+            const diff = ready - declared;
+            if (diff === 0) { tone = "ok"; verdict = "✓ Matches the YAML"; }
+            else if (diff < 0) { tone = "danger"; verdict = `⚠️ ${-diff} missing`; }
+            else { tone = "warn"; verdict = `➕ ${diff} extra`; }
+        }
+
+        const card = el("article", `plan-card plan-card--${tone}`);
+        const head = el("button", "plan-card__head");
+        head.type = "button";
+        head.setAttribute("aria-expanded", "false");
+        head.append(el("span", "plan-card__name", item.service_name || "unknown"), el("span", "plan-card__verdict", verdict));
+
+        const booked = el("div", "plan-row");
+        booked.append(el("span", "plan-row__label", "📄 YAML asks for"));
+        const bookedSeats = el("span", "plan-row__seats");
+        for (let i = 0; i < (declared ?? 0); i++) bookedSeats.appendChild(el("span", "plan-seat plan-seat--booked"));
+        booked.append(bookedSeats, el("span", "plan-row__count", declared == null ? "n/a" : `${declared}`));
+
+        const running = el("div", "plan-row");
+        running.append(el("span", "plan-row__label", "🖥️ Cluster runs"));
+        const runningSeats = el("span", "plan-row__seats");
+        planSeats(declared ?? 0, pods).forEach((seat) => runningSeats.appendChild(seatEl(seat)));
+        running.append(runningSeats, el("span", "plan-row__count", ready == null ? "n/a" : `${ready} ready`));
+
+        // Declared placement rules, shown when the card is opened.
+        const rules = el("div", "plan-card__rules");
+        const spread = item.spread_constraints?.length > 0;
+        const anti = Boolean(item.pod_anti_affinity_configured);
+        const compliant = item.is_topology_compliant;
+        rules.append(
+            ruleChip("Spread rule", spread ? "declared" : "none", spread ? "ok" : "muted"),
+            ruleChip("Anti-affinity", anti ? "declared" : "none", anti ? "ok" : "muted"),
+            ruleChip("Node affinity", item.has_node_affinity ? "declared" : "none", item.has_node_affinity ? "ok" : "muted"),
+            ruleChip("Rules satisfied", compliant == null ? "nothing to check" : compliant ? "yes" : "no", compliant == null ? "muted" : compliant ? "ok" : "danger"),
+            ruleChip("Limits (info)", limitsText(item), "muted"),
+        );
+        rules.hidden = true;
+        head.addEventListener("click", () => {
+            rules.hidden = !rules.hidden;
+            card.classList.toggle("is-open", !rules.hidden);
+            head.setAttribute("aria-expanded", String(!rules.hidden));
+        });
+
+        card.append(head, booked, running, rules);
+        return { card, tone, name: item.service_name, verdict };
+    }
+
+    function renderPlanCards(intents, liveMap) {
+        const box = document.querySelector("[data-role='plan-cards']");
+        if (!box) return;
+        const cards = intents.map((item) => planCard(item, liveMap[key(item.namespace, item.service_name || "unknown")]));
+        const order = { danger: 0, warn: 1, muted: 2, ok: 3 };
+        cards.sort((a, b) => order[a.tone] - order[b.tone] || String(a.name).localeCompare(String(b.name)));
+        box.replaceChildren(...cards.map((c) => c.card));
+
+        const headline = document.querySelector("[data-role='plan-headline']");
+        if (!headline) return;
+        const differ = cards.filter((c) => c.tone === "danger" || c.tone === "warn");
+        const matched = cards.filter((c) => c.tone === "ok").length;
+        if (!cards.length) headline.textContent = "No declared intent to compare.";
+        else if (!differ.length) headline.textContent = `✅ ${matched} of ${cards.length} services run exactly what the YAML asks for.`;
+        else headline.textContent = `⚠️ ${differ.length} of ${cards.length} services differ from the YAML: ${differ.map((c) => `${c.name} (${c.verdict.replace(/^\S+\s/, "")})`).join(", ")}.`;
+        headline.dataset.tone = differ.length ? "danger" : "ok";
+    }
+
+    // The table under Show details always shows every column; nothing to wire.
+    function init() {}
 
     return {
         init: init,
         loadIntentCompliance: loadIntentCompliance,
+        planSeats: planSeats,
     };
 })();

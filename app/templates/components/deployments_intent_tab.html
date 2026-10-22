@@ -1,33 +1,28 @@
-{# Tab 3: Declared Manifest Intent vs Live Cluster State. One question, one table; the rest is behind "Show details". #}
+{# Tab 3: Declared Manifest Intent vs Live Cluster State, as a picture: the copies the YAML asks for
+   (empty seats) and the pods really running (filled seats), per service. The table is behind "Show details". #}
 <div class="tab-pane" id="tab-intent" role="tabpanel" aria-labelledby="tab-btn-intent" hidden>
     <div class="tab-pane__header">
         <div>
             <h3 class="tab-pane__title">Does the cluster match the YAML?</h3>
-            <p class="tab-pane__desc">Declared = what the YAML asks for. Live = what is really running now.</p>
+            <p class="tab-pane__desc">Like booked seats and the people who came: the YAML books the copies, the cluster shows who is really running.</p>
         </div>
         <div class="compliance-metric-pill" title="Services whose declared ready-replica count equals the live ready count">
             Replica match: <strong id="replica-match-val">n/a</strong>
         </div>
     </div>
 
-    <div class="intent-table-container card card--glass">
-        <table class="intent-table" id="intent-comparison-table" data-role="intent-table">
-            <thead>
-                <tr>
-                    <th>Microservice</th>
-                    <th>Declared Replicas (YAML)</th>
-                    <th>Live Ready Replicas</th>
-                    <th>Result</th>
-                    <th class="intent-col--extra">CPU / Mem Limits (info)</th>
-                    <th class="intent-col--extra">Anti-Affinity</th>
-                    <th class="intent-col--extra">Topology Spread</th>
-                </tr>
-            </thead>
-            <tbody id="intent-table-body">
-                <!-- Populated by deployments_intent_widget.js -->
-            </tbody>
-        </table>
-    </div>
+    <section class="plan" data-role="plan-board" aria-label="Declared copies against running pods, per service">
+        <p class="plan__headline" data-role="plan-headline" aria-live="polite">Reading the declared intent…</p>
+        <p class="plan__source" data-role="plan-source"></p>
+        <p class="plan__legend">
+            <span class="plan-seat plan-seat--booked" aria-hidden="true"></span> asked for in the YAML
+            &nbsp;·&nbsp; <span class="plan-seat plan-seat--ok" aria-hidden="true"></span> running and ready
+            &nbsp;·&nbsp; <span class="plan-seat plan-seat--missing" aria-hidden="true">✕</span> missing
+            &nbsp;·&nbsp; <span class="plan-seat plan-seat--extra" aria-hidden="true">+</span> extra
+            &nbsp;·&nbsp; click a service for its rules
+        </p>
+        <div class="plan__cards" data-role="plan-cards"></div>
+    </section>
 
     <details class="show-details" data-role="intent-details">
         <summary>Show details</summary>
@@ -39,8 +34,27 @@
             <ul class="show-details__notes">
                 <li><strong>Replica drift</strong> = the cluster runs a different number of ready copies than the YAML declares.</li>
                 <li><strong>Placement-rule compliance</strong> = of the services that declare a spread/anti-affinity rule, how many actually satisfy it. No rule declared → nothing to check (n/a).</li>
-                <li>The table now also shows limits and placement rules. Limits are for information only; they do not count towards compliance.</li>
+                <li>Limits are shown for information only; they do not count towards compliance.</li>
             </ul>
+            <h4 class="show-details__title">Table view</h4>
+            <div class="intent-table-container card card--glass">
+                <table class="intent-table intent-table--all" id="intent-comparison-table" data-role="intent-table">
+                    <thead>
+                        <tr>
+                            <th>Microservice</th>
+                            <th>Declared Replicas (YAML)</th>
+                            <th>Live Ready Replicas</th>
+                            <th>Result</th>
+                            <th class="intent-col--extra">CPU / Mem Limits (info)</th>
+                            <th class="intent-col--extra">Anti-Affinity</th>
+                            <th class="intent-col--extra">Topology Spread</th>
+                        </tr>
+                    </thead>
+                    <tbody id="intent-table-body">
+                        <!-- Populated by deployments_intent_widget.js -->
+                    </tbody>
+                </table>
+            </div>
         </div>
     </details>
 </div>
