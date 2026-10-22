@@ -1,6 +1,8 @@
 # Bookinfo tracing setup: Plan, Enable, Verify, Undo
 
-Status: **built and tested against an in-memory cluster; never run against a real cluster.** The configuration lives in
+Status: **built and tested against an in-memory cluster; the installation, traffic and Undo have never been run against a real
+cluster.** (An external audit reported a read-only Plan as ready on `docker-desktop`: zero blockers, Bookinfo 4/4 Ready,
+Jaeger reachable from the nodes. That is a read-only check, not a validation of the install.) The configuration lives in
 `k8s-bookinfo/tracing/` (branch `tracing/prepare-istio-otel`); the extension carries reviewed copies. Nothing has been
 installed, no Pod restarted, and the running extension has not been updated.
 
@@ -15,8 +17,8 @@ the extension already manages. No second Jaeger, no synthetic spans, no change t
 | Plan (read-only), approval fingerprint, gates, downtime disclosure | `extension/helper/internal/bookinfotrace` |
 | Apply, rollback, Undo, Verify, record, pinned `istioctl`, allow-list writer | `extension/helper/internal/traceinstall` |
 | Raw create / UID-guarded delete / label patch (used by nothing else) | `extension/helper/internal/kube` (`RawWriter`) |
-| Commands `trace-bookinfo-plan`, `-apply`, `-undo`, `-verify`, `-status` | `extension/helper/main.go`, `main_bookinfo.go` |
-| Four controls on the Connect page | `extension/ui-src/bookinfo-tracing.js`, `extension/build_ui.py` |
+| Commands `trace-bookinfo-plan`, `-apply`, `-undo`, `-traffic` (each ends in a native dialog, except plan), `-verify` and `-status` (read-only) | `extension/helper/main.go`, `main_bookinfo.go` |
+| Five controls on the Connect page (Plan, Enable Bookinfo tracing, Verify, Run test traffic, Undo) | `extension/ui-src/bookinfo-tracing.js`, `extension/build_ui.py` |
 | Trace verdict incl. which services delivered spans | `app/integrations/tracing/trace_path.py` (`GET /_extension/tracing/trace-path`) |
 | Reviewed manifests (copies, drift-tested) | `traceinstall/manifests/`, `traceinstall/data/istio-objects.json` |
 
@@ -25,15 +27,19 @@ the extension already manages. No second Jaeger, no synthetic spans, no change t
 **Plan** reads the cluster and the host and changes nothing: Kubernetes version (Istio 1.31 supports 1.32 to 1.37), the
 `bookinfo` namespace and its four Deployments Ready, no existing Istio (never touched), no existing injection, the Jaeger
 address re-discovered from inside the nodes and proved by a TCP connection, and memory. Blockers have stable codes; an
-unreadable reading is a blocker, never a pass.
+unreadable reading is a blocker, never a pass. An existing `reviews-v2` is a blocker (`REVIEWS_V2_EXISTS`): its Pod has no
+sidecar and this setup does not restart Pods it did not plan to, so the ratings calls could never be traced. Remove it and
+plan again; the setup creates `reviews-v2` itself, with a sidecar.
 
 **Enable Bookinfo tracing** (Apply):
 
 1. Platform check, plan, **native approval dialog** (cluster, every change in order, the Pods that restart and what is
    unavailable while they do, any download, and that a failed step rolls back what this run created).
 2. The plan is made again and must have the same fingerprint; otherwise the approval is void and nothing is changed.
-3. Without touching the cluster: `istioctl` 1.31.2 is fetched if absent (see below), the Istio objects are rendered
-   offline and must equal the reviewed list of 32 exactly, the documents are prepared.
+3. Without touching the cluster: `istioctl` 1.31.2 is fetched if absent (see below) and the Istio objects are rendered
+   offline. The render must have exactly the reviewed **content digest** (a SHA-256 over every field of all 32 objects,
+   compiled into the helper and shown in the dialog), not merely the reviewed names; anything else is refused. The
+   digest is stored in the record and checked once more right before the first write.
 4. The record is written (installation ID, cluster identity, baseline, snapshot, full planned inventory) **before** the
    first write.
 5. Stage 1: namespace `istio-system`, then the 32 Istio objects in dependency order, wait for istiod, **memory gate 1**
@@ -50,17 +56,33 @@ Any failed step, gate, timeout, cancellation or Ctrl+C **rolls back what this ru
 cancelled with the run). If rollback cannot finish, the record stays, says what remains, and Apply refuses until Undo has
 finished it.
 
-**Verify**: re-discovers the Jaeger address and compares it with the `ServiceEntry` (drift is reported and nothing is
-sent), requires a Ready sidecar on ratings, details, productpage and reviews-v2, checks memory, runs the temporary client
-Pod inside the mesh (60 real requests to `productpage`; it makes no span and never talks to Jaeger) and deletes it again,
-also on failure or cancellation. The page then reads Jaeger (`trace-path`) and says **Verified** only when one trace holds
-`productpage->details`, `productpage->reviews` and `reviews->ratings` and no `reviews-v1` span is seen. The same answer
+**Verify** is read-only. It creates nothing, asks nothing and does not even touch the saved record. It re-discovers the
+Jaeger address and compares it with the `ServiceEntry` (drift is reported), confirms every created object is still the one
+this run created, requires a Ready sidecar on ratings, details, productpage and reviews-v2, and reports memory. It is a
+check of **readiness**, not of traces: it passes before any traffic exists. The page also shows whatever traces Jaeger
+already holds (one read, no waiting) and says **Verified** only for a trace verdict of `VERIFIED`.
+
+**Run test traffic** is a separate operation with its own native dialog. The dialog names the one temporary Pod
+(`trace-demo-client`, image `curlimages/curl:8.23.0`, memory limit 32 MiB plus a sidecar), the 60 real requests to
+`productpage` and that the Pod is deleted afterwards. It runs the read-only checks first (nothing is asked if the setup is
+unhealthy or memory is tight), checks again after you approve, creates the Pod, waits for it to finish, and deletes it again,
+also on failure, cancellation or a kill (Undo removes a leftover from the record). The Pod makes no span itself and never
+talks to Jaeger. Only a run that really sent requests makes the page wait for Jaeger: it reads `trace-path` until a trace
+holds `productpage->details`, `productpage->reviews` and `reviews->ratings` and no `reviews-v1` span is seen. The same answer
 lists which of the four services delivered spans: a span of `ratings` in Jaeger was exported by the ratings Pod's own
-sidecar, so it shows that Pod reached Jaeger. A node-level connection test cannot show that.
+sidecar, so it shows that Pod reached Jaeger. A node-level connection test cannot show that. If the traces never become
+linked the page reports them as partial; it never says "Verified" for less.
+
+**Verify after Undo** is the cleanup check, also read-only: the cluster is read again and compared with the snapshot taken
+before the setup (namespace labels, Deployment spec digests, replicas, containers per Pod, so no sidecar is left), and every
+object this installation created must be gone. An object of the same name without this installation's label belongs to
+someone else and is not counted. An unreadable cluster is not a pass.
 
 **Undo**: dialog, then in this order: client Pod, route, `reviews-v2` (only if this run created it), **injection label**,
 the sidecar Pods recreated without sidecars (waiting until each workload is Ready again), `Telemetry`, `ServiceEntry`,
-then Istio in reverse creation order (webhooks first, namespace last). The label comes off before Istio goes because the
+then the Istio objects this setup created, in reverse creation order (webhooks first, namespace last). It does **not** run
+`istioctl uninstall --purge`, which would remove an Istio the setup did not install: a definition (CRD) that any Istio
+resource still uses, or a namespace holding anything this setup did not create, is kept and reported. The label comes off before Istio goes because the
 injection webhook fails closed. If the label or a workload cannot be restored, Istio is left in place and the remainder
 is reported. Finally the cluster is compared with the snapshot taken before (namespace labels, Deployment spec digests,
 replicas, containers per Pod): the result must be identical.
@@ -81,7 +103,8 @@ measured**; the setup waits up to 5 minutes per Pod before it rolls back.
   (`KUBECONFIG` points at a missing file, `HOME` at a scratch directory, clean environment).
 * The cluster must be a verified local cluster (kind or Docker Desktop, loopback address, every node reporting a kind
   provider ID); anything else is refused without contact.
-* Writes exist only in `traceinstall`, and only `Guard` calls them (source-scan test). `Guard` allows: the reviewed
+* Writes exist only in `traceinstall`, and only `Guard` calls them (source-scan test). The old, separate allow-list in the
+  planning package was deleted so that two lists cannot disagree. `Guard` allows: the reviewed
   inventory (exact kind, namespace and name), creates labelled with the management label and this installation's ID,
   deletes that carry the recorded UID (the API server refuses a mismatch), Pods the approved plan named (or sidecar Pods
   of the three restarted workloads), and the `istio-injection` label on `bookinfo` only. There is no generic patch.
@@ -131,6 +154,9 @@ the existing connection flow.
 | Cluster-admin credential kept or leaked | in memory for one command; not in the record, outputs, `istioctl`'s environment, or logs; no token requests; no RBAC created | boundary tests (no client/kubeconfig/token code in the package), secret scans of outputs and record, `TestNoClusterTextReachesAnyOutcome...` |
 | Page or backend triggers a change | a native dialog the page cannot see; the page passes only a command name and a context that is matched against the real kubeconfig | helper tests: decline/timeout/no-dialog change nothing |
 | Stale approval | fingerprint of the exact plan, re-planned after approval | `TestAnApprovalIsVoid...` |
+| A different render under the same names | content digest of all 32 objects, shown, recorded, checked at render time and before the first write | render-content tests, opt-in real-`istioctl` test |
+| Creating a Pod under the install approval | none: Verify is read-only; the test Pod has its own dialog, is re-checked after approval and always deleted | verify and traffic tests, source scan of `Verify` |
+| Two helpers both taking a stale lock | takeover under a claim, re-checking the very file judged stale | lock regression test |
 | Writes outside the intended set | `Guard` allow-list, labels, UID preconditions, only Guard writes | guard and source-scan tests |
 | Deleting someone else's object | ownership = installation label **and** recorded UID; mismatches are left alone | Undo ownership tests |
 | Deleting someone else's Istio resources/CRDs/namespace | CRDs kept while any custom resource exists (or cannot be listed); namespace kept if it holds anything not created by istiod or this run; Plan refuses an existing Istio | Undo keep-tests |
@@ -143,9 +169,9 @@ the existing connection flow.
 
 **Residual risks (not controlled, stated plainly):**
 
-1. The *content* of the rendered Istio objects (for example istiod's ClusterRole rules) is whatever the pinned, checksummed
-   `istioctl` renders; names, kinds and count are enforced, but a digest of the rendered content is not pinned. Pin one
-   per platform after the first successful run.
+1. The reviewed content digest (`ReviewedRenderDigest`) was recorded from the darwin/arm64 `istioctl` render and checked
+   against the real binary. Whether the Windows and Linux binaries render byte-for-byte the same objects is **not
+   verified**. If one does not, the setup refuses before any write; the new digest must then be reviewed and recorded.
 2. Container images are pinned by tag (`istio/pilot:1.31.2`, `istio/proxyv2:1.31.2`, `curlimages/curl:8.23.0`,
    `registry.istio.io/release/examples-bookinfo-reviews-v2:1.20.3`), not by digest.
 3. Anyone able to run as you can alter your record, your kubeconfig, or the helper.
@@ -164,15 +190,22 @@ the existing connection flow.
 
 ## First demonstration (not done yet)
 
-1. Docker Desktop with Kubernetes running; Bookinfo Ready (`bookinfo` namespace, four Deployments, one replica each).
+Sequence: **Plan -> Enable Bookinfo tracing -> Verify (readiness) -> Run test traffic -> Verify (traces) -> Undo -> Verify
+(cleanup)**.
+
+1. Docker Desktop with Kubernetes running; Bookinfo Ready (`bookinfo` namespace, four Deployments, one replica each, no
+   `reviews-v2`).
 2. Update the extension (`./scripts/extension-manage.sh update`; Windows `scripts\extension-manage.cmd update`) so the new
-   helper and page are installed. This replaces the running extension.
+   helper and page are installed. This replaces the running extension and needs your go-ahead.
 3. Connect page: the Tracing service card running (Jaeger answers on 16686/4317/4318). Close heavy applications first.
 4. Bookinfo card -> **Plan**. Read blockers, downtime and the Jaeger address. Fix anything blocking.
 5. **Enable Bookinfo tracing** -> read the system dialog -> approve. First run downloads `istioctl` and pulls images:
    expect several minutes. Progress lines come from the saved record.
-6. **Verify**. Expect "Verified" with edges and all four services listed; open Jaeger at http://localhost:16686.
-7. **Undo** when finished (or to repeat); it ends with a comparison against the snapshot.
+6. **Verify**: every sidecar ready, address unchanged. No traces are expected yet.
+7. **Run test traffic** -> read its own dialog -> approve. Expect "Verified" with the edges and all four services listed;
+   open Jaeger at http://localhost:16686 to look at the traces yourself.
+8. **Undo** when finished (or to repeat); it ends with a comparison against the snapshot.
+9. **Verify** again: the cleanup check.
 
 If anything goes wrong the setup removes what it created; if the page or Docker Desktop is closed mid-way, reopen it and
 press Undo.
@@ -181,5 +214,6 @@ press Undo.
 
 Go: table tests of a failure at each of the 42 writes, a kill before and after each, a kill at each write of Undo, ownership
 and keep rules, gates and monitoring, `istioctl` handling, record integrity, command wiring, boundary scans, and
-cross-compilation. Python: embedded manifests identical to `k8s-bookinfo/tracing`, reviews-v2 identical to the original,
+cross-compilation, the content digest, the Verify / test-traffic split and the cleanup check, and the stale-lock race.
+Python: embedded manifests identical to `k8s-bookinfo/tracing`, reviews-v2 identical to the original,
 the trace verdict and services. Node: the controls, flows and field whitelist.

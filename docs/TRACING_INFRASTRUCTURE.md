@@ -118,6 +118,19 @@ The page can ask the helper for exactly these, with no argument. All print one J
 
 The background job runs `renew-managed` every 15 minutes, which now also runs `trace-ensure`.
 
+The Bookinfo tracing setup adds commands that take **one argument, the kubeconfig context**, and nothing else from the page.
+They work only on a verified local cluster and use your own kubeconfig inside the helper for that one command. Design,
+order of operations and security review: [BOOKINFO_TRACING_SETUP.md](BOOKINFO_TRACING_SETUP.md).
+
+| Command | Asks the person? | Effect |
+| --- | --- | --- |
+| `trace-bookinfo-plan <context>` | no | Reads the cluster and the host; changes nothing |
+| `trace-bookinfo-apply <context>` | **yes**, native dialog | Installs Istio 1.31.2 (no gateways) and sidecar tracing for Bookinfo; rolls back what it created if a step or a memory gate fails |
+| `trace-bookinfo-verify <context>` | no | **Read-only** readiness check (sidecars ready, Jaeger address unchanged); after Undo it checks the cleanup instead. Creates nothing |
+| `trace-bookinfo-traffic <context>` | **yes**, its own native dialog | Creates one temporary Pod that sends 60 real requests to `productpage`, then deletes it |
+| `trace-bookinfo-undo <context>` | **yes**, native dialog | Removes only what the recorded setup created, and compares the cluster with the snapshot taken before |
+| `trace-bookinfo-status <context>` | no | Reads the saved record only (no cluster contact) |
+
 ## Staying up
 
 * The container is created with `--restart unless-stopped`, so Docker Desktop brings it back when it restarts.
@@ -173,9 +186,10 @@ reports spans. They do not make an application emit traces by themselves.
 
 ## Bookinfo benchmark: investigation
 
-**Status: investigation only. Nothing was changed, installed or started.** The `kind-bookinfo-demo` cluster was
-not running (connection refused), so everything below comes from your `k8s-bookinfo` repository's files, not from a
-live cluster. Anything marked *unverified* needs checking before it is relied on.
+**Status: option A below was chosen and has been built** (Plan, Enable, Verify, Run test traffic, Undo; see
+[BOOKINFO_TRACING_SETUP.md](BOOKINFO_TRACING_SETUP.md)). It has been exercised only against an in-memory cluster, not yet on a real
+one. This section is kept as the reasoning behind the choice. It was written from your `k8s-bookinfo` repository's files
+when the `kind-bookinfo-demo` cluster was not running, so statements marked *unverified* were true of that moment only.
 
 ### What the sample does today
 
@@ -189,7 +203,8 @@ live cluster. Anything marked *unverified* needs checking before it is relied on
   `OTEL_EXPORTER_OTLP_ENDPOINT` alone produces nothing. (This is the source in the repo; the running image was not
   inspected.)
 * `demo-profile-no-gateways.yaml` is an `IstioOperator` profile, which suggests Istio is how the benchmark cluster
-  is meant to run. *Unverified*: whether Istio is installed, which version, and whether sidecars are injected.
+  is meant to run. *Unverified at the time*: whether Istio was installed. (The setup's Plan now refuses to proceed if any Istio
+  is present, so it never touches an existing one.)
 
 ### Options
 
@@ -204,23 +219,23 @@ no image changes. It still has to be checked against the Istio version actually 
 configuration keys for tracing providers have changed between releases. If Istio is not installed, A means
 installing it, which is exactly the kind of change that must not happen silently.
 
-### What a one-click version would have to be (not built)
+### What was built (option A)
 
-1. **Preview**: show the exact objects (the mesh-config change, `Telemetry`, `ServiceEntry`) as YAML, and which
-   Pods would restart, before anything else.
-2. **Approval**: a native dialog listing those objects; nothing without it. Approval of tracing in general does not
-   cover this.
-3. **Scope**: create or patch exactly the previewed objects, nothing else; record what was changed so it can be reverted.
-4. **Verify**: afterwards the card's own check, real traces under `<service>.<namespace>` names, is the only proof.
+The requirements listed here earlier were: a preview of the exact objects and the Pods that restart; a native approval
+that lists them; creation of exactly the previewed objects and a record of what was created so it can be reverted; and
+verification by real traces under `<service>.<namespace>` names as the only proof. They are implemented as:
 
-It is not built because (a) the extension's cluster access is read-only by design, and giving it write access to
-mesh configuration is a decision for you; (b) the Istio version and state on your cluster are unknown; and (c)
-option A's reachability depends on the receiver test above, which cannot be run until the cluster is up.
+1. **Plan** (read-only) with blockers and the downtime of each restarted Pod.
+2. **Enable Bookinfo tracing**: a native dialog that lists every change, the downtime and the rollback consent; the
+   approval is bound to the exact plan and to the exact content of the rendered Istio objects (a compiled-in digest).
+3. A durable record bound to the cluster's identity, written before the first write; every delete is by recorded UID.
+4. **Verify** checks readiness and never creates anything. **Run test traffic** is a separate, separately approved
+   operation. Only traces Jaeger really received count as evidence, and "Verified" requires linked
+   `productpage->details`, `productpage->reviews` and `reviews->ratings` spans with no `reviews-v1` span.
+5. **Undo** removes only what the record lists, then **Verify** checks the cleanup against the snapshot.
 
-### Next step you could take
-
-Start `kind-bookinfo-demo`, open the Connect page, **Enable tracing**, run **Check connections**, and see whether the
-nodes reach the receiver. That single result decides whether option A is viable on your setup.
+An existing `reviews-v2` blocks the plan (`REVIEWS_V2_EXISTS`), because its Pod has no sidecar and the ratings calls
+could not be traced. The extension's read-only credential is unchanged.
 
 ## What was and was not verified
 
@@ -228,6 +243,10 @@ nodes reach the receiver. That single result decides whether option A is viable 
   stop-as-disable, address checks and the node-evidence labelling (against a fake Docker); the backend state
   machine, matching rule and read-only routes (against a fake Jaeger); the page logic and wording; that the
   tracing package imports no engine, cannot write, and has no seeding.
+* Verified by automated tests (in-memory cluster, fakes): the Bookinfo setup's approval gating, content digest, rollback
+  after a failure at every write, recovery after a kill at every write, ownership-safe Undo, the read-only Verify and the
+  test-traffic cleanup. **Not verified on a real cluster:** creating the Istio objects, a Pod reaching Jaeger through the
+  `ServiceEntry`, the memory gates' readings, and Windows and Linux hosts (see BOOKINFO_TRACING_SETUP.md).
 * **Not verified on a real machine:** the native approval dialog for this command, the real container start, the
   LaunchAgent running `trace-ensure`, `host.docker.internal` from the nodes, and the card in Docker Desktop. The
   Windows and Linux background jobs have never been run on those systems (as for the existing renewal job).
