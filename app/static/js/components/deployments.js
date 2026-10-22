@@ -82,6 +82,11 @@
         put("evidence-complete", `${evidence.filter((e) => e.complete).length} of ${evidence.length}`);
         put("evidence-command", `kubectl -n ${body.namespace} get pods -o wide`);
         box.hidden = false;
+        // The main-output section names the same snapshot, so the JSON can be matched to what the page shows.
+        document.querySelectorAll('[data-role="output-snapshot"]').forEach((n) => { n.textContent = graph.snapshotId || "n/a"; });
+        document.querySelectorAll('[data-role="output-time"]').forEach((n) => {
+            n.textContent = box.querySelector('[data-role="evidence-time"]').textContent;
+        });
     }
 
     const readyCount = (s) => s.readyReplicas ?? s.ready_replicas ?? (s.pods ? s.pods.filter((p) => p.ready).length : 0);

@@ -969,3 +969,6 @@
 .evidence-box__grid dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-muted); }
 .evidence-box__grid dd { margin: 2px 0 0 0; font-size: 13px; }
 .evidence-box__verify { margin: 10px 0 0 0; font-size: 12px; color: var(--color-text-muted); }
+
+/* ---- main output: DeploymentGraph ---- */
+.main-output__desc { margin: 0 0 var(--space-md) 0; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); max-width: 900px; }
