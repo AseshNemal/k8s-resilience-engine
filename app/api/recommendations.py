@@ -12,6 +12,8 @@ from app.engine.recommendation_evaluation_validation.approval import (
     PreconditionError,
     has_verified_provenance,
 )
+from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
+from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
 from app.engine.recommendation_evaluation_validation.live_pipeline import build_live_recommendation
 from app.shared.evidence_errors import EvidenceError, unavailable
 from app.core.config import get_settings
@@ -131,6 +133,38 @@ def read_live_recommendation(
     response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
     response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
     return live.report
+
+
+@router.get("/context")
+def read_recommendation_context(
+    namespace: str | None = Query(None, description="Application namespace; default: the only one with applications"),
+    workflow_id: str | None = Query(None, description="Frozen workflow; default: the only one that applies"),
+) -> dict:
+    """Which application and frozen workflow the page can use, and which evidence is missing, and what to do.
+
+    Read-only and always answers: a missing piece of evidence is the answer, not an error. It lists the approved
+    frozen workflows and whether each applies to the application's services; it builds none of them.
+    """
+    return build_recommendation_context(namespace, workflow_id)
+
+
+@router.get(
+    "/live/detail",
+    responses={409: {"description": "No recommendation has been generated from live evidence"}},
+)
+def read_live_recommendation_detail(
+    response: Response,
+    provider: Callable[[], LiveRecommendation] = Depends(get_recommendation_provider),
+) -> dict:
+    """The live recommendation with what the page shows for each candidate: root cause, the change, feasibility and
+    why, current placement, predicted before and after, cost, ranking and whether it may be put to approval.
+
+    Same inputs and same coded errors as ``/live``. Everything in it was computed by the engine; nothing is applied.
+    """
+    live = provider()
+    response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
+    response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
+    return describe_live_recommendation(live)
 
 
 @router.get(

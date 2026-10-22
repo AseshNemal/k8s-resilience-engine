@@ -165,6 +165,20 @@ class _Combinations(NamedTuple):
     outcomes: dict[str, _Outcome]
     feasibility: dict[str, Any]
     evidence: dict[str, Any]
+    details: dict[str, Any]
+
+
+def _dump(graph) -> dict[str, Any] | None:
+    """A DeploymentGraph as its contract JSON, or None when there is none."""
+    return graph.model_dump(by_alias=True) if graph is not None else None
+
+
+def _current_placement(deployment, service_name: str) -> list[dict[str, Any]]:
+    """Where the service's pods run now, exactly as the live topology reports it."""
+    service = next((s for s in deployment.services if s.name == service_name), None)
+    if service is None:
+        return []
+    return [{"pod": pod.name, "node": pod.node, "ready": pod.ready} for pod in service.pods]
 
 
 def _evaluate_combinations(
@@ -181,6 +195,7 @@ def _evaluate_combinations(
     candidates: list[EvaluatedCandidate] = []
     outcomes: dict[str, _Outcome] = {}
     feasibility: dict[str, Any] = {}
+    details: dict[str, Any] = {}
     entries: dict[str, Any] = {}
     for first, second in plan.pairs:
         result = combine_pair(deployment, first, second, scheduling_evidence)
@@ -217,6 +232,13 @@ def _evaluate_combinations(
 
         costs = [singles[m.id].cost for m in (first, second)]
         coverage = min(singles[m.id].confidence for m in (first, second))
+        details[combo_id] = {
+            "rootCause": "Two individually verified changes that reduce the blast radius only together.",
+            "services": list(result.services), "members": list(result.members),
+            "currentPlacement": {svc: _current_placement(deployment, svc) for svc in result.services},
+            "simulatedDeployment": _dump(simulation.simulated_deployment),
+            "podsToRecreate": list(simulation.pods_to_recreate),
+        }
         outcomes[combo_id] = _Outcome(
             COMBINATION, simulation.service, True, after.blast_radius,
             round(before.blast_radius - after.blast_radius, 2), coverage, _highest_cost(costs))
@@ -236,7 +258,7 @@ def _evaluate_combinations(
         "rolloutTime": ROLLOUT_TIME,
         "scope": "The final state of the two changes together, as one logical proposal; nothing is applied.",
         "entries": entries,
-    })
+    }, details)
 
 
 def build_live_recommendation(
@@ -271,6 +293,7 @@ def build_live_recommendation(
     evaluated: list[EvaluatedCandidate] = []
     outcomes: dict[str, _Outcome] = {}
     members: list[Member] = []
+    candidate_details: dict[str, Any] = {}
     singles_after: dict[str, ImpactSnapshot | None] = {}
     ready_replicas: dict[str, int] = {}
     for spec in generate_candidates(CandidateContextBuilder.build(deployment, before)):
@@ -299,6 +322,16 @@ def build_live_recommendation(
         service = next((svc for svc in deployment.services if svc.name == spec.service), None)
         ready_replicas[spec.service] = sum(1 for pod in service.pods if pod.ready) if service else 0
         singles_after[candidate_id] = after_snapshot
+        candidate_details[candidate_id] = {
+            "rootCause": spec.reason,
+            "service": spec.service,
+            "feasibilityReason": simulated.feasibility_reason,
+            "declaredReplicas": service.declared_replicas if service else None,
+            "readyReplicas": ready_replicas[spec.service],
+            "currentPlacement": {spec.service: _current_placement(deployment, spec.service)},
+            "simulatedDeployment": _dump(simulated.simulated_deployment) if simulated.feasible else None,
+            "podsToRecreate": list(simulated.pods_to_recreate),
+        }
         if simulated.feasible:      # verified individually, even when it improves nothing on its own
             members.append(Member(id=candidate_id, service=spec.service, feasibility=simulated.feasibility))
         evaluated.append(EvaluatedCandidate(
@@ -313,6 +346,7 @@ def build_live_recommendation(
     evaluated += combos.candidates
     outcomes.update(combos.outcomes)
     feasibility.update(combos.feasibility)
+    candidate_details.update(combos.details)
 
     weights = RankingWeights()
     ranked = rank_candidates(evaluated, weights)
@@ -363,4 +397,7 @@ def build_live_recommendation(
         "combinations": combos.evidence,
         "isPrediction": True,
     }
-    return LiveRecommendation(report=report, evidence=evidence)
+    return LiveRecommendation(
+        report=report, evidence=evidence,
+        details={"currentDeployment": _dump(deployment), "candidates": candidate_details},
+    )

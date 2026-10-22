@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -33,6 +33,10 @@ class LiveRecommendation:
 
     report: RecommendationReport
     evidence: dict[str, Any]
+    # What the Recommendations page shows beside the report (root cause, current and simulated placement, ...).
+    # It is display detail only: it is never stored with an approval and is not part of the proposal fingerprint,
+    # so adding to it cannot change what an approval is bound to. Approvals read ``evidence`` and nothing else.
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 def has_verified_provenance(approval: "ApprovalModel") -> bool:
