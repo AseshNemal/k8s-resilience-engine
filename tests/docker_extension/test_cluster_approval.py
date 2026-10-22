@@ -7,7 +7,6 @@ reloads, backend restarts and the background renewal job. As in the other extens
 authorization check is stubbed.
 """
 
-import fcntl
 import io
 import json
 import logging
@@ -23,6 +22,13 @@ from extension.asgi import app
 
 from .test_cluster_connection import TOKEN_MARKER, kubeconfig
 from .test_cluster_managed import HELPER_SERVER, fresh_token, managed_put
+
+try:  # Windows has no fcntl (and no Unix file modes): the tests that need them skip there
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
+
+UNIX_ONLY = pytest.mark.skipif(os.name == "nt", reason="Windows has no fcntl locks or Unix file modes")
 
 CONTEXT = "docker-desktop"
 IDENTITY = {"server": "127.0.0.1:50345", "caSha256": "ab" * 32}
@@ -62,6 +68,7 @@ def test_nothing_is_approved_until_a_person_authorizes(client):
     assert status(client) == {"connected": False}
 
 
+@UNIX_ONLY
 def test_the_record_is_private_and_holds_no_credential(client, tmp_path):
     install(client, token=TOKEN_MARKER + ".x.y")
 
@@ -226,6 +233,7 @@ def hold_the_connection_lock(tmp_path):
     return handle
 
 
+@UNIX_ONLY
 def test_a_second_connection_attempt_is_refused_at_once_while_one_is_running(client, tmp_path):
     import time
 
@@ -242,6 +250,7 @@ def test_a_second_connection_attempt_is_refused_at_once_while_one_is_running(cli
     assert not (tmp_path / "kube" / "config").exists()
 
 
+@UNIX_ONLY
 def test_the_lock_file_is_private_and_is_released_after_a_success_and_after_a_refusal(client, tmp_path):
     assert install(client).status_code == 200
     assert stat.S_IMODE(os.stat(tmp_path / "kube" / ".connect.lock").st_mode) == 0o600
@@ -250,6 +259,7 @@ def test_the_lock_file_is_private_and_is_released_after_a_success_and_after_a_re
     handle.close()
 
 
+@UNIX_ONLY
 def test_a_disconnect_waits_for_a_running_attempt_only_a_short_while_then_says_so(client, tmp_path, monkeypatch):
     install(client)
     monkeypatch.setattr(cc, "DISCONNECT_WAIT_SECONDS", 0.2)
