@@ -46,6 +46,17 @@ added on top of the existing sample APIs.
 - `app/static/css/pages/recommendations.css`
 - `tests/recommendation_evaluation_validation/`
 
+## Tracing infrastructure — shared, independent of Members 1–4
+
+A read-only layer that provides a trace service and its health to any component; it analyses no traces and builds no
+graph. See `docs/TRACING_INFRASTRUCTURE.md`. Member 1 may read from it as a trace source; Members 2–4 do not depend on it.
+
+- `app/integrations/tracing/`
+- `extension/tracing_routes.py`
+- `extension/ui-src/tracing-panel.js`, `extension/ui-src/trace-service.js`
+- `extension/helper/internal/tracesvc/`
+- `tests/tracing/`, `tests/docker_extension/test_tracing_routes.py`
+
 ## Shared files — require team review before changing
 
 - `app/main.py`
