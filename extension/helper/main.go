@@ -14,6 +14,7 @@
 //	resilience-helper reconnect
 //	resilience-helper agent-status | agent-enable <context> | agent-disable
 //	resilience-helper trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop
+//	resilience-helper trace-bookinfo-plan <context>      (read-only: previews the Bookinfo tracing setup, changes nothing)
 //	resilience-helper revoke <context>
 //	resilience-helper version
 package main
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"resilience-engine/helper/internal/approve"
+	"resilience-engine/helper/internal/bookinfotrace"
 	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/execx"
 	"resilience-engine/helper/internal/flow"
@@ -43,6 +45,47 @@ const version = "0.1.0"
 
 // traceDeps is replaced in tests so no test ever reaches Docker or the network.
 var traceDeps = realTrace
+
+// bookinfoDeps is the host's side of the Bookinfo tracing plan: Docker, to read memory and the cluster nodes, and
+// the swap figure. Replaced in tests.
+var bookinfoDeps = realBookinfo
+
+func realBookinfo() bookinfotrace.Deps {
+	home, _ := os.UserHomeDir()
+	return bookinfotrace.Deps{
+		Runner: execx.Real{},
+		FindDocker: func() (string, error) {
+			return transport.FindDocker(exec.LookPath, os.Stat, runtime.GOOS, home)
+		},
+		GOOS:     runtime.GOOS,
+		ReadFile: os.ReadFile,
+	}
+}
+
+// planOutput is what trace-bookinfo-plan prints: the usual Result plus the plan. Like every Result it has no field
+// that can carry a credential.
+type planOutput struct {
+	flow.Result
+	Plan *bookinfotrace.PlanResult `json:"plan,omitempty"`
+}
+
+// bookinfoPlan previews the Bookinfo tracing setup. It only reads: the cluster is reached through a read-only view
+// and nothing here asks the person, creates, changes or deletes anything.
+func bookinfoPlan(ctx context.Context, d flow.Deps, name string) planOutput {
+	const command = "trace-bookinfo-plan"
+	reader, contextName, refusal := flow.ReadOnlyCluster(ctx, d, command, name)
+	if refusal != nil {
+		return planOutput{Result: *refusal}
+	}
+	plan := bookinfotrace.Plan(ctx, bookinfoDeps(), reader, contextName)
+	result := flow.Result{OK: plan.Ready, Command: command, Context: contextName}
+	if plan.Ready {
+		result.State, result.Message = "bookinfo-plan-ready", "Nothing has been changed. This is the exact plan."
+	} else {
+		result.State, result.Message = "bookinfo-plan-blocked", "The setup is blocked for the reasons listed. Nothing has been changed."
+	}
+	return planOutput{Result: result, Plan: &plan}
+}
 
 // Deadlines. Docker Desktop on a busy machine can need 30 seconds for a single `docker exec`, and one
 // renewal makes several Docker and cluster calls, so a short limit turns "slow" into "never renews".
@@ -138,12 +181,19 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		return usage(stderr)
 	}
 	command, rest := args[0], args[1:]
-	needsContext := command == "authorize" || command == "renew" || command == "revoke" || command == "agent-enable"
+	needsContext := command == "authorize" || command == "renew" || command == "revoke" || command == "agent-enable" || command == "trace-bookinfo-plan"
 	switch {
 	case needsContext && len(rest) != 1:
 		return usage(stderr)
 	case !needsContext && len(rest) != 0:
 		return usage(stderr)
+	}
+
+	if command == "trace-bookinfo-plan" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		emit(stdout, bookinfoPlan(ctx, deps(), rest[0]))
+		return 0
 	}
 
 	var (
@@ -211,6 +261,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-bookinfo-plan <context> | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
 	return 2
 }

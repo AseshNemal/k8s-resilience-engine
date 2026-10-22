@@ -1,0 +1,161 @@
+package bookinfotrace
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+
+	"resilience-engine/helper/internal/kube"
+)
+
+// Blocker is a reason the setup must not start. Code is stable for the page; Message is fixed wording.
+type Blocker struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// PlanResult is the whole preview. Ready is true only when there is nothing blocking AND every reading that decides
+// safety was actually taken.
+type PlanResult struct {
+	Ready             bool         `json:"ready"`
+	Context           string       `json:"context"`
+	IstioVersion      string       `json:"istioVersion"`
+	KubernetesVersion string       `json:"kubernetesVersion"`
+	Blockers          []Blocker    `json:"blockers"`
+	Warnings          []string     `json:"warnings"`
+	Preview           []Change     `json:"preview"`
+	Restarts          []string     `json:"restarts"`
+	Jaeger            *Address     `json:"jaeger"`
+	Baseline          Measurements `json:"baseline"`
+	Gate0             Decision     `json:"gate0"`
+}
+
+func (p *PlanResult) block(code, format string, args ...any) {
+	p.Blockers = append(p.Blockers, Blocker{Code: code, Message: fmt.Sprintf(format, args...)})
+}
+
+func hasSidecar(containers []string) bool {
+	for _, c := range containers {
+		if c == "istio-proxy" {
+			return true
+		}
+	}
+	return false
+}
+
+// podsToRecreate picks the live Pods of the workloads that need a sidecar, in a fixed order.
+func podsToRecreate(f Facts) []string {
+	var names []string
+	for _, w := range Contract.RecreatedWorkloads {
+		for _, p := range f.Pods {
+			if p.App == w.App && p.Version == w.Version {
+				names = append(names, p.Name)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// BuildPlan is pure: it turns facts and readings into a preview and the reasons to stop. addrErr is the reason the
+// Jaeger address could not be discovered and validated (nil when addr is set).
+func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, contextName string) PlanResult {
+	c := Contract
+	p := PlanResult{Context: contextName, IstioVersion: c.IstioVersion, KubernetesVersion: f.ServerVersion, Baseline: baseline, Jaeger: addr,
+		Blockers: []Blocker{}, Warnings: []string{}}
+
+	switch {
+	case f.KubernetesMinor == 0:
+		p.block("KUBERNETES_VERSION_UNKNOWN", "The cluster's Kubernetes version could not be read, so compatibility with Istio %s cannot be confirmed.", c.IstioVersion)
+	case f.KubernetesMinor < c.SupportedKubernetesMinors.Min || f.KubernetesMinor > c.SupportedKubernetesMinors.Max:
+		p.block("KUBERNETES_VERSION_UNSUPPORTED", "Istio %s supports Kubernetes 1.%d to 1.%d; this cluster is %s.", c.IstioVersion,
+			c.SupportedKubernetesMinors.Min, c.SupportedKubernetesMinors.Max, f.ServerVersion)
+	}
+
+	if !f.NamespaceExists {
+		p.block("BOOKINFO_NAMESPACE_MISSING", "The %s namespace does not exist, so there is no benchmark to trace.", c.Namespace)
+	}
+	if f.IstioNamespaceExists || len(f.IstioCRDs) > 0 {
+		p.block("ISTIO_ALREADY_PRESENT", "Istio is already installed in this cluster (%s namespace or Istio CRDs found). This setup never touches an existing Istio.", c.IstioNamespace)
+	}
+	if _, ok := f.NamespaceLabels["istio-injection"]; ok {
+		p.block("NAMESPACE_ALREADY_INJECTED", "The %s namespace already has an istio-injection label.", c.Namespace)
+	}
+	if _, ok := f.NamespaceLabels["istio.io/rev"]; ok {
+		p.block("NAMESPACE_ALREADY_INJECTED", "The %s namespace already has an istio.io/rev label.", c.Namespace)
+	}
+
+	var missing, notReady []string
+	for _, name := range c.RequiredWorkloads {
+		d, ok := f.Deployments[name]
+		switch {
+		case !ok:
+			missing = append(missing, name)
+		case d.Replicas == nil || d.ReadyReplicas == nil || *d.ReadyReplicas < *d.Replicas || *d.Replicas == 0:
+			notReady = append(notReady, name) // unknown readiness is not ready
+		}
+	}
+	if len(missing) > 0 {
+		p.block("REQUIRED_WORKLOAD_MISSING", "These Bookinfo Deployments are missing: %s.", strings.Join(missing, ", "))
+	}
+	if len(notReady) > 0 {
+		p.block("WORKLOAD_NOT_READY", "These Deployments are not fully Ready (or their state is unknown): %s. The setup does not start on an unhealthy baseline.", strings.Join(notReady, ", "))
+	}
+	for _, pod := range f.Pods {
+		if hasSidecar(pod.Containers) {
+			p.block("NAMESPACE_ALREADY_INJECTED", "Pod %s already has a sidecar.", pod.Name)
+			break
+		}
+	}
+
+	recreate := podsToRecreate(f)
+	if len(recreate) != len(c.RecreatedWorkloads) {
+		p.block("WORKLOAD_NOT_READY", "Expected one Pod each for %d workloads to recreate, found %d.", len(c.RecreatedWorkloads), len(recreate))
+	}
+	p.Restarts = recreate
+
+	address := ""
+	switch {
+	case addrErr != nil:
+		p.block("JAEGER_ADDRESS_UNAVAILABLE", "The Jaeger receiver could not be validated from the cluster: %s.", addrErr.Error())
+	case addr == nil:
+		p.block("JAEGER_ADDRESS_UNAVAILABLE", "The Jaeger receiver address was not discovered.")
+	default:
+		address = addr.IPv4
+	}
+
+	p.Gate0 = Evaluate(Gate0, baseline, baseline, DefaultThresholds())
+	if !p.Gate0.Proceed {
+		for _, reason := range p.Gate0.Reasons {
+			p.block("RESOURCES_NOT_SAFE", "%s.", reason)
+		}
+	}
+	if baseline.SwapUsedMiB != nil && *baseline.SwapUsedMiB > 2048 {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("This computer is already using %.0f MiB of swap. The setup is gated on how much more it swaps, but close other applications first.", *baseline.SwapUsedMiB))
+	}
+
+	_, v2 := f.Deployments[c.CreatedFromOriginal.Name]
+	if v2 {
+		p.Warnings = append(p.Warnings, "reviews-v2 is already deployed. It is left as it is and Undo will not remove it.")
+	}
+	p.Preview = Steps(StepInputs{JaegerIPv4: address, PodsToRecreate: recreate, ReviewsV2Exists: v2})
+	p.Ready = len(p.Blockers) == 0
+	return p
+}
+
+// Plan reads, measures and rediscovers, and changes nothing: the cluster is only reachable through a kube.Reader.
+func Plan(ctx context.Context, d Deps, r kube.Reader, contextName string) PlanResult {
+	facts, err := Gather(ctx, r)
+	if err != nil {
+		p := PlanResult{Context: contextName, IstioVersion: Contract.IstioVersion, Blockers: []Blocker{}, Warnings: []string{}, Preview: []Change{}}
+		p.block("CLUSTER_READ_FAILED", "The cluster could not be read completely, so nothing can be planned.")
+		return p
+	}
+	var addr *Address
+	found, addrErr := RediscoverJaegerOTLP(ctx, d)
+	if addrErr == nil {
+		addr = &found
+	}
+	return BuildPlan(facts, addr, addrErr, Measure(ctx, d), contextName)
+}
