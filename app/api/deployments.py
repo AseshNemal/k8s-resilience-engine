@@ -709,11 +709,14 @@ def get_accuracy_certificate() -> Dict[str, Any]:
 @router.get(
     "/benchmarks/ground-truth",
     tags=[TAG_BENCHMARKS],
-    summary="[Validation] Model output vs kubectl ground truth for the stored KinD snapshot",
+    summary="[Validation] Model output vs kubectl ground truth for the stored KinD recordings",
 )
-def get_ground_truth_report() -> Dict[str, Any]:
+def get_ground_truth_report(
+    recordings: Optional[str] = Query(
+        None, description="Only the recordings whose folder name starts with this, e.g. bookinfo-exp; all when omitted"),
+) -> Dict[str, Any]:
     """Accuracies with their sample sizes and the per-failure exposure checks."""
-    return get_ground_truth_evaluation()
+    return get_ground_truth_evaluation(recordings)
 
 
 @router.get(

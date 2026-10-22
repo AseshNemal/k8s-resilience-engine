@@ -485,11 +485,18 @@ def get_manifest_service_detail(service_name: str, namespace: str = "default") -
 # Validation
 # ---------------------------------------------------------------------------------------------
 
-def _pooled_ground_truth():
-    """Every stored kubectl recording under experiments/single-node-failure, pooled by counts
-    (see ground_truth_evaluation)."""
-    from app.engine.deployment_topology_modeling.ground_truth_evaluation import evaluate_recordings, recording_dirs
-    return evaluate_recordings(recording_dirs())
+def _pooled_ground_truth(recordings: str | None = None):
+    """The stored kubectl recordings under experiments/single-node-failure, pooled by counts (see
+    ground_truth_evaluation). `recordings` keeps only the experiment folders whose name starts with it."""
+    from app.engine.deployment_topology_modeling.ground_truth_evaluation import (
+        GROUND_TRUTH_ROOT,
+        evaluate_recordings,
+        recording_dirs,
+    )
+    dirs = recording_dirs()
+    if recordings:
+        dirs = [d for d in dirs if d.relative_to(GROUND_TRUTH_ROOT).parts[0].startswith(recordings)]
+    return evaluate_recordings(dirs)
 
 
 def get_academic_accuracy_certificate() -> ModelAccuracyCertificate:
@@ -497,8 +504,8 @@ def get_academic_accuracy_certificate() -> ModelAccuracyCertificate:
     return _pooled_ground_truth().certificate
 
 
-def get_ground_truth_evaluation() -> dict[str, Any]:
-    pooled = _pooled_ground_truth()
+def get_ground_truth_evaluation(recordings: str | None = None) -> dict[str, Any]:
+    pooled = _pooled_ground_truth(recordings)
     return {
         "ground_truth_source": ", ".join(r["source"] for r in pooled.recordings),
         "recordings": pooled.recordings,

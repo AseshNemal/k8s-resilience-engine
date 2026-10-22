@@ -68,6 +68,17 @@ def test_ground_truth_endpoint_reports_sample_sizes(client):
         "down_predicted_down": 4, "down_predicted_up": 0, "up_predicted_up": 9, "up_predicted_down": 0}
 
 
+def test_the_bookinfo_recordings_can_be_shown_on_their_own(client):
+    data = client.get("/api/deployments/benchmarks/ground-truth", params={"recordings": "bookinfo-exp"}).json()
+    assert all("bookinfo-exp" in r["source"] for r in data["recordings"])
+    assert (data["pods_evaluated"], data["failure_experiments"]) == (24, 3)
+    assert data["counts"]["exposure"] == {"correct": 12, "compared": 12}
+    assert data["counts"]["owner"] == {"correct": 24, "compared": 24}
+    assert data["exposure_confusion"] == {
+        "down_predicted_down": 3, "down_predicted_up": 0, "up_predicted_up": 9, "up_predicted_down": 0}
+    assert {c["service"] for c in data["exposure_checks"]} == {"details", "productpage", "ratings", "reviews"}
+
+
 def test_the_baseline_recording_alone_is_unchanged():
     from app.engine.deployment_topology_modeling.ground_truth_evaluation import (
         KIND_CONCENTRATED_BASELINE, evaluate_snapshot)
