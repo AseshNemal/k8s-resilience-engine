@@ -88,8 +88,14 @@ class LiveSource:
         evidence = dict(LIVE_EVIDENCE)
         evidence["ranking"] = {"candidates": {
             c.id: {"id": c.id, "rank": 1 if c.feasible else None, "score": c.score if c.feasible else None,
-                   "excluded": None if c.feasible else "INSUFFICIENT_EVIDENCE"}
+                   "excluded": None if c.feasible else "INSUFFICIENT_EVIDENCE",
+                   "components": {"blastBefore": 100.0, "blastAfter": 0.0}}
             for c in self.report.recommendations}}
+        # The plan the evaluation proposes, which an approval is bound to.
+        evidence["feasibility"] = {
+            c.id: {"status": "FEASIBLE", "placement": {f"{c.id}-0": "n1", f"{c.id}-1": "n2"}, "podsToRecreate": [f"{c.id}-1"],
+                   "constraintsDigest": "digest-a"}
+            for c in self.report.recommendations if c.feasible}
         return LiveRecommendation(report=self.report, evidence=evidence)
 
 

@@ -18,6 +18,7 @@ from app.api.recommendations import get_current_evaluator, get_recommendation_pr
 from app.core.database import get_engine
 from app.engine.recommendation_evaluation_validation.approval import (
     LIVE_EVIDENCE_SOURCE,
+    proposal_fingerprint,
     ApprovalModel,
     ApprovalRepository,
     ApprovalService,
@@ -44,6 +45,14 @@ class Spec:
     score: float | None = 0.0
     feasible: bool = True
     excluded: str | None = None
+    plan: str = "a"                 # which placement the evaluation proposes; a different value is a different plan
+    constraints: str = "a"          # the digest of the scheduling constraints the verdict was reached under
+    blast_after: float = 0.0
+    members: tuple[str, ...] = ()   # for a combination
+
+
+def plan_of(spec: Spec) -> dict:
+    return {f"{spec.id}-0": f"node-{spec.plan}-1", f"{spec.id}-1": f"node-{spec.plan}-2"}
 
 
 class Source:
@@ -53,6 +62,7 @@ class Source:
         self.specs: list[Spec] = []
         self.selected: str | None = None
         self.with_ranking = True
+        self.with_plan = True
         self.provenance_extra: dict = {}
         self.evaluations = 0
 
@@ -73,8 +83,16 @@ class Source:
                     "workflowId": "wf1", "namespace": "shop", "failedNode": "w1"} | self.provenance_extra
         if self.with_ranking:
             evidence["ranking"] = {"formulaVersion": "1", "candidates": {
-                s.id: {"id": s.id, "rank": s.rank, "score": s.score if s.rank else None, "excluded": s.excluded}
+                s.id: {"id": s.id, "rank": s.rank, "score": s.score if s.rank else None, "excluded": s.excluded,
+                       "components": {"blastBefore": 100.0, "blastAfter": s.blast_after}}
                 for s in self.specs}}
+        if self.with_plan:
+            evidence["feasibility"] = {s.id: {"status": "FEASIBLE" if s.feasible else "INSUFFICIENT_EVIDENCE",
+                                              "placement": plan_of(s) if s.feasible else {},
+                                              "podsToRecreate": [f"{s.id}-1"] if s.feasible else [],
+                                              "constraintsDigest": f"digest-{s.constraints}"}
+                                       for s in self.specs}
+            evidence["combinations"] = {"entries": {s.id: {"members": list(s.members)} for s in self.specs if s.members}}
         return LiveRecommendation(report=report, evidence=evidence)
 
 
@@ -224,10 +242,13 @@ def test_the_justification_length_is_configurable():
     pending = MagicMock()
     pending.status = ApprovalStatus.PENDING_APPROVAL
     pending.proposal_version = "v1"
-    pending.evaluation_snapshot = {"provenance": {"source": LIVE_EVIDENCE_SOURCE}}
+    current = Source().set(TOP, SECOND)()
+    pending.evaluation_snapshot = {"provenance": {"source": LIVE_EVIDENCE_SOURCE},
+                                   "proposal": {"fingerprint": proposal_fingerprint(current, "second"), "yamlSha256": None}}
+    pending.yaml_snapshot = None
     repository = MagicMock(spec=ApprovalRepository)
     repository.get_by_recommendation_id.return_value = pending
-    evaluate = lambda approval: Source().set(TOP, SECOND)()      # noqa: E731
+    evaluate = lambda approval: current      # noqa: E731
 
     with pytest.raises(PreconditionError):
         ApprovalService(repository, min_justification_chars=30).approve("second", "v1", "short reason", evaluate=evaluate)
@@ -274,14 +295,19 @@ def test_a_record_written_before_the_gate_is_judged_by_the_current_evaluation_no
     assert status_of(client, "idle") == "PENDING_APPROVAL"
 
 
-def test_a_record_written_before_the_gate_can_be_approved_when_it_is_currently_eligible(client, source, session):
+def test_a_record_written_before_the_gate_is_refused_even_when_its_candidate_is_currently_eligible(client, source, session):
+    # Eligibility now is not enough: nothing says this request was made for the proposal that is current, so it is
+    # refused as predating the binding and has to be requested again.
     ApprovalRepository(session).save(ApprovalModel(
         id=0, recommendation_id="top", proposal_version="v1", status=ApprovalStatus.PENDING_APPROVAL,
         requested_at=datetime.now(timezone.utc), requested_by="developer", recommendation_snapshot={"id": "top"},
         evaluation_snapshot={"provenance": {
             "source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop", "failedNode": "w1"}}))
 
-    assert decide(client, "top").status_code == 200
+    response = decide(client, "top")
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "APPROVAL_PROPOSAL_STALE"
+    assert status_of(client, "top") == "PENDING_APPROVAL"
 
 
 def test_a_verified_record_that_does_not_say_what_to_re_evaluate_cannot_be_approved(client, source, session):
@@ -363,17 +389,25 @@ def test_without_a_current_evaluation_the_service_fails_closed():
 
 # --- the eligibility rule itself, on malformed evidence -------------------------------------------------
 
-def live_with(entry, *, score=0.8, selected="c", feasible=True, extra_entries=None):
+PLAN = {"status": "FEASIBLE", "placement": {"c-0": "n1", "c-1": "n2"}, "podsToRecreate": ["c-1"],
+        "constraintsDigest": "digest-a"}
+COMPONENTS = {"blastBefore": 100.0, "blastAfter": 0.0}
+
+
+def live_with(entry, *, score=0.8, selected="c", feasible=True, extra_entries=None, plan=PLAN, kind="TOPOLOGY_SPREAD"):
     report = RecommendationReport(
         workflow_id="wf", selected_recommendation_id=selected,
-        recommendations=[RecommendationCandidate(id="c", type="TOPOLOGY_SPREAD", service="c", feasible=feasible,
+        recommendations=[RecommendationCandidate(id="c", type=kind, service="c", feasible=feasible,
                                                  predicted_blast_radius=0.0, risk_reduction=0.0, resource_cost="LOW",
                                                  confidence=1.0, score=score)])
     candidates = {"c": entry} | (extra_entries or {})
-    return LiveRecommendation(report=report, evidence={"ranking": {"candidates": candidates}})
+    evidence = {"ranking": {"candidates": candidates}, "failedNode": "w1"}
+    if plan is not None:
+        evidence["feasibility"] = {"c": plan}
+    return LiveRecommendation(report=report, evidence=evidence)
 
 
-GOOD = {"id": "c", "rank": 1, "score": 0.8, "excluded": None}
+GOOD = {"id": "c", "rank": 1, "score": 0.8, "excluded": None, "components": COMPONENTS}
 
 
 def test_a_well_formed_top_ranked_candidate_is_eligible_and_selected():
@@ -432,9 +466,275 @@ def test_missing_or_malformed_ranking_evidence_is_never_eligible(evidence):
 
 
 def test_a_ranked_candidate_that_is_not_first_is_eligible_but_not_selected():
-    live = live_with({"id": "c", "rank": 2, "score": 0.8, "excluded": None}, selected="top",
+    live = live_with({"id": "c", "rank": 2, "score": 0.8, "excluded": None, "components": COMPONENTS}, selected="top",
                      extra_entries={"top": {"id": "top", "rank": 1, "score": 0.9, "excluded": None}})
 
     standing = evaluate_eligibility(live, "c")
 
     assert standing.eligible and not standing.is_selected and standing.selected_recommendation_id == "top"
+
+
+# --- an approval is bound to the exact proposal: identity, plan and predicted effect ---------------------------------
+
+def fingerprint(**changes):
+    plan = dict(PLAN)
+    components = dict(COMPONENTS)
+    evidence_changes = {}
+    for key, value in changes.items():
+        if key == "placement":
+            plan["placement"] = value
+        elif key == "constraintsDigest":
+            plan["constraintsDigest"] = value
+        elif key == "recreate":
+            plan["podsToRecreate"] = value
+        elif key in components:
+            components[key] = value
+        else:
+            evidence_changes[key] = value
+    live = live_with(dict(GOOD, components=components), plan=plan)
+    live.evidence.update(evidence_changes)
+    return proposal_fingerprint(live, "c")
+
+
+def test_the_fingerprint_is_stable_for_the_same_proposal():
+    assert fingerprint() == fingerprint() and len(fingerprint()) == 64
+
+
+@pytest.mark.parametrize("change", [
+    {"placement": {"c-0": "n1", "c-1": "n3"}},                  # a pod would go to a different node
+    {"placement": {"c-0": "n1", "c-1": "n2", "c-2": "n3"}},     # another pod is part of the plan
+    {"recreate": ["c-0", "c-1"]},                               # a different set of pods changes node
+    {"blastAfter": 25.0},                                       # a different predicted effect
+    {"blastBefore": 50.0},
+    {"failedNode": "w2"},                                       # assessed against a different failure
+    {"constraintsDigest": "digest-b"},                          # the scheduling constraints it was judged under
+])
+def test_anything_that_changes_the_plan_or_its_predicted_effect_changes_the_fingerprint(change):
+    assert fingerprint(**change) != fingerprint()
+
+
+def test_a_different_strategy_for_the_same_placement_is_a_different_proposal():
+    spread = live_with(GOOD)
+    combination = live_with(GOOD, kind="COMBINATION")
+
+    assert proposal_fingerprint(spread, "c") != proposal_fingerprint(combination, "c")
+
+
+def test_the_same_placement_for_a_different_service_is_a_different_proposal():
+    other = live_with(GOOD)
+    other.report.recommendations[0] = other.report.recommendations[0].model_copy(update={"service": "elsewhere"})
+
+    assert proposal_fingerprint(other, "c") != proposal_fingerprint(live_with(GOOD), "c")
+
+
+@pytest.mark.parametrize("digest", [None, "", 7, ["digest-a"]])
+def test_a_plan_with_no_usable_constraints_digest_is_not_eligible(digest):
+    live = live_with(GOOD, plan=dict(PLAN, constraintsDigest=digest))
+
+    assert proposal_fingerprint(live, "c") is None and evaluate_eligibility(live, "c").eligible is False
+
+
+def test_a_changed_constraints_digest_makes_a_pending_request_stale(client, source):
+    request(client, "top")
+    source.set(Spec("top", rank=1, score=0.9, constraints="b"), SECOND)       # same plan, same rank, new constraints
+
+    response = decide(client, "top")
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "APPROVAL_PROPOSAL_STALE"
+
+
+def test_the_fingerprint_ignores_what_does_not_change_the_proposal():
+    # The score, the topology snapshot and other candidates move with unrelated cluster activity.
+    base = live_with(GOOD)
+    noisy = live_with(dict(GOOD, score=0.81), score=0.81, extra_entries={"other": {"rank": 2, "score": 0.4}})
+    noisy.evidence["topologySnapshotId"] = "snap-other"
+    noisy.evidence["topologyCapturedAt"] = "2030-01-01T00:00:00Z"
+
+    assert proposal_fingerprint(noisy, "c") == proposal_fingerprint(base, "c")
+
+
+def test_the_members_of_a_combination_are_part_of_its_identity():
+    one = live_with(GOOD)
+    one.evidence["combinations"] = {"entries": {"c": {"members": ["rec-a", "rec-b"]}}}
+    other = live_with(GOOD)
+    other.evidence["combinations"] = {"entries": {"c": {"members": ["rec-a", "rec-z"]}}}
+    reordered = live_with(GOOD)
+    reordered.evidence["combinations"] = {"entries": {"c": {"members": ["rec-b", "rec-a"]}}}
+
+    assert proposal_fingerprint(one, "c") != proposal_fingerprint(other, "c")
+    assert proposal_fingerprint(one, "c") == proposal_fingerprint(reordered, "c")
+
+
+@pytest.mark.parametrize("plan", [None, {}, {"status": "FEASIBLE"}, {"placement": {}}, {"placement": []},
+                                  {"placement": {"c-0": "n1"}, "podsToRecreate": "c-0"}])
+def test_a_candidate_with_no_recorded_plan_has_no_fingerprint_and_is_not_eligible(plan):
+    live = live_with(GOOD, plan=plan)
+
+    assert proposal_fingerprint(live, "c") is None
+    assert evaluate_eligibility(live, "c").eligible is False
+
+
+def test_a_candidate_with_no_recorded_predicted_effect_is_not_eligible():
+    live = live_with(dict(GOOD, components={}))
+
+    assert evaluate_eligibility(live, "c").eligible is False
+
+
+def test_the_request_records_the_fingerprint_of_the_proposal_it_was_made_for(client, source):
+    response = request(client, "top")
+
+    proposal = response.json()["evaluationSnapshot"]["proposal"]
+    assert len(proposal["fingerprint"]) == 64 and proposal["failedNode"] == "w1"
+
+
+def test_an_unchanged_proposal_is_approved(client, source):
+    request(client, "top")
+
+    assert decide(client, "top").status_code == 200
+
+
+def test_a_proposal_whose_plan_changed_is_refused_as_stale_even_though_the_candidate_is_still_top_ranked(client, source):
+    request(client, "top")
+    source.set(Spec("top", rank=1, score=0.9, plan="b"), SECOND)         # same id, same rank: a different plan
+
+    response = decide(client, "top", note="ok")
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "APPROVAL_PROPOSAL_STALE"
+    assert status_of(client, "top") == "PENDING_APPROVAL"
+
+
+def test_a_proposal_whose_predicted_effect_changed_is_refused_as_stale(client, source):
+    request(client, "top")
+    source.set(Spec("top", rank=1, score=0.9, blast_after=40.0), SECOND)
+
+    assert decide(client, "top").status_code == 409
+
+
+def test_a_score_that_moved_without_the_plan_changing_does_not_make_a_proposal_stale(client, source):
+    request(client, "top")
+    source.set(Spec("top", rank=1, score=0.7), SECOND)
+
+    assert decide(client, "top").status_code == 200
+
+
+def test_a_stored_fingerprint_that_was_altered_is_refused(client, source, session):
+    from app.shared.persistence.models import RecommendationApprovalRecord
+
+    request(client, "top")
+    record = session.query(RecommendationApprovalRecord).filter_by(recommendation_id="top").one()
+    record.evaluation_snapshot = {**record.evaluation_snapshot, "proposal": {"fingerprint": "0" * 64}}
+    session.commit()
+
+    assert decide(client, "top").status_code == 409
+
+
+def test_a_verified_request_with_no_stored_fingerprint_predates_the_binding_and_cannot_be_approved(client, source, session):
+    ApprovalRepository(session).save(ApprovalModel(
+        id=0, recommendation_id="top", proposal_version="v1", status=ApprovalStatus.PENDING_APPROVAL,
+        requested_at=datetime.now(timezone.utc), requested_by="developer", recommendation_snapshot={"id": "top"},
+        evaluation_snapshot={"provenance": {"source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop",
+                                            "failedNode": "w1"}}))
+
+    response = decide(client, "top")
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "APPROVAL_PROPOSAL_STALE"
+    assert "predates" in response.json()["detail"]["message"]
+
+
+def test_a_candidate_that_is_no_longer_eligible_is_reported_as_that_before_it_is_reported_stale(client, source):
+    request(client, "top")
+    source.set(Spec("top", score=0.0, excluded="NO_PREDICTED_IMPROVEMENT", plan="b"), SECOND, selected=None)
+
+    response = decide(client, "top")
+
+    assert response.status_code == 422 and "not ranked" in response.json()["detail"]
+
+
+def test_staleness_is_reported_before_a_missing_justification(client, source):
+    request(client, "second")
+    source.set(TOP, Spec("second", rank=2, score=0.5, plan="b"))
+
+    response = decide(client, "second", note="")
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "APPROVAL_PROPOSAL_STALE"
+
+
+def test_the_decision_records_the_fingerprint_it_was_checked_against(client, source):
+    request(client, "top")
+
+    check = decide(client, "top").json()["evaluationSnapshot"]["approvalCheck"]
+
+    assert check["proposalFingerprint"] == client.get("/api/recommendations/top/approval").json()[
+        "evaluationSnapshot"]["proposal"]["fingerprint"]
+
+
+def test_a_combination_is_bound_by_its_members_as_well_as_its_plan(client, source):
+    combo = Spec("combo", rank=1, score=0.8, members=("rec-a", "rec-b"))
+    source.set(combo)
+    request(client, "combo")
+    source.set(Spec("combo", rank=1, score=0.8, members=("rec-a", "rec-c")))        # same plan, different members
+
+    assert decide(client, "combo").status_code == 409
+
+
+# --- the YAML stored with a request is bound too -----------------------------------------------------------------
+
+def test_the_request_records_a_hash_of_the_yaml_it_stores(client, source):
+    import hashlib
+
+    response = request(client, "top", yamlSnapshot="kind: Deployment\n")
+
+    assert response.json()["evaluationSnapshot"]["proposal"]["yaml"]["sha256"] == hashlib.sha256(b"kind: Deployment\n").hexdigest()
+    assert request(client, "second").json()["evaluationSnapshot"]["proposal"]["yaml"]["sha256"] is None
+
+
+def test_yaml_that_changed_after_the_request_is_refused_as_stale(client, source, session):
+    from app.shared.persistence.models import RecommendationApprovalRecord
+
+    request(client, "top", yamlSnapshot="kind: Deployment\n")
+    record = session.query(RecommendationApprovalRecord).filter_by(recommendation_id="top").one()
+    record.yaml_snapshot = "kind: Deployment\nreplicas: 99\n"
+    session.commit()
+
+    response = decide(client, "top")
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "APPROVAL_PROPOSAL_STALE"
+    assert "YAML" in response.json()["detail"]["message"]
+
+
+def test_unchanged_yaml_is_approved(client, source):
+    request(client, "top", yamlSnapshot="kind: Deployment\n")
+
+    assert decide(client, "top").status_code == 200
+
+
+def test_the_yaml_hash_is_labelled_an_integrity_check_of_client_supplied_text_not_a_verification(client, source):
+    response = request(client, "top", yamlSnapshot="kind: Deployment\n")
+
+    recorded = response.json()["evaluationSnapshot"]["proposal"]["yaml"]
+    assert recorded["origin"] == "client-supplied" and recorded["verifiedAgainstRecommendation"] is False
+
+
+def test_yaml_unrelated_to_the_recommendation_is_accepted_but_never_marked_as_verified_and_nothing_is_applied(client, source):
+    # Nothing compares the YAML with the recommendation. This documents that, so it cannot be mistaken for a check.
+    request(client, "top", yamlSnapshot="apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: unrelated\n")
+
+    approved = decide(client, "top")
+
+    check = approved.json()["evaluationSnapshot"]["approvalCheck"]
+    assert approved.status_code == 200
+    assert check["yamlVerifiedAgainstRecommendation"] is False and check["appliesNothing"] is True
+    assert approved.json()["evaluationSnapshot"]["proposal"]["yaml"]["verifiedAgainstRecommendation"] is False
+
+
+def test_the_stale_yaml_message_says_it_is_an_integrity_check_only(client, source, session):
+    from app.shared.persistence.models import RecommendationApprovalRecord
+
+    request(client, "top", yamlSnapshot="kind: Deployment\n")
+    record = session.query(RecommendationApprovalRecord).filter_by(recommendation_id="top").one()
+    record.yaml_snapshot = "kind: Deployment\nreplicas: 99\n"
+    session.commit()
+
+    message = decide(client, "top").json()["detail"]["message"]
+
+    assert "integrity check only" in message and "not verified against the recommendation" in message

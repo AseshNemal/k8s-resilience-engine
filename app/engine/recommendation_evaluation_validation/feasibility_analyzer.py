@@ -80,6 +80,8 @@ Until they are closed, a live candidate is INSUFFICIENT_EVIDENCE rather than FEA
 5. When several Deployments back one service the intent keeps only the first; the pod template is then unknown.
 """
 
+import hashlib
+import json
 import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -104,6 +106,10 @@ UNSCHEDULED_NODE = "unscheduled"
 DEFAULT_MAX_SKEW = 1
 # How many partial placements the search may expand per question before it gives up (and says so).
 DEFAULT_SEARCH_BUDGET = 20_000
+
+# The strategy a TOPOLOGY_SPREAD verdict is reached under. Changing how the proposal is modelled must change this,
+# so an approval made under the old model is not read as one made under the new.
+STRATEGY_MODEL = "topology-spread/kubernetes.io-hostname/DoNotSchedule/v1"
 
 ASSUMPTIONS = (
     "The proposal is modelled as a topologySpreadConstraint on kubernetes.io/hostname with "
@@ -788,3 +794,37 @@ def _inconclusive(service_name: str, ctx: _Context, findings: list[ConstraintFin
         scheduling=INSUFFICIENT, single_node_resilience=None,
         findings=tuple(findings), missing_evidence=ctx.missing_evidence(),
     )
+
+
+# --- what a verdict was reached under --------------------------------------------------------------------------
+
+_SCHEDULING_FIELDS = {
+    "selector", "node_selector", "tolerations", "selector_match_expressions", "node_affinity_configured",
+    "node_affinity_rules", "pod_affinity_configured", "pod_affinity_rules", "pod_anti_affinity_configured",
+    "pod_anti_affinity_rules", "topology_spread_constraints", "resource_requests",
+}
+
+
+def scheduling_basis(deployment: DeploymentGraph, service_names: Sequence[str], max_skew: int = DEFAULT_MAX_SKEW) -> str:
+    """A digest of the scheduling constraints and model settings a verdict about these services was reached under.
+
+    It covers the strategy model and ``max_skew``, the declared scheduling intent of each named service, and the
+    required anti-affinity of every other service (which can repel the moving pods). It deliberately leaves out
+    live state (node readiness and capacity, where pods are now, replica counts): that changes constantly and is
+    already covered by checking that the exact placement is still what the current evaluation proposes.
+    """
+    named = set(service_names)
+    services = []
+    for service in sorted((s for s in deployment.services if s.name in named), key=lambda s: s.name):
+        intent = service.declared_intent
+        services.append({
+            "service": service.name, "deployments": sorted(service.deployment_names),
+            "intent": None if intent is None else intent.model_dump(mode="json", include=_SCHEDULING_FIELDS),
+        })
+    repelling = [
+        {"service": other.name, "rules": other.declared_intent.pod_anti_affinity_rules}
+        for other in sorted(deployment.services, key=lambda s: s.name)
+        if other.name not in named and other.declared_intent is not None and other.pods
+        and (other.declared_intent.pod_anti_affinity_rules or other.declared_intent.pod_anti_affinity_configured)]
+    payload = {"model": STRATEGY_MODEL, "maxSkew": max_skew, "services": services, "repelledBy": repelling}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

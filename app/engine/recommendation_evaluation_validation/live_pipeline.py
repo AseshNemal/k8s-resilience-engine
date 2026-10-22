@@ -58,6 +58,7 @@ from app.engine.recommendation_evaluation_validation.feasibility_analyzer import
     UNSCHEDULED_NODE,
     FeasibilityStatus,
     SchedulingEvidence,
+    scheduling_basis,
 )
 from app.engine.recommendation_evaluation_validation.ranking import (
     FORMULA_VERSION,
@@ -184,7 +185,8 @@ def _evaluate_combinations(
     for first, second in plan.pairs:
         result = combine_pair(deployment, first, second, scheduling_evidence)
         combo_id = combination_id(workflow.workflow_id, result.services)
-        feasibility[combo_id] = result.feasibility.to_dict()
+        feasibility[combo_id] = result.feasibility.to_dict() | {
+            "constraintsDigest": scheduling_basis(deployment, result.services)}
         entry: dict[str, Any] = {
             "members": list(result.members), "services": list(result.services), "status": result.status.value,
             "reason": result.reason, "order": list(result.order) if result.order else None,
@@ -289,7 +291,8 @@ def build_live_recommendation(
                 after_snapshot = _impact_snapshot(after)
                 predicted, reduction = after.blast_radius, round(before.blast_radius - after.blast_radius, 2)
         candidate_id = f"rec-{workflow_id}-{spec.service}-{spec.recommendation_type}".lower().replace("_", "-")
-        feasibility[candidate_id] = simulated.feasibility.to_dict()
+        feasibility[candidate_id] = simulated.feasibility.to_dict() | {
+            "constraintsDigest": scheduling_basis(deployment, [spec.service])}
         cost = RESOURCE_COST.get(spec.recommendation_type, "UNKNOWN")
         outcomes[candidate_id] = _Outcome(spec.recommendation_type, spec.service, simulated.feasible, predicted,
                                           reduction, coverage, cost)
@@ -341,6 +344,7 @@ def build_live_recommendation(
         "namespace": inputs.namespace,
         "workflowId": workflow.workflow_id,
         "workflowFreezeId": inputs.workflow_freeze_id,
+        "topologySnapshotId": deployment.snapshot_id,
         "failedNode": failed_node,
         "failedNodeChosen": chosen_by,
         "blastRadiusBefore": before.blast_radius,

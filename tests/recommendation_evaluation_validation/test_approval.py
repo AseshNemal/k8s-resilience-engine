@@ -1,5 +1,6 @@
 import pytest
 from app.engine.recommendation_evaluation_validation.approval import (
+    proposal_fingerprint,
     LiveRecommendation,
     ApprovalService,
     ApprovalRepository,
@@ -56,10 +57,14 @@ def sample_recommendation():
 @pytest.fixture
 def ranking_evidence():
     """What the live pipeline records: rec-1 is ranked first, rec-2 is not feasible and so unranked."""
-    return {"ranking": {"candidates": {
-        "rec-1": {"id": "rec-1", "rank": 1, "score": 0.9, "excluded": None},
-        "rec-2": {"id": "rec-2", "rank": None, "score": None, "excluded": "INSUFFICIENT_EVIDENCE"},
-    }}}
+    return {"failedNode": "w1",
+            "feasibility": {"rec-1": {"status": "FEASIBLE", "placement": {"p-0": "n1", "p-1": "n2"},
+                                      "podsToRecreate": ["p-1"], "constraintsDigest": "digest-a"}},
+            "ranking": {"candidates": {
+                "rec-1": {"id": "rec-1", "rank": 1, "score": 0.9, "excluded": None,
+                          "components": {"blastBefore": 100.0, "blastAfter": 0.0}},
+                "rec-2": {"id": "rec-2", "rank": None, "score": None, "excluded": "INSUFFICIENT_EVIDENCE"},
+            }}}
 
 
 def test_request_approval_success(approval_service, mock_repository, sample_recommendation, ranking_evidence):
@@ -144,10 +149,12 @@ def test_approve_success(approval_service, mock_repository, sample_recommendatio
     pending = MagicMock()
     pending.status = ApprovalStatus.PENDING_APPROVAL
     pending.proposal_version = "v1.0"
-    pending.evaluation_snapshot = {"provenance": {"source": "live-discovery"}}
+    current = LiveRecommendation(report=sample_recommendation, evidence=ranking_evidence)
+    pending.evaluation_snapshot = {"provenance": {"source": "live-discovery"},
+                                   "proposal": {"fingerprint": proposal_fingerprint(current, "rec-1"), "yamlSha256": None}}
+    pending.yaml_snapshot = None
     mock_repository.get_by_recommendation_id.return_value = pending
     mock_repository.update.return_value = "updated"
-    current = LiveRecommendation(report=sample_recommendation, evidence=ranking_evidence)
 
     result = approval_service.approve("rec-1", "v1.0", "Looks good", evaluate=lambda approval: current)
     
