@@ -1,3 +1,9 @@
+from .cluster_identity import (
+    ClusterIdentity,
+    DisposableClusterDesignation,
+    ResearchClusterAuthorization,
+    verify_cluster,
+)
 from .models import (
     APPLY,
     FAIL_BASELINE,
@@ -15,7 +21,8 @@ from .prediction import predict_outcome
 from .run import ValidationExecutor, ValidationPlan, ValidationRun, authorize, to_validation_report
 
 __all__ = [
-    "APPLY", "Authorization", "FAIL_BASELINE", "FAIL_NODE", "RunState", "TEST_ENVIRONMENT", "TestTarget",
-    "ValidationExecutor", "ValidationInterrupted", "ValidationPlan", "ValidationRefusedError", "ValidationResult",
-    "ValidationRun", "ValidationThresholds", "authorize", "predict_outcome", "to_validation_report",
+    "APPLY", "Authorization", "ClusterIdentity", "DisposableClusterDesignation", "FAIL_BASELINE", "FAIL_NODE",
+    "ResearchClusterAuthorization", "RunState", "TEST_ENVIRONMENT", "TestTarget", "ValidationExecutor",
+    "ValidationInterrupted", "ValidationPlan", "ValidationRefusedError", "ValidationResult", "ValidationRun",
+    "ValidationThresholds", "authorize", "predict_outcome", "to_validation_report", "verify_cluster",
 ]
