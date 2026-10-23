@@ -129,3 +129,12 @@ def test_windows_gets_a_console_less_helper_for_the_background_task():
     assert "COPY --from=helper --chmod=0755 /out/windows/resilience-helper-bg.exe /windows/resilience-helper-bg.exe" in DOCKERFILE
     metadata = (ROOT / "extension" / "metadata.json").read_text(encoding="utf-8")
     assert "/windows/resilience-helper-bg.exe" in metadata
+
+
+def test_the_declared_workflow_file_is_named_on_the_app_private_data_volume():
+    import yaml
+
+    environment = yaml.safe_load((ROOT / "extension" / "compose.yaml").read_text())["services"]["resilience-engine"]["environment"]
+    path = environment["RESILIENCE_DECLARED_WORKFLOW_PATH"]
+
+    assert path.startswith("/data/") and path.endswith(".json")      # /data is private to the app user; nothing else can write it
