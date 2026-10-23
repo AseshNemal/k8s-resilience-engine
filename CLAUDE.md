@@ -51,7 +51,10 @@ This is an early-stage scaffold, not a working system yet:
   cluster, no cluster has been created, no node has been stopped, and no request has been sent to a real application.** The
   resource assessment for the developer's machine is INSUFFICIENT, so the test cluster is not to be created until that changes.
   The protocol is `docs/MEMBER4_REAL_VALIDATION_PROTOCOL.md`; the gates, procedure and recovery are in
-  `docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md`.
+  `docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md`. Member 4 takes Member 2's node and intent facts from `analyze_live_topology` and reads node
+  taints itself (`live_scheduling_evidence.py`), and when Member 1 has no frozen workflow it can evaluate a workflow a person **declared**
+  (`declared_workflow.py`, `/api/recommendations/declared`), labelled `declared-workflow` and never approvable; see
+  `docs/MEMBER4_INPUT_SOURCES.md`.
   The offline harness and benchmark (`tests/support/member4_*.py`, `experiments/member4_offline_benchmark/`,
   see `docs/MEMBER4_OFFLINE_VALIDATION.md`) are test/research only and stamp a non-live evidence source the
   approval gate refuses.

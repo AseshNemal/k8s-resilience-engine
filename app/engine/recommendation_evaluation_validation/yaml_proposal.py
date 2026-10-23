@@ -37,7 +37,11 @@ from typing import Any
 
 import yaml
 
-from app.engine.recommendation_evaluation_validation.approval import LIVE_EVIDENCE_SOURCE, LiveRecommendation
+from app.engine.recommendation_evaluation_validation.approval import (
+    DECLARED_WORKFLOW_SOURCE,
+    LIVE_EVIDENCE_SOURCE,
+    LiveRecommendation,
+)
 from app.engine.recommendation_evaluation_validation.approval.eligibility import evaluate_eligibility
 from app.engine.recommendation_evaluation_validation.feasibility_analyzer import (
     DEFAULT_MAX_SKEW,
@@ -249,6 +253,9 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
     return YamlProposal(
         recommendation_id, GENERATED, applicable,
         reason=None if applicable else (
+            "The workflow behind this proposal was declared by a person, not observed from traces and approved and frozen by "
+            "Component 1, so the proposal can be read but never approved or applied."
+            if source == DECLARED_WORKFLOW_SOURCE else
             f"The evidence source is {source!r}, not read from the connected cluster, so this text is for research "
             f"and testing only."),
         yaml=text, sha256=hashlib.sha256(text.encode()).hexdigest(), fingerprint=standing.fingerprint,

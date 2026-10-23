@@ -66,7 +66,7 @@ test("the only application and the only applicable workflow are used without typ
     assert.equal(view.status, "ready");
     assert.equal(view.namespace, "bookinfo");
     assert.equal(view.workflowId, "bookinfo-productpage");
-    assert.deepEqual(plain(c.selection()), { workflowId: "bookinfo-productpage", namespace: "bookinfo", failedNode: "" });
+    assert.deepEqual(plain(c.selection()), { workflowId: "bookinfo-productpage", namespace: "bookinfo", failedNode: "", workflowKind: "frozen" });
     assert.deepEqual(calls, ["/api/recommendations/context", "/api/recommendations/live/detail?workflow_id=bookinfo-productpage&namespace=bookinfo"]);
     assert.deepEqual(plain(view.failedNodes), ["w1", "w2"], "the failed-node dropdown lists the cluster's own nodes");
 });
@@ -297,4 +297,126 @@ test("a context answer that is not in the expected shape is a failure, never an 
     assert.equal(view.status, "blocked");
     assert.deepEqual(plain(view.namespaces), []);
     assert.ok(view.error);
+});
+
+
+// ---- declared workflows: Member 4's own source when Component 1 has no frozen workflow -----------------------------------------------------
+
+const declared = (id, extra = {}) => ({ workflowId: id, declaredBy: "asesh", services: ["a", "b"], applicable: true, reason: null, declared: true, approvable: false, ...extra });
+const noFrozen = (over = {}) => context({ workflows: [], workflowId: null, workflowChoice: "none", ready: false, declaredWorkflows: [declared("checkout")], ...over });
+const DECLARED_DETAIL = "/api/recommendations/declared/detail?workflow_id=checkout&namespace=bookinfo";
+const declaredBody = () => detailBody({
+    outcome: { state: "DECLARED_NOT_APPROVABLE", message: "declared, not approvable" },
+    candidates: [{ id: "c1", service: "reviews", feasible: true, approval: { ready: false, reason: "declared", declared: true } }],
+    declared: { workflowId: "checkout", observed: false, approvable: false, notApprovableBecause: "declared, not approvable" },
+});
+
+test("a declared workflow is offered, labelled, and never chosen for you even when it is the only one", async () => {
+    const { env, calls } = makeEnv({ "/api/recommendations/context": noFrozen(), "/api/recommendations/context?namespace=bookinfo": noFrozen() });
+    const c = C.createController(env);
+
+    const view = await c.start();
+
+    assert.equal(view.status, "blocked", "no frozen workflow means missing evidence, however many declared ones exist");
+    assert.deepEqual(calls, ["/api/recommendations/context"], "no recommendation was requested");
+    const [option] = plain(view.workflows);
+    assert.equal(option.value, "declared:checkout");
+    assert.equal(option.declared, true);
+    assert.match(option.label, /declared, not approvable/);
+    assert.equal(view.workflowId, "");
+});
+
+test("choosing a declared workflow asks the declared route, never the frozen one, and says so", async () => {
+    const { env, calls } = makeEnv({
+        "/api/recommendations/context": noFrozen(), "/api/recommendations/context?namespace=bookinfo": noFrozen(),
+        [DECLARED_DETAIL]: declaredBody(),
+    });
+    const c = C.createController(env);
+    await c.start();
+
+    const view = await c.selectWorkflow("declared:checkout");
+
+    assert.equal(view.status, "ready");
+    assert.equal(view.workflowKind, "declared");
+    assert.equal(view.workflowValue, "declared:checkout");
+    assert.equal(view.workflowId, "checkout");
+    assert.deepEqual(plain(c.selection()), { workflowId: "checkout", namespace: "bookinfo", failedNode: "", workflowKind: "declared" });
+    assert.ok(calls.includes(DECLARED_DETAIL));
+    assert.ok(!calls.some((u) => u.includes("/live/detail")), "the frozen route is never asked about a declared workflow");
+    assert.ok(!calls.some((u) => u.startsWith("/api/recommendations/context") && u.includes("workflow_id=")), "a declared id is never sent to the context as a frozen one");
+    assert.equal(plain(view.detail.candidates[0].approval).ready, false, "the server's verdict, shown as it came");
+});
+
+test("a frozen and a declared workflow with the same id are never confused", async () => {
+    const both = context({ declaredWorkflows: [declared("bookinfo-productpage")] });
+    const { env, calls } = makeEnv({
+        "/api/recommendations/context": both, "/api/recommendations/context?namespace=bookinfo&workflow_id=bookinfo-productpage": both,
+        "/api/recommendations/context?namespace=bookinfo": both,
+        "/api/recommendations/live/detail?workflow_id=bookinfo-productpage&namespace=bookinfo": detailBody(),
+        "/api/recommendations/declared/detail?workflow_id=bookinfo-productpage&namespace=bookinfo": declaredBody(),
+    });
+    const c = C.createController(env);
+
+    const frozenView = await c.start();
+    assert.equal(frozenView.workflowKind, "frozen", "the only frozen workflow is chosen for you, not the declared one");
+    assert.deepEqual(plain(frozenView.workflows.map((w) => w.value)), ["bookinfo-productpage", "declared:bookinfo-productpage"]);
+
+    const declaredView = await c.selectWorkflow("declared:bookinfo-productpage");
+    assert.equal(declaredView.workflowKind, "declared");
+    assert.ok(calls.at(-1).startsWith("/api/recommendations/declared/detail"));
+
+    const backToFrozen = await c.selectWorkflow("bookinfo-productpage");
+    assert.equal(backToFrozen.workflowKind, "frozen");
+    assert.ok(calls.at(-1).startsWith("/api/recommendations/live/detail"));
+});
+
+test("a declared choice that stops applying is dropped, not guessed at", async () => {
+    let applies = true;
+    const body = () => noFrozen({ declaredWorkflows: [declared("checkout", { applicable: applies, reason: applies ? null : "Services not found" })] });
+    const { env, calls } = makeEnv({
+        "/api/recommendations/context": body, "/api/recommendations/context?namespace=bookinfo": body, [DECLARED_DETAIL]: declaredBody(),
+    });
+    const c = C.createController(env);
+    await c.start();
+    await c.selectWorkflow("declared:checkout");
+    const before = calls.length;
+
+    applies = false;
+    const view = await c.reload();
+
+    assert.equal(view.workflowKind, "frozen");
+    assert.equal(view.workflowId, "");
+    assert.equal(view.status, "blocked");
+    assert.ok(!calls.slice(before).some((u) => u.includes("declared/detail")), "nothing was requested for a workflow that no longer applies");
+});
+
+test("when the connected cluster changes a declared choice is cleared with the rest", async () => {
+    const { env, calls, state } = makeEnv({
+        "/api/recommendations/context": noFrozen(), "/api/recommendations/context?namespace=bookinfo": noFrozen(), [DECLARED_DETAIL]: declaredBody(),
+    });
+    const c = C.createController(env);
+    await c.start();
+    await c.selectWorkflow("declared:checkout");
+    const before = calls.length;
+
+    state.identity = "another-cluster";
+    const view = await c.clusterChanged();
+
+    assert.equal(view.workflowKind, "frozen");
+    assert.equal(c.selection().workflowId, "");
+    assert.ok(!calls.slice(before).some((u) => u.includes("declared/detail")));
+});
+
+test("a context without any declared workflows behaves exactly as before", async () => {
+    const { env } = makeEnv({
+        "/api/recommendations/context": context(),
+        "/api/recommendations/context?namespace=bookinfo&workflow_id=bookinfo-productpage": context(),
+        "/api/recommendations/live/detail?workflow_id=bookinfo-productpage&namespace=bookinfo": detailBody(),
+    });
+
+    const view = await C.createController(env).start();
+
+    assert.equal(view.status, "ready");
+    assert.equal(view.workflowKind, "frozen");
+    assert.deepEqual(plain(view.workflows.map((w) => w.declared)), [false]);
 });

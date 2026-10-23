@@ -17,9 +17,15 @@ chosen and the recommendation is requested (``live_pipeline``); here it is repor
 
 Component 1's workflow discovery, Component 2's topology and Component 3's prediction are called, never changed.
 """
+from types import SimpleNamespace
 from typing import Any
 
 from app.engine.deployment_topology_modeling.discovery_all import discover_all
+from app.engine.recommendation_evaluation_validation.declared_workflow import (
+    NOT_OBSERVED,
+    declared_workflow_path,
+    load_declared_workflows,
+)
 from app.engine.workflow_dependency_modeling import service as workflow_service
 from app.shared.evidence_errors import EvidenceError
 
@@ -127,6 +133,23 @@ def _describe_workflow(frozen, namespace_row: dict[str, Any] | None) -> dict[str
     }
 
 
+def _describe_declared(declared, namespace_row: dict[str, Any] | None) -> dict[str, Any]:
+    """A declared workflow, described like a frozen one, and always labelled: it is not observed and cannot be approved."""
+    described = _describe_workflow(SimpleNamespace(graph=declared.graph), namespace_row)
+    return {**described, "freezeId": None, "frozenAt": None, "declared": True, "approvable": False,
+            "declaredBy": declared.declared_by, "declarationSha256": declared.declaration_sha256, "limits": NOT_OBSERVED}
+
+
+def _declared_workflows(row: dict[str, Any] | None) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
+    """Declared workflows from Member 4's own file (never a frozen one), or the reason the file could not be used."""
+    if declared_workflow_path() is None:
+        return [], None
+    try:
+        return [_describe_declared(item, row) for item in load_declared_workflows()], None
+    except EvidenceError as error:
+        return [], {"code": error.code, "message": error.message}
+
+
 def build_recommendation_context(namespace: str | None = None, workflow_id: str | None = None) -> dict[str, Any]:
     """The evidence checklist for the Recommendations page. Read-only; it answers even when evidence is missing."""
     namespace = (namespace or "").strip() or None
@@ -229,6 +252,18 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
         "applies to the selected application.",
         None if selected else "Select an application and a frozen workflow that applies to it."))
 
+    # 7. declared workflows: Member 4's own source when Component 1 has none. Listed apart, labelled, never selected for you, never approvable.
+    declared, declared_problem = _declared_workflows(row)
+    if declared_problem:
+        evidence.append(_item("declaredWorkflow", "Declared workflow", MISSING, declared_problem["message"],
+                              "Fix the declaration file named by RESILIENCE_DECLARED_WORKFLOW_PATH.", code=declared_problem["code"]))
+    elif declared:
+        usable = [d for d in declared if d["applicable"]]
+        evidence.append(_item("declaredWorkflow", "Declared workflow", AVAILABLE if usable else MISSING,
+                              f"{len(usable)} of {len(declared)} declared workflow(s) apply to {chosen or 'the selected application'}. "
+                              "Declared, not observed: recommendations from it can be read but never approved.",
+                              None if usable else "Declare a workflow whose services are in this application."))
+
     ready = bool(cluster["state"] == AVAILABLE and row and selected)
     return {
         "cluster": cluster,
@@ -236,6 +271,8 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
         "namespace": chosen,
         "namespaceChoice": choice,
         "workflows": workflows,
+        "declaredWorkflows": declared,
+        "declaredWorkflowsError": declared_problem,
         "workflowId": selected,
         "workflowChoice": selection,
         "evidence": evidence,

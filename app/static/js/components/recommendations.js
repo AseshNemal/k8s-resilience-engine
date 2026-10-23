@@ -289,8 +289,8 @@
             v.namespaces.map((row) => ({ value: row.namespace, label: `${row.namespace} (${row.services.length} services)` })),
             v.namespace, v.namespaceChoice === "ambiguous" || !v.namespace ? "Choose an application…" : null);
         fillSelect(workflowSelect,
-            v.workflows.map((w) => ({ value: w.workflowId, label: w.label, disabled: !w.applicable })),
-            v.workflowId, v.workflowChoice === "choose" || !v.workflowId ? (v.workflows.length ? "Choose a workflow…" : "No approved frozen workflow") : null);
+            v.workflows.map((w) => ({ value: w.value, label: w.label, disabled: !w.applicable })),
+            v.workflowValue, v.workflowChoice === "choose" || !v.workflowId ? (v.workflows.length ? "Choose a workflow…" : "No approved frozen workflow") : null);
         fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case (the node whose loss hurts most)");
         view.renderEvidenceChecklist(evidenceList, v.evidence);
     }
@@ -369,8 +369,19 @@
         const busy = v.status === "loading" || v.status === "loading-recommendation";
         if (reloadButton) reloadButton.disabled = busy;
         if (v.status === "ready") {
-            applyBadge(sourceBadge, { variant: "success", text: "Live evidence" });
+            const declared = v.workflowKind === "declared";
+            applyBadge(sourceBadge, declared ? { variant: "warning", text: "Declared workflow · not approvable" }
+                                             : { variant: "success", text: "Live evidence" });
             showDetail(v);
+            if (declared) {
+                // Standing label: this is not observed and cannot be approved, whatever the candidates below say.
+                const note = document.createElement("p");
+                note.className = "ui-note";
+                note.dataset.role = "declared-note";
+                note.textContent = (v.detail && v.detail.declared && v.detail.declared.notApprovableBecause)
+                    || "This recommendation uses a workflow a person declared. It can be read, but it cannot be approved or applied.";
+                region.prepend(note);
+            }
             return;
         }
         currentRecommendation = null;

@@ -14,7 +14,11 @@ from app.engine.recommendation_evaluation_validation.approval import (
 )
 from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
-from app.engine.recommendation_evaluation_validation.live_pipeline import build_live_recommendation
+from app.engine.recommendation_evaluation_validation.declared_workflow import NOT_OBSERVED
+from app.engine.recommendation_evaluation_validation.live_pipeline import (
+    build_declared_recommendation,
+    build_live_recommendation,
+)
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 from app.shared.evidence_errors import EvidenceError, unavailable
 from app.core.config import get_settings
@@ -77,6 +81,32 @@ def get_recommendation_provider(
     return provide
 
 
+DECLARED_NOT_APPROVABLE = (
+    "This recommendation was computed from a workflow a person declared, not one Component 1 observed from traces, approved and "
+    "froze. It can be read and studied, but it cannot be put to approval, applied or validated."
+)
+
+
+def get_declared_provider(
+    workflow_id: str | None = Query(None, description="Declared workflow to evaluate (required)"),
+    failed_node: str | None = Query(None, description="Worker to protect against; default: the one whose loss would hurt most"),
+    namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+) -> Callable[[], LiveRecommendation]:
+    """Supplies the evaluation of a DECLARED workflow on the live topology. It has no approval, apply or validation path."""
+
+    def provide() -> LiveRecommendation:
+        if not workflow_id:
+            raise unavailable("RECOMMENDATION_EVIDENCE_UNAVAILABLE", "Name the declared workflow to evaluate (workflow_id).",
+                              "recommendation")
+        try:
+            return build_declared_recommendation(workflow_id, failed_node, namespace)
+        except ValueError as error:
+            raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422,
+                                component="recommendation") from error
+
+    return provide
+
+
 def get_current_evaluator() -> Callable[[ApprovalModel], LiveRecommendation]:
     """Supplies the function that re-evaluates, on the server, the workflow and failure a request was made for.
 
@@ -134,6 +164,50 @@ def read_live_recommendation(
     response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
     response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
     return live.report
+
+
+@router.get(
+    "/declared",
+    response_model=RecommendationReport,
+    response_model_by_alias=True,
+    responses={409: {"description": "Required evidence is not available"}},
+)
+def read_declared_recommendation(
+    response: Response,
+    provider: Callable[[], LiveRecommendation] = Depends(get_declared_provider),
+) -> RecommendationReport:
+    """The recommendation for a workflow a person DECLARED, on the connected cluster's live topology. Never approvable."""
+    live = provider()
+    response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
+    response.headers["X-Evidence-Approvable"] = "false"
+    response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
+    return live.report
+
+
+@router.get("/declared/detail")
+def read_declared_recommendation_detail(
+    response: Response,
+    provider: Callable[[], LiveRecommendation] = Depends(get_declared_provider),
+) -> dict:
+    """The declared recommendation with what the page shows, with approval switched off for every candidate and the reason given.
+
+    The engine's own eligibility verdict does not look at where the evidence came from (the approval gate does, later), so this route
+    overrides it: whatever the ranking says, nothing here is ready for approval.
+    """
+    live = provider()
+    response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
+    response.headers["X-Evidence-Approvable"] = "false"
+    response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
+    shown = describe_live_recommendation(live)
+    for candidate in shown["candidates"]:
+        candidate["approval"] = {"ready": False, "reason": DECLARED_NOT_APPROVABLE, "requiresJustification": False,
+                                 "declared": True}
+    if shown["outcome"]["state"] == "READY":
+        shown["outcome"] = {"state": "DECLARED_NOT_APPROVABLE", "message": DECLARED_NOT_APPROVABLE}
+    shown["declared"] = {**(live.evidence.get("declaredWorkflow") or {}), "approvable": False, "limits": NOT_OBSERVED,
+                         "notApprovableBecause": DECLARED_NOT_APPROVABLE}
+    shown["schedulingFacts"] = live.evidence.get("schedulingFacts")
+    return shown
 
 
 @router.get("/context")

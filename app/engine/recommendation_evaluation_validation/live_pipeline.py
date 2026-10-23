@@ -33,11 +33,16 @@ candidate. A pair is one logical proposal; it is listed and ranked only if it wa
 member matters. At most two members and a configurable number of pairs are looked at, and what was left out is
 reported. The pair is verified for the final state only; rollout time is reported as not evaluated.
 """
+import dataclasses
 from typing import Any, NamedTuple
 
 from app.engine.failure_impact_prediction.runtime_provider import get_runtime_component_inputs
 from app.engine.failure_impact_prediction.service import predict_failure_impact
-from app.engine.recommendation_evaluation_validation.approval import LIVE_EVIDENCE_SOURCE, LiveRecommendation
+from app.engine.recommendation_evaluation_validation.approval import (
+    DECLARED_WORKFLOW_SOURCE,
+    LIVE_EVIDENCE_SOURCE,
+    LiveRecommendation,
+)
 from app.engine.recommendation_evaluation_validation.candidate_generation import (
     CandidateContextBuilder,
     generate_candidates,
@@ -68,6 +73,11 @@ from app.engine.recommendation_evaluation_validation.ranking import (
     ImpactSnapshot,
     RankingWeights,
     rank_candidates,
+)
+from app.engine.recommendation_evaluation_validation.declared_workflow import get_declared_workflow
+from app.engine.recommendation_evaluation_validation.live_scheduling_evidence import (
+    enrich_scheduling_facts,
+    live_scheduling_evidence,
 )
 from app.engine.recommendation_evaluation_validation.service import evaluate_candidate
 from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
@@ -134,11 +144,12 @@ def _impact_snapshot(report) -> ImpactSnapshot:
 
 
 def scheduling_evidence_for(deployment) -> SchedulingEvidence:
-    """The scheduling facts the live topology cannot carry (node taints), as far as anything supplies them.
+    """The scheduling facts the live topology cannot carry (node taints).
 
-    Nothing reads taints from the cluster yet, so today this is empty and taints are reported unknown.
+    No other component supplies them, so Member 4 reads them itself (``live_scheduling_evidence``), read-only. A node that
+    cannot be read keeps its taints unknown; they are never defaulted to none.
     """
-    return SchedulingEvidence.from_graph(deployment)
+    return live_scheduling_evidence(deployment)
 
 
 def _invalid(message: str) -> EvidenceError:
@@ -294,13 +305,68 @@ def build_live_recommendation(
     the most pairs of changes evaluated together; what the budget left out is reported in the evidence.
     """
     inputs = get_runtime_component_inputs(workflow_id, namespace)
-    return evaluate_recommendation(
-        inputs.workflow, inputs.deployment,
+    deployment, facts = enrich_scheduling_facts(inputs.deployment, inputs.namespace)
+    live = evaluate_recommendation(
+        inputs.workflow, deployment,
         EvidenceProvenance(LIVE_EVIDENCE_SOURCE, inputs.namespace, inputs.topology_captured_at,
                            inputs.topology_status, inputs.workflow_freeze_id),
-        failed_node, scheduling_evidence=scheduling_evidence_for(inputs.deployment),
+        failed_node, scheduling_evidence=scheduling_evidence_for(deployment),
         combination_budget=combination_budget,
     )
+    return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts})
+
+
+def _require_complete_topology(workflow, discovery) -> None:
+    """Refuse when a service the workflow uses has no complete observed placement (the same rule Component 3 applies to a frozen one)."""
+    referenced = set(workflow.mandatory_services) | set(workflow.optional_services)
+    for edge in workflow.edges:
+        referenced.update((edge.source, edge.target))
+    placed = {service.name for service in discovery.graph.services}
+    blocked = {}
+    for name in sorted(referenced):
+        evidence = discovery.service_evidence.get(name)
+        if name not in placed:
+            blocked[name] = list(evidence.reasons) if evidence and evidence.reasons else ["SERVICE_NOT_DISCOVERED"]
+        elif evidence is not None and not evidence.complete:
+            blocked[name] = list(evidence.reasons)
+    if blocked:
+        raise EvidenceError(
+            "TOPOLOGY_INCOMPLETE",
+            "The topology is not complete enough for the services this declared workflow names, so nothing was evaluated.",
+            http_status=409, component=COMPONENT,
+            details={"services": [{"service": n, "reasons": r} for n, r in sorted(blocked.items())]})
+
+
+def build_declared_recommendation(
+    workflow_id: str,
+    failed_node: str | None = None,
+    namespace: str = "default",
+    *,
+    combination_budget: int = DEFAULT_EVALUATION_BUDGET,
+    declaration_path: str | None = None,
+) -> LiveRecommendation:
+    """The recommendation for a workflow a person DECLARED, on the connected cluster's live topology. Never approvable.
+
+    For when Component 1 has no frozen workflow to give. The workflow comes from Member 4's own declaration file
+    (``declared_workflow``), the topology from Component 2 (``discover_live``, the same call Component 3's provider makes), the
+    scheduling facts from Component 2's fuller analysis plus Member 4's taint read, and the failure sizing from Component 3's
+    ``predict_failure_impact``. Nothing in another member's code is changed. The evidence is labelled ``DECLARED_WORKFLOW_SOURCE``,
+    which the approval gate refuses, and it carries the declaration's identity and its limits.
+    """
+    from app.engine.deployment_topology_modeling.service import discover_live
+
+    declared = get_declared_workflow(workflow_id, declaration_path)
+    namespace = (namespace or "").strip()
+    if not namespace:
+        raise ValueError("namespace must be a non-empty string")
+    discovery = discover_live(namespace=namespace)
+    _require_complete_topology(declared.graph, discovery)
+    deployment, facts = enrich_scheduling_facts(discovery.graph.model_copy(deep=True), namespace)
+    live = evaluate_recommendation(
+        declared.graph.model_copy(deep=True), deployment,
+        EvidenceProvenance(DECLARED_WORKFLOW_SOURCE, namespace, discovery.captured_at, discovery.status, None),
+        failed_node, scheduling_evidence=scheduling_evidence_for(deployment), combination_budget=combination_budget)
+    return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts, "declaredWorkflow": declared.to_dict()})
 
 
 def evaluate_recommendation(

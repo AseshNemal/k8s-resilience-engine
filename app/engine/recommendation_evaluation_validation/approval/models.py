@@ -9,6 +9,11 @@ from app.shared.schemas.recommendation import RecommendationReport
 # live recommendation source; a client can never supply it.
 LIVE_EVIDENCE_SOURCE = "live-discovery"
 
+# Live topology, but a workflow a person DECLARED instead of one Component 1 observed, approved and froze. It is shown and studied;
+# it is never trusted: ``has_verified_provenance`` accepts only LIVE_EVIDENCE_SOURCE, so nothing computed from a declaration can be
+# approved, applied or validated.
+DECLARED_WORKFLOW_SOURCE = "declared-workflow"
+
 @dataclass
 class ApprovalModel:
     id: int

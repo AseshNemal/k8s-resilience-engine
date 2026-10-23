@@ -291,6 +291,10 @@ def test_without_scheduling_evidence_a_live_candidate_is_not_feasible_and_cannot
         client, monkeypatch, use_cluster, sqlite_url):
     freeze_checkout(monkeypatch)
     use_cluster(concentrated_db())  # live discovery: no node labels, no Ready condition, no intent, no taints
+    # Member 4 now fetches those facts itself (Component 2's fuller analysis, and a taint read). This test is about what happens when
+    # they cannot be had, so that second read is made to fail: the check must then fail closed, as it did before they were read at all.
+    monkeypatch.setattr(live_pipeline, "enrich_scheduling_facts", lambda deployment, namespace, reader=None: (deployment, {}))
+    monkeypatch.setattr(live_pipeline, "live_scheduling_evidence", lambda deployment: SchedulingEvidence.from_graph(deployment))
 
     response = client.get(LIVE, params=PARAMS)
     live = live_pipeline.build_live_recommendation("checkout", None, "shop")

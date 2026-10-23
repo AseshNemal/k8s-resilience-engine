@@ -15,12 +15,18 @@
  * generation, or for a cluster that is no longer the connected one, is dropped. Choices belong to one cluster: when
  * the connected cluster changes (or the same connection now reaches a different cluster) the namespace, workflow and
  * node you had chosen are cleared, so nothing chosen on one cluster is ever sent to another.
+ *
+ * Declared workflows. When Component 1 has no frozen workflow, a person can declare one (a file on the backend). The context
+ * lists those apart, they are offered in the same dropdown clearly labelled, they are NEVER chosen for you, and choosing one asks
+ * a different route (/declared/detail) whose answer has approval switched off. A declared workflow is not observed and not approved.
  */
 (function () {
     "use strict";
 
     const CONTEXT_URL = "/api/recommendations/context";
     const DETAIL_URL = "/api/recommendations/live/detail";
+    const DECLARED_DETAIL_URL = "/api/recommendations/declared/detail";
+    const DECLARED_PREFIX = "declared:";
 
     // What to do next, by coded failure. Wording is fixed here; the server's own message is shown beside it.
     const NEXT_ACTIONS = {
@@ -31,6 +37,8 @@
         CLUSTER_CONNECTION_FAILED: "Check that the cluster is running; reload when it answers.",
         CLUSTER_AUTH_FAILED: "Reconnect on the Connect page; the extension's credential was rejected.",
         CLUSTER_FORBIDDEN: "The extension's credential cannot read what discovery needs; reconnect on the Connect page.",
+        DECLARED_WORKFLOW_UNAVAILABLE: "Declare this workflow in the file the backend names (RESILIENCE_DECLARED_WORKFLOW_PATH), or choose another.",
+        DECLARED_WORKFLOW_INVALID: "Fix the declaration file named by RESILIENCE_DECLARED_WORKFLOW_PATH.",
     };
 
     const text = (value, max) => (typeof value === "string" ? value.slice(0, max) : "");
@@ -44,12 +52,12 @@
         return query ? `${CONTEXT_URL}?${query}` : CONTEXT_URL;
     }
 
-    function detailUrl(workflowId, namespace, failedNode) {
+    function detailUrl(workflowId, namespace, failedNode, declared) {
         const params = new URLSearchParams();
         params.set("workflow_id", workflowId);
         params.set("namespace", namespace);
         if (failedNode) params.set("failed_node", failedNode);
-        return `${DETAIL_URL}?${params.toString()}`;
+        return `${declared === true ? DECLARED_DETAIL_URL : DETAIL_URL}?${params.toString()}`;
     }
 
     // A coded evidence error, turned into what the person needs: which evidence is missing, and the next action.
@@ -94,7 +102,22 @@
         parts.push(`${workflow.services.length} services`);
         return {
             workflowId: workflow.workflowId,
+            value: workflow.workflowId, declared: false,
             label: parts.join(" · ") + (workflow.applicable ? "" : ` — not usable here: ${workflow.reason}`),
+            applicable: workflow.applicable,
+            reason: workflow.reason || null,
+        };
+    }
+
+    // A declared workflow in the dropdown: always labelled as declared and not approvable, and its value carries the prefix
+    // that tells a choice of it apart from a frozen workflow of the same name.
+    function declaredOption(workflow) {
+        const by = workflow.declaredBy ? ` by ${workflow.declaredBy}` : "";
+        return {
+            workflowId: workflow.workflowId,
+            value: DECLARED_PREFIX + workflow.workflowId, declared: true,
+            label: `${workflow.workflowId} · declared${by} · ${workflow.services.length} services — declared, not approvable`
+                + (workflow.applicable ? "" : ` — not usable here: ${workflow.reason}`),
             applicable: workflow.applicable,
             reason: workflow.reason || null,
         };
@@ -113,6 +136,10 @@
                 workflowId: text(w.workflowId, 200), freezeId: text(w.freezeId, 200) || null, frozenAt: text(w.frozenAt, 40) || null,
                 services: list(w.services, 100).map((s) => text(s, 253)), applicable: w.applicable === true, reason: text(w.reason, 300) || null,
             })),
+            declaredWorkflows: (Array.isArray(body.declaredWorkflows) ? body.declaredWorkflows : []).map((w) => ({
+                workflowId: text(w.workflowId, 200), declaredBy: text(w.declaredBy, 100) || null,
+                services: list(w.services, 100).map((s) => text(s, 253)), applicable: w.applicable === true, reason: text(w.reason, 300) || null,
+            })),
             workflowId: text(body.workflowId, 200) || null,
             workflowChoice: text(body.workflowChoice, 30),
             evidence: body.evidence.map((e) => ({ id: text(e.id, 40), label: text(e.label, 80), state: text(e.state, 20), detail: text(e.detail, 600), nextAction: text(e.nextAction, 600) || null })),
@@ -126,7 +153,7 @@
     function createController(env) {
         const s = {
             identity: null, fingerprint: null, generation: 0,
-            namespace: "", workflowId: "", failedNode: "",
+            namespace: "", workflowId: "", workflowKind: "frozen", failedNode: "",
             ctx: null, detail: null, error: null, status: "loading",
         };
 
@@ -143,8 +170,10 @@
                 cluster: { identity: s.identity || "", fingerprint: s.fingerprint },
                 namespaces: ctx ? ctx.namespaces : [],
                 namespace: s.namespace, namespaceChoice: ctx ? ctx.namespaceChoice : "",
-                workflows: ctx ? ctx.workflows.map(workflowOption) : [],
+                workflows: ctx ? [...ctx.workflows.map(workflowOption), ...ctx.declaredWorkflows.map(declaredOption)] : [],
                 workflowId: s.workflowId, workflowChoice: ctx ? ctx.workflowChoice : "",
+                workflowKind: s.workflowKind,
+                workflowValue: s.workflowKind === "declared" ? DECLARED_PREFIX + s.workflowId : s.workflowId,
                 failedNodes: nodesOf(s.detail), failedNode: s.failedNode,
                 evidence,
                 nextActions: ctx ? ctx.nextActions : [],
@@ -164,7 +193,7 @@
             s.detail = null; s.error = null;
             publish();
             try {
-                const detail = await env.fetchJson(detailUrl(s.workflowId, s.namespace, s.failedNode));
+                const detail = await env.fetchJson(detailUrl(s.workflowId, s.namespace, s.failedNode, s.workflowKind === "declared"));
                 if (!current(generation)) return;               // an older request: never shown
                 s.detail = detail;
                 s.status = "ready";
@@ -184,13 +213,14 @@
             const identity = text(await env.clusterIdentity(), 253);
             if (!current(generation)) return view();
             if (s.identity !== null && identity !== s.identity) {   // a different cluster than the choices were made on
-                s.namespace = ""; s.workflowId = ""; s.failedNode = ""; s.ctx = null;
+                s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; s.ctx = null;
             }
             s.identity = identity;
 
             let ctx;
             try {
-                ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, s.workflowId)));
+                // A declared choice is not a frozen workflow, so it is never sent to the context as one.
+                ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, s.workflowKind === "declared" ? "" : s.workflowId)));
             } catch (error) {
                 if (!current(generation)) return view();
                 s.ctx = null; s.error = error; s.status = "blocked";
@@ -202,14 +232,24 @@
                 // The same connection now reaches another cluster. This answer was asked for with the old cluster's
                 // choices, so it is discarded whole: the choices are cleared and the question is asked again with
                 // none. No recommendation is ever requested from a context that does not match its cluster.
-                s.namespace = ""; s.workflowId = ""; s.failedNode = ""; s.ctx = null;
+                s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; s.ctx = null;
                 s.fingerprint = ctx.cluster.fingerprint;
                 return start();
             }
             s.fingerprint = ctx.cluster.fingerprint;
             s.ctx = ctx;
             s.namespace = ctx.namespace || "";
-            s.workflowId = ctx.workflowId || "";
+            if (s.workflowKind === "declared") {
+                // Kept only while that declared workflow still exists and applies here; otherwise the choice is dropped, not guessed.
+                const kept = ctx.declaredWorkflows.some((d) => d.workflowId === s.workflowId && d.applicable);
+                if (!kept || !s.namespace) { s.workflowKind = "frozen"; s.workflowId = ctx.workflowId || ""; }
+            } else {
+                s.workflowId = ctx.workflowId || "";
+            }
+            if (s.workflowKind === "declared") {
+                await loadDetail(generation);
+                return view();
+            }
             if (!ctx.ready) {
                 // Several applications or several applicable workflows is a choice for you; anything else is missing evidence.
                 s.status = ctx.namespaceChoice === "ambiguous" || ctx.workflowChoice === "choose" ? "needs-input" : "blocked";
@@ -222,20 +262,26 @@
 
         function reset() {
             s.generation += 1;
-            s.namespace = ""; s.workflowId = ""; s.failedNode = "";
+            s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = "";
             s.ctx = null; s.detail = null; s.error = null; s.fingerprint = null; s.identity = null;
         }
 
         return {
             start,
             reload: start,
-            selectNamespace(namespace) { s.namespace = text(namespace, 253); s.workflowId = ""; s.failedNode = ""; return start(); },
-            selectWorkflow(workflowId) { s.workflowId = text(workflowId, 200); s.failedNode = ""; return start(); },
+            selectNamespace(namespace) { s.namespace = text(namespace, 253); s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; return start(); },
+            selectWorkflow(value) {
+                const chosen = text(value, 220);
+                s.workflowKind = chosen.startsWith(DECLARED_PREFIX) ? "declared" : "frozen";
+                s.workflowId = s.workflowKind === "declared" ? chosen.slice(DECLARED_PREFIX.length) : chosen;
+                s.failedNode = "";
+                return start();
+            },
             selectFailedNode(node) { s.failedNode = text(node, 253); const generation = ++s.generation; return loadDetail(generation); },
             // The connected cluster changed: nothing chosen before belongs to the new one.
             clusterChanged() { reset(); return start(); },
             // The inputs an approval request must send, because the server recomputes the recommendation from them.
-            selection() { return { workflowId: s.workflowId, namespace: s.namespace, failedNode: s.failedNode }; },
+            selection() { return { workflowId: s.workflowId, namespace: s.namespace, failedNode: s.failedNode, workflowKind: s.workflowKind }; },
             view,
         };
     }
