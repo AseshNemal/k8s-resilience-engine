@@ -65,6 +65,31 @@ def test_a_file_named_in_the_kubeconfig_variable_is_not_borrowed_either(tmp_path
         KubernetesTestClusterGateway(shared, topology_reader=discover)
 
 
+def test_the_connected_cluster_is_the_one_explicit_exception_and_it_is_a_separate_switch(api, tmp_path, monkeypatch):
+    shared = write_kubeconfig(tmp_path / "shared")
+    monkeypatch.setenv("KUBECONFIG", shared)
+
+    with pytest.raises(AmbientCredentialsError):             # the same file, without the switch, is still refused
+        KubernetesTestClusterGateway(shared, topology_reader=discover)
+    connected = KubernetesTestClusterGateway(shared, connected_cluster=True, allow_writes=True, transport=api.transport)
+
+    assert connected.allow_writes is True and connected.identity().cluster_uid == KUBE_SYSTEM_UID
+
+
+def test_the_connected_cluster_still_needs_a_file_that_exists(tmp_path):
+    for bad in ("", str(tmp_path / "absent")):
+        with pytest.raises(AmbientCredentialsError):
+            KubernetesTestClusterGateway(bad, connected_cluster=True)
+
+
+def test_a_gateway_made_for_applying_has_no_topology_reader_and_says_so(api, tmp_path):
+    connected = KubernetesTestClusterGateway(write_kubeconfig(tmp_path / "c"), connected_cluster=True, transport=api.transport)
+
+    from app.integrations.kubernetes.client import NotConnectedError
+    with pytest.raises(NotConnectedError):
+        connected.read_graph(NAMESPACE)
+
+
 def test_no_path_and_a_missing_file_are_refused_rather_than_defaulted(tmp_path):
     for bad in ("", "   ", str(tmp_path / "absent")):
         with pytest.raises(AmbientCredentialsError):

@@ -92,7 +92,7 @@ def test_a_declared_plan_runs_through_the_validation_pipeline_and_the_record_say
     assert provenance["workflowBasis"] == "DECLARED" and provenance["conditionalOnDeclaration"] is True
     assert provenance["declaredWorkflow"]["declarationSha256"] == plan.declaration["declarationSha256"]
     assert provenance["declaredWorkflow"]["observed"] is False
-    assert provenance["researchAcknowledgement"]["by"] == "asesh" and "disposable test cluster" in provenance["researchAcknowledgement"]["scope"]
+    assert provenance["researchAcknowledgement"]["by"] == "asesh" and "research cluster only" in provenance["researchAcknowledgement"]["scope"]
     assert record.proposal["approval"]["decidedBy"] == "asesh"
     assert record.workflow["mandatoryServices"] == ["web", "db"]          # the declared workflow is stored with the experiment
 

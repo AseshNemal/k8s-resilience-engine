@@ -46,6 +46,7 @@
     let lastResearchName = "";                            // remembered in memory only, to save retyping within this page
     let researchNameInput = null;
     let researchAckInput = null;
+    let lastApplierName = "";                             // remembered in memory only, to save retyping within this page
     const RESEARCH_PLACEHOLDER = "I understand this workflow is declared by me, not observed, and approve it for research validation only.";
 
     function isDeclared() {
@@ -144,7 +145,7 @@
                 research.className = "approval-note";
                 research.setAttribute("data-role", "research-note");
                 research.textContent = "Research tier: this workflow was declared, not observed. A decision here applies nothing and counts "
-                    + "for validation on a designated test cluster only; results from it are conditional on the declaration.";
+                    + "for research on the research cluster only; results from it are conditional on the declaration.";
                 stack.append(research);
             }
             if (provenance === "unverified") {
@@ -163,6 +164,7 @@
                 stack.append(note);
             }
             stateContainer.append(stack);
+            if (approval.status === "APPROVED") renderApplication(stateContainer);
 
             if (approval.status === "PENDING_APPROVAL") {
                 const reject = button("Reject", "danger-button", "btn-show-reject", () => showApprovalModal("reject"));
@@ -235,6 +237,102 @@
         renderApprovalState(result.payload, result.provenance);
     }
 
+    // ---- Apply and Reset (an approved change, on the connected cluster) --------------------------------
+
+    const APPLY_NOTE = "Applying changes the connected cluster. It patches only the Deployments in the approved YAML above (more replicas, a " +
+        "hostname spread, required anti-affinity), stores the state it replaces, and rolls their pods out again. Reset puts that stored " +
+        "state back.";
+    const APPLICATION_VARIANT = { APPLIED: "warning", RESET: "success", FAILED: "danger", RESET_FAILED: "danger", APPLYING: "warning" };
+
+    // Shown only for an APPROVED request. The server decides whether it can be applied or reset (canApply / canReset) and re-checks everything
+    // when it is asked; this collects the named person and asks once more before anything is written.
+    function renderApplication(stateContainer) {
+        const box = document.createElement("div");
+        box.className = "stack-sm";
+        box.setAttribute("data-role", "application");
+        stateContainer.append(box);
+        const requestedFor = currentRecommendation.id;
+        callApproval("GET", "/application").then((result) => {
+            if (!currentRecommendation || currentRecommendation.id !== requestedFor) return;
+            if (!result.ok) return fillApplication(box, null, errorText(result, "Could not read what has been applied."));
+            fillApplication(box, result.payload);
+        });
+    }
+
+    function fillApplication(box, status, message, confirming) {
+        box.replaceChildren();
+        const heading = document.createElement("strong");
+        heading.textContent = "Apply to the connected cluster";
+        box.append(heading);
+        if (!status) {
+            if (message) box.append(applicationNote(message, true));
+            return;
+        }
+        const application = status.application;
+        box.append(approvalBadge(application ? application.status.replace("_", " ") : "Not applied",
+            application ? (APPLICATION_VARIANT[application.status] || "muted") : "muted"));
+        if (application) {
+            const detail = document.createElement("div");
+            detail.className = "text-sm text-muted";
+            detail.setAttribute("data-role", "application-detail");
+            const rollout = status.rolloutComplete === true ? "rollout settled" : status.rolloutComplete === false ? "rolling out" : "rollout unknown";
+            detail.textContent = `${application.deployments.join(", ")} in ${application.namespace} · applied by ${application.appliedBy}` +
+                (application.resetBy ? ` · reset by ${application.resetBy}` : ` · ${rollout}`);
+            box.append(detail);
+            if (application.detail && application.detail.message) box.append(applicationNote(application.detail.message, true));
+        }
+        if (status.canApply || status.canReset) {
+            const who = document.createElement("input");
+            who.type = "text";
+            who.className = "form-input";
+            who.id = "apply-by";
+            who.placeholder = "Your name";
+            who.value = lastApplierName;
+            box.append(who);
+            const row = document.createElement("div");
+            row.className = "approval-actions";
+            const submit = (action) => submitApplication(box, status, action, who);
+            if (confirming) {
+                box.append(applicationNote(confirming === "apply" ? APPLY_NOTE : "Reset puts back the replica count and placement constraints " +
+                    "stored when this was applied. Other changes made to those Deployments since are kept.", false));
+                row.append(button(confirming === "apply" ? "Confirm apply" : "Confirm reset",
+                    confirming === "apply" ? "danger-button" : "primary-button", confirming === "apply" ? "btn-confirm-apply" : "btn-confirm-reset",
+                    () => submit(confirming)),
+                    button("Cancel", "secondary-button", "btn-cancel-application", () => { lastApplierName = who.value.trim() || lastApplierName; fillApplication(box, status); }));
+            } else {
+                if (status.canReset) row.append(button("Reset to previous state", "secondary-button", "btn-reset",
+                    () => { lastApplierName = who.value.trim() || lastApplierName; fillApplication(box, status, null, "reset"); }));
+                if (status.canApply) row.append(button("Apply to cluster", "primary-button", "btn-apply",
+                    () => { lastApplierName = who.value.trim() || lastApplierName; fillApplication(box, status, null, "apply"); }));
+            }
+            box.append(row);
+        } else if (status.reason) {
+            box.append(applicationNote(status.reason, false));
+        }
+        if (message) box.append(applicationNote(message, true));
+    }
+
+    function applicationNote(text, alert) {
+        const note = document.createElement("div");
+        note.className = "approval-note";
+        if (alert) note.setAttribute("role", "alert");
+        note.textContent = text;
+        return note;
+    }
+
+    async function submitApplication(box, status, action, whoInput) {
+        const by = (whoInput.value || "").trim();
+        if (!by) return fillApplication(box, status, "Enter your name: applying or resetting a change is done by a named person.", action);
+        lastApplierName = by;
+        const result = await callApproval("POST", `/${action}`, action === "apply" ? { appliedBy: by } : { resetBy: by });
+        if (!result.ok) {
+            // The server's refusal is the message; the status is read again so the buttons match what is true now.
+            const again = await callApproval("GET", "/application");
+            return fillApplication(box, again.ok ? again.payload : status, errorText(result, `The ${action} did not complete.`));
+        }
+        fillApplication(box, result.payload);
+    }
+
     async function loadApprovalState() {
         const result = await callApproval("GET", "/approval");
         if (result.status === 404) {
@@ -278,13 +376,13 @@
         if (action === "approve" && declared) {
             message.textContent =
                 "Approve this recommendation for RESEARCH validation? The workflow was declared, not observed, so anything measured from it is " +
-                "conditional on that declaration. This approval does NOT apply the change; it only authorizes this exact proposal.";
+                "conditional on that declaration. This approval does NOT apply the change; it only authorizes this exact proposal, and applying it is a separate step.";
             approve.style.display = "inline-flex";
             approve.onclick = () => submitApprovalDecision("approve");
         } else if (action === "approve") {
             message.textContent =
                 "Approve this recommendation? This approval does NOT apply the change automatically. " +
-                "It only authorizes this exact proposal for a future controlled test-environment application.";
+                "It only authorizes this exact proposal; applying it to the cluster is a separate step.";
             approve.style.display = "inline-flex";
             approve.onclick = () => submitApprovalDecision("approve");
         } else {

@@ -80,7 +80,8 @@ mostly a fixture loader.
 Latest test result (2026-10-21, `integration/team-sync`): 1303 passed, 2 skipped, 0 failed (`python -m pytest`);
 151 Node tests and every Go package pass. Floating-point assertions use `pytest.approx`.
 
-The extension's read-only role grants `get`/`list` on exactly nodes, pods, services, deployments and
+The extension's role is full access to the connected research cluster (developer-approved 2026-10-23, so Apply and Reset can write); writes go only through
+`application.ApplicationService`. Member 2's reads use nodes, pods, services, deployments and
 replicasets. Member 2's per-namespace pipeline reads them through `KubernetesApiSource.list_objects` (no Kubernetes client
 package); `discovery.py` uses the same selector resolver, so Bookinfo-style naming resolves completely. Declared intent comes from a named manifest path, `RESILIENCE_MANIFEST_PATH`, the
 repository's manifests, or else the cluster's own Deployment specs (`service.py`, `_declared_target`).

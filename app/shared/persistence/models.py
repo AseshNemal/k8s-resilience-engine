@@ -108,3 +108,33 @@ class ValidationRunRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppliedChangeRecord(Base):
+    """One approved change applied to the connected cluster, with the state it replaced so it can be reset (Member 4).
+
+    ``before`` is written BEFORE the first write to the cluster (status APPLYING), so a crash half-way still leaves
+    everything needed to put it back. ``status`` moves APPLYING -> APPLIED -> RESET; FAILED means the apply did not
+    complete and everything it touched was put back; RESET_FAILED means a restore did not complete and can be retried.
+    """
+
+    __tablename__ = "applied_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    application_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    recommendation_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    approval_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    tier: Mapped[str] = mapped_column(String(20), nullable=False)
+    namespace: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    yaml_applied: Mapped[str] = mapped_column(String, nullable=False)
+    yaml_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    before: Mapped[list] = mapped_column(JSON, nullable=False)
+    cluster: Mapped[dict] = mapped_column(JSON, nullable=False)
+    events: Mapped[list] = mapped_column(JSON, nullable=False)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    applied_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reset_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

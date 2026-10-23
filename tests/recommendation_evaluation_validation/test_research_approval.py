@@ -76,7 +76,7 @@ def test_a_request_keeps_the_acknowledgement_the_digest_the_scope_and_the_server
     assert approval.status is ApprovalStatus.PENDING_APPROVAL and approval.requested_by == "asesh"
     assert provenance["source"] == DECLARED_WORKFLOW_SOURCE and provenance["researchTier"] == RESEARCH_TIER
     assert provenance["researchAcknowledgement"]["by"] == "asesh" and provenance["researchAcknowledgement"]["statement"] == ACK
-    assert "disposable test cluster only" in provenance["researchAcknowledgement"]["scope"]
+    assert "research cluster only" in provenance["researchAcknowledgement"]["scope"]
     assert len(provenance["declaredWorkflow"]["declarationSha256"]) == 64
     assert approval.evaluation_snapshot["proposal"]["yaml"]["origin"] == "server-generated"
     assert has_research_provenance(approval) is True and has_verified_provenance(approval) is False

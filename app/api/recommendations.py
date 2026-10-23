@@ -1,3 +1,4 @@
+import os
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -14,6 +15,15 @@ from app.engine.recommendation_evaluation_validation.approval import (
     has_research_provenance,
     has_verified_provenance,
 )
+from app.engine.recommendation_evaluation_validation.application import (
+    PRODUCTION,
+    RESEARCH,
+    AppliedChangeRepository,
+    ApplicationRefused,
+    ApplicationService,
+    ApplyGateway,
+)
+from app.engine.recommendation_evaluation_validation.approval.research import declaration_digest
 from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
 from app.engine.recommendation_evaluation_validation.approval.research import RESEARCH_SCOPE
@@ -24,6 +34,8 @@ from app.engine.recommendation_evaluation_validation.live_pipeline import (
 )
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 from app.shared.evidence_errors import EvidenceError, unavailable
+from app.integrations.kubernetes.client import NotConnectedError
+from app.integrations.kubernetes.validation_gateway import AmbientCredentialsError, KubernetesTestClusterGateway
 from app.core.config import get_settings
 from app.core.database import get_engine
 from sqlalchemy.orm import Session
@@ -50,6 +62,16 @@ class ResearchDecisionRequest(APIModel):
     note: str
     expected_proposal_version: str
     decided_by: str
+
+class ApplyRequest(APIModel):
+    """Who is applying an approved change to the connected cluster. Member 4's own body; no shared schema changes."""
+
+    applied_by: str
+
+
+class ResetRequest(APIModel):
+    reset_by: str
+
 
 router = APIRouter(
     prefix="/api/recommendations",
@@ -176,6 +198,52 @@ def get_current_evaluator() -> Callable[[ApprovalModel], LiveRecommendation]:
             ) from error
 
     return evaluate
+
+
+def get_cluster_applier() -> Callable[[], ApplyGateway]:
+    """Builds the gateway for the cluster the extension is CONNECTED to, able to write (Apply and Reset only).
+
+    Developer-approved 2026-10-23: the connected cluster is the docker-desktop research cluster and the extension holds a
+    full-access credential for it. This is the only place a gateway is built with ``connected_cluster=True`` and
+    ``allow_writes=True``; it is reached only through the apply and reset routes below. Tests substitute it.
+    """
+
+    def build() -> ApplyGateway:
+        first = next((p for p in (os.environ.get("KUBECONFIG") or "").split(os.pathsep) if p), "~/.kube/config")
+        try:
+            return KubernetesTestClusterGateway(first, connected_cluster=True, allow_writes=True)
+        except AmbientCredentialsError:
+            raise NotConnectedError("no cluster is connected") from None
+
+    return build
+
+
+def get_application_service(db: Session = Depends(get_db),
+                            gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier)) -> ApplicationService:
+    return ApplicationService(ApprovalRepository(db), AppliedChangeRepository(db), gateway, tier=PRODUCTION,
+                              trusted=has_verified_provenance)
+
+
+def get_research_application_service(db: Session = Depends(get_db),
+                                     gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier)) -> ApplicationService:
+    """Applies a RESEARCH-approved recommendation. Its YAML is never 'applicable' at the production gate, by design."""
+    return ApplicationService(ApprovalRepository(db), AppliedChangeRepository(db), gateway, tier=RESEARCH,
+                              trusted=has_research_provenance, require_applicable=False)
+
+
+def get_research_application_evaluator(
+    evaluate: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_declared_evaluator),
+) -> Callable[[ApprovalModel], LiveRecommendation]:
+    """The declared evaluation, plus: the declaration it was approved against must be the declaration that is in force now."""
+
+    def checked(approval: ApprovalModel) -> LiveRecommendation:
+        live = evaluate(approval)
+        if declaration_digest(live.evidence) != declaration_digest((approval.evaluation_snapshot or {}).get("provenance")):
+            raise ApplicationRefused("APPROVAL_STALE", "The declared workflow changed since this was approved, so it is not what "
+                                     "was approved. Request approval again.")
+        return live
+
+    return checked
 
 
 def _to_response(approval) -> ApprovalResponse:
@@ -489,3 +557,65 @@ def reject_recommendation(
         raise HTTPException(status_code=409, detail=str(e))
 
     return _to_response(approval)
+
+
+# --- Apply and Reset ----------------------------------------------------------------------------------------------------------------
+# An approval applies nothing. These routes are the separate, named step that applies an approved change to the connected cluster and
+# puts it back (developer-approved 2026-10-23). The checks are in ``ApplicationService``; the routes only choose the tier.
+
+
+def _applied(service: ApplicationService, recommendation_id: str, action: Callable[[], object]) -> dict:
+    try:
+        action()
+    except PreconditionError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    return service.status(recommendation_id)
+
+
+@router.get("/{recommendation_id}/application")
+def get_application(recommendation_id: str, service: ApplicationService = Depends(get_application_service)) -> dict:
+    return service.status(recommendation_id)
+
+
+@router.post("/{recommendation_id}/apply")
+def apply_recommendation(
+    recommendation_id: str,
+    request: ApplyRequest,
+    service: ApplicationService = Depends(get_application_service),
+    evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_current_evaluator),
+) -> dict:
+    return _applied(service, recommendation_id, lambda: service.apply(recommendation_id, request.applied_by, evaluate=evaluator))
+
+
+@router.post("/{recommendation_id}/reset")
+def reset_recommendation(
+    recommendation_id: str,
+    request: ResetRequest,
+    service: ApplicationService = Depends(get_application_service),
+) -> dict:
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+
+
+@router.get("/declared/{recommendation_id}/application")
+def get_research_application(recommendation_id: str,
+                             service: ApplicationService = Depends(get_research_application_service)) -> dict:
+    return service.status(recommendation_id)
+
+
+@router.post("/declared/{recommendation_id}/apply")
+def apply_research_recommendation(
+    recommendation_id: str,
+    request: ApplyRequest,
+    service: ApplicationService = Depends(get_research_application_service),
+    evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_research_application_evaluator),
+) -> dict:
+    return _applied(service, recommendation_id, lambda: service.apply(recommendation_id, request.applied_by, evaluate=evaluator))
+
+
+@router.post("/declared/{recommendation_id}/reset")
+def reset_research_recommendation(
+    recommendation_id: str,
+    request: ResetRequest,
+    service: ApplicationService = Depends(get_research_application_service),
+) -> dict:
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))

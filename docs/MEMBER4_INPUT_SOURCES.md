@@ -76,7 +76,7 @@ YAML regenerated at decision time. Four things differ, on purpose:
 2. the request carries a **named person's written acknowledgement** (at least 20 characters) that the workflow is declared, not observed; the anonymous
    `developer` is refused, and so is an anonymous decision;
 3. the approval is bound to the **declaration's digest**: it is evaluated again when decided, and a declaration that changed since makes it stale;
-4. the YAML may be marked "not applicable" (it always is for declared evidence), which only keeps it from being applied to the connected cluster.
+4. the YAML may be marked "not applicable" (it always is for declared evidence), which keeps the PRODUCTION tier from applying it. The research tier's own Apply step turns that off (section 6).
 
 Routes (Member 4's own request bodies; no shared schema changed): `POST /api/recommendations/declared/{id}/request-approval`, `/approve`, `/reject`,
 `GET /declared/{id}/approval`. The declared detail offers the door per candidate (`researchApproval`) while the production controls stay off.
@@ -94,3 +94,20 @@ Tested with fakes and, read-only, against the real docker-desktop cluster: the t
 the research request, approval and validation-plan build on real Bookinfo data (approvals went to a throwaway database). **Never exercised against a real cluster:**
 applying the YAML and stopping a node (the executor), which waits on the readiness gates in `docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md`. The installed extension is
 unchanged: nothing on the live page changes until it is updated and the declaration file is given to the backend.
+
+## 6. Apply and Reset (developer-approved 2026-10-23)
+
+An approval still applies nothing. A separate step applies an APPROVED change to the **connected cluster** (the docker-desktop research cluster the extension is
+connected to) and can reset it. The extension holds a full-access credential for that cluster for this reason; the developer said that, for now, much security is not
+needed there. Routes (both tiers): `GET .../{id}/application`, `POST .../{id}/apply` `{appliedBy}`, `POST .../{id}/reset` `{resetBy}`; the declared workflow's are
+under `/declared/{id}/...`, and a production approval is not applied by the research door or the other way round.
+
+Before it writes, Apply requires: an APPROVED record of the tier's own provenance; the evaluation made again now to give the same eligible candidate and fingerprint (and, for
+research, the same declaration digest); the YAML to be server-generated and identical to the approved text; every document to pass the proposal whitelist against the
+Deployments in the cluster right now; no other application to be active (one at a time); the cluster identity (`kube-system` UID) to be readable. It stores the state it replaces
+(status `APPLYING`) before the first patch, patches with the `resourceVersion` it read (a Deployment edited in between is refused, not overwritten), and puts back what it
+already patched if a later patch fails. Reset restores exactly the stored replica count and placement constraints, only on the same cluster, and can be retried
+(`RESET_FAILED` keeps the snapshot). Records are in the `applied_changes` table. The page shows Apply and Reset under the Approval Gate with a second confirmation and a named person.
+
+Not done: pods already running are not moved by a Deployment patch (the Deployment rolls out; the scheduler places replacements), and the rollout status shown is read from the
+cluster each time rather than waited for. **Never run against a real cluster yet**: tests use an in-memory cluster that remembers what was written.

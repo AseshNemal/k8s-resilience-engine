@@ -375,3 +375,117 @@ test("a frozen workflow still uses the production request button and routes, unc
     assert.equal(byId(env, "btn-request-research"), undefined);
     assert.ok(!calls_include(env, "/declared"));
 });
+
+// ---- Apply and Reset: a separate, confirmed step after an approval, on the connected cluster -----------------------------------------------
+
+const approvedRecord = { id: 1, recommendationId: "rec-live", proposalVersion: "v1.0", status: "APPROVED", requestedAt: "2026-10-23T00:00:00Z", requestedBy: "asesh",
+    decidedBy: "asesh", recommendationSnapshot: {}, yamlSnapshot: null, evaluationSnapshot: {} };
+const applicationOf = (status, over = {}) => ({ applicationId: "apply-1", recommendationId: "rec-live", status, deployments: ["db"], namespace: "shop", appliedBy: "asesh",
+    resetBy: null, detail: null, ...over });
+const applicationStatus = (over = {}) => ({ recommendationId: "rec-live", application: null, rolloutComplete: null, canApply: true, canReset: false, reason: null, tier: "research", ...over });
+const D_APPROVAL = "GET /api/recommendations/declared/rec-live/approval";
+const D_APPLICATION = "GET /api/recommendations/declared/rec-live/application";
+const openApproved = (application, extra = {}) => openDeclared({
+    [D_APPROVAL]: { status: 200, headers: { "X-Evidence-Provenance": "research-declared" }, body: approvedRecord },
+    [D_APPLICATION]: { status: 200, body: application }, ...extra });
+const posts = (env) => env.calls.map(([m, u], i) => [m, u, env.bodies[i]]).filter(([m]) => m === "POST");
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("an approved recommendation offers Apply, read from the research route, and nothing is applied by showing it", async () => {
+    const env = await openApproved(applicationStatus());
+
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("Apply to the connected cluster") && shown.includes("Not applied"), shown);
+    assert.ok(byId(env, "btn-apply") && byId(env, "apply-by"));
+    assert.equal(byId(env, "btn-reset"), undefined, "nothing to reset yet");
+    assert.deepEqual(posts(env), [], "reading changes nothing");
+});
+
+test("Apply asks once more before it sends, needs a name, and then shows what was applied with a way back", async () => {
+    const env = await openApproved(applicationStatus(), {
+        "POST /api/recommendations/declared/rec-live/apply": { status: 200, body: applicationStatus({ application: applicationOf("APPLIED"), rolloutComplete: false, canApply: false, canReset: true }) } });
+
+    await byId(env, "btn-apply").listeners.click();
+    assert.deepEqual(posts(env), [], "the first click only asks");
+    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("patches only the Deployments in the approved YAML"));
+
+    byId(env, "apply-by").value = "   ";
+    await byId(env, "btn-confirm-apply").listeners.click();
+    assert.deepEqual(posts(env), [], "a name is required");
+    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("Enter your name"));
+
+    byId(env, "apply-by").value = "asesh";
+    await byId(env, "btn-confirm-apply").listeners.click();
+    await settle();
+
+    assert.deepEqual(posts(env), [["POST", "/api/recommendations/declared/rec-live/apply", { appliedBy: "asesh" }]]);
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("APPLIED") && shown.includes("db in shop") && shown.includes("rolling out"), shown);
+    assert.ok(byId(env, "btn-reset") && !byId(env, "btn-apply"));
+});
+
+test("Cancel puts the question away without sending anything", async () => {
+    const env = await openApproved(applicationStatus());
+
+    await byId(env, "btn-apply").listeners.click();
+    await byId(env, "btn-cancel-application").listeners.click();
+
+    assert.deepEqual(posts(env), []);
+    assert.ok(byId(env, "btn-apply") && !byId(env, "btn-confirm-apply"));
+});
+
+test("Reset is confirmed too, names who reset it, and goes back to offering Apply", async () => {
+    const env = await openApproved(applicationStatus({ application: applicationOf("APPLIED"), rolloutComplete: true, canApply: false, canReset: true }), {
+        "POST /api/recommendations/declared/rec-live/reset": { status: 200, body: applicationStatus({ application: applicationOf("RESET", { resetBy: "asesh" }), canApply: true, canReset: false }) } });
+
+    await byId(env, "btn-reset").listeners.click();
+    assert.deepEqual(posts(env), []);
+    byId(env, "apply-by").value = "asesh";
+    await byId(env, "btn-confirm-reset").listeners.click();
+    await settle();
+
+    assert.deepEqual(posts(env), [["POST", "/api/recommendations/declared/rec-live/reset", { resetBy: "asesh" }]]);
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("RESET") && shown.includes("reset by asesh"), shown);
+    assert.ok(byId(env, "btn-apply") && !byId(env, "btn-reset"));
+});
+
+test("when the server refuses, its reason is shown and the buttons are read again from the server", async () => {
+    const env = await openApproved(applicationStatus(), {
+        "POST /api/recommendations/declared/rec-live/apply": { status: 409, body: { detail: { code: "APPROVAL_STALE", message: "The topology changed since this was approved." } } } });
+
+    await byId(env, "btn-apply").listeners.click();
+    byId(env, "apply-by").value = "asesh";
+    await byId(env, "btn-confirm-apply").listeners.click();
+    await settle();
+
+    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("The topology changed since this was approved."));
+    assert.ok(byId(env, "btn-apply"), "the state was read again; it can still be tried");
+});
+
+test("another application being active explains why Apply is not offered", async () => {
+    const env = await openApproved(applicationStatus({ canApply: false, reason: "rec-other is still applied; reset it first." }));
+
+    assert.equal(byId(env, "btn-apply"), undefined);
+    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("rec-other is still applied; reset it first."));
+});
+
+test("a failed reset shows the reason and can be tried again", async () => {
+    const env = await openApproved(applicationStatus({ application: applicationOf("RESET_FAILED", { detail: { message: "Could not reach the connected cluster." } }),
+        canApply: false, canReset: true }));
+
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("RESET FAILED") && shown.includes("Could not reach the connected cluster."), shown);
+    assert.ok(byId(env, "btn-reset"));
+});
+
+test("a request that is only pending has no Apply section, and a frozen workflow uses the production routes", async () => {
+    const pending = await openDeclared({ [D_APPROVAL]: { status: 200, headers: { "X-Evidence-Provenance": "research-declared" }, body: { ...approvedRecord, status: "PENDING_APPROVAL" } } });
+    assert.ok(!text(pending.element('[data-role="approval-state-container"]')).includes("Apply to the connected cluster"));
+
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") },
+        "GET /api/recommendations/rec-live/approval": { status: 200, headers: { "X-Evidence-Provenance": "verified" }, body: approvedRecord },
+        "GET /api/recommendations/rec-live/application": { status: 200, body: applicationStatus({ tier: "production" }) } });
+    assert.ok(env.calls.some(([, u]) => u === "/api/recommendations/rec-live/application"));
+    assert.ok(!calls_include(env, "/declared"));
+});

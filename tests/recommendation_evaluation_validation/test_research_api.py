@@ -41,7 +41,7 @@ def test_the_declared_detail_offers_the_research_door_without_reopening_the_prod
     feasible = [c for c in detail["candidates"] if c["feasible"]]
     assert feasible and all(c["approval"]["ready"] is False for c in detail["candidates"])
     offered = [c["researchApproval"] for c in feasible if c["researchApproval"]["available"]]
-    assert offered and "disposable test cluster only" in offered[0]["scope"]
+    assert offered and "research cluster only" in offered[0]["scope"]
     assert offered[0]["requestWith"].startswith("POST /api/recommendations/declared/")
     blocked = [c["researchApproval"] for c in detail["candidates"] if not c["feasible"]]
     assert all(b["available"] is False and "cannot be approved in any tier" in b["reason"] for b in blocked)

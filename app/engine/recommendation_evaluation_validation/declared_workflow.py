@@ -44,7 +44,7 @@ COMPONENT = "recommendation"
 NOT_OBSERVED = (
     "Declared by a person, not observed from traces and not approved or frozen by Component 1. The dependencies, which "
     "services are mandatory and the edges are as stated and unchecked. A recommendation computed from it cannot be "
-    "approved at the production gate; only the research tier (a named person, for validation on a test cluster) can "
+    "approved at the production gate; only the research tier (a named person, for research on the research cluster) can "
     "approve it, and anything measured from it is conditional on the declaration."
 )
 

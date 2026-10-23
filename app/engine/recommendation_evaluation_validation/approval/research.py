@@ -17,12 +17,14 @@ differs is exactly four things:
   it, with the declaration's digest and the scope below;
 * because the declaration is only a file, the approval is bound to its digest: the evaluation is made again when the request is
   decided, and a declaration that changed since makes the approval stale;
-* the YAML may be marked "not applicable" (it always is for declared evidence); that flag exists to keep it from being applied to the
-  connected cluster, and approval applies nothing in either tier.
+* the YAML may be marked "not applicable" (it always is for declared evidence); that flag keeps the PRODUCTION tier from applying it. The
+  research tier's own Apply step (``application``, developer-approved 2026-10-23) turns that requirement off, and approval itself still
+  applies nothing in either tier.
 
-Scope. A research approval is honoured only by ``ValidationPlan.from_approval(..., allow_declared_workflow=True)``, which in turn only
-runs against a designated disposable test cluster, and every experiment record made from it says its workflow was declared. Whatever
-such an experiment shows is conditional on the declaration being right.
+Scope. A research approval is honoured by ``ValidationPlan.from_approval(..., allow_declared_workflow=True)`` (validation on a designated
+test cluster) and by the research tier of ``application.ApplicationService`` (an explicit Apply and Reset on the connected research
+cluster, by a named person). Every experiment record made from it says its workflow was declared. Whatever such an experiment shows is
+conditional on the declaration being right.
 """
 
 from collections.abc import Callable
@@ -46,7 +48,7 @@ RESEARCH_TIER = "research-declared-workflow"
 MIN_ACKNOWLEDGEMENT_CHARS = 20
 ANONYMOUS = "developer"      # what the production routes record when nobody is named; a research decision needs a person
 RESEARCH_SCOPE = (
-    "Research validation on a designated disposable test cluster only. The workflow was declared by a person, not observed from "
+    "Research use on the research cluster only: validation, and applying and resetting this exact proposal on the connected cluster by a named person. The workflow was declared by a person, not observed from "
     "traces and not approved or frozen by Component 1, so every result is conditional on the declaration being correct."
 )
 

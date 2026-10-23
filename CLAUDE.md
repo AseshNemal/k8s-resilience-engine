@@ -83,8 +83,10 @@ This is an early-stage scaffold, not a working system yet:
   `insecure-skip-tls-verify`, `proxy-url`, basic auth and credential plugins (`exec`, `auth-provider`) are
   refused, never run. The host helper (`extension/helper`, Go) likewise speaks plain `net/http`, without
   client-go; both read the same backend kubeconfig, pinned by `tests/fixtures/tls/backend-kubeconfig.yaml`.
-  The extension's role grants exactly those five (`deploy/rbac/resilience-readonly.yaml`, mirrored in
-  `extension/helper/internal/rbac/rbac.go` and checked against each other by a Go test). Member 2's per-namespace
+  The extension's role is FULL ACCESS (`*/*/*`) to the connected research cluster since 2026-10-23, developer-approved so that Apply and Reset can write
+  (`deploy/rbac/resilience-readonly.yaml`, file and object names kept so an install upgrades in place; mirrored in `extension/helper/internal/rbac/rbac.go`
+  and checked against each other by a Go test). The backend no longer refuses a credential that can write (`extension/cluster_connection.py`,
+  `_verify_access` only requires the reads the app needs); it still writes ONLY through `application.ApplicationService`. Member 2's per-namespace
   pipeline (`service.py`, `collect_live_cluster`) uses services/replicasets: the live parser and the Service
   resolver read through `KubernetesApiSource.list_objects`, so they need no Kubernetes client package.
   `discovery.py` (what the extension pages call) uses the same selector resolver, so an application whose
@@ -200,5 +202,7 @@ contract instead when integrating against an unfinished upstream component.
 - Use `pytest.approx` (not exact equality) for any calculated floating-point assertion.
 - Keep thresholds configurable rather than hardcoded.
 - Never apply Kubernetes recommendations automatically — always require developer approval
-  before an `apply` step.
+  before an `apply` step. Since 2026-10-23 that step exists: `application/` (`ApplicationService`, routes `.../apply`, `.../reset`, `.../application`,
+  both tiers) applies an APPROVED change to the connected cluster on a named person's request and can put the stored prior state back. It re-checks the
+  evaluation, the server-generated YAML and the proposal whitelist first, applies one change at a time, and never runs on approval or on a read.
 - Don't claim experimental validation before controlled experiments are actually run.

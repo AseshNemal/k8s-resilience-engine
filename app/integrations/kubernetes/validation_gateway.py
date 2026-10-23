@@ -118,6 +118,13 @@ class NodeCapacity:
         return None if self.allocatable_memory is None else self.allocatable_memory - self.requested_memory
 
 
+def _existing_file(path: str) -> str:
+    real = os.path.realpath(os.path.expanduser(str(path or "")))
+    if not path or not os.path.isfile(real):
+        raise AmbientCredentialsError("the connected cluster's credentials file does not exist")
+    return real
+
+
 def _refuse_ambient(path: str) -> str:
     if not path or not str(path).strip():
         raise AmbientCredentialsError("a validation gateway needs the path of its own credentials file")
@@ -168,9 +175,13 @@ class KubernetesTestClusterGateway:
         """REAL_CLUSTER only when talking over the network. A gateway given a test transport is a test double, whatever its class."""
         return REAL_CLUSTER if self._transport is None else "TEST_DOUBLE"
 
-    def __init__(self, kubeconfig_path: str, *, topology_reader: Callable[[str, Any], Any], allow_writes: bool = False,
-                 timeout: float = 10.0, transport: httpx.BaseTransport | None = None) -> None:
-        self._path = _refuse_ambient(kubeconfig_path)
+    def __init__(self, kubeconfig_path: str, *, topology_reader: Callable[[str, Any], Any] | None = None,
+                 allow_writes: bool = False, timeout: float = 10.0, transport: httpx.BaseTransport | None = None,
+                 connected_cluster: bool = False) -> None:
+        # ``connected_cluster`` is the one deliberate exception to "a file made for this gateway alone": the extension's
+        # own connected cluster (developer-approved 2026-10-23), used by Apply and Reset and by nothing else. It is a
+        # separate switch, never inferred from the path, so a validation gateway still refuses an ambient file.
+        self._path = _existing_file(kubeconfig_path) if connected_cluster else _refuse_ambient(kubeconfig_path)
         self._reader, self._timeout, self._transport = topology_reader, timeout, transport
         self.allow_writes = allow_writes
         self._source = KubernetesApiSource(config_file=self._path, request_timeout=timeout, transport=transport)
@@ -216,6 +227,8 @@ class KubernetesTestClusterGateway:
 
     def read_graph(self, namespace: str):
         """Member 2's ``DeploymentGraph`` for the namespace, with each node's Ready and schedulable state read from the nodes."""
+        if self._reader is None:
+            raise NotConnectedError("this gateway was built without a topology reader")
         result = self._reader(namespace, self._source)
         self.last_discovery = result
         graph = result.graph
