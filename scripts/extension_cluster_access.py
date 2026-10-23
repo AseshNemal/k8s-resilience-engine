@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit setup action for the Docker Desktop extension: create a READ-ONLY, time-limited credential for the
+"""Explicit setup action for the Docker Desktop extension: create a FULL-ACCESS, time-limited credential for the
 local kind cluster and write it to .kube/extension-readonly.kubeconfig. Pick that file in the extension's
 "Connect cluster" page. It works the same on macOS, Linux and Windows (scripts/extension-cluster-access.sh or
 scripts\\extension-cluster-access.cmd).
@@ -81,14 +81,14 @@ All tokens issued for that service account stop working. The local file {self.ou
     def do_create(self) -> None:
         print(f"""This will CREATE in cluster '{self.context}' (see deploy/rbac/resilience-readonly.yaml):
   namespace/{NAMESPACE}, serviceaccount/{SERVICE_ACCOUNT},
-  clusterrole + clusterrolebinding granting ONLY get/list on nodes, pods, services, deployments and replicasets.
+  clusterrole + clusterrolebinding granting FULL ACCESS (read and write, every resource) to the connected research cluster.
 It then issues a bearer token valid for {self.duration} and writes {self.out_file} (mode 600).
 No workloads are deployed. Existing access objects are updated to match the manifest; no other objects are modified.""")
         self.confirm()
 
         if self.read(self.kubectl("apply", "-f", str(self.manifest)), show_errors=True).code != 0:
-            die("Could not apply the read-only access objects.")
-        print("Read-only access objects applied.")
+            die("Could not apply the access objects.")
+        print("Access objects applied.")
 
         # Server address and CA come from the admin context, but the admin credential itself is NOT copied.
         server = self.read(self.kubectl("config", "view", "--minify", "-o",
@@ -139,7 +139,7 @@ current-context: kind-readonly
                 staging.unlink()
 
         print(f"""
-Done. Read-only credential written to .kube/extension-readonly.kubeconfig (valid for {self.duration}).
+Done. Full-access credential written to .kube/extension-readonly.kubeconfig (valid for {self.duration}).
 
 Next: open the extension in Docker Desktop, go to "Connect cluster", and pick that file.
 

@@ -1,0 +1,17 @@
+{
+  "workflows": [
+    {
+      "workflowId": "productpage-view",
+      "criticality": 0.9,
+      "declaredBy": "REPLACE with the name of the person declaring this",
+      "note": "Example only, from Bookinfo's documented architecture: the product page needs details and reviews; reviews calls ratings, which is optional (the page renders without stars). Criticality is the declarer's statement, not a measurement. Not loaded unless RESILIENCE_DECLARED_WORKFLOW_PATH names a copy of this file.",
+      "mandatoryServices": ["productpage", "details", "reviews"],
+      "optionalServices": ["ratings"],
+      "edges": [
+        {"source": "productpage", "target": "details"},
+        {"source": "productpage", "target": "reviews"},
+        {"source": "reviews", "target": "ratings"}
+      ]
+    }
+  ]
+}

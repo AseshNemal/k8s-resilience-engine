@@ -48,7 +48,7 @@ def jwt(expires_at: datetime) -> str:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(cc, "KUBECONFIG_PATH", tmp_path / "kube" / "config")
-    monkeypatch.setattr(cc, "_verify_read_only", lambda document: None)
+    monkeypatch.setattr(cc, "_verify_access", lambda document: None)
     return TestClient(app)
 
 
@@ -155,25 +155,21 @@ def verify_with(monkeypatch, allowed_pairs):
     monkeypatch.setattr(cc.rest, "RestClient", lambda connection, timeout: http)
     monkeypatch.setattr(cc, "_allowed", lambda http, verb, resource, group: (verb, resource) in http.allowed)
     try:
-        return cc._verify_read_only({})
+        return cc._verify_access({})
     finally:
         assert http.closed, "the connection must always be closed"
 
 
-READ_ONLY = {("list", "nodes"), ("list", "pods"), ("list", "deployments")}
+READS = {("list", "nodes"), ("list", "pods"), ("list", "deployments")}
 
 
-def test_a_read_only_credential_passes_verification(monkeypatch):
-    verify_with(monkeypatch, READ_ONLY)
+def test_a_credential_that_can_read_what_the_app_reads_passes_verification(monkeypatch):
+    verify_with(monkeypatch, READS)
 
 
 @pytest.mark.parametrize("extra", [("create", "pods"), ("delete", "pods"), ("patch", "deployments"), ("get", "secrets")])
-def test_a_credential_with_any_write_or_secret_access_is_refused(monkeypatch, extra):
-    with pytest.raises(cc.HTTPException) as refused:
-        verify_with(monkeypatch, READ_ONLY | {extra})
-
-    assert refused.value.status_code == 422
-    assert "can change the cluster" in refused.value.detail
+def test_a_credential_with_write_access_is_accepted_because_the_connected_cluster_is_full_access(monkeypatch, extra):
+    verify_with(monkeypatch, READS | {extra})      # Apply and Reset need to write (developer-approved 2026-10-23)
 
 
 def test_a_credential_missing_required_reads_is_refused(monkeypatch):
@@ -250,7 +246,7 @@ def test_cluster_failures_while_verifying_are_reported_without_detail_and_the_co
 
     monkeypatch.setattr(cc, "_allowed", raise_it)
     with pytest.raises(cc.HTTPException) as refused:
-        cc._verify_read_only({})
+        cc._verify_access({})
 
     assert refused.value.status_code == status and words in refused.value.detail
     assert http.closed
@@ -262,6 +258,6 @@ def test_an_unusable_kubeconfig_is_a_422_that_names_the_problem(monkeypatch):
 
     monkeypatch.setattr(cc.rest, "connection_from_documents", refuse)
     with pytest.raises(cc.HTTPException) as refused:
-        cc._verify_read_only({})
+        cc._verify_access({})
 
     assert refused.value.status_code == 422 and "certificate authority" in refused.value.detail

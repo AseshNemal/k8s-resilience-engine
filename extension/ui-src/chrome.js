@@ -46,8 +46,8 @@
         let how = "The credential renews itself while the extension is open.";
         if (auto && auto.background === "on") how = "The credential renews itself and is kept renewed in the background, even when Docker Desktop is closed.";
         else if (offered) how = "The credential renews itself while the extension is open. Turn on background renewal to keep it renewed when Docker Desktop is closed or the computer sleeps.";
-        return { state: "connected", chip: "Connected · read-only", title: `Connected to ${status.server}`,
-            detail: `Read-only access. ${how} ${live}`, action: offered ? BACKGROUND_ACTION : "Manage connection" };
+        return { state: "connected", chip: "Connected · full access", title: `Connected to ${status.server}`,
+            detail: `Full access. ${how} ${live}`, action: offered ? BACKGROUND_ACTION : "Manage connection" };
     }
 
     // One source of truth for how a connection state is worded, used by the chip and the Overview panel.
@@ -104,8 +104,8 @@
         }
         const live = "Overview and Deployment topology show your connected cluster; a page without live evidence says so instead of showing figures.";
         const hint = byHand && automatic ? " It was added by hand and will not renew itself." : "";
-        return { state: "connected", chip: "Connected · read-only", title: `Connected to ${status.server}`,
-            detail: `Read-only access${expiry ? `, credential expires ${expiry}` : ""}.${hint} ${live}`,
+        return { state: "connected", chip: "Connected · full access", title: `Connected to ${status.server}`,
+            detail: `Full access${expiry ? `, credential expires ${expiry}` : ""}.${hint} ${live}`,
             action: byHand && automatic ? "Set up automatic renewal" : "Manage connection" };
     }
 

@@ -78,7 +78,7 @@ func stripLabels(t *testing.T, cs *kubetest.Fake) {
 func widenRole(t *testing.T, cs *kubetest.Fake) {
 	t.Helper()
 	edit(t, cs, kube.ClusterRoles, "", rbac.Name, func(cr *kube.Object) {
-		cr.Rules = append(cr.Rules, kube.PolicyRule{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get", "list"}})
+		cr.Rules = append(cr.Rules, kube.PolicyRule{NonResourceURLs: []string{"/metrics"}, Verbs: []string{"get"}})
 	})
 	cs.ClearActions()
 }

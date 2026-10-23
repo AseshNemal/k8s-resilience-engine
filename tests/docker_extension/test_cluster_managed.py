@@ -39,7 +39,7 @@ def timed_jwt(*, issued: datetime, expires: datetime) -> str:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(cc, "KUBECONFIG_PATH", tmp_path / "kube" / "config")
-    monkeypatch.setattr(cc, "_verify_read_only", lambda document: None)
+    monkeypatch.setattr(cc, "_verify_access", lambda document: None)
     return TestClient(app)
 
 
@@ -178,7 +178,7 @@ def test_the_read_only_check_still_applies_to_managed_credentials(client, monkey
     def refuse(document):
         raise cc._bad("This credential can change the cluster (create pods).")
 
-    monkeypatch.setattr(cc, "_verify_read_only", refuse)
+    monkeypatch.setattr(cc, "_verify_access", refuse)
     response = managed_put(client, fresh_token(8))
 
     assert response.status_code == 422
@@ -251,7 +251,7 @@ def test_the_credential_is_not_logged_on_success_or_failure(client, caplog):
 
 def ingest(stdin_text, tmp_path, monkeypatch, argv=()):
     monkeypatch.setattr(cc, "KUBECONFIG_PATH", tmp_path / "kube" / "config")
-    monkeypatch.setattr(cc, "_verify_read_only", lambda document: None)
+    monkeypatch.setattr(cc, "_verify_access", lambda document: None)
     out = io.StringIO()
     monkeypatch.setattr("sys.stdout", out)
     code = cluster_ingest.run(list(argv), io.StringIO(stdin_text))

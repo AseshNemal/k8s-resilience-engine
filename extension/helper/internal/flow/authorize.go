@@ -109,7 +109,7 @@ func issueAndInstall(ctx context.Context, d Deps, cmd, origin string, c clusters
 	return Result{
 		OK: true, Command: cmd, State: StateConnected, Context: name, Transport: backend.Name(), TokenRequest: true,
 		ExpiresAt: iso(issued.ExpiresAt), RenewAt: st.RenewAt,
-		Message: fmt.Sprintf("connected; the cluster granted a %s read-only token (a TokenRequest: this step created, changed and deleted nothing in the cluster)", issued.Lifetime().Round(minute)),
+		Message: fmt.Sprintf("connected; the cluster granted a %s access token (a TokenRequest: this step created, changed and deleted nothing in the cluster)", issued.Lifetime().Round(minute)),
 	}
 }
 

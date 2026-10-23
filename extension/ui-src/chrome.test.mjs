@@ -35,10 +35,10 @@ test("not connected: says pages show an error instead of data and offers to conn
     assert.equal(info.action, "Connect cluster");
 });
 
-test("connected: read-only, names the server, and says pages read the connected cluster", () => {
+test("connected: full access, names the server, and says pages read the connected cluster", () => {
     const info = describeCluster({ connected: true, server: "host.docker.internal:58227", expiresAt: "2026-10-25T12:00:00Z", expired: false }, NOW);
     assert.equal(info.state, "connected");
-    assert.equal(info.chip, "Connected · read-only");
+    assert.equal(info.chip, "Connected · full access");
     assert.match(info.title, /host\.docker\.internal:58227/);
     assert.match(info.detail, /expires Oct 25, 2026 \(in 7 days\)/);
     assert.match(info.detail, /Overview and Deployment topology show your connected cluster/);
@@ -48,7 +48,7 @@ test("connected: read-only, names the server, and says pages read the connected 
 test("connected without an expiry still reads correctly", () => {
     const info = describeCluster({ connected: true, server: "h:1", expiresAt: null, expired: false }, NOW);
     assert.doesNotMatch(info.detail, /expires/);
-    assert.match(info.detail, /^Read-only access\./);
+    assert.match(info.detail, /^Full access\./);
 });
 
 const MANAGED_EXPIRED = { connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: true, context: "kind-x" };

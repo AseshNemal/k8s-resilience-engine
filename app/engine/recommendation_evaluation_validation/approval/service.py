@@ -37,15 +37,22 @@ def _sha256(text: str | None) -> str | None:
     return None if text is None else hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _yaml_record(yaml_snapshot: str | None) -> dict:
+SERVER_GENERATED = "server-generated"
+CLIENT_SUPPLIED = "client-supplied"
+
+
+def _yaml_record(yaml_snapshot: str | None, server_generated: bool = False) -> dict:
     """What is recorded about the YAML stored with a request.
 
-    The YAML is supplied by the client. Nothing here generates it, and nothing checks that it matches the
-    recommendation, so the hash is an INTEGRITY check only: it shows the stored text is unchanged since the request,
-    not that the text does what the recommendation says. That is stated in the record so it cannot be read as
-    verification. Approving applies nothing, whatever the YAML says.
+    When the server generated the text (``yaml_proposal``) the record says so and ``verifiedAgainstRecommendation``
+    is true: the text is exactly what the engine derives from the evaluation, and it is generated again from a
+    fresh evaluation when the request is decided. Otherwise the YAML is supplied by the client, nothing checks
+    that it matches the recommendation, and the hash is an INTEGRITY check only: it shows the stored text is
+    unchanged since the request, not that it does what the recommendation says. That is stated in the record so
+    it cannot be read as verification. Approving applies nothing, whatever the YAML says.
     """
-    return {"sha256": _sha256(yaml_snapshot), "origin": "client-supplied", "verifiedAgainstRecommendation": False}
+    return {"sha256": _sha256(yaml_snapshot), "origin": SERVER_GENERATED if server_generated else CLIENT_SUPPLIED,
+            "verifiedAgainstRecommendation": server_generated}
 
 
 # Approving a candidate that is not the top-ranked one needs a written reason of at least this many characters.
@@ -76,9 +83,17 @@ class ApprovalService:
     candidate needs a documented justification in the approval note.
     """
 
+    # What this gate trusts. A subclass built for a narrower, explicitly named purpose (``research.py``) may change these two
+    # hooks; the production gate trusts live evidence only and refuses a proposal the engine marks as not applicable.
+    require_applicable_yaml = True
+
     def __init__(self, repository: ApprovalRepository, min_justification_chars: int = MIN_JUSTIFICATION_CHARS):
         self.repository = repository
         self.min_justification_chars = min_justification_chars
+
+    def _require_provenance(self, approval: ApprovalModel) -> None:
+        if not has_verified_provenance(approval):
+            raise UnverifiedProvenanceError()
 
     def request_approval(
         self,
@@ -88,7 +103,14 @@ class ApprovalService:
         yaml_snapshot: str | None = None,
         requested_by: str = "developer",
         evidence: dict | None = None,
+        proposal_yaml: str | None = None,
     ) -> ApprovalModel:
+        """Record a request for approval.
+
+        ``proposal_yaml`` is the YAML the server generated for this candidate from the live evaluation, or None when
+        none could be (the candidate is not eligible, or the evidence is not live). When it is given it is the YAML
+        of the request: a client-supplied snapshot is accepted only if it is identical.
+        """
         # Preconditions
         if not recommendation.recommendations:
             raise PreconditionError("Recommendation report has no candidates")
@@ -109,6 +131,12 @@ class ApprovalService:
         if existing and existing.status == ApprovalStatus.PENDING_APPROVAL:
             raise StateTransitionError("Approval already pending")
 
+        if proposal_yaml is not None:
+            if yaml_snapshot is not None and yaml_snapshot != proposal_yaml:
+                raise PreconditionError("The YAML sent with this request is not the YAML the server generates for "
+                                        "this recommendation; send none to use the server's, or the identical text.")
+            yaml_snapshot = proposal_yaml
+
         # Snapshot
         snapshot = candidate.model_dump()
         evaluation_snapshot = {
@@ -123,7 +151,7 @@ class ApprovalService:
             "fingerprint": standing.fingerprint,
             "failedNode": (evidence or {}).get("failedNode"),
             "topologySnapshotId": (evidence or {}).get("topologySnapshotId"),   # for audit; not part of the binding
-            "yaml": _yaml_record(yaml_snapshot),
+            "yaml": _yaml_record(yaml_snapshot, server_generated=proposal_yaml is not None),
         }
         if evidence is not None:
             evaluation_snapshot["provenance"] = dict(evidence)
@@ -171,13 +199,13 @@ class ApprovalService:
                 f"Version mismatch: expected {expected_proposal_version}, got {approval.proposal_version}"
             )
 
-        if not has_verified_provenance(approval):
-            raise UnverifiedProvenanceError()
+        self._require_provenance(approval)
 
         if evaluate is None:
             raise PreconditionError("There is no current evaluation to check this candidate against, so it "
                                     "cannot be approved")
-        standing = evaluate_eligibility(evaluate(approval), recommendation_id)
+        current = evaluate(approval)
+        standing = evaluate_eligibility(current, recommendation_id)
         if not standing.eligible:
             raise PreconditionError(standing.reason)
         bound = ((approval.evaluation_snapshot or {}).get("proposal") or {}).get("fingerprint")
@@ -192,6 +220,7 @@ class ApprovalService:
             raise StaleProposalError("The YAML stored with this request is not the YAML it was requested with "
                                      "(an integrity check only: the YAML is client-supplied and is not verified "
                                      "against the recommendation).")
+        yaml_verified = self._check_generated_yaml(approval, current, recommendation_id, self.require_applicable_yaml)
         justification = (note or "").strip()
         if standing.requires_justification and len(justification) < self.min_justification_chars:
             raise PreconditionError(
@@ -206,10 +235,30 @@ class ApprovalService:
         approval.decision_note = note
         approval.evaluation_snapshot = {**(approval.evaluation_snapshot or {}), "approvalCheck": {
             **standing.to_dict(), "proposalFingerprint": standing.fingerprint,
-            "yamlVerifiedAgainstRecommendation": False, "appliesNothing": True, "checkedAt": decided_at.isoformat(),
+            "yamlVerifiedAgainstRecommendation": yaml_verified, "appliesNothing": True, "checkedAt": decided_at.isoformat(),
             "justification": justification if standing.requires_justification else None}}
 
         return self.repository.update(approval)
+
+    @staticmethod
+    def _check_generated_yaml(approval: ApprovalModel, current: LiveRecommendation, recommendation_id: str,
+                              require_applicable: bool = True) -> bool:
+        """For a request whose YAML the server generated: the server must generate the same text again, now.
+
+        Returns whether the YAML was verified (False for a client-supplied snapshot, which is never verified).
+        """
+        recorded = ((approval.evaluation_snapshot or {}).get("proposal") or {}).get("yaml") or {}
+        if recorded.get("origin") != SERVER_GENERATED:
+            return False
+        # Imported here: yaml_proposal builds on this package (eligibility), so a module-level import would be circular.
+        from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
+        regenerated = build_yaml_proposal(current, recommendation_id)
+        if (regenerated.status != GENERATED or (require_applicable and not regenerated.applicable)
+                or regenerated.sha256 != recorded.get("sha256")):
+            raise StaleProposalError("The YAML the server generates for this recommendation now differs from the YAML "
+                                     "it was requested with (the Deployment or its labels changed), so it is not what "
+                                     "the developer was shown.")
+        return True
 
     def reject(
         self,

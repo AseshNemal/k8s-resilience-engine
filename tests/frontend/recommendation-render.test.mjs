@@ -301,9 +301,173 @@ test("a service absent from the supplied topology is stated, not guessed", () =>
     assert.ok(text(current).includes("not found in the supplied topology"));
 });
 
+// ---- the explained recommendation ------------------------------------------------------------------------------------------
+
+const o = { document: undefined };   // replaced per test; kept here so the helpers below read like the ones above
+const detailCandidate = (over = {}) => ({
+    id: "c1", type: "TOPOLOGY_SPREAD", service: "ratings", rootCause: "All replicas run on one node.",
+    recommendedChange: "Add a topologySpreadConstraint", feasibility: { status: "INFEASIBLE", explanation: "single replica", findings: [{ constraint: "TOPOLOGY_SPREAD", status: "INFEASIBLE", detail: "needs two nodes" }], missingEvidence: ["node taints"] },
+    currentPlacement: { ratings: [{ pod: "ratings-1", node: "w1", ready: true }] },
+    predicted: { blastRadiusBefore: 100, blastRadiusAfter: 100, riskReduction: 0 },
+    cost: { resource: "LOW", note: "Adds no replicas.", configuration: "1 Deployment pod-template edit(s)" },
+    selectionJustification: "Not ranked (INFEASIBLE).", notes: ["single replica note"],
+    approval: { ready: false, reason: "not feasible", requiresJustification: false }, ...over,
+});
+
+test("the evidence checklist marks each state and shows the next action only for evidence that is not available", () => {
+    const doc = makeDocument();
+    const list = doc.container();
+    view.renderEvidenceChecklist(list, [
+        { id: "cluster", label: "Connected cluster", state: "available", detail: "answered", nextAction: "ignored for available" },
+        { id: "workflow", label: "Approved frozen workflow", state: "missing", detail: "none frozen", nextAction: "freeze one" },
+        { id: "topology", label: "Deployment topology", state: "incomplete", detail: "ratings not placed", nextAction: "open topology" },
+        { id: "failureImpact", label: "Failure impact", state: "pending", detail: "computed later", nextAction: null },
+    ], { document: doc });
+
+    const shown = text(list);
+    assert.ok(shown.includes("✔ Connected cluster") && shown.includes("✖ Approved frozen workflow") && shown.includes("! Deployment topology") && shown.includes("… Failure impact"));
+    assert.ok(shown.includes("Next: freeze one") && shown.includes("Next: open topology"));
+    assert.ok(!shown.includes("ignored for available"), "an available item has nothing left to do");
+    assert.deepEqual(plain(list.children.map((row) => row.attributes["data-state"])), ["available", "missing", "incomplete", "pending"]);
+});
+
+test("the outcome keeps 'no candidates' apart from 'ready', and an absent outcome shows nothing", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderOutcome(box, { state: "NO_CANDIDATES", message: "not a finding that the application is resilient" }, { document: doc });
+    assert.equal(box.children[0].attributes["data-state"], "no-candidates");
+    assert.ok(text(box).includes("not a finding that the application is resilient"));
+
+    view.renderOutcome(box, { state: "READY", message: "1 candidate can be approved" }, { document: doc });
+    assert.equal(box.children[0].attributes["data-state"], "ready");
+    view.renderOutcome(box, null, { document: doc });
+    assert.equal(box.children.length, 0);
+});
+
+test("each candidate shows root cause, change, feasibility with its findings, placement, effect, cost, ranking and approval", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate()] }, { document: doc });
+
+    const shown = text(box);
+    for (const piece of ["ratings · Topology Spread", "All replicas run on one node.", "Add a topologySpreadConstraint", "Infeasible — single replica",
+        "TOPOLOGY_SPREAD: INFEASIBLE — needs two nodes", "node taints", "ratings: ratings-1 on w1", "100% now → 100% predicted (0 points)",
+        "Low — Adds no replicas.; 1 Deployment pod-template edit(s)", "Not ranked (INFEASIBLE).", "single replica note", "Not ready for approval: not feasible"]) {
+        assert.ok(shown.includes(piece), `missing: ${piece}`);
+    }
+});
+
+test("a ready candidate says approving does not apply anything, and one needing a justification says so", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate({ approval: { ready: true, reason: null, requiresJustification: true } })] }, { document: doc });
+
+    assert.ok(text(box).includes("Ready for approval (needs a written justification). Approving does not apply anything."));
+});
+
+test("a value the server did not report is shown as not reported, never filled in", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate({ rootCause: null, recommendedChange: undefined, currentPlacement: {} })] }, { document: doc });
+
+    const shown = text(box);
+    assert.ok(shown.match(/not reported/g).length >= 3, "root cause, change and placement are all not reported");
+});
+
+test("no candidates is an explicit state carrying the server's own message", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [], outcome: { state: "NO_CANDIDATES", message: "evidence complete, nothing to change" } }, { document: doc });
+    assert.ok(text(box).includes("No candidate was generated") && text(box).includes("evidence complete, nothing to change"));
+    view.renderCandidateDetails(box, null, { document: doc });
+    assert.ok(text(box).includes("No candidate was generated"));
+});
+
+test("text from the server is never written as markup", () => {
+    const doc = makeDocument();
+    const box = doc.container();
+    view.renderCandidateDetails(box, { candidates: [detailCandidate({ rootCause: "<img src=x onerror=alert(1)>" })] }, { document: doc });
+    assert.ok(text(box).includes("<img src=x onerror=alert(1)>"), "shown as text");
+    assert.doesNotMatch(source, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+});
+
 // ---- hygiene ------------------------------------------------------------------------------------------------------------------------------
 
 test("the module fetches nothing and contains no sample, demo or round-robin logic", () => {
     assert.doesNotMatch(source, /\bfetch\s*\(/);
     assert.doesNotMatch(source, /sample|demo|round-robin|% *nodes\.length|index *% */i);
+});
+
+// ---- per-node failure assessment -----------------------------------------------------------------
+test("each failure shows its own candidate and opens that node without merging rankings", () => {
+    const o = options(); const box = o.document.container(); const opened = [];
+    view.renderFailures(box, { scope: "Separate rankings", failures: [
+        { failedNode: "worker-a", blastRadiusBefore: 100, singlePointOfFailure: true, candidates: 4, feasible: 3, ranked: 3,
+            selected: { type: "REPLICA_INCREASE_PLUS_2", service: "<img src=x>", predictedBlastRadius: 0, resourceCost: "HIGH" } },
+        { failedNode: "worker-b", blastRadiusBefore: 0, singlePointOfFailure: false, candidates: 0, feasible: 0, ranked: 0, selected: null },
+    ] }, (node) => opened.push(node), o);
+    for (const expected of ["Separate rankings", "worker-a", "100%", "3 feasible · 3 ranked of 4", "Replica Increase Plus 2", "<img src=x>", "HIGH", "Nothing to fix"]) {
+        assert.ok(text(box).includes(expected), expected);
+    }
+    const buttons = find(box, n => n.tag === "button");
+    buttons[1].listeners.click();
+    assert.deepEqual(opened, ["worker-b"]);
+    walk(box, n => assert.equal("innerHTML" in n, false));
+});
+
+test("a failure assessment with no nodes states the missing evidence", () => {
+    const o = options(); const box = o.document.container();
+    view.renderFailures(box, { scope: "Separate rankings", failures: [] }, () => {}, o);
+    assert.ok(text(box).includes("No worker nodes"));
+});
+
+// ---- the proposal under review -------------------------------------------------------------------------------------------------------
+const reviewed = (over = {}) => ({
+    evidence: { source: "declared-workflow", namespace: "shop", workflowId: "checkout", workflowFreezeId: null, failedNode: "w1", failedNodeChosen: "highest blast radius" },
+    declared: { declaredBy: "asesh" }, ...over });
+const proposed = (over = {}) => ({
+    type: "TOPOLOGY_SPREAD", service: "db", recommendedChange: "Spread the replicas across nodes", feasibility: { status: "FEASIBLE" },
+    predicted: { blastRadiusBefore: 100, blastRadiusAfter: 0, riskReduction: 100 }, cost: { resource: "LOW", configuration: "1 Deployment pod-template edit(s)" },
+    yamlProposal: { deployments: [{ service: "db", deployment: "db", namespace: "shop" }] }, ...over });
+
+test("the proposal summary names the cluster, application, workflow and its provenance, failure, strategy, targets, benefit, cost and feasibility", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed(), proposed(), "docker-desktop", o);
+
+    const shown = text(box);
+    for (const expected of ["Connected cluster", "docker-desktop", "shop", "checkout — declared by asesh, not observed or frozen", "User declaration",
+        "w1 (the node whose loss hurts most)", "Model assumption", "Topology Spread for db", "db", "100% → 0% (100 percentage points)", "Low — 1 Deployment pod-template edit(s)", "Feasible"]) {
+        assert.ok(shown.includes(expected), `${expected} in ${shown}`);
+    }
+});
+
+test("a frozen workflow is labelled as observed evidence, and a chosen failure says it was chosen", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed({ evidence: { source: "live-discovery", namespace: "shop", workflowId: "checkout", workflowFreezeId: "freeze-9", failedNode: "w2", failedNodeChosen: "requested" }, declared: undefined }),
+        proposed(), "docker-desktop", o);
+
+    assert.ok(text(box).includes("frozen by Component 1 (freeze-9)") && text(box).includes("w2 (chosen by you)"));
+    assert.ok(!text(box).includes("User declaration"));
+});
+
+test("what the summary does not have is Missing evidence, never a default or a zero", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed(), proposed({ predicted: null, cost: null, yamlProposal: {} }), "", o);
+
+    const missing = find(box, (n) => n.className && n.className.includes("rec-summary__kind--missing")).map((n) => n.textContent);
+    assert.ok(missing.length >= 4 && missing.every((m) => m === "Missing evidence"), missing.join(","));
+    assert.ok(!/NaN|undefined|null/.test(text(box)));
+});
+
+test("the summary renders server text as text only", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed({ evidence: { source: "live-discovery", namespace: "<img src=x onerror=1>", workflowId: "<script>", failedNode: "w1", failedNodeChosen: "requested" } }),
+        proposed(), "<b>x</b>", o);
+
+    walk(box, (n) => assert.equal("innerHTML" in n, false));
+    assert.ok(text(box).includes("<img src=x onerror=1>"));
 });

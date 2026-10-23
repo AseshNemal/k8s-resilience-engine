@@ -107,7 +107,7 @@ func TestAuthorizeOnAnEmptyClusterShowsTheExactChangesThenCreatesThemAndConnects
 	dialog := p.requests[0].Title + "\n" + p.requests[0].Body
 	for _, want := range []string{
 		ctxName, "127.0.0.1:58227", "Kubernetes v1.37.0",
-		"Read (get, list) nodes, pods and services", "Read (get, list) deployments and replicasets", "No access to Secrets",
+		"Full access (read and write) to every resource in this cluster", "applying an approved change and resetting it", "approve full access",
 		"Create Namespace resilience-engine", "Create ServiceAccount resilience-engine-reader",
 		"Create ClusterRole resilience-engine-reader", "Create ClusterRoleBinding resilience-engine-reader",
 		"7 days", "renewed automatically",
@@ -300,7 +300,7 @@ func TestDriftedAccessIsRepairedOnlyAfterTheDialogListsTheUpdate(t *testing.T) {
 	p := answer(approve.Approved)
 	r := Authorize(bg, deps(newLoader(cs), p, newBackend()), ctxName)
 
-	if !r.OK || !strings.Contains(p.requests[0].Body, "Update ClusterRole") || !strings.Contains(p.requests[0].Body, "reset to the approved read-only set") {
+	if !r.OK || !strings.Contains(p.requests[0].Body, "Update ClusterRole") || !strings.Contains(p.requests[0].Body, "reset to the approved set") {
 		t.Fatalf("result %+v\n%s", r, p.requests[0].Body)
 	}
 	if rep, _ := rbac.Inspect(bg, cs); rep.Overall() != rbac.OverallApproved {

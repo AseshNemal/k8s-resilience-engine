@@ -111,7 +111,7 @@ func requireApprovedAccess(ctx context.Context, cmd string, cs kubeClient) *Resu
 		r = overGranted(cmd, report)
 	case rbac.OverallDrifted:
 		if report.NeedsMoreAccess() {
-			r = fail(cmd, StateDrifted, "this version of the extension needs more read access than you approved before, so no token was issued; approve again to add it")
+			r = fail(cmd, StateDrifted, "this version of the extension needs more access than you approved before, so no token was issued; approve again to add it")
 		} else {
 			r = fail(cmd, StateDrifted, "the extension's access in the cluster was changed from what you approved, so no token was issued; review it and approve again")
 		}

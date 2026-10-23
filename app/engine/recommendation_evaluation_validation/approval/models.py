@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +8,11 @@ from app.shared.schemas.recommendation import RecommendationReport
 # The only provenance marker that makes an approval trusted. It is written by the server from the
 # live recommendation source; a client can never supply it.
 LIVE_EVIDENCE_SOURCE = "live-discovery"
+
+# Live topology, but a workflow a person DECLARED instead of one Component 1 observed, approved and froze. It is shown and studied;
+# it is never trusted: ``has_verified_provenance`` accepts only LIVE_EVIDENCE_SOURCE, so nothing computed from a declaration can be
+# approved, applied or validated.
+DECLARED_WORKFLOW_SOURCE = "declared-workflow"
 
 @dataclass
 class ApprovalModel:
@@ -33,6 +38,10 @@ class LiveRecommendation:
 
     report: RecommendationReport
     evidence: dict[str, Any]
+    # What the Recommendations page shows beside the report (root cause, current and simulated placement, ...).
+    # It is display detail only: it is never stored with an approval and is not part of the proposal fingerprint,
+    # so adding to it cannot change what an approval is bound to. Approvals read ``evidence`` and nothing else.
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 def has_verified_provenance(approval: "ApprovalModel") -> bool:

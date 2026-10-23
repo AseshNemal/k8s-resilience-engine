@@ -159,7 +159,7 @@ func TestTheWholeFlowWorksThroughTheRealClientAgainstAnAPIServer(t *testing.T) {
 	// Someone widens the role and annotates it. A repair must fix the rules and keep their annotation.
 	api.mu.Lock()
 	stored := api.objects[clusterRolePath]
-	stored["rules"] = append(stored["rules"].([]any), map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "verbs": []any{"get"}})
+	stored["rules"] = append(stored["rules"].([]any), map[string]any{"nonResourceURLs": []any{"/metrics"}, "verbs": []any{"get"}})
 	stored["metadata"].(map[string]any)["annotations"] = map[string]any{"owner": "platform-team"}
 	stored["metadata"].(map[string]any)["finalizers"] = []any{"example.com/keep"}
 	api.mu.Unlock()
@@ -179,7 +179,7 @@ func TestTheWholeFlowWorksThroughTheRealClientAgainstAnAPIServer(t *testing.T) {
 	if meta["resourceVersion"] != "2" {
 		t.Fatalf("resourceVersion = %v", meta["resourceVersion"])
 	}
-	if len(repaired["rules"].([]any)) != 2 {
+	if len(repaired["rules"].([]any)) != 1 {
 		t.Fatalf("rules = %v", repaired["rules"])
 	}
 	if r := inspect(t, client); r.Overall() != OverallApproved {

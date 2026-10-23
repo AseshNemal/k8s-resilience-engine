@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to a private path outside the repository and fill in by hand after the cluster exists. clusterUid is the UID of the kube-system namespace of THAT cluster, read once with its own credentials. Not valid as it stands.",
+  "name": "kind-resilience-validation",
+  "apiServer": "REPLACE with the API server address in the validation kubeconfig, e.g. https://127.0.0.1:PORT",
+  "clusterUid": "REPLACE with the kube-system namespace UID of the validation cluster",
+  "namespace": "resilience-validation",
+  "designatedBy": "REPLACE with the name of the person designating the cluster",
+  "context": "kind-resilience-validation",
+  "kindCluster": "resilience-validation",
+  "workers": ["resilience-validation-worker", "resilience-validation-worker2"]
+}

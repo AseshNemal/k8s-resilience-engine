@@ -27,8 +27,9 @@ The ledger reads the graph it is built from and never changes it. ``write_back``
 into a graph the caller supplies, which is always a working copy.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
+from app.engine.recommendation_evaluation_validation.mutations import ReplicaIncreaseMutation
 from app.engine.recommendation_evaluation_validation.scheduling_constraints import pod_requests
 from app.engine.recommendation_evaluation_validation.simulator import simulate_topology_spread
 from app.shared.schemas.deployment import DeploymentGraph, ServicePlacement
@@ -129,6 +130,21 @@ class CapacityLedger:
             self._credit(origin, request)
         self._moved[pod_name] = (origin, to_node)
 
+    def add_pod(self, service: str, pod_name: str, node: str) -> None:
+        """Account for a pod the change ADDS: its request is debited from the node and nothing is credited anywhere."""
+        if pod_name in self._pods:
+            raise AlreadyMoved(pod_name)
+        if node not in self._available:
+            raise UnknownCapacity(node, "existence in the graph")
+        request = self._requests.get(service)
+        if request is None:
+            self._forget(node)
+        else:
+            self._check_fits(node, request)
+            self._debit(node, request)
+        self._pods[pod_name] = (service, node)
+        self._moved[pod_name] = (node, node)
+
     def write_back(self, deployment: DeploymentGraph) -> None:
         """Put the remaining capacity into ``deployment``, which must be a working copy."""
         for node in deployment.nodes:
@@ -165,6 +181,26 @@ class CapacityLedger:
             self._available[node] = [None, None]
 
 
+def _settle(ledger: CapacityLedger, placement: Mapping[str, str], pending: list[str]) -> None:
+    """Move the pods in ``pending`` to their verified nodes, in an order in which each move fits.
+
+    A move that does not fit yet waits for another move of the same change to free the room; when none can proceed
+    the first refusal is raised.
+    """
+    while pending:
+        waiting: list[str] = []
+        first_refusal: CapacityExceeded | None = None
+        for name in pending:
+            try:
+                ledger.move(name, placement[name])
+            except CapacityExceeded as refusal:      # another move in this change may free the room
+                waiting.append(name)
+                first_refusal = first_refusal or refusal
+        if len(waiting) == len(pending):
+            raise first_refusal
+        pending = waiting
+
+
 class LedgerPlacementMutation:
     """A DeploymentMutation: move a service's ready pods to a verified placement, capacity included.
 
@@ -183,21 +219,33 @@ class LedgerPlacementMutation:
             raise ValueError(f"Service not found: {self._service_name}")
 
         ledger = CapacityLedger(deployment)
-        pending = sorted(pod.name for pod in service.pods
-                         if pod.ready and self._placement.get(pod.name, pod.node) != pod.node)
-        while pending:
-            waiting: list[str] = []
-            first_refusal: CapacityExceeded | None = None
-            for name in pending:
-                try:
-                    ledger.move(name, self._placement[name])
-                except CapacityExceeded as refusal:      # another move in this change may free the room
-                    waiting.append(name)
-                    first_refusal = first_refusal or refusal
-            if len(waiting) == len(pending):
-                raise first_refusal
-            pending = waiting
-
+        _settle(ledger, self._placement, sorted(pod.name for pod in service.pods
+                                                if pod.ready and self._placement.get(pod.name, pod.node) != pod.node))
         simulate_topology_spread(deployment, self._service_name, self._placement)
+        ledger.write_back(deployment)
+        return deployment
+
+
+class LedgerReplicaIncreaseMutation:
+    """A DeploymentMutation: add replicas to a service and place everything at the verified nodes, capacity included.
+
+    The added replicas each cost their request on the node they land on (nothing is freed for them), and any existing
+    replica that moves is accounted for like any other move. Raises ``LedgerError`` if it does not fit.
+    """
+
+    def __init__(self, service_name: str, placement: Mapping[str, str], added: Sequence[str]) -> None:
+        self._service_name, self._placement, self._added = service_name, dict(placement), tuple(added)
+
+    def apply(self, deployment: DeploymentGraph) -> DeploymentGraph:
+        service = next((s for s in deployment.services if s.name == self._service_name), None)
+        if service is None:
+            raise ValueError(f"Service not found: {self._service_name}")
+
+        ledger = CapacityLedger(deployment)
+        _settle(ledger, self._placement, sorted(pod.name for pod in service.pods
+                                                if pod.ready and self._placement.get(pod.name, pod.node) != pod.node))
+        for name in self._added:
+            ledger.add_pod(self._service_name, name, self._placement[name])
+        ReplicaIncreaseMutation(self._service_name, self._placement, self._added).apply(deployment)
         ledger.write_back(deployment)
         return deployment

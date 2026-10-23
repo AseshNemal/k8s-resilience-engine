@@ -30,7 +30,7 @@ Do not rename these folders without explicit approval.
 - Shared Pydantic schemas are integration contracts.
 - Other components should use the owning component's public `service.py` interface.
 - Member 4 must call Member 3 for failure-impact recalculation rather than duplicate that algorithm.
-- Never auto-apply Kubernetes YAML.
+- Never auto-apply Kubernetes YAML. Apply and Reset are explicit, named-person steps (`application/`); a status request reads the cluster and advances the stored rollout and post-change analysis but never patches (`docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`). That analysis is a model recalculation over observed placement, not an experiment.
 - Developer approval is required before cluster changes.
 
 ## Validation
@@ -80,7 +80,8 @@ mostly a fixture loader.
 Latest test result (2026-10-21, `integration/team-sync`): 1303 passed, 2 skipped, 0 failed (`python -m pytest`);
 151 Node tests and every Go package pass. Floating-point assertions use `pytest.approx`.
 
-The extension's read-only role grants `get`/`list` on exactly nodes, pods, services, deployments and
+The extension's role is full access to the connected research cluster (developer-approved 2026-10-23, so Apply and Reset can write); writes go only through
+`application.ApplicationService`. Member 2's reads use nodes, pods, services, deployments and
 replicasets. Member 2's per-namespace pipeline reads them through `KubernetesApiSource.list_objects` (no Kubernetes client
 package); `discovery.py` uses the same selector resolver, so Bookinfo-style naming resolves completely. Declared intent comes from a named manifest path, `RESILIENCE_MANIFEST_PATH`, the
 repository's manifests, or else the cluster's own Deployments (`service.py`, `_declared_target`): the manifest

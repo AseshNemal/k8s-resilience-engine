@@ -243,10 +243,22 @@ def test_the_trace_bridge_still_loads_after_the_namespace_script_on_the_workflow
     assert page.index('src="namespaces.js"') < page.index('src="trace-service.js"')
 
 
-@pytest.mark.parametrize("name", ["failure-impacts.html", "recommendations.html"])
-def test_the_pages_that_take_a_namespace_still_expose_the_box_the_suggestions_attach_to(built, name):
+def test_the_failure_impact_page_still_exposes_the_box_the_suggestions_attach_to(built):
     # If an owner renames this hook the suggestions would silently stop; this makes that visible.
-    assert 'data-role="namespace"' in html(built, name)
+    assert 'data-role="namespace"' in html(built, "failure-impacts.html")
+
+
+def test_the_recommendations_page_chooses_its_application_and_workflow_from_what_the_cluster_and_workflows_say(built):
+    # It no longer asks for a namespace or a workflow ID to be typed: the application, the approved frozen workflow and
+    # the failure come from dropdowns the page fills from the backend's evidence context, so namespaces.js has no box
+    # to decorate here and reads nothing for this page.
+    page = html(built, "recommendations.html")
+    for role in ("rec-namespace-select", "rec-workflow-select", "rec-node-select", "rec-evidence", "rec-cluster"):
+        assert f'data-role="{role}"' in page, role
+    for gone in ('data-role="workflow-id"', 'data-role="namespace"', 'data-role="failed-node"'):
+        assert gone not in page, f"{gone} is a typed technical input the page no longer asks for"
+    # the controller loads before the page script that uses it
+    assert page.index("recommendation-context.js") < page.index("recommendations.js")
 
 
 def test_connect_page_lists_applications_with_every_element_the_script_fills(built):

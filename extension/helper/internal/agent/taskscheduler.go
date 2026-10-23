@@ -76,7 +76,7 @@ func (t *ScheduledTask) taskXML() string {
 	b.WriteString(`<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Keeps the Resilience Engine extension's read-only cluster token renewed. Removing the access removes this task.</Description>
+    <Description>Keeps the Resilience Engine extension's cluster token renewed. Removing the access removes this task.</Description>
   </RegistrationInfo>
   <Triggers>
     <TimeTrigger>

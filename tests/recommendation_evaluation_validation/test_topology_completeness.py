@@ -84,7 +84,7 @@ def test_a_complete_topology_on_the_same_cluster_is_still_evaluated(client, monk
 
     report = client.get(LIVE, params=PARAMS).json()
 
-    (candidate,) = report["recommendations"]
+    (candidate,) = [c for c in report["recommendations"] if c["type"] == "TOPOLOGY_SPREAD"]
     assert candidate["service"] == "db" and candidate["feasible"] is True
 
 

@@ -1,8 +1,8 @@
-# Read-only access for the Resilience Engine extension.
-# Applied only by `scripts/extension-cluster-access.sh`, after confirmation. It matches the
-# reads the app makes: nodes, pods, services, deployments and replicasets (get/list only), so it can
-# follow Service selectors and Pod -> ReplicaSet -> Deployment ownership. No write verbs, no secrets,
-# no endpointslices.
+# Full access to the connected research cluster for the Resilience Engine extension (developer-approved
+# 2026-10-23: applying an approved change and resetting it need to write). Applied only by
+# `scripts/extension-cluster-access.sh` or the extension's Connect page, after confirmation.
+# The file keeps its old name and the objects keep the `-reader` name so an existing install upgrades in place.
+# The engine still writes only through its approval and application gates, never on its own.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -19,12 +19,9 @@ kind: ClusterRole
 metadata:
   name: resilience-engine-reader
 rules:
-  - apiGroups: [""]
-    resources: ["nodes", "pods", "services"]
-    verbs: ["get", "list"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets"]
-    verbs: ["get", "list"]
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

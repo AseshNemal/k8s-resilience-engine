@@ -24,7 +24,7 @@ migration needs them, not speculatively.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, JSON, String
+from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -67,3 +67,110 @@ class RecommendationApprovalRecord(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     decision_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class ValidationRunRecord(Base):
+    """One validation experiment (Member 4). The prediction and the observation live in separate columns on purpose.
+
+    ``predicted``, ``proposal``, ``recommendation`` and ``before_evidence`` are written once, when the experiment is
+    planned, and never updated. ``observed``, ``comparison``, ``prediction_error``, ``failure`` and the verdict are
+    written once, when it ends. ``evidence_class`` says whether the observation came from a real cluster
+    (REAL_CLUSTER) or from a test double (TEST_DOUBLE); only the former can ever be shown as an experimental result.
+    ``validated`` and ``prediction_error`` stay NULL for any run that produced no measurement.
+    """
+
+    __tablename__ = "validation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    experiment_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    recommendation_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    approval_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workflow_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    validated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_measurement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    evidence_class: Mapped[str] = mapped_column(String(30), nullable=False)
+
+    cluster: Mapped[dict] = mapped_column(JSON, nullable=False)
+    workflow: Mapped[dict] = mapped_column(JSON, nullable=False)
+    before_evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    recommendation: Mapped[dict] = mapped_column(JSON, nullable=False)
+    proposal: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    predicted: Mapped[dict] = mapped_column(JSON, nullable=False)
+    observed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    comparison: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prediction_error: Mapped[float | None] = mapped_column(Float, nullable=True)
+    failure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    events: Mapped[list] = mapped_column(JSON, nullable=False)
+    provenance: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppliedChangeRecord(Base):
+    """One approved change applied to the connected cluster, with the state it replaced so it can be reset (Member 4).
+
+    ``before`` is written BEFORE the first write to the cluster (status APPLYING), so a crash half-way still leaves
+    everything needed to put it back. ``status`` moves APPLYING -> APPLIED -> RESET; FAILED means the apply did not
+    complete and everything it touched was put back; RESET_FAILED means a restore did not complete and can be retried.
+    """
+
+    __tablename__ = "applied_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    application_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    recommendation_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    approval_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    tier: Mapped[str] = mapped_column(String(20), nullable=False)
+    namespace: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    yaml_applied: Mapped[str] = mapped_column(String, nullable=False)
+    yaml_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    before: Mapped[list] = mapped_column(JSON, nullable=False)
+    cluster: Mapped[dict] = mapped_column(JSON, nullable=False)
+    events: Mapped[list] = mapped_column(JSON, nullable=False)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # The rollout the change is waiting for (generation, updated/ready/available replicas per Deployment, as last
+    # observed). Written and updated by observing the cluster; a patch being accepted is never recorded as a
+    # completed rollout. NULL for a change recorded before rollout tracking existed.
+    rollout: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    applied_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reset_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppliedChangeAnalysisRecord(Base):
+    """The post-change failure-impact analysis of one applied change (Member 4), one row per direction.
+
+    ``basis``, ``baseline`` and ``predicted`` are written when the change is applied (direction "apply") or reset
+    (direction "reset") and never updated: the before-change blast radius and the approved proposal's prediction
+    stay what they were when the person approved them. ``observed`` and ``comparison`` are written when the
+    rollout of that direction has completed and Member 3's predictor has recalculated the impact from freshly
+    observed topology. This is a model recalculation over live placement, NOT an experimentally observed failure
+    rate; ``label`` says so on the row itself.
+    """
+
+    __tablename__ = "applied_change_analyses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    analysis_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    application_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    recommendation_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)          # "apply" | "reset"
+    status: Mapped[str] = mapped_column(String(20), nullable=False)             # PENDING | COMPLETED | FAILED | UNAVAILABLE
+
+    basis: Mapped[dict] = mapped_column(JSON, nullable=False)                   # workflow, namespace, failed node, provenance
+    baseline: Mapped[dict] = mapped_column(JSON, nullable=False)                # pre-change impact, immutable
+    predicted: Mapped[dict | None] = mapped_column(JSON, nullable=True)         # the approved proposal's what-if result
+    observed: Mapped[dict | None] = mapped_column(JSON, nullable=True)          # recalculated from post-rollout topology
+    comparison: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -38,16 +38,9 @@ REQUIRED_READS = [
     ("list", "pods", ""),
     ("list", "deployments", "apps"),
 ]
-# ...and none of the second. These are checks that expose a credential able to change the cluster.
-FORBIDDEN_WRITES = [
-    ("create", "pods", ""),
-    ("delete", "pods", ""),
-    ("patch", "deployments", "apps"),
-    ("create", "deployments", "apps"),
-    ("delete", "nodes", ""),
-    ("get", "secrets", ""),
-    ("create", "clusterrolebindings", "rbac.authorization.k8s.io"),
-]
+# Developer-approved 2026-10-23: the credential is full access to the connected research cluster (Applying an
+# approved change and resetting it write to it), so write access is no longer a reason to refuse it. It must
+# still be able to read what the app reads.
 
 # A credential installed by the host helper ("managed") is renewed automatically. The renewal policy
 # lives here, in one place, and is computed from the token's real expiry claim: renew once
@@ -204,14 +197,13 @@ def _allowed(http: rest.RestClient, verb: str, resource: str, group: str) -> boo
     return isinstance(status, dict) and status.get("allowed") is True
 
 
-def _verify_read_only(document: dict) -> None:
-    """Ask the cluster what this credential may do. Rejects write access and missing read access."""
+def _verify_access(document: dict) -> None:
+    """Ask the cluster what this credential may do. Rejects a credential that cannot read what the app reads."""
     try:
         http = rest.RestClient(rest.connection_from_documents([(document, None)]), REQUEST_TIMEOUT_SECONDS)
     except rest.KubeconfigError as err:
         raise _bad(f"The kubeconfig cannot be used: {err}.")
     try:
-        writable = [f"{verb} {resource}" for verb, resource, group in FORBIDDEN_WRITES if _allowed(http, verb, resource, group)]
         readable = all(_allowed(http, verb, resource, group) for verb, resource, group in REQUIRED_READS)
     except rest.HttpStatusError as err:
         if err.status in (401, 403):
@@ -222,11 +214,6 @@ def _verify_read_only(document: dict) -> None:
     finally:
         http.close()
 
-    if writable:
-        raise _bad(
-            "This credential can change the cluster (" + ", ".join(writable[:3])
-            + "). Use scripts/extension-cluster-access.sh (Windows: scripts\\extension-cluster-access.cmd) to create a read-only credential."
-        )
     if not readable:
         raise _bad("This credential cannot list nodes, pods and deployments, which the app needs.")
 
@@ -498,7 +485,7 @@ def connect(kubeconfig: str, managed: ManagedInfo | None = None) -> dict:
             raise _bad("A reconnect must carry the identity of the cluster that was approved.")
     with _connection_lock(wait=0):
         record_identity = managed is not None and _check_origin(managed)
-        _verify_read_only(document)
+        _verify_access(document)
         _store(document)
         _store_managed(managed)  # a manual upload clears any earlier managed record
         if managed is not None and managed.origin == "authorize":

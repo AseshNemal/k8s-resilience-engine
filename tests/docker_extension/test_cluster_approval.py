@@ -39,7 +39,7 @@ OTHER_PORT = {"server": "127.0.0.1:60000", "caSha256": "ab" * 32}
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(cc, "KUBECONFIG_PATH", tmp_path / "kube" / "config")
-    monkeypatch.setattr(cc, "_verify_read_only", lambda document: None)
+    monkeypatch.setattr(cc, "_verify_access", lambda document: None)
     return TestClient(app)
 
 

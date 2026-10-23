@@ -1,4 +1,4 @@
-// Package rbac owns the least-privilege read-only access the extension needs, and nothing else.
+// Package rbac owns the cluster access the extension needs (full access to the connected research cluster, developer-approved 2026-10-23), and nothing else.
 //
 // The desired objects below must stay identical to deploy/rbac/resilience-readonly.yaml (a test
 // compares them). Three operations matter for safety:
@@ -101,8 +101,10 @@ func labels() map[string]string { return map[string]string{ManagedByKey: Managed
 
 func desiredRules() []kube.PolicyRule {
 	return []kube.PolicyRule{
-		{APIGroups: []string{""}, Resources: []string{"nodes", "pods", "services"}, Verbs: []string{"get", "list"}},
-		{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets"}, Verbs: []string{"get", "list"}},
+		// Full access to the connected research cluster (developer-approved 2026-10-23: Apply and Reset need
+		// to write). The credential is still short-lived, and the backend only writes through the approval
+		// and application gates in the engine, never on its own.
+		{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}},
 	}
 }
 
@@ -117,9 +119,9 @@ func desiredRoleRef() kube.RoleRef {
 // Permissions describes in plain words what the credential can do, for the approval dialog.
 func Permissions() []string {
 	return []string{
-		"Read (get, list) nodes, pods and services",
-		"Read (get, list) deployments and replicasets",
-		"No access to Secrets, ConfigMaps or any other resource; no create, update, patch or delete",
+		"Full access (read and write) to every resource in this cluster, Secrets included",
+		"Used for reading the cluster, and for applying an approved change and resetting it",
+		"Short-lived and renewed automatically; removed when you disconnect",
 	}
 }
 
@@ -182,7 +184,7 @@ func Inspect(ctx context.Context, cs kube.Client) (Report, error) {
 			return Drifted, "has an aggregation rule, so it can gain permissions from other roles"
 		}
 		if !reflect.DeepEqual(normalizeRules(cr.Rules), normalizeRules(desiredRules())) {
-			return Drifted, "rules differ from the approved read-only set"
+			return Drifted, "rules differ from the approved set"
 		}
 		return labelState(cr.Labels)
 	})
@@ -234,6 +236,24 @@ func ruleTriples(rules []kube.PolicyRule) (set map[string]bool, ok bool) {
 	return set, true
 }
 
+// covered reports whether a wanted set grants a triple, honouring "*" in any of the three positions.
+func covered(want map[string]bool, triple string) bool {
+	parts := strings.Split(triple, "/")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, g := range []string{parts[0], "*"} {
+		for _, res := range []string{parts[1], "*"} {
+			for _, v := range []string{parts[2], "*"} {
+				if want[g+"/"+res+"/"+v] {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // markOutdated tells a role that is merely narrower than the approved set (every grant it has is
 // still wanted) from one that was changed or widened. Only the first is a normal upgrade.
 func (r *Report) markOutdated(cr *kube.Object) {
@@ -243,9 +263,21 @@ func (r *Report) markOutdated(cr *kube.Object) {
 		return
 	}
 	for triple := range have {
-		if !want[triple] {
+		if !covered(want, triple) {
 			return
 		}
+	}
+	if have["*/*/*"] { // already as wide as can be: whatever else it differs by was changed, not missing
+		return
+	}
+	if want["*/*/*"] {
+		for i := range r.Objects {
+			if o := &r.Objects[i]; o.Kind == KindClusterRole && o.State == Drifted {
+				o.Outdated = true
+				o.Detail = "this version of the extension also needs full access to the cluster (to apply an approved change and roll it back)"
+			}
+		}
+		return
 	}
 	haveResources := map[string]bool{}
 	for triple := range have {
@@ -260,7 +292,7 @@ func (r *Report) markOutdated(cr *kube.Object) {
 		}
 	}
 	sort.Strings(missing)
-	what := "more read access"
+	what := "more access"
 	if len(missing) > 0 {
 		what = "read access to " + strings.Join(missing, ", ")
 	}
@@ -393,9 +425,9 @@ func Plan(r Report) []Change {
 		case NeedsLabel:
 			out = append(out, Change{Action: "label", Kind: o.Kind, Name: o.Name, Detail: "add " + ManagedByKey + " so it is recognised as the extension's"})
 		case Drifted:
-			suffix := "; will be reset to the approved read-only set"
+			suffix := "; will be reset to the approved set"
 			if o.Outdated {
-				suffix = "; the missing read access will be added"
+				suffix = "; the missing access will be added"
 			}
 			out = append(out, Change{Action: "update", Kind: o.Kind, Name: o.Name, Detail: o.Detail + suffix})
 		}

@@ -206,7 +206,7 @@ func backendFailure(cmd string, err error) Result {
 // facts are disclosed every time: what it is, how often it runs, and what it can never do. The agent
 // says what the job is called on this operating system.
 func (d Deps) backgroundParagraph() string {
-	return "To keep it renewed when Docker Desktop is closed or this computer was asleep, a small background job (" + d.Agent.Describe() + ") checks every 15 minutes and renews the token when it is nearly due. It only issues read-only tokens: it never changes the cluster, never asks you anything and never recreates removed access. Removing the access removes the job."
+	return "To keep it renewed when Docker Desktop is closed or this computer was asleep, a small background job (" + d.Agent.Describe() + ") checks every 15 minutes and renews the token when it is nearly due. It only issues access tokens: it never changes the cluster, never asks you anything and never recreates removed access. Removing the access removes the job."
 }
 
 const slowMessage = "Docker Desktop is responding very slowly, so this ran out of time; it will try again by itself. Closing other containers or giving Docker more memory makes it faster."
@@ -263,11 +263,11 @@ func authorizeDialog(c clusters.Context, version string, nodes int, plan []rbac.
 		b.WriteString("\nThis approval will change the cluster:\n")
 		b.WriteString(bullet(describe(plan)))
 	}
-	fmt.Fprintf(&b, "\nA read-only token (valid for up to %d days) is then issued and renewed automatically. You can remove this access at any time.", int(token.RequestedLifetime.Hours()/24))
+	fmt.Fprintf(&b, "\nA full-access token (valid for up to %d days) is then issued and renewed automatically. You can remove this access at any time.", int(token.RequestedLifetime.Hours()/24))
 	if background != "" {
 		b.WriteString("\n\n" + background)
 	}
-	return approve.Request{Title: "Resilience Engine: approve read-only access?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
+	return approve.Request{Title: "Resilience Engine: approve full access to this cluster?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
 }
 
 func revokeDialog(c clusters.Context, plan rbac.RevokePlan) approve.Request {
@@ -284,7 +284,7 @@ func revokeDialog(c clusters.Context, plan rbac.RevokePlan) approve.Request {
 		b.WriteString(bullet(kept))
 	}
 	b.WriteString("\nEvery token already issued for the extension stops working immediately, and the extension is disconnected.")
-	return approve.Request{Title: "Resilience Engine: remove read-only access?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
+	return approve.Request{Title: "Resilience Engine: remove cluster access?", Body: capText(b.String(), 1800), Timeout: 90 * time.Second}
 }
 
 func capText(s string, max int) string {

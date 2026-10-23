@@ -805,7 +805,8 @@ _SCHEDULING_FIELDS = {
 }
 
 
-def scheduling_basis(deployment: DeploymentGraph, service_names: Sequence[str], max_skew: int = DEFAULT_MAX_SKEW) -> str:
+def scheduling_basis(deployment: DeploymentGraph, service_names: Sequence[str], max_skew: int = DEFAULT_MAX_SKEW,
+                     model: str | None = None) -> str:
     """A digest of the scheduling constraints and model settings a verdict about these services was reached under.
 
     It covers the strategy model and ``max_skew``, the declared scheduling intent of each named service, and the
@@ -826,5 +827,5 @@ def scheduling_basis(deployment: DeploymentGraph, service_names: Sequence[str], 
         for other in sorted(deployment.services, key=lambda s: s.name)
         if other.name not in named and other.declared_intent is not None and other.pods
         and (other.declared_intent.pod_anti_affinity_rules or other.declared_intent.pod_anti_affinity_configured)]
-    payload = {"model": STRATEGY_MODEL, "maxSkew": max_skew, "services": services, "repelledBy": repelling}
+    payload = {"model": model or STRATEGY_MODEL, "maxSkew": max_skew, "services": services, "repelledBy": repelling}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
