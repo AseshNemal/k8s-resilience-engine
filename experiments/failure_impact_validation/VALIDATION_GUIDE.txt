@@ -21,7 +21,47 @@ be passed to the captured-evidence validation workflow below or reported as
 empirical results. They are never exposed through runtime API routes or the
 live frontend, which continue to require real evidence.
 
-### 1. Generate one disposable input set
+### Recommended one-command viva run
+
+The shortest complete demonstration generates both assumed upstream graphs,
+runs Component 3 against every synthetic node, writes the full evidence bundle,
+and prints a compact explanation:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_disposable_demo.py `
+  --scenario-id viva-01 `
+  --output-dir .\experiments\failure_impact_validation\disposable\viva-01 `
+  --compact
+```
+
+The bundle contains:
+
+```text
+workflow-graph.json
+deployment-graph.json
+synthetic-input-metadata.json
+scenario-results.json
+```
+
+The compact terminal table is for explanation; `scenario-results.json` retains
+the complete machine-readable reports, root causes, and risk ranking. To show
+one selected failure instead, add for example:
+
+```powershell
+--failed-node synthetic-node-3
+```
+
+Repeat `--failed-node` to select several nodes. Omit it to test every node.
+The command refuses to replace any existing bundle file, so use a new scenario
+ID and output directory for every run.
+
+### Separate generation and evaluation
+
+Use the following steps when the assumed Component 1 and Component 2 outputs
+need to be inspected before Component 3 runs.
+
+#### 1. Generate one disposable input set
 
 Run from the repository root and use a new scenario ID and output directory for
 each demonstration:
@@ -43,7 +83,7 @@ synthetic-input-metadata.json
 
 The generator refuses to overwrite an existing input set.
 
-### 2. Evaluate every synthetic node
+#### 2. Evaluate every synthetic node
 
 Omit `--failed-node` to evaluate every node in the disposable deployment:
 
@@ -65,7 +105,7 @@ synthetic-node-3  optional emailservice fails; the workflow survives
 The detailed result for every node includes blast radius, survivability, failed
 services, failed workflows, root causes, and the node-risk ranking.
 
-### 3. Evaluate one selected node
+#### 3. Evaluate one selected node
 
 Pass `--failed-node` to isolate one scenario. This is the direct Component 3
 prediction and does not require a dependency-only baseline service:
