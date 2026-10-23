@@ -16,6 +16,7 @@ from app.engine.failure_impact_prediction.service import (  # noqa: E402
     predict_failure_impact,
 )
 from app.shared.schemas.deployment import DeploymentGraph  # noqa: E402
+from app.shared.schemas.failure_impact import FailureImpactReport  # noqa: E402
 from app.shared.schemas.workflow import WorkflowGraph  # noqa: E402
 from experiments.failure_impact_validation.generate_disposable_inputs import (  # noqa: E402
     ARTIFACT_TYPE as INPUT_ARTIFACT_TYPE,
@@ -95,6 +96,34 @@ def _selected_nodes(
     return selected
 
 
+def _scenario_summary(
+    reports: Sequence[FailureImpactReport],
+) -> dict[str, object]:
+    highest_blast_radius = max(report.blast_radius for report in reports)
+    return {
+        "totalNodesEvaluated": len(reports),
+        "highestBlastRadius": highest_blast_radius,
+        "highestRiskNodes": sorted(
+            report.failed_node
+            for report in reports
+            if report.blast_radius == highest_blast_radius
+        ),
+        "workflowFailureNodes": sorted(
+            report.failed_node for report in reports if report.failed_workflows
+        ),
+        "serviceOnlyFailureNodes": sorted(
+            report.failed_node
+            for report in reports
+            if report.failed_services and not report.failed_workflows
+        ),
+        "noServiceFailureNodes": sorted(
+            report.failed_node
+            for report in reports
+            if not report.failed_services
+        ),
+    }
+
+
 def evaluate_disposable_scenarios(
     *,
     metadata: Mapping[str, object],
@@ -119,12 +148,12 @@ def evaluate_disposable_scenarios(
             "deployment graph does not match the disposable scenario metadata"
         )
     selected = _selected_nodes(deployment, failed_nodes)
-    results = [
+    reports = [
         predict_failure_impact(
             workflow,
             deployment,
             failed_node,
-        ).model_dump(by_alias=True, mode="json")
+        )
         for failed_node in selected
     ]
     return {
@@ -136,7 +165,11 @@ def evaluate_disposable_scenarios(
         "workflowId": workflow.workflow_id,
         "deploymentSnapshotId": deployment.snapshot_id,
         "evaluatedNodes": list(selected),
-        "results": results,
+        "summary": _scenario_summary(reports),
+        "results": [
+            report.model_dump(by_alias=True, mode="json")
+            for report in reports
+        ],
     }
 
 

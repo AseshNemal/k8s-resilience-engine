@@ -48,6 +48,14 @@ def test_runner_evaluates_every_node_when_none_is_selected() -> None:
         "synthetic-node-2",
         "synthetic-node-3",
     ]
+    assert artifact["summary"] == {
+        "totalNodesEvaluated": 3,
+        "highestBlastRadius": 100.0,
+        "highestRiskNodes": ["synthetic-node-1"],
+        "workflowFailureNodes": ["synthetic-node-1"],
+        "serviceOnlyFailureNodes": ["synthetic-node-3"],
+        "noServiceFailureNodes": ["synthetic-node-2"],
+    }
     reports = {
         report["failedNode"]: report
         for report in artifact["results"]
@@ -75,6 +83,14 @@ def test_runner_can_evaluate_one_selected_node() -> None:
     )
 
     assert artifact["evaluatedNodes"] == ["synthetic-node-3"]
+    assert artifact["summary"] == {
+        "totalNodesEvaluated": 1,
+        "highestBlastRadius": 0.0,
+        "highestRiskNodes": ["synthetic-node-3"],
+        "workflowFailureNodes": [],
+        "serviceOnlyFailureNodes": ["synthetic-node-3"],
+        "noServiceFailureNodes": [],
+    }
     assert len(artifact["results"]) == 1
     assert artifact["results"][0]["failedNode"] == "synthetic-node-3"
 
