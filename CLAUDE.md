@@ -39,8 +39,14 @@ This is an early-stage scaffold, not a working system yet:
   `predict_failure_impact`; a YAML proposal generator (`yaml_proposal.py`, minimal Deployment patches, refused for
   anything not verified feasible and ranked) whose text the approval gate generates itself and re-checks when a
   request is decided; and a validation run (`validation/`) that compares a fixed prediction with a controlled
-  failure in a TEST environment through an injected executor. **No real executor exists**: only the test double
-  in `tests/support/member4_test_cluster.py` can run it, so nothing has been validated against a real cluster.
+  failure in a TEST environment through an injected executor. The run reverts what it applied and its verdict is
+  idempotent. `validation/kubernetes_executor.py` holds the safety decisions of a real executor (cluster pinned by
+  `kube-system` UID and never the docker-desktop research cluster, YAML checked against live Deployments, writes off
+  unless armed, only a stopped node counts as a failure, observed settling) over a `ClusterGateway` protocol, and
+  `validation_runs` stores each experiment with predicted and observed apart. **No gateway for a real cluster and no
+  real node-fault injector exist**: only in-memory doubles (`tests/support/member4_test_cluster.py`,
+  `member4_fake_gateway.py`) can run it, so nothing has been validated against a real cluster. The plan and the
+  gates before a first real run are in `docs/MEMBER4_REAL_VALIDATION_PROTOCOL.md`.
   The offline harness and benchmark (`tests/support/member4_*.py`, `experiments/member4_offline_benchmark/`,
   see `docs/MEMBER4_OFFLINE_VALIDATION.md`) are test/research only and stamp a non-live evidence source the
   approval gate refuses.
