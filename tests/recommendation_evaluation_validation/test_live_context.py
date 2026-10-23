@@ -234,6 +234,23 @@ def test_the_checklist_is_read_only_and_builds_no_workflow(client, monkeypatch, 
 
 # ---- the explained recommendation --------------------------------------------------------------------------------
 
+def test_the_detail_carries_component_3s_own_result_for_the_assessed_failure(client, monkeypatch, use_cluster, evidenced_topology):
+    """The stepped page's failure-impact step is drawn from this block, so it must be the predictor's own numbers, unaltered."""
+    store(monkeypatch, bookinfo_workflow())
+    use_cluster(bookinfo_cluster())
+
+    body = client.get(DETAIL, params={"workflow_id": "bookinfo-productpage", "namespace": "bookinfo"}).json()
+
+    impact = body["baselineImpact"]
+    assert impact["blastRadius"] == body["evidence"]["blastRadiusBefore"]
+    assert impact["survivability"] == pytest.approx(100.0 - impact["blastRadius"])
+    assert set(impact["failedServices"]) == {"productpage", "ratings"}     # the two single replicas on the riskiest node, w1
+    assert impact["failedWorkflows"] == ["bookinfo-productpage"]
+    assert set(impact) == {"blastRadius", "survivability", "failedServices", "failedWorkflows"}, "nothing measured is invented"
+    # The roles are Component 1's: every service of the frozen workflow, mandatory first, each once.
+    assert body["workflowServices"] == [{"name": name, "role": "mandatory"} for name in BOOKINFO]
+
+
 def test_bookinfo_single_replicas_get_no_invented_spread_but_a_verified_pair_of_replica_increases(
         client, monkeypatch, use_cluster, evidenced_topology):
     store(monkeypatch, bookinfo_workflow())

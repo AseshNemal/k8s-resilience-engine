@@ -613,5 +613,9 @@ def evaluate_recommendation(
     return LiveRecommendation(
         report=report, evidence=evidence,
         details={"currentDeployment": _dump(deployment), "candidates": candidate_details,
-                 "baselineImpact": impact_detail(before)},
+                 "baselineImpact": impact_detail(before),
+                 # Display only, kept apart from baselineImpact (which the post-change analysis stores): each service the workflow
+                 # names and the role Component 1's frozen graph gives it.
+                 "workflowServices": [{"name": name, "role": "mandatory"} for name in workflow.mandatory_services]
+                                     + [{"name": name, "role": "optional"} for name in workflow.optional_services]},
     )

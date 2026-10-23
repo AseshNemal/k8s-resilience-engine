@@ -219,6 +219,9 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
             "isPrediction": True,
         },
         "candidates": candidates,
+        # Component 3's own result for the assumed failure (blast radius, survivability, services and workflows lost), display only.
+        "baselineImpact": details.get("baselineImpact"),
+        "workflowServices": details.get("workflowServices"),
         "currentDeployment": details.get("currentDeployment"),
         "yaml": _selected_yaml(candidates),
         "validation": {"available": False, "reason": VALIDATION_NOT_AVAILABLE},
