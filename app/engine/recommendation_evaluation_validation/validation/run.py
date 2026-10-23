@@ -175,6 +175,19 @@ class ValidationRun:
                   "placed": self._placed, "afterFailure": self._after_graph}
         return {name: graph.model_copy(deep=True) for name, graph in graphs.items() if graph is not None}
 
+    @property
+    def workloads_reverted(self) -> bool | None:
+        return self._reverted
+
+    @property
+    def needs_manual_restore(self) -> bool:
+        return self._manual_restore
+
+    @property
+    def observations(self) -> dict[str, ObservedOutcome | None]:
+        """The two measured (or derived) outcomes, with the basis each one stands on."""
+        return {"baseline": self._baseline, "afterFailure": self._after}
+
     def _log(self, event: str, detail: str = "") -> None:
         self.events.append({"at": self._clock().isoformat(), "event": event, "detail": detail})
 

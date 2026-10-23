@@ -9,7 +9,7 @@ from sqlalchemy import inspect
 from app.core.database import get_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "ad9a50b92535"
+HEAD_REVISION = "c4f8e2a91d07"
 
 
 def _alembic_config() -> Config:
@@ -55,6 +55,8 @@ def test_first_setup_migrates_fresh_database_to_head(sqlite_url: str) -> None:
     assert inspect(engine).has_table("recommendation_approvals")
     columns = {col["name"] for col in inspect(engine).get_columns("recommendation_approvals")}
     assert columns == {"id", "recommendation_id", "proposal_version", "status", "recommendation_snapshot", "yaml_snapshot", "evaluation_snapshot", "requested_at", "requested_by", "decided_at", "decided_by", "decision_note"}
+
+    assert inspect(engine).has_table("validation_runs")
 
 
 def test_repeated_setup_when_already_at_head_is_a_noop(sqlite_url: str) -> None:

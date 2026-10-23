@@ -24,7 +24,7 @@ migration needs them, not speculatively.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, JSON, String
+from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -67,3 +67,44 @@ class RecommendationApprovalRecord(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     decision_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class ValidationRunRecord(Base):
+    """One validation experiment (Member 4). The prediction and the observation live in separate columns on purpose.
+
+    ``predicted``, ``proposal``, ``recommendation`` and ``before_evidence`` are written once, when the experiment is
+    planned, and never updated. ``observed``, ``comparison``, ``prediction_error``, ``failure`` and the verdict are
+    written once, when it ends. ``evidence_class`` says whether the observation came from a real cluster
+    (REAL_CLUSTER) or from a test double (TEST_DOUBLE); only the former can ever be shown as an experimental result.
+    ``validated`` and ``prediction_error`` stay NULL for any run that produced no measurement.
+    """
+
+    __tablename__ = "validation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    experiment_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    recommendation_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    approval_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workflow_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    validated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_measurement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    evidence_class: Mapped[str] = mapped_column(String(30), nullable=False)
+
+    cluster: Mapped[dict] = mapped_column(JSON, nullable=False)
+    workflow: Mapped[dict] = mapped_column(JSON, nullable=False)
+    before_evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    recommendation: Mapped[dict] = mapped_column(JSON, nullable=False)
+    proposal: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    predicted: Mapped[dict] = mapped_column(JSON, nullable=False)
+    observed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    comparison: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prediction_error: Mapped[float | None] = mapped_column(Float, nullable=True)
+    failure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    events: Mapped[list] = mapped_column(JSON, nullable=False)
+    provenance: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
