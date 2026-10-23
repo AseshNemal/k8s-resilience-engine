@@ -4,9 +4,10 @@
 __pycache__/
 .pytest_cache/
 
-# Local scratch files and generated Component 1 verification output
+# Local scratch files and generated research/verification output
 /tmp/
 /experiments/component-1/
+/experiments/failure_impact_validation/disposable/
 
 # Markdown files are for reference only — not tracked
 *.md
