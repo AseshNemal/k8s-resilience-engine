@@ -65,11 +65,6 @@
                 </div>
                 <div class="acc-facts">
                     <div class="acc-fact"><span class="acc-fact__value" id="stat-latency-overhead">Not measured</span><span class="acc-fact__label">to build the model from a recording (reading the files included) · Self-chosen target &lt; 50 ms</span></div>
-                    <ul class="show-details__notes">
-                        <li>Self-chosen targets: ≥ 98% for the three mappings, ≥ 95% for predicting outages.</li>
-                        <li>Ground truth: <code>kubectl get pods -o wide</code>, EndpointSlices, the API server's selector query per Deployment, and which services kept a ready endpoint after a real node failure.</li>
-                    </ul>
-                    <p class="academic-footnote">Accuracy is reported only after comparison with independent ground-truth data.</p>
                 </div>
             </div>
         </div>
