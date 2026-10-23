@@ -297,6 +297,22 @@ class KubernetesTestClusterGateway:
                 uid=meta.get("uid"))
         return found
 
+    def read_all_pods(self) -> list[dict[str, Any]]:
+        """Every pod of the cluster, reduced to what a disruption check needs: where it runs, whether it is Ready, what owns it.
+
+        Read only. ``ready`` is None when the pod carries no readiness condition (unknown is never reported as ready).
+        """
+        pods = []
+        for item in self._items("pods", "/api/v1/pods"):
+            meta, spec, status = _meta(item), item.get("spec") or {}, item.get("status") or {}
+            ready = next((c.get("status") == "True" for c in status.get("conditions") or [] if c.get("type") == "Ready"), None)
+            owners = meta.get("ownerReferences") or []
+            controller = next((o for o in owners if o.get("controller")), owners[0] if owners else {})
+            pods.append({"namespace": meta.get("namespace"), "name": meta.get("name"), "node": spec.get("nodeName"),
+                         "phase": status.get("phase"), "ready": ready, "ownerKind": controller.get("kind"),
+                         "ownerName": controller.get("name")})
+        return pods
+
     def rollout_complete(self, namespace: str, names: Sequence[str]) -> bool:
         return all(rollout.missing is False and (rollout.observed_generation or 0) >= (rollout.generation or 0)
                    and rollout.updated == rollout.desired and rollout.total == rollout.desired

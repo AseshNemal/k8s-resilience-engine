@@ -249,7 +249,13 @@ class KubernetesValidationExecutor:
         if self._probe is not None:
             self._probe.mark("pods-unready")
             self._sample_for(self._failure_window_s)       # the state the prediction describes
-        return self._gateway.read_graph(self.namespace)
+        graph = self._gateway.read_graph(self.namespace)
+        if self._gateway.node_ready(node) is not False:
+            # A container runtime or an orchestrator can restart a node that was killed (a restart policy of on-failure or always).
+            # Then the node was not down for the whole window, and what was observed is not the failure the prediction describes.
+            raise RuntimeError(f"node {node} reported Ready again before the failure was observed to the end (it may have been "
+                               f"restarted by its restart policy), so the failure window is not valid and nothing was measured")
+        return graph
 
     def restore_node(self, node: str) -> None:
         if self._probe is not None:
