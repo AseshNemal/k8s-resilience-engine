@@ -945,7 +945,19 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         if (!parts || !parts.select || !parts.run) return;
         parts.run.addEventListener("click", runSimulation);
         parts.select.addEventListener("change", runSimulation);
-        loadSimulationNamespaces().catch((err) => console.warn("Failed to start the cluster simulation:", err));
+        const start = () => loadSimulationNamespaces().catch((err) => console.warn("Failed to start the cluster simulation:", err));
+        // The card sits under Show details; reading every namespace of the cluster waits until it is opened,
+        // so it does not slow the page's own first load.
+        const details = parts.select.closest("details");
+        if (!details || details.open) {
+            start();
+            return;
+        }
+        details.addEventListener("toggle", function once() {
+            if (!details.open) return;
+            details.removeEventListener("toggle", once);
+            start();
+        });
     }
 
     function init() {
