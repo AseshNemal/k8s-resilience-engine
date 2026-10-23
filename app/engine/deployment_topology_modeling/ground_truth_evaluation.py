@@ -115,6 +115,24 @@ def _owner_truth(snapshot_dir: Path) -> dict[str, str] | None:
             (line.split() for line in path.read_text(encoding="utf-8").splitlines() if line.strip())}
 
 
+def _exposure_checks(analyzed: list[dict], observations: list[FailureObservation]) -> list[dict]:
+    """One labelled case per service and observed node failure: predicted SA(s, F) against observed availability."""
+    checks = []
+    for obs in observations:
+        for svc in analyzed:
+            observed = obs.observed(svc["name"])
+            if observed is None:
+                continue  # no recorded outcome for this service: not a labelled case
+            per_node = pm.ready_replicas_per_node(svc["pods"])
+            checks.append({
+                "service": svc["name"],
+                "failed_nodes": obs.failed_nodes,
+                "predicted_available": any(n not in obs.failed_nodes for n in per_node),
+                "observed_available": observed,
+            })
+    return checks
+
+
 def _items(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))["items"] if path.exists() else []
 
@@ -153,20 +171,8 @@ def evaluate_snapshot(snapshot_dir: Path = KIND_CONCENTRATED_BASELINE) -> Snapsh
                 truth_pod_service[ip_to_pod[ip]] = service_name
 
     # Each observed node failure is one labelled case: predicted SA(s, F) vs observed availability.
-    exposure_checks = []
     observations = _observed_failures(snapshot_dir)
-    for obs in observations:
-        for svc in analyzed:
-            observed = obs.observed(svc["name"])
-            if observed is None:
-                continue  # no recorded outcome for this service: not a labelled case
-            per_node = pm.ready_replicas_per_node(svc["pods"])
-            exposure_checks.append({
-                "service": svc["name"],
-                "failed_nodes": obs.failed_nodes,
-                "predicted_available": any(n not in obs.failed_nodes for n in per_node),
-                "observed_available": observed,
-            })
+    exposure_checks = _exposure_checks(analyzed, observations)
     exposure = (sum(c["predicted_available"] == c["observed_available"] for c in exposure_checks), len(exposure_checks))
 
     counts = {
