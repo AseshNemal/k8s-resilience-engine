@@ -193,7 +193,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
     // The target in one snapshot: its pods per node, and the ones no node took (Pending).
     function targetPlacement(snapshot, target) {
-        const pods = (snapshot || {})[target] || [];
+        const pods = snapshot?.[target] || [];
         const nodes = {};
         let pending = 0;
         pods.forEach((p) => {
@@ -331,8 +331,8 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             dots.appendChild(d);
         });
         const mean = (stat) => (stat?.mean == null ? "n/a" : pctText(stat.mean));
-        const c0 = (run.concentration_t0 || {})[target]?.ratio ?? null;
-        const c1 = (run.concentration_t1 || {})[target]?.ratio ?? null;
+        const c0 = run.concentration_t0?.[target]?.ratio ?? null;
+        const c1 = run.concentration_t1?.[target]?.ratio ?? null;
         const ruled = run.compliance_rate_t1 != null;
 
         box.replaceChildren(
@@ -361,7 +361,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         root.querySelectorAll(".xp-item").forEach((b) => {
             const on = b.dataset.scenario === player.scenario.id;
             b.classList.toggle("is-active", on);
-            b.setAttribute("aria-selected", String(on));
+            b.setAttribute("aria-pressed", String(on));
         });
         root.querySelectorAll("[data-config]").forEach((b) => {
             const on = b.dataset.config === player.config;
@@ -445,7 +445,6 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             const btn = el("button", "xp-item");
             btn.type = "button";
             btn.dataset.scenario = s.id;
-            btn.setAttribute("role", "option");
             btn.append(el("span", "xp-item__icon", SCENARIO_ICONS[s.id.slice(0, 2)] || "🧪"), el("span", "xp-item__name", s.name));
             const dots = el("span", "xp-item__dots");
             CONFIGS.forEach((cfg) => {
@@ -564,8 +563,8 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const view = el("div", "live-exp-run");
         view.appendChild(el("p", "ui-note", `Action: ${run.action.action}${run.stable_after_disruption ? "" : " · did not settle within 90 s"}`));
         const pair = el("div", "placement-pair");
-        const c0 = (run.concentration_t0 || {})[target];
-        const c1 = (run.concentration_t1 || {})[target];
+        const c0 = run.concentration_t0?.[target];
+        const c1 = run.concentration_t1?.[target];
         pair.append(
             placementGrid("Before (T0)", run.t0, target, run.target_status_t0, c0, null),
             el("div", "placement-pair__arrow", "→"),
@@ -899,7 +898,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             parts.run.disabled = !parts.select.value;
             if (simulationRerun) {
                 simulationRerun = false;
-                runSimulation();
+                void runSimulation();
             }
         }
     }
@@ -948,7 +947,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
     function initSimulation() {
         const parts = simulationParts();
-        if (!parts || !parts.select || !parts.run) return;
+        if (!parts?.select || !parts.run) return;
         parts.run.addEventListener("click", runSimulation);
         parts.select.addEventListener("change", runSimulation);
         const start = () => {

@@ -70,7 +70,7 @@ window.DeploymentsAcademicWidget = (function () {
     }
 
     function drawBar(bar, count) {
-        const share = count && count.compared ? count.correct / count.compared : null;
+        const share = count?.compared ? count.correct / count.compared : null;
         const target = Number(bar.dataset.target);
         bar.classList.toggle("is-unmeasured", share == null);
         bar.classList.toggle("is-below-target", share != null && share < target);

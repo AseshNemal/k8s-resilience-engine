@@ -285,11 +285,7 @@ window.DeploymentsIntentWidget = (function () {
         headline.dataset.tone = differ.length ? "danger" : "ok";
     }
 
-    // The table under Show details always shows every column; nothing to wire.
-    function init() {}
-
     return {
-        init: init,
         loadIntentCompliance: loadIntentCompliance,
         compareCounts: compareCounts,
     };

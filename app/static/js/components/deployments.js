@@ -221,7 +221,6 @@
         if (window.DeploymentsTabRouter) window.DeploymentsTabRouter.init();
         if (window.DeploymentsAcademicWidget) window.DeploymentsAcademicWidget.init();
         if (window.DeploymentsTopologyWidget) window.DeploymentsTopologyWidget.init();
-        if (window.DeploymentsIntentWidget) window.DeploymentsIntentWidget.init();
         if (window.DeploymentsDriftWidget) window.DeploymentsDriftWidget.init();
         if (window.DeploymentsLiveExperimentsWidget) window.DeploymentsLiveExperimentsWidget.init();
         if (window.DeploymentsModalManager) window.DeploymentsModalManager.init();
