@@ -229,8 +229,21 @@
             btn.addEventListener("click", () => goToTab(btn.dataset.gotoTab));
         });
 
-        loadNamespaces()
-            .then(loadPage)
-            .catch((err) => console.error("Failed to load deployment data:", err));
+        // A namespace named in the URL is read first; the namespace list (it reads every namespace of the
+        // cluster, the slowest request) follows, so the two do not compete. The page reloads only if that
+        // namespace turns out not to exist and another one is chosen.
+        const wanted = scope().requested();
+        const fail = (err) => console.error("Failed to load deployment data:", err);
+        if (wanted) {
+            scope().set(wanted);
+            if (namespacePicker) namespacePicker.replaceChildren(namespaceOption({ namespace: wanted }));
+            loadPage()
+                .catch(fail)
+                .then(loadNamespaces)
+                .then(() => (scope().get() === wanted ? null : loadPage()))
+                .catch(fail);
+        } else {
+            loadNamespaces().then(loadPage).catch(fail);
+        }
     });
 })();

@@ -12,8 +12,12 @@ window.DeploymentsDriftWidget = (function () {
     // The page reads the connected cluster only, so drift always compares declared intent with that cluster.
     async function loadDriftSignals() {
         try {
-            // 1. Categories Breakdown
-            const catResp = await fetch(scoped("/api/deployments/drift/categories"));
+            // The three reads are independent, so they go out together rather than one after another.
+            const [catResp, spofResp, nodeResp] = await Promise.all([
+                fetch(scoped("/api/deployments/drift/categories")),
+                fetch(scoped("/api/deployments/drift/spofs")),
+                fetch(scoped("/api/deployments/drift/nodes/risk")),
+            ]);
             if (!catResp.ok) {
                 const body = await catResp.json().catch(() => ({}));
                 const container = document.getElementById("spof-workloads-list");
@@ -23,22 +27,9 @@ window.DeploymentsDriftWidget = (function () {
                 }
                 return;
             }
-            const catData = await catResp.json();
-            renderCategoryCounters(catData.summary || {});
-
-            // 2. SPOF Workloads
-            const spofResp = await fetch(scoped("/api/deployments/drift/spofs"));
-            if (spofResp.ok) {
-                const spofs = await spofResp.json();
-                renderSpofList(spofs);
-            }
-
-            // 3. Worker Node Risks
-            const nodeResp = await fetch(scoped("/api/deployments/drift/nodes/risk"));
-            if (nodeResp.ok) {
-                const nodeRisks = await nodeResp.json();
-                renderNodeRisks(nodeRisks);
-            }
+            renderCategoryCounters((await catResp.json()).summary || {});
+            if (spofResp.ok) renderSpofList(await spofResp.json());
+            if (nodeResp.ok) renderNodeRisks(await nodeResp.json());
         } catch (err) {
             console.warn("Could not load drift signals:", err);
         }
