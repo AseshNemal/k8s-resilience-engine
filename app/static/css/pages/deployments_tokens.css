@@ -26,15 +26,3 @@
     --c2-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-    :root {
-        --c2-glass-bg: rgba(30, 41, 59, 0.7);
-        --c2-glass-border: rgba(255, 255, 255, 0.1);
-        --c2-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-
-        --c2-surface-subtle: #0f172a;
-        --c2-text-main: #f8fafc;
-        --c2-text-muted: #94a3b8;
-        --c2-border-light: #334155;
-    }
-}
