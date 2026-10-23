@@ -147,7 +147,8 @@ def test_bookinfo_results_name_their_own_workload_and_target(tmp_path):
     assert data["workload"] == "bookinfo"
     assert data["target_service"] == "reviews"
     assert data["services"] == ["details", "ratings", "reviews", "productpage"]
-    assert "Bookinfo" in data["evidence_note"] and "bookinfo-exp" in data["evidence_note"]
+    assert "Bookinfo" in data["evidence_note"]
+    assert "bookinfo-exp" in data["evidence_note"]
 
 
 def test_unknown_workload_is_refused():
@@ -180,7 +181,8 @@ def test_tab_opens_on_the_experiment_player_with_the_table_under_details(client)
     html = client.get("/components/deployments").text
     for role in ("xp", "xp-list", "xp-config", "xp-runs", "xp-play", "xp-before", "xp-action", "xp-after", "xp-verdict"):
         assert f'data-role="{role}"' in html
-    assert 'data-config="A-no-rule"' in html and 'data-config="B-spread"' in html
+    assert 'data-config="A-no-rule"' in html
+    assert 'data-config="B-spread"' in html
     assert 'data-role="live-exp-hero"' not in html  # the main-finding card was removed
     assert html.index('data-role="xp"') < html.index('data-role="live-exp-table-body"')
 

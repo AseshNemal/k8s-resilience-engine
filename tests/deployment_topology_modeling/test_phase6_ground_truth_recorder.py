@@ -99,7 +99,8 @@ def test_the_mixed_setup_applies_the_no_rule_config_first_and_uncordons_afterwar
     assert calls[0] == ("apply", "config-a-no-rule.yaml")
     names = [c[0] for c in calls]
     assert names.index("cordon") < names.index("rollout_restart") < names.index("uncordon")
-    assert ("uncordon", "w2") in calls and ("uncordon", "w3") in calls
+    assert ("uncordon", "w2") in calls
+    assert ("uncordon", "w3") in calls
     assert ("cordon", "w1") not in calls  # the one node that takes every reviews replica
 
 

@@ -40,9 +40,11 @@ def test_deployments_page_renders_tab_navigation(client):
 
     # The main output and the accuracy check are tabs of their own, not sections under every tab
     for tab in ("output", "accuracy"):
-        assert f'id="tab-btn-{tab}"' in html and f'id="tab-{tab}"' in html
+        assert f'id="tab-btn-{tab}"' in html
+        assert f'id="tab-{tab}"' in html
     output_pane = html[html.index('id="tab-output"'):html.index('id="tab-accuracy"')]
-    assert 'id="deployment-raw-json"' in output_pane and 'data-role="output-snapshot"' in output_pane
+    assert 'id="deployment-raw-json"' in output_pane
+    assert 'data-role="output-snapshot"' in output_pane
     assert 'id="academic-panel"' in html[html.index('id="tab-accuracy"'):]
 
     # Dry-run scenarios are not shown on the dashboard (scripted, not evidence).
