@@ -53,6 +53,7 @@ from app.shared.schemas.approval import (
     ApprovalResponse,
 )
 from app.shared.schemas.base import APIModel
+from app.api.validation_loop import require_no_validation_run, router as validation_loop_router
 
 
 class ResearchApprovalRequest(APIModel):
@@ -672,6 +673,7 @@ def get_application(recommendation_id: str, service: ApplicationService = Depend
 def apply_recommendation(
     recommendation_id: str,
     request: ApplyRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_application_service),
     evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_current_evaluator),
 ) -> dict:
@@ -682,6 +684,7 @@ def apply_recommendation(
 def reset_recommendation(
     recommendation_id: str,
     request: ResetRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_application_service),
 ) -> dict:
     return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
@@ -709,6 +712,7 @@ def get_research_application(recommendation_id: str,
 def apply_research_recommendation(
     recommendation_id: str,
     request: ApplyRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_research_application_service),
     evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_research_application_evaluator),
 ) -> dict:
@@ -719,6 +723,11 @@ def apply_research_recommendation(
 def reset_research_recommendation(
     recommendation_id: str,
     request: ResetRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_research_application_service),
 ) -> dict:
     return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+
+
+# The fault-injection validation loop ("Prove it"). Included last so that none of the `/{recommendation_id}/...` routes above can shadow it.
+router.include_router(validation_loop_router, prefix="/validation-loop")

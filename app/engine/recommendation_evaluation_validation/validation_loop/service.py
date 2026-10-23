@@ -238,19 +238,26 @@ class ValidationLoopService:
         return self._worker.reconcile(self._env.recoverer)
 
     def proof_for(self, *, namespace: str, workflow_id: str, candidate_sha256: str | None) -> dict[str, Any]:
-        """What the Approve step shows: has a candidate with this exact YAML been proven, on which cluster, at what evidence level."""
-        for run in self._repo.history(20):
-            result = run.get("result") or {}
-            if run["namespace"] != namespace or run["workflowId"] != workflow_id or run["status"] != "COMPLETED":
-                continue
-            winner = result.get("winner")
-            granted = {c["id"]: c["yamlSha256"] for c in (run.get("approval") or {}).get("candidates") or []}
-            return {"state": "PROVEN" if winner and candidate_sha256 and granted.get(winner) == candidate_sha256 else
-                    ("OTHER_PROVEN" if winner else "NOT_PROVEN"),
-                    "runKey": run["runKey"], "target": {"kind": run["targetKind"], "name": run["targetName"]},
-                    "mode": run["mode"], "preliminary": (run.get("plan") or {}).get("mode", {}).get("preliminary"),
-                    "winner": winner, "finishedAt": run["finishedAt"]}
-        return {"state": "NOT_RUN"}
+        return proof_from_history(self._repo, namespace=namespace, workflow_id=workflow_id, candidate_sha256=candidate_sha256)
+
+
+def proof_from_history(repository: LoopRepository, *, namespace: str, workflow_id: str, candidate_sha256: str | None) -> dict[str, Any]:
+    """What the Approve step shows: has a candidate with this exact YAML been proven, on which cluster, at what evidence level.
+
+    Reads only the database. A proof stays attached to the cluster it was obtained on: it is shown with that cluster's name and kind,
+    and it never stands for an approval of anything.
+    """
+    for run in repository.history(20):
+        result = run.get("result") or {}
+        if run["namespace"] != namespace or run["workflowId"] != workflow_id or run["status"] != "COMPLETED":
+            continue
+        winner = result.get("winner")
+        granted = {c["id"]: c["yamlSha256"] for c in (run.get("approval") or {}).get("candidates") or []}
+        state = "PROVEN" if winner and candidate_sha256 and granted.get(winner) == candidate_sha256 else ("OTHER_PROVEN" if winner else "NOT_PROVEN")
+        return {"state": state, "runKey": run["runKey"], "target": {"kind": run["targetKind"], "name": run["targetName"]},
+                "mode": run["mode"], "preliminary": (run.get("plan") or {}).get("mode", {}).get("preliminary"),
+                "winner": winner, "finishedAt": run["finishedAt"]}
+    return {"state": "NOT_RUN"}
 
 
 def _target_name(identity) -> str:
