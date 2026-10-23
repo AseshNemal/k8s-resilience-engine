@@ -50,10 +50,6 @@ dialog.modal-dialog {
     color: inherit;
 }
 
-.modal-dialog--wide {
-    max-width: 900px;
-}
-
 .modal-header {
     padding: 1.25rem 1.5rem;
     border-bottom: 1px solid var(--c2-border-light);
@@ -137,15 +133,6 @@ dialog.modal-dialog {
     margin: 0 0 0.5rem 0;
 }
 
-.remediation-hint-box {
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    border-radius: var(--c2-radius-md);
-    padding: 0.75rem 1rem;
-    font-size: 0.875rem;
-    color: #1e40af;
-}
-
 .modal-footer {
     padding: 1rem 1.5rem;
     border-top: 1px solid var(--c2-border-light);
@@ -153,50 +140,3 @@ dialog.modal-dialog {
     justify-content: flex-end;
 }
 
-/* Snapshot Diff Table Specifics */
-.diff-controls-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 1rem;
-}
-
-.diff-select {
-    padding: 0.5rem 0.75rem;
-    border-radius: var(--c2-radius-sm);
-    border: 1px solid var(--c2-border-light);
-    background: var(--c2-surface-subtle);
-    color: var(--c2-text-main);
-}
-
-.diff-summary-row {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-    background: var(--c2-surface-subtle);
-    padding: 0.75rem 1rem;
-    border-radius: var(--c2-radius-sm);
-    border: 1px solid var(--c2-border-light);
-}
-
-.diff-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.875rem;
-}
-
-.diff-table th, .diff-table td {
-    padding: 0.6rem 0.75rem;
-    text-align: left;
-    border-bottom: 1px solid var(--c2-border-light);
-}
-
-.status-tag--drifted {
-    color: #dc2626;
-    font-weight: 700;
-}
-
-.status-tag--steady {
-    color: #16a34a;
-    font-weight: 600;
-}
