@@ -13,61 +13,17 @@ from app.engine.recommendation_evaluation_validation.validation import STOP_KIND
 from app.engine.recommendation_evaluation_validation.validation.node_fault import NodeFaultKind, require_node_failure
 from app.integrations.kind.node_fault import FaultRefused, KindWorkerFaultInjector
 from app.integrations.kind.recovery import (
-    CommandResult,
     DockerCli,
     main as recovery_main,
     pending_records,
     restore_pending,
 )
 
+from tests.support.member4_fake_docker import CLUSTER, FakeDocker, labels
+
 ROOT = Path(__file__).resolve().parents[2]
-CLUSTER = "resilience-validation"
 DIGEST = "d" * 64
 TARGET = "kind-resilience-validation"
-
-
-def labels(cluster=CLUSTER, role="worker"):
-    return {"io.x-k8s.kind.cluster": cluster, "io.x-k8s.kind.role": role}
-
-
-class FakeDocker:
-    """Answers inspect/kill/start for a few containers and records each command. Anything else is a test failure."""
-
-    def __init__(self, containers=None, *, kill_fails=False, start_fails=False, on_kill=None):
-        self.containers = containers or {
-            f"{CLUSTER}-control-plane": {"labels": labels(role="control-plane"), "running": True},
-            f"{CLUSTER}-worker": {"labels": labels(), "running": True},
-            f"{CLUSTER}-worker2": {"labels": labels(), "running": True},
-            "desktop-worker": {"labels": labels("desktop"), "running": True},
-        }
-        self.calls, self.kill_fails, self.start_fails, self.on_kill = [], kill_fails, start_fails, on_kill
-
-    def __call__(self, args):
-        self.calls.append(list(args))
-        assert args[0] == "docker", args
-        verb, name = args[1], args[-1]
-        known = self.containers.get(name)
-        if verb == "inspect":
-            if known is None:
-                return CommandResult(1, "", f"Error: No such object: {name}")
-            body = [{"Config": {"Labels": known["labels"]}, "State": {"Running": known["running"]}}]
-            return CommandResult(0, json.dumps(body), "")
-        if verb == "kill":
-            if self.on_kill:
-                self.on_kill()
-            if self.kill_fails:
-                return CommandResult(1, "", "Error response from daemon: cannot kill")
-            known["running"] = False
-            return CommandResult(0, name, "")
-        if verb == "start":
-            if self.start_fails:
-                return CommandResult(1, "", "Error response from daemon: cannot start")
-            known["running"] = True
-            return CommandResult(0, name, "")
-        raise AssertionError(f"a command the injector must never run: {args}")
-
-    def verbs(self):
-        return [c[1] for c in self.calls]
 
 
 def injector(docker, tmp_path, workers=(f"{CLUSTER}-worker", f"{CLUSTER}-worker2")):
@@ -96,6 +52,14 @@ def test_it_is_a_node_failure_by_the_engines_definition_and_not_a_drain(tmp_path
 
     assert require_node_failure(fault) is fault and fault.kind == NodeFaultKind.NODE_STOP
     assert "SIGKILL" in fault.method and "docker kill" in fault.method and "not a drain" in fault.method
+
+
+def test_an_injector_is_real_only_when_its_commands_really_go_to_docker(tmp_path):
+    from app.integrations.kind.recovery import subprocess_runner
+
+    assert injector(FakeDocker(), tmp_path).evidence_class == "TEST_DOUBLE"
+    default = KindWorkerFaultInjector(CLUSTER, [f"{CLUSTER}-worker"], tmp_path / "r")      # builds; runs nothing
+    assert default.evidence_class == "REAL_CLUSTER" and default._runner is subprocess_runner
 
 
 # --- it can only ever name a worker of the designated cluster -----------------------------------------------------------------

@@ -43,10 +43,15 @@ This is an early-stage scaffold, not a working system yet:
   idempotent. `validation/kubernetes_executor.py` holds the safety decisions of a real executor (cluster pinned by
   `kube-system` UID and never the docker-desktop research cluster, YAML checked against live Deployments, writes off
   unless armed, only a stopped node counts as a failure, observed settling) over a `ClusterGateway` protocol, and
-  `validation_runs` stores each experiment with predicted and observed apart. **No gateway for a real cluster and no
-  real node-fault injector exist**: only in-memory doubles (`tests/support/member4_test_cluster.py`,
-  `member4_fake_gateway.py`) can run it, so nothing has been validated against a real cluster. The plan and the
-  gates before a first real run are in `docs/MEMBER4_REAL_VALIDATION_PROTOCOL.md`.
+  `validation_runs` stores each experiment with predicted and observed apart. A gateway for one designated test
+  cluster (`app/integrations/kubernetes/validation_gateway.py`, read-only by default, refuses the default kubeconfig), a kind
+  worker fault injector (`app/integrations/kind/`: `docker kill`, its own authorization per kill, durable recovery records) and
+  an HTTP workflow probe (`validation/workflow_probe.py`) now exist, composed in `experiments/member4_real_validation/`, but they
+  have only ever run against in-memory doubles (`tests/support/member4_*`): **nothing has been validated against a real
+  cluster, no cluster has been created, no node has been stopped, and no request has been sent to a real application.** The
+  resource assessment for the developer's machine is INSUFFICIENT, so the test cluster is not to be created until that changes.
+  The protocol is `docs/MEMBER4_REAL_VALIDATION_PROTOCOL.md`; the gates, procedure and recovery are in
+  `docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md`.
   The offline harness and benchmark (`tests/support/member4_*.py`, `experiments/member4_offline_benchmark/`,
   see `docs/MEMBER4_OFFLINE_VALIDATION.md`) are test/research only and stamp a non-live evidence source the
   approval gate refuses.

@@ -251,6 +251,13 @@ def test_the_executor_refuses_a_cluster_whose_uid_differs_from_the_designation(a
     assert raised.value.code == "CLUSTER_IDENTITY_MISMATCH" and api.methods == {"GET"}
 
 
+def test_a_gateway_is_real_only_when_it_talks_over_the_network(api, tmp_path):
+    path = write_kubeconfig(tmp_path / "own.kubeconfig")
+
+    assert gateway(api, tmp_path).evidence_class == "TEST_DOUBLE"
+    assert KubernetesTestClusterGateway(path, topology_reader=discover).evidence_class == "REAL_CLUSTER"      # no transport: not contacted here
+
+
 # --- layering ----------------------------------------------------------------------------------------------------------------------
 
 def test_the_integration_modules_import_nothing_from_the_engine():

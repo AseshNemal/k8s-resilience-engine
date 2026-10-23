@@ -60,7 +60,6 @@ class FaultRefused(Exception):
 
 class KindWorkerFaultInjector:
     kind = FaultKind.NODE_STOP
-    evidence_class = "REAL_CLUSTER"
     method = ("docker kill <container>: SIGKILL to the kind worker node's container (an abrupt node failure, not a drain); "
               "restored with docker start <container>")
 
@@ -75,8 +74,13 @@ class KindWorkerFaultInjector:
             raise FaultRefused("NODE_NOT_ALLOWED", f"only workers named {cluster}-worker[N] of the designated kind cluster can be "
                                f"named, never a control-plane node: {list(workers)!r}")
         self.cluster, self._workers = cluster, frozenset(workers)
-        self._dir, self._docker = Path(recovery_dir), DockerCli(runner)
+        self._dir, self._docker, self._runner = Path(recovery_dir), DockerCli(runner), runner
         self._grants: list[tuple[str, str, str]] = []      # (node, authorized_by, plan_digest), each good for ONE injection
+
+    @property
+    def evidence_class(self) -> str:
+        """REAL_CLUSTER only when commands really go to docker. Any other runner is a test double."""
+        return "REAL_CLUSTER" if self._runner is subprocess_runner else "TEST_DOUBLE"
 
     # -- authorization -------------------------------------------------------------------------------------------------
 

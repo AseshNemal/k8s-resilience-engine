@@ -1,0 +1,19 @@
+# Publishes the application's entry service on a fixed NodePort so the probe can reach it from this machine through the
+# control-plane container's port mapping (see kind-validation-cluster.yaml). NOT APPLIED. Apply it, by a person, to the
+# disposable cluster's experiment namespace only, after the application itself is deployed WITHOUT Istio sidecars.
+#
+# kube-proxy on every node routes a NodePort to ready endpoints on any node, so the request path survives the loss of a worker.
+apiVersion: v1
+kind: Service
+metadata:
+  name: productpage-probe
+  namespace: resilience-validation       # the experiment namespace named in the designation
+spec:
+  type: NodePort
+  selector:
+    app: productpage
+  ports:
+    - name: http
+      port: 9080
+      targetPort: 9080
+      nodePort: 30080

@@ -163,7 +163,10 @@ def _ready_condition(node: dict) -> bool | None:
 
 
 class KubernetesTestClusterGateway:
-    evidence_class = REAL_CLUSTER
+    @property
+    def evidence_class(self) -> str:
+        """REAL_CLUSTER only when talking over the network. A gateway given a test transport is a test double, whatever its class."""
+        return REAL_CLUSTER if self._transport is None else "TEST_DOUBLE"
 
     def __init__(self, kubeconfig_path: str, *, topology_reader: Callable[[str, Any], Any], allow_writes: bool = False,
                  timeout: float = 10.0, transport: httpx.BaseTransport | None = None) -> None:

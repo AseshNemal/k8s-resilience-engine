@@ -1,0 +1,33 @@
+# The disposable cluster for Member 4's first real validation. NOT CREATED YET, and not to be created until
+# docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md section 3 (readiness gates) is signed off.
+#
+# Create it only with its own credentials file, so the default ~/.kube/config (and its current-context, which the backend and the
+# installed extension follow) is not touched:
+#
+#   kind create cluster --config experiments/member4_real_validation/kind-validation-cluster.yaml \
+#       --kubeconfig "$HOME/.resilience-validation/kubeconfig"
+#
+# Facts this file depends on:
+# * the name is NOT "desktop": that is the Docker Desktop cluster, and the fault injector refuses it;
+# * the image is the one already on this machine (kindest/node:v1.36.1), so nothing is pulled for the nodes;
+# * the probe port is published on the CONTROL-PLANE container, which a validation run never stops. A port published on a worker
+#   would disappear with the worker the experiment kills, and the probe would fail for that reason alone;
+# * 2 workers is the minimal profile (a 2-replica spread); a third worker (recommended profile, 3-replica spread) is commented out
+#   because the resource assessment decides whether the machine can hold it.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: resilience-validation
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.36.1
+    extraPortMappings:
+      - containerPort: 30080          # the NodePort of manifests/probe-nodeport.yaml
+        hostPort: 18080               # the probe's URL: http://127.0.0.1:18080/productpage
+        listenAddress: "127.0.0.1"    # loopback only
+        protocol: TCP
+  - role: worker
+    image: kindest/node:v1.36.1
+  - role: worker
+    image: kindest/node:v1.36.1
+  # - role: worker                    # recommended profile only, if the resource assessment allows it
+  #   image: kindest/node:v1.36.1

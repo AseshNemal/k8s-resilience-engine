@@ -117,9 +117,11 @@ class KubernetesValidationExecutor:
 
     @property
     def evidence_class(self) -> str:
-        """REAL_CLUSTER only if both the gateway and the injector act on a real cluster; anything less is a double."""
-        both = (getattr(self._gateway, "evidence_class", TEST_DOUBLE), getattr(self._injector, "evidence_class", TEST_DOUBLE))
-        return REAL_CLUSTER if all(kind == REAL_CLUSTER for kind in both) else TEST_DOUBLE
+        """REAL_CLUSTER only if the gateway, the injector and any probe all act on the real thing; anything less is a double."""
+        parts = [getattr(self._gateway, "evidence_class", TEST_DOUBLE), getattr(self._injector, "evidence_class", TEST_DOUBLE)]
+        if self._probe_factory is not None:      # a probe whose requests are faked makes the observation partly fake
+            parts.append(getattr(self._probe_factory, "evidence_class", TEST_DOUBLE))
+        return REAL_CLUSTER if all(kind == REAL_CLUSTER for kind in parts) else TEST_DOUBLE
 
     def _verified_target(self) -> TestTarget:
         return verify_cluster(self._gateway.identity(), self._designation, research_override=self._override)
