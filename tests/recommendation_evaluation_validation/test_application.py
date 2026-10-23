@@ -72,7 +72,7 @@ def ready(world, session, cluster):
     approvals = InMemoryApprovals()
     approval = approved(ResearchApprovalService(approvals), world)
     service = ApplicationService(approvals, AppliedChangeRepository(session), lambda: cluster, tier=RESEARCH,
-                                 trusted=has_research_provenance, require_applicable=False)
+                                 trusted=has_research_provenance, require_applicable=False, writes_enabled=True)
     return service, approval, approvals
 
 
@@ -152,7 +152,7 @@ def test_an_unapproved_recommendation_is_not_applied(world, session, cluster):
     from tests.recommendation_evaluation_validation.test_research_approval import requested
     selected, _ = requested(ResearchApprovalService(approvals), world)
     service = ApplicationService(approvals, AppliedChangeRepository(session), lambda: cluster, tier=RESEARCH,
-                                 trusted=has_research_provenance, require_applicable=False)
+                                 trusted=has_research_provenance, require_applicable=False, writes_enabled=True)
 
     with pytest.raises(ApplicationRefused) as refused:
         service.apply(selected, "asesh", evaluate=evaluate)
@@ -163,7 +163,7 @@ def test_an_unapproved_recommendation_is_not_applied(world, session, cluster):
 def test_the_production_door_does_not_apply_a_research_approval(ready, session, cluster):
     _, approval, approvals = ready
     production = ApplicationService(approvals, AppliedChangeRepository(session), lambda: cluster, tier=PRODUCTION,
-                                    trusted=has_verified_provenance)
+                                    trusted=has_verified_provenance, writes_enabled=True)
 
     with pytest.raises(ApplicationRefused) as refused:
         production.apply(approval.recommendation_id, "asesh", evaluate=evaluate)
@@ -294,8 +294,26 @@ def test_status_says_what_can_be_done_next(ready):
 
 def test_status_of_something_never_approved_offers_nothing(world, session, cluster):
     service = ApplicationService(InMemoryApprovals(), AppliedChangeRepository(session), lambda: cluster, tier=RESEARCH,
-                                 trusted=has_research_provenance, require_applicable=False)
+                                 trusted=has_research_provenance, require_applicable=False, writes_enabled=True)
 
     status = service.status("rec-unknown")
 
     assert status["canApply"] is False and status["canReset"] is False and status["application"] is None
+
+
+# --- armed by the deployment, not by the caller ----------------------------------------------------------------------------------------------
+
+def test_a_service_that_was_not_armed_writes_nothing_and_says_why(ready, cluster):
+    service, approval, approvals = ready
+    unarmed = ApplicationService(approvals, service.repository, lambda: cluster, tier=RESEARCH, trusted=has_research_provenance,
+                                 require_applicable=False)          # the default: off
+
+    for action in (lambda: unarmed.apply(approval.recommendation_id, "asesh", evaluate=evaluate),
+                   lambda: unarmed.reset(approval.recommendation_id, "asesh")):
+        with pytest.raises(ApplicationRefused) as refused:
+            action()
+        assert refused.value.code == "CLUSTER_WRITES_NOT_ENABLED" and refused.value.http_status == 403
+
+    status = unarmed.status(approval.recommendation_id)
+    assert status["canApply"] is False and status["writesEnabled"] is False and "RESILIENCE_ALLOW_CLUSTER_WRITES" in status["reason"]
+    assert cluster.patches == [] and cluster.restores == []

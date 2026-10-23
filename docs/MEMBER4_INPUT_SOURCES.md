@@ -107,7 +107,7 @@ research, the same declaration digest); the YAML to be server-generated and iden
 Deployments in the cluster right now; no other application to be active (one at a time); the cluster identity (`kube-system` UID) to be readable. It stores the state it replaces
 (status `APPLYING`) before the first patch, patches with the `resourceVersion` it read (a Deployment edited in between is refused, not overwritten), and puts back what it
 already patched if a later patch fails. Reset restores exactly the stored replica count and placement constraints, only on the same cluster, and can be retried
-(`RESET_FAILED` keeps the snapshot). Records are in the `applied_changes` table. The page shows Apply and Reset under the Approval Gate with a second confirmation and a named person.
+(`RESET_FAILED` keeps the snapshot). Records are in the `applied_changes` table. Writes are **off unless the deployment arms them** (`RESILIENCE_ALLOW_CLUSTER_WRITES=1`, set only in `extension/compose.yaml`): a development server that finds an admin kubeconfig applies nothing, and a request cannot arm it. There is no authentication in front of the API (it listens on a Unix socket inside the extension), and `appliedBy` is a name the person types, like the approval flow's; that is the "for now no need much security" the developer chose. The page shows Apply and Reset under the Approval Gate with a second confirmation and a named person.
 
 Not done: pods already running are not moved by a Deployment patch (the Deployment rolls out; the scheduler places replacements), and the rollout status shown is read from the
 cluster each time rather than waited for. **Never run against a real cluster yet**: tests use an in-memory cluster that remembers what was written.

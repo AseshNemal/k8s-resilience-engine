@@ -15,6 +15,10 @@ services:
       # data volume so only the app user can read it. Declared, not observed: the page labels it and nothing computed from it
       # can be approved at the production gate. If the file is absent the page says so and offers no declared workflow.
       RESILIENCE_DECLARED_WORKFLOW_PATH: /data/declared-workflows.json
+      # Arms Apply and Reset (developer-approved 2026-10-23): without it the backend refuses every write to the cluster, so a
+      # development server that happens to find an admin kubeconfig cannot apply anything. Only here, where the credential is the
+      # extension's own, is it set.
+      RESILIENCE_ALLOW_CLUSTER_WRITES: "1"
     volumes:
       - resilience-engine-data:/data
     # Measured 2026-10-20 on the built image: 62 MiB idle and an 80 MiB peak after 400 requests across the

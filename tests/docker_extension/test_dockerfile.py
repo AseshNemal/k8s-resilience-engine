@@ -138,3 +138,11 @@ def test_the_declared_workflow_file_is_named_on_the_app_private_data_volume():
     path = environment["RESILIENCE_DECLARED_WORKFLOW_PATH"]
 
     assert path.startswith("/data/") and path.endswith(".json")      # /data is private to the app user; nothing else can write it
+
+
+def test_the_compose_file_arms_apply_and_reset_and_nothing_else_does():
+    import yaml
+
+    environment = yaml.safe_load((ROOT / "extension" / "compose.yaml").read_text())["services"]["resilience-engine"]["environment"]
+
+    assert environment["RESILIENCE_ALLOW_CLUSTER_WRITES"] == "1"

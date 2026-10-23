@@ -21,7 +21,8 @@ PROD, RESEARCH = "/api/recommendations", "/api/recommendations/declared"
 
 
 @pytest.fixture
-def connected(cluster):
+def connected(cluster, monkeypatch):
+    monkeypatch.setenv("RESILIENCE_ALLOW_CLUSTER_WRITES", "1")           # what the extension's compose file does
     app.dependency_overrides[get_cluster_applier] = lambda: (lambda: cluster)
     yield cluster
     app.dependency_overrides.pop(get_cluster_applier, None)
@@ -97,3 +98,25 @@ def test_the_real_applier_is_built_only_for_the_connected_cluster_and_refuses_a_
 
     with pytest.raises(NotConnectedError):
         get_cluster_applier()()
+
+
+def test_a_backend_that_was_not_armed_refuses_every_write_and_the_page_is_told(client, connected, approved_candidate, monkeypatch):
+    monkeypatch.delenv("RESILIENCE_ALLOW_CLUSTER_WRITES")
+
+    refused = client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
+    reset = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh"})
+    status = client.get(f"{RESEARCH}/{approved_candidate}/application").json()
+
+    assert refused.status_code == 403 and refused.json()["detail"]["code"] == "CLUSTER_WRITES_NOT_ENABLED"
+    assert reset.status_code == 403
+    assert status["canApply"] is False and status["writesEnabled"] is False and connected.patches == []
+
+
+def test_a_request_cannot_arm_the_backend(client, connected, approved_candidate, monkeypatch):
+    monkeypatch.delenv("RESILIENCE_ALLOW_CLUSTER_WRITES")
+
+    refused = client.post(f"{RESEARCH}/{approved_candidate}/apply?RESILIENCE_ALLOW_CLUSTER_WRITES=1", params=PARAMS,
+                          json={"appliedBy": "asesh", "writesEnabled": True},
+                          headers={"RESILIENCE_ALLOW_CLUSTER_WRITES": "1"})
+
+    assert refused.status_code == 403 and connected.patches == []

@@ -218,17 +218,26 @@ def get_cluster_applier() -> Callable[[], ApplyGateway]:
     return build
 
 
+CLUSTER_WRITES_ENV = "RESILIENCE_ALLOW_CLUSTER_WRITES"
+
+
+def cluster_writes_enabled() -> bool:
+    """Whether this deployment armed Apply and Reset. Read from the backend's environment, never from a request."""
+    return os.environ.get(CLUSTER_WRITES_ENV) == "1"
+
+
 def get_application_service(db: Session = Depends(get_db),
                             gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier)) -> ApplicationService:
     return ApplicationService(ApprovalRepository(db), AppliedChangeRepository(db), gateway, tier=PRODUCTION,
-                              trusted=has_verified_provenance)
+                              trusted=has_verified_provenance, writes_enabled=cluster_writes_enabled())
 
 
 def get_research_application_service(db: Session = Depends(get_db),
                                      gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier)) -> ApplicationService:
     """Applies a RESEARCH-approved recommendation. Its YAML is never 'applicable' at the production gate, by design."""
     return ApplicationService(ApprovalRepository(db), AppliedChangeRepository(db), gateway, tier=RESEARCH,
-                              trusted=has_research_provenance, require_applicable=False)
+                              trusted=has_research_provenance, require_applicable=False,
+                              writes_enabled=cluster_writes_enabled())
 
 
 def get_research_application_evaluator(

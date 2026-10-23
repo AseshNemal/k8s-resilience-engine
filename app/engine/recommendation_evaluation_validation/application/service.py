@@ -66,6 +66,8 @@ from app.shared.schemas.approval import ApprovalStatus
 COMPONENT = "recommendation"
 PRODUCTION, RESEARCH = "production", "research"
 NAME = re.compile(r"^[^\x00-\x1f]{2,100}$")
+WRITES_OFF = ("Writes to the cluster are not enabled on this backend (it is armed with RESILIENCE_ALLOW_CLUSTER_WRITES by the "
+              "extension's deployment), so nothing can be applied or reset from here.")
 RESTORED_FIELDS = ("name", "namespace", "resource_version", "generation", "replicas", "selector", "pod_labels",
                    "topology_spread_constraints", "pod_anti_affinity")
 
@@ -139,12 +141,14 @@ def _named(who: str | None) -> str:
 class ApplicationService:
     def __init__(self, approvals: ApprovalRepository, repository: AppliedChangeRepository,
                  gateway_factory: Callable[[], ApplyGateway], *, tier: str,
-                 trusted: Callable[[ApprovalModel], bool], require_applicable: bool = True, max_added_replicas: int = 5) -> None:
+                 trusted: Callable[[ApprovalModel], bool], require_applicable: bool = True, max_added_replicas: int = 5,
+                 writes_enabled: bool = False) -> None:
         # ``require_applicable`` mirrors the approval service's own hook: a DECLARED workflow's YAML is never "applicable"
         # at the production gate, and the research tier (which approved it, knowing that) turns the requirement off.
         self.approvals, self.repository, self._gateway_factory = approvals, repository, gateway_factory
         self.tier, self._trusted, self._max_added = tier, trusted, max_added_replicas
         self._require_applicable = require_applicable
+        self.writes_enabled = writes_enabled      # armed by the deployment, never by a request
 
     # -- reads -------------------------------------------------------------------------------------------------------
 
@@ -161,13 +165,19 @@ class ApplicationService:
         return {
             "recommendationId": recommendation_id, "application": change.to_dict() if change else None,
             "rolloutComplete": rollout,
-            "canApply": bool(approved and not active),
+            "canApply": bool(approved and not active and self.writes_enabled),
+            "writesEnabled": self.writes_enabled,
             "canReset": bool(change and change.status in RESETTABLE),
-            "reason": (None if approved and not active else
+            "reason": (None if approved and not active and self.writes_enabled else
+                       WRITES_OFF if not self.writes_enabled else
                        f"{blocking.recommendation_id} is still applied; reset it first." if blocking else
                        "Only an approved recommendation can be applied."),
             "tier": self.tier,
         }
+
+    def _require_armed(self) -> None:
+        if not self.writes_enabled:
+            raise ApplicationRefused("CLUSTER_WRITES_NOT_ENABLED", WRITES_OFF, http_status=403)
 
     def _rollout(self, change: AppliedChange) -> bool | None:
         try:
@@ -179,6 +189,7 @@ class ApplicationService:
 
     def apply(self, recommendation_id: str, applied_by: str, *,
               evaluate: Callable[[ApprovalModel], LiveRecommendation]) -> AppliedChange:
+        self._require_armed()
         who = _named(applied_by)
         approval = self.approvals.get_by_recommendation_id(recommendation_id)
         if approval is None or approval.status != ApprovalStatus.APPROVED:
@@ -272,6 +283,7 @@ class ApplicationService:
     # -- reset -------------------------------------------------------------------------------------------------------
 
     def reset(self, recommendation_id: str, reset_by: str) -> AppliedChange:
+        self._require_armed()
         who = _named(reset_by)
         change = self.repository.latest_for(recommendation_id)
         if change is None or change.status not in RESETTABLE:
