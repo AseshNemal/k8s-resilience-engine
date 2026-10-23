@@ -243,7 +243,9 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         else if (!pod.ready) cls += " xp-pod--notready";
         const pill = el("span", cls, isTarget ? `🎯 ${svc}` : svc);
         if (!isTarget) pill.style.setProperty("--svc-hue", hues[svc]);
-        pill.title = `${pod.name}${where ? ` on ${where}` : ": no node took it (Pending)"}${where && !pod.ready ? " (not ready)" : ""}`;
+        let place = ": no node took it (Pending)";
+        if (where) place = pod.ready ? " on " + where : " on " + where + " (not ready)";
+        pill.title = pod.name + place;
         return pill;
     }
 
@@ -253,7 +255,9 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const box = el("div", "xp-snap");
         box.appendChild(el("span", "xp-snap__title", title));
         const cols = el("div", "xp-snap__nodes");
-        const services = Object.keys(snapshot || {}).sort((a, b) => (a === target ? -1 : b === target ? 1 : a.localeCompare(b)));
+        // The target first, then the others by name.
+        const others = Object.keys(snapshot || {}).filter((s) => s !== target).sort((a, b) => a.localeCompare(b));
+        const services = (snapshot || {})[target] ? [target, ...others] : others;
         const podsOn = (node) => services.flatMap((svc) => (snapshot[svc] || [])
             .filter((p) => (node ? p.node === node : !p.node || NO_NODE.includes(p.node)))
             .map((p) => ({ svc, p })));
@@ -313,7 +317,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     }
 
     function renderMetrics(box, run, cond, target) {
-        const services = Object.keys(run.t1 || {}).sort();
+        const services = Object.keys(run.t1 || {}).sort((a, b) => a.localeCompare(b));
         const changed = new Set(run.changed_services || []);
         const dots = el("span", "xp-dots");
         services.forEach((svc) => {
@@ -709,8 +713,8 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     }
 
     function sameOutcome(a, b) {
-        return JSON.stringify(Object.keys(a.target_status_t1_counts || {}).sort())
-                === JSON.stringify(Object.keys(b.target_status_t1_counts || {}).sort())
+        return JSON.stringify(Object.keys(a.target_status_t1_counts || {}).sort((x, y) => x.localeCompare(y)))
+                === JSON.stringify(Object.keys(b.target_status_t1_counts || {}).sort((x, y) => x.localeCompare(y)))
             && (a.unstable_runs > 0) === (b.unstable_runs > 0)
             && a.d_rate?.mean === b.d_rate?.mean;
     }

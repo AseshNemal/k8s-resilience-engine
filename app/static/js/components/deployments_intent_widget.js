@@ -188,6 +188,50 @@ window.DeploymentsIntentWidget = (function () {
         return tile;
     }
 
+    const shown = (n) => (n == null ? "?" : String(n));
+
+    function scoreBoard(declared, ready, notReady) {
+        const board = el("span", "score");
+        const liveSub = notReady ? `ready · ${notReady} not ready` : "running and ready";
+        board.append(
+            scoreTile("📄 YAML", shown(declared), declared === 1 ? "copy asked for" : "copies asked for", "score-tile--yaml"),
+            el("span", "score__arrow", "→"),
+            scoreTile("🖥️ Cluster", shown(ready), liveSub, "score-tile--live"),
+        );
+        return board;
+    }
+
+    // One chip per node: how many of the service's pods run there, ready and not.
+    function nodeChips(pods) {
+        const byNode = {};
+        pods.forEach((p) => (byNode[shortNode(p.node)] = byNode[shortNode(p.node)] || []).push(p));
+        return Object.keys(byNode).sort((a, b) => a.localeCompare(b)).map((node) => {
+            const ok = byNode[node].filter((p) => p.ready).length;
+            const waiting = byNode[node].length - ok;
+            return ruleChip(`🖥️ ${node}`, waiting ? `${ok} ready, ${waiting} not ready` : `${ok} ready`, "ok");
+        });
+    }
+
+    const COMPLIANCE = {
+        null: { text: "nothing to check", tone: "muted" },
+        true: { text: "yes", tone: "ok" },
+        false: { text: "no", tone: "danger" },
+    };
+    const declaredChip = (label, isDeclared) => ruleChip(label, isDeclared ? "declared" : "none", isDeclared ? "ok" : "muted");
+
+    // The placement rules the YAML declares, whether the cluster satisfies them, and the limits (information only).
+    function ruleChips(item) {
+        const compliance = COMPLIANCE[String(item.is_topology_compliant ?? null)];
+        return [
+            declaredChip("Spread rule", item.spread_constraints?.length > 0),
+            declaredChip("Anti-affinity", Boolean(item.pod_anti_affinity_configured)),
+            declaredChip("Node affinity", Boolean(item.has_node_affinity)),
+            ruleChip("Rules satisfied", compliance.text, compliance.tone),
+            ruleChip("CPU limit", item.resource_limits?.cpu || "not set", "muted"),
+            ruleChip("Memory limit", item.resource_limits?.memory || "not set", "muted"),
+        ];
+    }
+
     // One scoreboard per service: what the YAML asks for, what the cluster really runs, the difference.
     function planCard(item, live) {
         const declared = item.expected_replicas ?? item.declared_replicas ?? null;
@@ -202,34 +246,12 @@ window.DeploymentsIntentWidget = (function () {
         head.setAttribute("aria-expanded", "false");
         head.title = "Click for its pods per node and its declared rules";
 
-        const board = el("span", "score");
-        board.append(
-            scoreTile("📄 YAML", declared == null ? "?" : String(declared), declared === 1 ? "copy asked for" : "copies asked for", "score-tile--yaml"),
-            el("span", "score__arrow", "→"),
-            scoreTile("🖥️ Cluster", ready == null ? "?" : String(ready), notReady ? `ready · ${notReady} not ready` : "running and ready", "score-tile--live"),
-        );
-        head.append(el("span", "plan-card__name", item.service_name || "unknown"), board, el("span", "plan-card__verdict", verdict.text));
+        head.append(el("span", "plan-card__name", item.service_name || "unknown"), scoreBoard(declared, ready, notReady),
+            el("span", "plan-card__verdict", verdict.text));
 
         // Opened: the pods per node, then the declared placement rules.
         const rules = el("div", "plan-card__rules");
-        const byNode = {};
-        pods.forEach((p) => (byNode[shortNode(p.node)] = byNode[shortNode(p.node)] || []).push(p));
-        Object.keys(byNode).sort().forEach((node) => {
-            const ok = byNode[node].filter((p) => p.ready).length;
-            rules.appendChild(ruleChip(`🖥️ ${node}`, `${ok} ready${byNode[node].length > ok ? `, ${byNode[node].length - ok} not ready` : ""}`, "ok"));
-        });
-        const spread = item.spread_constraints?.length > 0;
-        const anti = Boolean(item.pod_anti_affinity_configured);
-        const compliant = item.is_topology_compliant;
-        rules.append(
-            ruleChip("Spread rule", spread ? "declared" : "none", spread ? "ok" : "muted"),
-            ruleChip("Anti-affinity", anti ? "declared" : "none", anti ? "ok" : "muted"),
-            ruleChip("Node affinity", item.has_node_affinity ? "declared" : "none", item.has_node_affinity ? "ok" : "muted"),
-            ruleChip("Rules satisfied", compliant == null ? "nothing to check" : compliant ? "yes" : "no", compliant == null ? "muted" : compliant ? "ok" : "danger"),
-            // Limits: the most CPU / memory one copy may use, as the YAML sets them (information only).
-            ruleChip("CPU limit", item.resource_limits?.cpu || "not set", "muted"),
-            ruleChip("Memory limit", item.resource_limits?.memory || "not set", "muted"),
-        );
+        rules.append(...nodeChips(pods), ...ruleChips(item));
         rules.hidden = true;
         head.addEventListener("click", () => {
             rules.hidden = !rules.hidden;

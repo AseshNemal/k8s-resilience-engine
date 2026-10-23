@@ -83,50 +83,56 @@ window.DeploymentsAcademicWidget = (function () {
         drawOverall(overall(counts));
         document.querySelectorAll("#academic-panel .acc-bar").forEach((bar) => drawBar(bar, counts[bar.dataset.measure]));
 
-        const confusion = evaluation.exposure_confusion || {};
+        renderConfusion(evaluation.exposure_confusion || {});
+        renderProof(evaluation);
+        renderSummaryLine(evaluation, counts);
+        renderOtherChecks(counts);
+        renderSample(evaluation);
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+    function renderConfusion(confusion) {
         document.querySelectorAll("#academic-panel [data-cell]").forEach((cell) => {
             const n = confusion[cell.dataset.cell] ?? 0;
             cell.querySelector("b").textContent = String(n);
             cell.classList.toggle("is-zero", n === 0);
         });
+    }
 
-        renderProof(evaluation);
+    // One line: did the model predict the outages of the real node failures? (the cards below)
+    function renderSummaryLine(evaluation, counts) {
+        const line = document.querySelector("#academic-panel [data-role='acc-failures']");
+        if (!line) return;
+        const outages = counts.exposure;
+        const allRight = Boolean(outages?.compared && outages.correct === outages.compared);
+        let text = `⚠️ ${outages?.correct ?? 0} of ${outages?.compared ?? 0} predictions came true · ${failureRuns(evaluation)}`;
+        if (!evaluation.failure_experiments) text = "No real node failure has been recorded yet.";
+        else if (allRight) text = `✅ The model predicted every outage correctly · ${failureRuns(evaluation)} on Bookinfo`;
+        line.textContent = text;
+        line.dataset.tone = allRight ? "ok" : "warn";
+    }
 
-        // One line: did the model predict the outages of the real node failures? (the cards below)
-        const failures = document.querySelector("#academic-panel [data-role='acc-failures']");
-        if (failures) {
-            const outages = counts.exposure;
-            const allRight = Boolean(outages && outages.compared && outages.correct === outages.compared);
-            const runs = evaluation.failure_experiments || 0;
-            if (!runs) failures.textContent = "No real node failure has been recorded yet.";
-            else if (allRight) failures.textContent = `✅ The model predicted every outage correctly · ${failureRuns(evaluation)} on Bookinfo`;
-            else failures.textContent = `⚠️ ${outages.correct} of ${outages.compared} predictions came true · ${failureRuns(evaluation)}`;
-            failures.dataset.tone = allRight ? "ok" : "warn";
-        }
-
-        // The other checks, which have no picture of their own: one line, the numbers under Show details.
+    // The other checks, which have no picture of their own: one line, the numbers under Show details.
+    function renderOtherChecks(counts) {
         const other = document.querySelector("#academic-panel [data-role='acc-other']");
-        if (other) {
-            const parts = ["service_pod", "pod_node", "owner"].map((m) => counts[m]).filter(Boolean);
-            const correct = parts.reduce((n, c) => n + c.correct, 0);
-            const compared = parts.reduce((n, c) => n + c.compared, 0);
-            other.textContent = compared
-                ? `Also checked: which service, node and Deployment each pod belongs to · ${correct} of ${compared} correct`
-                : "";
-        }
+        if (!other) return;
+        const parts = ["service_pod", "pod_node", "owner"].map((m) => counts[m]).filter(Boolean);
+        const correct = parts.reduce((n, c) => n + c.correct, 0);
+        const compared = parts.reduce((n, c) => n + c.compared, 0);
+        other.textContent = compared
+            ? `Also checked: which service, node and Deployment each pod belongs to · ${correct} of ${compared} correct`
+            : "";
+    }
 
-        const latencyEl = document.getElementById("stat-latency-overhead");
-        const latency = evaluation.certificate?.runtime_overhead_ms;
-        if (latencyEl) latencyEl.textContent = latency == null ? "Not measured" : `${latency.toFixed(1)} ms`;
-
+    function renderSample(evaluation) {
         const sampleEl = document.getElementById("academic-overall-status");
-        if (sampleEl) {
-            const recordings = (evaluation.recordings || []).length;
-            sampleEl.textContent = recordings
-                ? `Checked against kubectl in ${recordings} recording${recordings === 1 ? "" : "s"}: ` +
-                  `${evaluation.pods_evaluated} pod observations, ${failureRuns(evaluation)}. A small sample, not a statistical guarantee.`
-                : "Accuracy not measured against ground truth";
-        }
+        if (!sampleEl) return;
+        const recordings = (evaluation.recordings || []).length;
+        sampleEl.textContent = recordings
+            ? `Checked against kubectl in ${plural(recordings, "recording")}: ${evaluation.pods_evaluated} pod observations, ` +
+              `${failureRuns(evaluation)}. A small sample, not a statistical guarantee.`
+            : "Accuracy not measured against ground truth";
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -222,8 +228,7 @@ window.DeploymentsAcademicWidget = (function () {
     }
 
     function failureRuns(evaluation) {
-        const n = evaluation.failure_experiments;
-        return `${n} real node failure${n === 1 ? "" : "s"}`;
+        return plural(evaluation.failure_experiments, "real node failure");
     }
 
     function init() {

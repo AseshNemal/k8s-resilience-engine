@@ -78,7 +78,9 @@ window.DeploymentsTopologyWidget = (function () {
         dot.dataset.service = svcName;
         dot.dataset.node = nodeName;
         dot.style.setProperty("--svc-hue", serviceHue[svcName]);
-        dot.title = `Pod: ${pod.name}\nService: ${svcName}\n${pod.ready ? "Ready" : "Not ready"}${pod.node ? `\nNode: ${pod.node}` : ""}`;
+        const lines = [`Pod: ${pod.name}`, `Service: ${svcName}`, pod.ready ? "Ready" : "Not ready"];
+        if (pod.node) lines.push(`Node: ${pod.node}`);
+        dot.title = lines.join("\n");
         dot.textContent = svcName;
         return dot;
     }
@@ -273,7 +275,8 @@ window.DeploymentsTopologyWidget = (function () {
         const text = sim.down.length
             ? `${sim.down.length} service(s) go down (0 ready replicas): ${sim.down.join(", ")}.`
             : "no service goes down.";
-        const extra = sim.degraded.length ? ` Still running with fewer replicas: ${sim.degraded.map((d) => `${d.name} (${d.left}/${d.of})`).join(", ")}.` : "";
+        const fewer = sim.degraded.map((d) => d.name + " (" + d.left + "/" + d.of + ")").join(", ");
+        const extra = sim.degraded.length ? ` Still running with fewer replicas: ${fewer}.` : "";
         result.replaceChildren(title, document.createTextNode(text + extra + " Click the node again to undo."));
     }
 
@@ -284,7 +287,7 @@ window.DeploymentsTopologyWidget = (function () {
     function fillZoneFilter(nodes) {
         const zoneSelect = document.getElementById("filter-topology-zone");
         if (!zoneSelect) return;
-        const zones = [...new Set(nodes.filter((n) => n.name !== PENDING).map((n) => n.zone || "No zone label (failure domain = node)"))].sort();
+        const zones = [...new Set(nodes.filter((n) => n.name !== PENDING).map((n) => n.zone || "No zone label (failure domain = node)"))].sort((a, b) => a.localeCompare(b));
         zoneSelect.length = 1;
         zoneSelect.value = "all";
         zones.forEach((z) => zoneSelect.appendChild(new Option(z, z)));
