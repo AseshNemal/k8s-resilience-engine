@@ -18,7 +18,7 @@ def test_topology_tab_structure(client):
     html = response.text
 
     assert 'id="tab-topology"' in html
-    assert "Physical Cluster & Failure Domain Topology" in html
+    assert "Where are the pods running?" in html
     assert 'id="filter-topology-zone"' in html
     assert 'id="deployment-zone-grid"' in html
     assert 'id="deployment-concentration-panel"' in html

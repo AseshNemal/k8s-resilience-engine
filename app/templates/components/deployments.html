@@ -1,66 +1,95 @@
 {# Deployment Topology Modeling Master Dashboard. Owned by: Member 2 (P.A.M. Minara). #}
 {% extends "base.html" %}
-{% from "partials/metric_card.html" import metric_card %}
 {% from "partials/loading_state.html" import loading_state %}
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.13">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.13">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.13">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.13">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.13">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.58">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.58">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.58">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.58">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.58">
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2 class="page-header__title">Deployment Topology Modeling & Resilience Drift</h2>
-    <p class="page-header__subtitle">
-        Where the replicas really run, how that differs from the declared YAML, which services one node failure would take down, and what live disruption experiments showed.
-    </p>
-    <div class="page-header__meta">
-        <span class="component-owner">Owner: <strong>Member 2</strong></span>
-        <span class="contract-chip">In: Kubernetes Manifests</span>
-        <span class="contract-chip">In: Live Cluster State</span>
-        <span class="contract-chip contract-chip--out">Out: DeploymentGraph</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Reading the connected cluster…</span>
+<header class="c2-header">
+    <div class="c2-header__words">
+        <h2 class="c2-header__title">Deployment Topology</h2>
+        <p class="c2-header__subtitle">Where the replicas really run, and which services one node failure would take down.</p>
+    </div>
+    <div class="c2-header__tools">
         <label class="namespace-picker" for="deployment-namespace">
             <span>Namespace</span>
             <select id="deployment-namespace" class="namespace-picker__select" data-role="namespace-select" disabled>
                 <option value="">Loading namespaces…</option>
             </select>
         </label>
-        <button type="button" class="secondary-button" data-role="reload-button">
-            Reload Data
-        </button>
+        <button type="button" class="icon-button" data-role="reload-button" aria-label="Reload data from the cluster" title="Reload data from the cluster">⟳</button>
     </div>
-</div>
+    <div class="c2-header__status">
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Reading the connected cluster…</span>
+        {# Where and when this page's data was read, so anyone can check it against the cluster themselves #}
+        <details class="evidence-box" data-role="evidence-box" hidden>
+            <summary class="evidence-box__title"><span data-role="evidence-line"></span> <span class="evidence-box__more">How to check</span></summary>
+            <div class="evidence-box__panel">
+                <dl class="evidence-box__grid">
+                    <div><dt>Namespace</dt><dd data-role="evidence-namespace"></dd></div>
+                    <div><dt>Read at</dt><dd data-role="evidence-time"></dd></div>
+                    <div><dt>Snapshot</dt><dd><code data-role="evidence-snapshot"></code></dd></div>
+                    <div><dt>Took</dt><dd data-role="evidence-took"></dd></div>
+                    <div><dt>Services resolved</dt><dd data-role="evidence-complete"></dd></div>
+                </dl>
+                <p class="evidence-box__verify">Read from the connected Kubernetes cluster, not stored or typed in. Check it yourself: <code data-role="evidence-command"></code></p>
+            </div>
+        </details>
+    </div>
+</header>
 
 {# Failure and status messages for the live source (explicit error states, see connection-state.js) #}
 <div data-role="page-region"></div>
 
-{# Headline metrics #}
-<section class="metric-grid" aria-label="Deployment metrics">
-    {{ metric_card("deployment-node-count", "Total Nodes", icon_name="server", icon_color="blue") }}
-    {{ metric_card("deployment-service-count", "Total Services", icon_name="topology", icon_color="teal") }}
-    {{ metric_card("deployment-ready-pods", "Ready Pods", icon_name="check-circle", icon_color="green") }}
-    {{ metric_card("deployment-exposed-services", "Exposed Services (one node failure = 0 ready)", icon_name="gauge", icon_color="red") }}
+{# The answer at a glance, as one slim bar: the status, one sentence, and the key figures (each opens its tab). #}
+<section class="verdict" data-role="verdict" data-state="loading" aria-live="polite" aria-label="Deployment verdict">
+    <div class="verdict__words">
+        <span class="verdict__icon" data-role="verdict-icon">READING</span>
+        <h3 class="verdict__title" data-role="verdict-title">Reading the cluster…</h3>
+    </div>
+    <div class="verdict__stats" aria-label="Deployment metrics">
+        <button type="button" class="verdict__stat" data-goto-tab="topology" title="Open the topology picture">
+            <strong data-metric="deployment-node-count">—</strong><span>nodes</span>
+        </button>
+        <button type="button" class="verdict__stat" data-goto-tab="intent" title="Compare with the declared YAML">
+            <strong data-metric="deployment-service-count">—</strong><span>services</span>
+        </button>
+        <button type="button" class="verdict__stat" data-goto-tab="topology" title="Open the topology picture">
+            <strong data-metric="deployment-ready-pods">—</strong><span>pods ready</span>
+        </button>
+        <button type="button" class="verdict__stat verdict__stat--exposed" data-goto-tab="drift" title="See which services are exposed">
+            <strong data-metric="deployment-exposed-services">—</strong><span>exposed</span>
+        </button>
+    </div>
 </section>
 
 {# Tab navigation #}
 <div class="dashboard-tabs-wrapper">
     <nav class="dashboard-tabs-nav" role="tablist" aria-label="Deployment Dashboard Tabs">
         <button type="button" class="tab-nav-btn active" id="tab-btn-topology" role="tab" aria-selected="true" aria-controls="tab-topology" data-target="tab-topology">
-            <span class="tab-icon">🌐</span> Physical Topology Map
-        </button>
-        <button type="button" class="tab-nav-btn" id="tab-btn-intent" role="tab" aria-selected="false" aria-controls="tab-intent" data-target="tab-intent">
-            <span class="tab-icon">📋</span> Declared Intent Compliance
+            <span class="tab-icon">🌐</span> Topology
         </button>
         <button type="button" class="tab-nav-btn" id="tab-btn-drift" role="tab" aria-selected="false" aria-controls="tab-drift" data-target="tab-drift">
-            <span class="tab-icon">⚠️</span> Resilience Drift & SPOFs
+            <span class="tab-icon">⚠️</span> Exposed services
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-intent" role="tab" aria-selected="false" aria-controls="tab-intent" data-target="tab-intent">
+            <span class="tab-icon">📋</span> Declared vs live
         </button>
         <button type="button" class="tab-nav-btn" id="tab-btn-live-experiments" role="tab" aria-selected="false" aria-controls="tab-live-experiments" data-target="tab-live-experiments">
-            <span class="tab-icon">🧪</span> Live Experiments
+            <span class="tab-icon">🧪</span> Experiments
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-output" role="tab" aria-selected="false" aria-controls="tab-output" data-target="tab-output">
+            <span class="tab-icon">📦</span> Output
+        </button>
+        <button type="button" class="tab-nav-btn" id="tab-btn-accuracy" role="tab" aria-selected="false" aria-controls="tab-accuracy" data-target="tab-accuracy">
+            <span class="tab-icon">🎯</span> Accuracy
         </button>
     </nav>
 </div>
@@ -69,41 +98,74 @@
     {# Tab 1: Topology Map #}
     {% include "components/deployments_topology_tab.html" %}
 
-    {# Tab 2: Declared Intent vs Live Compliance #}
-    {% include "components/deployments_intent_tab.html" %}
-
-    {# Tab 3: Resilience Drift & Failure Domain Exposure #}
+    {# Tab 2: Exposed services (resilience drift & failure domain exposure) #}
     {% include "components/deployments_drift_tab.html" %}
+
+    {# Tab 3: Declared vs live #}
+    {% include "components/deployments_intent_tab.html" %}
 
     {# Tab 4: Live KinD experiment results #}
     {% include "components/deployments_live_experiments_tab.html" %}
-</div>
 
-{# Model validation against kubectl ground truth #}
-<div class="section-header" style="margin-top: var(--space-xl);">
-    <h3 class="section-header__title">How accurate is the model?</h3>
+    {# Tab 5: The component's main output, the contract Component 3 reads #}
+    <div class="tab-pane" id="tab-output" role="tabpanel" aria-labelledby="tab-btn-output" hidden>
+        <section class="main-output" aria-labelledby="main-output-title">
+            <div class="tab-pane__header">
+                <div>
+                    <h3 class="tab-pane__title" id="main-output-title">Main output: DeploymentGraph</h3>
+                    <p class="tab-pane__desc">What goes in, what comes out, and who uses it.</p>
+                </div>
+            </div>
+            {# The hand-off as a picture: inputs, this component, its output, the component that reads it #}
+            <div class="flow" aria-label="Component 2 inputs and output">
+                <div class="flow__inputs">
+                    <div class="flow-box flow-box--input"><span class="flow-box__icon">📄</span><strong>YAML</strong><span>what was declared</span></div>
+                    <div class="flow-box flow-box--input"><span class="flow-box__icon">🖥️</span><strong>Live cluster</strong><span>where pods really run</span></div>
+                </div>
+                <span class="flow__arrow" aria-hidden="true">➜</span>
+                <div class="flow-box flow-box--me"><span class="flow-box__icon">🧩</span><strong>Component 2</strong><span>Deployment topology modeling</span></div>
+                <span class="flow__arrow" aria-hidden="true">➜</span>
+                <div class="flow-box flow-box--output">
+                    <span class="flow-box__icon">📦</span><strong>DeploymentGraph</strong>
+                    <span><b data-role="output-services">…</b> services · <b data-role="output-nodes">…</b> nodes</span>
+                    <code data-role="output-snapshot">…</code>
+                </div>
+                <span class="flow__arrow" aria-hidden="true">➜</span>
+                <div class="flow-box flow-box--next"><span class="flow-box__icon">🔮</span><strong>Component 3</strong><span>predicts which workflows fail when a node fails</span></div>
+            </div>
+            <p class="main-output__desc">
+                Read at <span data-role="output-time">…</span>. Component 3 gets it from <code>get_live_deployment_graph()</code>
+                or <code>GET /api/deployments/live</code>; it is the same graph every other tab shows.
+            </p>
+            {{ raw_json_panel("deployment-raw-json", "Show the DeploymentGraph JSON") }}
+        </section>
+    </div>
+
+    {# Tab 6: Model validation against kubectl ground truth #}
+    <div class="tab-pane" id="tab-accuracy" role="tabpanel" aria-labelledby="tab-btn-accuracy" hidden>
+        <div class="tab-pane__header">
+            <div>
+                <h3 class="tab-pane__title">How accurate is the model?</h3>
+                <p class="tab-pane__desc">The model's answers checked against kubectl, including real node failures.</p>
+            </div>
+        </div>
+        {% include "components/deployments_academic_panel.html" %}
+    </div>
 </div>
-{% include "components/deployments_academic_panel.html" %}
 
 {# Service exposure drill-down #}
 {% include "components/deployments_modal_violation.html" %}
 
-{# Raw Data Panel #}
-<div class="section-header" style="margin-top: var(--space-xl);">
-    <h3 class="section-header__title">Raw Data Export</h3>
-</div>
-{{ raw_json_panel("deployment-raw-json", "View Raw DeploymentGraph JSON") }}
-
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.13"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.13"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.58"></script>
 {% endblock %}

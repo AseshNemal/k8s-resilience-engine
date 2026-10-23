@@ -1,0 +1,225 @@
+{
+  "scenario_id": "08_constrained_resources",
+  "config": "B-spread",
+  "repetition": 1,
+  "started_at": "2026-10-22T06:43:18.022133+00:00",
+  "action": {
+    "action": "scale target to 0, fill CPU on all workers but one, scale target to 3",
+    "kept_free_node": "resilience-research-worker3",
+    "filler_cpu_millicores": {
+      "resilience-research-worker": 7370,
+      "resilience-research-worker2": 7370
+    }
+  },
+  "stable_after_disruption": false,
+  "wait_seconds": null,
+  "d_rate": 0.25,
+  "exposure_rate_t0": 0.0,
+  "exposure_rate_t1": 0.25,
+  "delta_e_rate": 0.25,
+  "compliance_rate_t1": 1.0,
+  "changed_services": [
+    "reviews"
+  ],
+  "transitions": {
+    "reviews": "NOT_EXPOSED -> EXPOSED"
+  },
+  "target_status_t0": "NOT_EXPOSED",
+  "target_status_t1": "EXPOSED",
+  "moved_pods": 0,
+  "observation_ms_t0": 721.6,
+  "observation_ms_t1": 400.88,
+  "t0": {
+    "details": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "details-v1-864bc5474d-dkn66",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "details-v1-864bc5474d-dz5rj",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "details-v1-864bc5474d-vmpz9",
+          "resilience-research-worker2",
+          true
+        ]
+      ]
+    },
+    "productpage": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "productpage-v1-97577d494-9g9cs",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "productpage-v1-97577d494-fxsv5",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "productpage-v1-97577d494-xflv6",
+          "resilience-research-worker",
+          true
+        ]
+      ]
+    },
+    "ratings": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "ratings-v1-69bb54fb6d-22lzt",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "ratings-v1-69bb54fb6d-hxpsw",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "ratings-v1-69bb54fb6d-r8tv2",
+          "resilience-research-worker3",
+          true
+        ]
+      ]
+    },
+    "reviews": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "reviews-v1-7dc5ff46f7-6rxfc",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "reviews-v1-7dc5ff46f7-9qz95",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "reviews-v1-7dc5ff46f7-d6cj2",
+          "resilience-research-worker",
+          true
+        ]
+      ]
+    }
+  },
+  "t1": {
+    "details": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "details-v1-864bc5474d-dkn66",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "details-v1-864bc5474d-dz5rj",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "details-v1-864bc5474d-vmpz9",
+          "resilience-research-worker2",
+          true
+        ]
+      ]
+    },
+    "productpage": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "productpage-v1-97577d494-9g9cs",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "productpage-v1-97577d494-fxsv5",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "productpage-v1-97577d494-xflv6",
+          "resilience-research-worker",
+          true
+        ]
+      ]
+    },
+    "ratings": {
+      "ready_replicas": 3,
+      "concentrated": false,
+      "replica_concentration": 0.3333,
+      "exposed_failure_domains": [],
+      "pods": [
+        [
+          "ratings-v1-69bb54fb6d-22lzt",
+          "resilience-research-worker",
+          true
+        ],
+        [
+          "ratings-v1-69bb54fb6d-hxpsw",
+          "resilience-research-worker2",
+          true
+        ],
+        [
+          "ratings-v1-69bb54fb6d-r8tv2",
+          "resilience-research-worker3",
+          true
+        ]
+      ]
+    },
+    "reviews": {
+      "ready_replicas": 1,
+      "concentrated": true,
+      "replica_concentration": 1.0,
+      "exposed_failure_domains": [
+        "resilience-research-worker3"
+      ],
+      "pods": [
+        [
+          "reviews-v1-7dc5ff46f7-gcqtc",
+          "unscheduled",
+          false
+        ],
+        [
+          "reviews-v1-7dc5ff46f7-mt55v",
+          "resilience-research-worker3",
+          true
+        ],
+        [
+          "reviews-v1-7dc5ff46f7-wl8jp",
+          "unscheduled",
+          false
+        ]
+      ]
+    }
+  },
+  "error": "Workload not stable after 90s: ['details-v1', 'ratings-v1', 'reviews-v1', 'productpage-v1']",
+  "workload": "bookinfo",
+  "target_service": "reviews"
+}

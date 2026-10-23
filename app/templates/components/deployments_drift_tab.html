@@ -1,9 +1,11 @@
-{# Tab 3: Resilience Drift & Failure Domain Exposure #}
+{# Tab 2: Exposed services, as a what-if game: crash a worker node, see which services survive.
+   One picture (nodes with their pods) and one card per service; the drill-down and the drift counters
+   are behind "Show details". #}
 <div class="tab-pane" id="tab-drift" role="tabpanel" aria-labelledby="tab-btn-drift" hidden>
     <div class="tab-pane__header">
         <div>
-            <h3 class="tab-pane__title">Resilience Drift & Failure Exposure</h3>
-            <p class="tab-pane__desc">Services that one worker-node failure would leave with 0 ready replicas, and differences between the declared YAML and the live cluster (live cluster only).</p>
+            <h3 class="tab-pane__title">Which services would one node failure take down?</h3>
+            <p class="tab-pane__desc">Don't put all your eggs in one basket: a service whose copies all sit on one node goes down with that node.</p>
         </div>
         <div class="spof-alert-badge" id="spof-banner-badge">
             <span class="pulsing-dot"></span>
@@ -11,61 +13,78 @@
         </div>
     </div>
 
-    <details class="tab-help">
-        <summary>ℹ️ What am I looking at?</summary>
-        <ul>
-            <li><strong>Exposed service</strong> = there is one node whose failure would leave the service with 0 ready replicas (a single point of failure).</li>
-            <li>A service with 1 replica is always exposed. A service with 3 replicas is exposed only if all 3 ended up on the same node.</li>
-            <li>The counters show the kinds of difference found between the YAML and the cluster (e.g. <strong>Scale drift</strong>: replica count differs).</li>
-            <li>Click <strong>Drill Down</strong> on a service to see which node it depends on and why.</li>
-        </ul>
-    </details>
-
-    <!-- Category Summary Counters -->
-    <div class="drift-categories-grid" id="drift-categories-counters">
-        <div class="category-card" data-cat="scale">
-            <span class="category-card__label">Scale Drift</span>
-            <span class="category-card__count" id="count-scale-drift">0</span>
-        </div>
-        <div class="category-card" data-cat="affinity">
-            <span class="category-card__label">Affinity Violations</span>
-            <span class="category-card__count" id="count-affinity-drift">0</span>
-        </div>
-        <div class="category-card" data-cat="resource">
-            <span class="category-card__label">Missing Limits (info)</span>
-            <span class="category-card__count" id="count-resource-drift">0</span>
-        </div>
-        <div class="category-card" data-cat="contention">
-            <span class="category-card__label">Node Contention</span>
-            <span class="category-card__count" id="count-contention-drift">0</span>
-        </div>
-        <div class="category-card" data-cat="spread">
-            <span class="category-card__label">Spread Skew</span>
-            <span class="category-card__count" id="count-spread-drift">0</span>
-        </div>
-    </div>
-
-    <div class="drift-split-grid">
-        <!-- SPOF & Exposed Workloads -->
-        <div class="card card--glass">
-            <div class="card__header">
-                <h4 class="card__title">Exposed Services (single point of failure)</h4>
-                <span class="card__badge badge--danger" id="spof-total-badge">SPOF</span>
+    <section class="whatif" data-role="whatif" aria-label="Fail a worker node and see which services survive">
+        <div class="whatif__bar">
+            <p class="whatif__headline" data-role="whatif-headline" aria-live="polite">👆 Click a worker node to crash it.</p>
+            <div class="whatif__actions">
+                <button type="button" class="whatif__btn whatif__btn--play" data-role="whatif-play">▶ Crash each node in turn</button>
+                <button type="button" class="whatif__btn" data-role="whatif-reset" hidden>↺ Bring it back</button>
             </div>
+        </div>
+
+        {# The baskets: each worker node with the pods it runs #}
+        <div class="whatif__nodes" data-role="whatif-nodes"></div>
+
+        {# One card per service: its copies and what happens to it #}
+        <div class="whatif__services" data-role="whatif-services"></div>
+    </section>
+
+    {# The two measures behind the board, each one picture; clicking a row drives the board above #}
+    <section class="risk-pair" aria-label="Replica concentration and failure-domain exposure">
+        <div class="risk-panel">
+            <h4 class="risk-panel__title">Replica concentration</h4>
+            <p class="risk-panel__desc">How much of each service sits on its busiest node. 100% = every copy on one node. The tick marks an even spread.</p>
+            <div class="risk-rows" data-role="conc-rows"></div>
+        </div>
+        <div class="risk-panel">
+            <h4 class="risk-panel__title">Failure-domain exposure</h4>
+            <p class="risk-panel__desc">What each node would take down on its own. Click a node to crash it above.</p>
+            <div class="risk-rows" data-role="expo-rows"></div>
+            <p class="risk-panel__summary" data-role="expo-summary"></p>
+        </div>
+    </section>
+
+    <details class="show-details">
+        <summary>Show details</summary>
+        <div class="show-details__body">
+            <ul class="show-details__notes">
+                <li>The rule: a service is <strong>exposed</strong> when every one of its ready copies is on the same node. One copy is always exposed; three copies are exposed only when all three are on one node.</li>
+                <li>Crashing a node here is a picture only; nothing in the cluster is changed. The same rule was checked against 4 real node failures (see the 🎯 Accuracy tab).</li>
+                <li>Click <strong>Drill Down</strong> on an exposed service to see which node it depends on and why.</li>
+            </ul>
+
             <div class="spof-list" id="spof-workloads-list">
                 <!-- Populated by deployments_drift_widget.js -->
             </div>
-        </div>
 
-        <!-- Per-node exposure -->
-        <div class="card card--glass">
-            <div class="card__header">
-                <h4 class="card__title">Worker Nodes: services that depend on one node</h4>
-                <span class="card__badge badge--warning">Node exposure</span>
+            <h4 class="show-details__title">Kinds of drift found (YAML vs cluster)</h4>
+            <div class="drift-categories-grid" id="drift-categories-counters">
+                <div class="category-card" data-cat="scale">
+                    <span class="category-card__label">Scale Drift</span>
+                    <span class="category-card__count" id="count-scale-drift">0</span>
+                </div>
+                <div class="category-card" data-cat="affinity">
+                    <span class="category-card__label">Affinity Violations</span>
+                    <span class="category-card__count" id="count-affinity-drift">0</span>
+                </div>
+                <div class="category-card" data-cat="resource">
+                    <span class="category-card__label">Missing Limits (info)</span>
+                    <span class="category-card__count" id="count-resource-drift">0</span>
+                </div>
+                <div class="category-card" data-cat="contention">
+                    <span class="category-card__label">Node Contention</span>
+                    <span class="category-card__count" id="count-contention-drift">0</span>
+                </div>
+                <div class="category-card" data-cat="spread">
+                    <span class="category-card__label">Spread Skew</span>
+                    <span class="category-card__count" id="count-spread-drift">0</span>
+                </div>
             </div>
+
+            <h4 class="show-details__title">Worker nodes: services that depend on one node</h4>
             <div class="node-risk-list" id="node-risk-rankings-list">
                 <!-- Populated by deployments_drift_widget.js -->
             </div>
         </div>
-    </div>
+    </details>
 </div>

@@ -1,82 +1,69 @@
-{# Model validation: shows measured accuracy only when independent ground truth is available. #}
-<section class="academic-validation-panel" id="academic-panel" aria-label="Model validation against kubectl">
-    <div class="academic-card">
-        <div class="academic-card__header">
-            <div class="academic-card__title-group">
-                <span class="academic-badge academic-badge--primary">MODEL VALIDATION (kubectl ground truth)</span>
-                <h3 class="academic-card__title">Model Accuracy & Runtime Metrics</h3>
-            </div>
-            <div class="academic-card__status">
-                <span class="status-pill status-pill--warning" id="academic-overall-status">
-                    Accuracy not measured against ground truth
-                </span>
-            </div>
-        </div>
+{# Model validation: one line with the result, then the proof (each real node failure, the model's prediction next
+   to what Kubernetes showed). The score, the counts per check and the timing are behind "Show details".
+   Accuracy is shown only when independent ground truth exists, always with its sample. #}
+<section class="academic-validation-panel acc" id="academic-panel" aria-label="Model validation against kubectl">
+    <p class="acc__summary" data-role="acc-failures">Reading the recorded node failures…</p>
 
-        <div class="academic-grid">
-            <div class="academic-stat">
-                <span class="academic-stat__label">Service-to-Pod Mapping</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-svc-pod-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
-                </div>
-            </div>
+    {# The proof: one card per real node failure, the services the model said would go down next to the ones
+       that really went down. A card opens to every service of that failure. #}
+    <section class="proof" data-role="acc-proof" aria-label="Model prediction against what really happened">
+        <div class="proof__cards" data-role="acc-proof-cards"></div>
+    </section>
 
-            <div class="academic-stat">
-                <span class="academic-stat__label">Pod-to-Node Placement</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-pod-node-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
+    <p class="acc__other" data-role="acc-other"></p>
+
+    <details class="show-details">
+        <summary>Show details</summary>
+        <div class="show-details__body">
+            <div class="acc__head">
+                <div>
+                    <span class="academic-badge academic-badge--primary">MODEL VALIDATION (kubectl ground truth)</span>
+                    <h4 class="show-details__title acc__title">Model Accuracy &amp; Runtime Metrics</h4>
+                    <p class="acc__sample" id="academic-overall-status">Accuracy not measured against ground truth</p>
                 </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
-                </div>
+                <button type="button" class="academic-copy-btn" id="btn-copy-accuracy-json" title="Copy the raw validation JSON">📋 Copy JSON</button>
             </div>
 
-            <div class="academic-stat">
-                <span class="academic-stat__label">Owner Reference Resolution</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-owner-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 98%</span>
+            <div class="acc__main">
+                {# Every check the model answered, and how many kubectl confirmed #}
+                <div class="acc-ring acc-ring--overall" data-role="acc-overall">
+                    <div class="acc-ring__dial"><svg viewBox="0 0 120 120" aria-hidden="true"></svg><span class="acc-ring__value" data-role="acc-overall-value">–</span></div>
+                    <p class="acc-overall__text"><strong data-role="acc-overall-count">Not measured yet</strong><span>checks matched kubectl</span></p>
                 </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
-                </div>
-            </div>
 
-            <div class="academic-stat">
-                <span class="academic-stat__label">Concentration Detection</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-conc-acc">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target ≥ 95%</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill" style="width: 0%;"></div>
+                {# One bar per kind of check #}
+                <div class="acc-bars">
+                    <div class="acc-bar" data-measure="service_pod" data-target="0.98" title="Self-chosen target ≥ 98%">
+                        <span class="acc-bar__label">Service → Pod</span><span class="acc-bar__track"><span class="acc-bar__fill"></span></span><span class="acc-bar__value" id="stat-svc-pod-acc">Not measured</span>
+                    </div>
+                    <div class="acc-bar" data-measure="pod_node" data-target="0.98" title="Self-chosen target ≥ 98%">
+                        <span class="acc-bar__label">Pod → Node</span><span class="acc-bar__track"><span class="acc-bar__fill"></span></span><span class="acc-bar__value" id="stat-pod-node-acc">Not measured</span>
+                    </div>
+                    <div class="acc-bar" data-measure="owner" data-target="0.98" title="Self-chosen target ≥ 98%">
+                        <span class="acc-bar__label">Pod → Deployment</span><span class="acc-bar__track"><span class="acc-bar__fill"></span></span><span class="acc-bar__value" id="stat-owner-acc">Not measured</span>
+                    </div>
+                    <div class="acc-bar" data-measure="exposure" data-target="0.95" title="Self-chosen target ≥ 95%">
+                        <span class="acc-bar__label">Predicts outages</span><span class="acc-bar__track"><span class="acc-bar__fill"></span></span><span class="acc-bar__value" id="stat-conc-acc">Not measured</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="academic-stat">
-                <span class="academic-stat__label">Execution Latency</span>
-                <div class="academic-stat__value-row">
-                    <span class="academic-stat__value" id="stat-latency-overhead">Not measured</span>
-                    <span class="academic-stat__target">Self-chosen target &lt; 50 ms</span>
-                </div>
-                <div class="academic-stat__bar">
-                    <div class="academic-stat__fill academic-stat__fill--accent" style="width: 0%;"></div>
+            <div class="acc__lower">
+                <div class="acc-matrix" data-role="acc-matrix">
+                    <h4 class="acc-matrix__title">When a node really failed, was the model right?</h4>
+                    <div class="acc-matrix__grid">
+                        <span></span>
+                        <span class="acc-matrix__col">Model said <strong>down</strong></span>
+                        <span class="acc-matrix__col">Model said <strong>stays up</strong></span>
+                        <span class="acc-matrix__row">Really went <strong>down</strong></span>
+                        <span class="acc-cell acc-cell--right" data-cell="down_predicted_down"><b>–</b><small>caught</small></span>
+                        <span class="acc-cell acc-cell--wrong" data-cell="down_predicted_up"><b>–</b><small>missed</small></span>
+                        <span class="acc-matrix__row">Really <strong>stayed up</strong></span>
+                        <span class="acc-cell acc-cell--wrong" data-cell="up_predicted_down"><b>–</b><small>false alarm</small></span>
+                        <span class="acc-cell acc-cell--right" data-cell="up_predicted_up"><b>–</b><small>correct</small></span>
+                    </div>
                 </div>
             </div>
         </div>
-
-        <div class="academic-card__footer">
-            <span class="academic-footnote">
-                Accuracy is reported only after comparison with independent ground-truth data.
-            </span>
-            <button type="button" class="academic-copy-btn" id="btn-copy-accuracy-json" title="Copy the raw validation JSON">
-                📋 Copy JSON
-            </button>
-        </div>
-    </div>
+    </details>
 </section>

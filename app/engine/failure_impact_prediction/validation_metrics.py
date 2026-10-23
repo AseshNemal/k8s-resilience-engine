@@ -38,9 +38,18 @@ class ValidationBatchMetrics:
     workflow_metrics: ClassificationMetrics
 
 
-def _classification_metrics(
+def calculate_classification_metrics(
     counts: ClassificationCounts,
 ) -> ClassificationMetrics:
+    """Calculate precision, recall and F1 from explicit classification counts."""
+
+    if min(
+        counts.true_positives,
+        counts.false_positives,
+        counts.false_negatives,
+    ) < 0:
+        raise ValueError("Classification counts cannot be negative")
+
     precision_denominator = counts.true_positives + counts.false_positives
     recall_denominator = counts.true_positives + counts.false_negatives
 
@@ -112,8 +121,8 @@ def calculate_validation_batch_metrics(
         total_experiments=batch.total_experiments,
         exact_match_count=exact_match_count,
         exact_match_rate=exact_match_count / batch.total_experiments,
-        service_metrics=_classification_metrics(service_counts),
-        workflow_metrics=_classification_metrics(workflow_counts),
+        service_metrics=calculate_classification_metrics(service_counts),
+        workflow_metrics=calculate_classification_metrics(workflow_counts),
     )
 
 
@@ -121,5 +130,6 @@ __all__ = [
     "ClassificationCounts",
     "ClassificationMetrics",
     "ValidationBatchMetrics",
+    "calculate_classification_metrics",
     "calculate_validation_batch_metrics",
 ]

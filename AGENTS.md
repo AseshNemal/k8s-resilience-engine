@@ -84,7 +84,8 @@ The extension's role is full access to the connected research cluster (developer
 `application.ApplicationService`. Member 2's reads use nodes, pods, services, deployments and
 replicasets. Member 2's per-namespace pipeline reads them through `KubernetesApiSource.list_objects` (no Kubernetes client
 package); `discovery.py` uses the same selector resolver, so Bookinfo-style naming resolves completely. Declared intent comes from a named manifest path, `RESILIENCE_MANIFEST_PATH`, the
-repository's manifests, or else the cluster's own Deployment specs (`service.py`, `_declared_target`).
+repository's manifests, or else the cluster's own Deployments (`service.py`, `_declared_target`): the manifest
+last applied with kubectl (`kubectl.kubernetes.io/last-applied-configuration`), else the live spec.
 
 ## Real data only
 

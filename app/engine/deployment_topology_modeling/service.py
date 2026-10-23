@@ -45,6 +45,8 @@ DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "deploy" / "kubernetes" / "boutique.yaml"
 FALLBACK_MANIFEST_DIR = PROJECT_ROOT / "deploy" / "test-workloads"
 SAMPLE_FILE = PROJECT_ROOT / "sample_data" / "deployment.json"
 LIVE_EXPERIMENT_RESULTS_DIR = PROJECT_ROOT / "experiments" / "placement_drift" / "results" / "five-repetitions"
+# The real-application check: the same live runs on the team's Bookinfo benchmark.
+LIVE_EXPERIMENT_BOOKINFO_DIR = PROJECT_ROOT / "experiments" / "placement_drift" / "results" / "bookinfo-five-repetitions"
 HOSTNAME_LABEL = "kubernetes.io/hostname"
 
 
@@ -281,8 +283,36 @@ def get_manifest_source() -> dict[str, Any]:
     return {"source": "manifest", "path": shown, "found": target.exists()}
 
 
+LAST_APPLIED_ANNOTATION = "kubectl.kubernetes.io/last-applied-configuration"
+
+
+def _declared_document(item: dict[str, Any]) -> dict[str, Any]:
+    """The declared form of one live Deployment.
+
+    `kubectl apply` stores the manifest it applied in the last-applied-configuration annotation, and
+    `kubectl scale` or `kubectl edit` do not change it, so it still holds what the YAML asked for after
+    the live spec was changed by hand. When it is absent or unreadable, the live spec (without status)
+    is the declared intent, as before.
+    """
+    annotations = (item.get("metadata") or {}).get("annotations") or {}
+    raw = annotations.get(LAST_APPLIED_ANNOTATION)
+    if raw:
+        try:
+            applied = json.loads(raw)
+        except ValueError:
+            applied = None
+        if isinstance(applied, dict) and applied.get("kind") == "Deployment":
+            metadata = {**(applied.get("metadata") or {})}
+            # Applied with `-n`, the stored manifest may carry no namespace; it is the live object's.
+            metadata.setdefault("namespace", (item.get("metadata") or {}).get("namespace"))
+            return {**applied, "metadata": metadata}
+    # List items carry no kind or apiVersion, and status is observed state, not declared intent.
+    return {"apiVersion": "apps/v1", "kind": "Deployment", **{k: v for k, v in item.items() if k != "status"}}
+
+
 def _cluster_declared_intents(namespace: str) -> list[Any]:
-    """Declared intent read from the Deployments of the connected cluster (see the source order above)."""
+    """Declared intent read from the Deployments of the connected cluster (see the source order above):
+    the manifest last applied with kubectl when the cluster kept it, otherwise the live spec."""
     if not discovery.NAMESPACE_PATTERN.match((namespace or "").strip()):
         raise discovery.DiscoveryError(
             "INVALID_NAMESPACE", "The namespace is not a valid Kubernetes namespace name.", http_status=422
@@ -293,10 +323,7 @@ def _cluster_declared_intents(namespace: str) -> list[Any]:
         )
     except ClusterAccessError as exc:
         raise CodedClusterUnavailableError(discovery.classify_access_error(exc)) from None
-    # List items carry no kind or apiVersion, and status is observed state, not declared intent.
-    documents = [{"apiVersion": "apps/v1", "kind": "Deployment", **{k: v for k, v in item.items() if k != "status"}}
-                 for item in items]
-    return parse_declared_intents(documents)
+    return parse_declared_intents([_declared_document(item) for item in items])
 
 
 def _declared_intents(manifest_path: str | None, namespace: str) -> list[Any]:
@@ -458,26 +485,37 @@ def get_manifest_service_detail(service_name: str, namespace: str = "default") -
 # Validation
 # ---------------------------------------------------------------------------------------------
 
-def get_academic_accuracy_certificate() -> ModelAccuracyCertificate:
-    """Accuracy against the stored, kubectl-inspected KinD snapshot in
-    experiments/single-node-failure/concentrated-baseline (see ground_truth_evaluation)."""
-    from app.engine.deployment_topology_modeling.ground_truth_evaluation import evaluate_snapshot
-    return evaluate_snapshot().certificate
-
-
-def get_ground_truth_evaluation() -> dict[str, Any]:
+def _pooled_ground_truth(recordings: str | None = None):
+    """The stored kubectl recordings under experiments/single-node-failure, pooled by counts (see
+    ground_truth_evaluation). `recordings` keeps only the experiment folders whose name starts with it."""
     from app.engine.deployment_topology_modeling.ground_truth_evaluation import (
-        KIND_CONCENTRATED_BASELINE,
-        evaluate_snapshot,
+        GROUND_TRUTH_ROOT,
+        evaluate_recordings,
+        recording_dirs,
     )
-    evaluation = evaluate_snapshot()
+    dirs = recording_dirs()
+    if recordings:
+        dirs = [d for d in dirs if d.relative_to(GROUND_TRUTH_ROOT).parts[0].startswith(recordings)]
+    return evaluate_recordings(dirs)
+
+
+def get_academic_accuracy_certificate() -> ModelAccuracyCertificate:
+    """Accuracy against the stored, kubectl-inspected KinD recordings (pooled)."""
+    return _pooled_ground_truth().certificate
+
+
+def get_ground_truth_evaluation(recordings: str | None = None) -> dict[str, Any]:
+    pooled = _pooled_ground_truth(recordings)
     return {
-        "ground_truth_source": KIND_CONCENTRATED_BASELINE.relative_to(PROJECT_ROOT).as_posix(),
-        "pods_evaluated": evaluation.pods_evaluated,
-        "services_evaluated": evaluation.services_evaluated,
-        "failure_experiments": evaluation.failure_experiments,
-        "certificate": evaluation.certificate.model_dump(),
-        "exposure_checks": evaluation.exposure_checks,
+        "ground_truth_source": ", ".join(r["source"] for r in pooled.recordings),
+        "recordings": pooled.recordings,
+        "pods_evaluated": sum(r["pods"] for r in pooled.recordings),
+        "services_evaluated": sum(r["services"] for r in pooled.recordings),
+        "failure_experiments": sum(r["failure_runs"] for r in pooled.recordings),
+        "counts": {k: {"correct": c, "compared": n} for k, (c, n) in pooled.counts.items()},
+        "exposure_confusion": pooled.confusion,
+        "certificate": pooled.certificate.model_dump(),
+        "exposure_checks": pooled.exposure_checks,
     }
 
 
@@ -814,71 +852,113 @@ def get_parametric_ensemble_markdown_report() -> str:
 # Live KinD experiments (stored results; reading them needs no cluster)
 # ---------------------------------------------------------------------------------------------
 
-def _example_run(results_dir: Path, scenario_id: str, config: str) -> dict[str, Any] | None:
-    """Pod placement at T0 and T1 of the first successful stored run of one condition."""
-    for path in sorted(results_dir.glob(f"{scenario_id}__{config}__run*.json")):
-        run = json.loads(path.read_text(encoding="utf-8"))
-        if run.get("failed"):
-            continue
-        pods = lambda snap: {  # noqa: E731
-            svc: [{"name": p[0], "node": p[1], "ready": p[2]} for p in info["pods"]] for svc, info in snap.items()
-        }
-        # Stored by the run (placement_metrics.concentration_ratio); None when a service had no ready replica.
-        concentration = lambda snap: {  # noqa: E731
-            svc: {"ratio": info["replica_concentration"], "ready_replicas": info["ready_replicas"]}
-            for svc, info in snap.items()
-        }
-        return {
-            "repetition": run["repetition"],
-            "action": run["action"],
-            "stable_after_disruption": run["stable_after_disruption"],
-            "target_status_t0": run["target_status_t0"],
-            "target_status_t1": run["target_status_t1"],
-            "t0": pods(run["t0"]),
-            "t1": pods(run["t1"]),
-            "concentration_t0": concentration(run["t0"]),
-            "concentration_t1": concentration(run["t1"]),
-        }
-    return None
+def _run_placement(run: dict[str, Any]) -> dict[str, Any]:
+    """Pod placement at T0 and T1 of one stored run, as stored."""
+    pods = lambda snap: {  # noqa: E731
+        svc: [{"name": p[0], "node": p[1], "ready": p[2]} for p in info["pods"]] for svc, info in snap.items()
+    }
+    # Stored by the run (placement_metrics.concentration_ratio); None when a service had no ready replica.
+    concentration = lambda snap: {  # noqa: E731
+        svc: {"ratio": info["replica_concentration"], "ready_replicas": info["ready_replicas"]}
+        for svc, info in snap.items()
+    }
+    return {
+        "repetition": run["repetition"],
+        "action": run["action"],
+        "stable_after_disruption": run["stable_after_disruption"],
+        "target_status_t0": run["target_status_t0"],
+        "target_status_t1": run["target_status_t1"],
+        "t0": pods(run["t0"]),
+        "t1": pods(run["t1"]),
+        "concentration_t0": concentration(run["t0"]),
+        "concentration_t1": concentration(run["t1"]),
+        # The run's own measurements, as stored by the runner (placement_metrics); None when not recorded.
+        "d_rate": run.get("d_rate"),
+        "exposure_rate_t0": run.get("exposure_rate_t0"),
+        "exposure_rate_t1": run.get("exposure_rate_t1"),
+        "compliance_rate_t1": run.get("compliance_rate_t1"),
+        "changed_services": run.get("changed_services") or [],
+    }
 
 
-def get_live_experiment_results(results_dir: Path | None = None) -> dict[str, Any] | None:
-    """Summary of the stored live placement-drift runs, or None if no summary exists.
+def _condition_runs(results_dir: Path, scenario_id: str, config: str) -> list[dict[str, Any]]:
+    """Every successful stored run of one condition, in repetition order (failed runs are left out)."""
+    runs = [json.loads(p.read_text(encoding="utf-8")) for p in results_dir.glob(f"{scenario_id}__{config}__run*.json")]
+    return [_run_placement(r) for r in sorted(runs, key=lambda r: r["repetition"]) if not r.get("failed")]
+
+
+def _live_evidence_note(workload: str) -> tuple[str, list[str]]:
+    """What the stored runs of one workload ran on, and the services they observed."""
+    if workload == "bookinfo":
+        from experiments.placement_drift.live import bookinfo_workloads as bi
+        services = list(bi.SERVICES)
+        return (
+            f"Observed on a local KinD cluster (nodes are containers on one host) with the team's Bookinfo benchmark "
+            f"(v1, images {bi.IMAGE_TAG}) in its own namespace {bi.NAMESPACE}: {len(services)} services x {bi.REPLICAS} "
+            f"replicas, requests {bi.REQUESTS['cpu']}/{bi.REQUESTS['memory']}. Disruptions target reviews; "
+            f"all services are observed.",
+            services,
+        )
+    from experiments.placement_drift.live.generate_workloads import IMAGE, REPLICAS, SERVICES
+    from experiments.placement_drift.live.scenarios import TARGET_SERVICE
+    return (
+        f"Observed on a local KinD cluster (nodes are containers on one host) with stand-in workloads: "
+        f"{len(SERVICES)} services x {REPLICAS} replicas running {IMAGE}. "
+        f"Disruptions target {TARGET_SERVICE}; all services are observed.",
+        list(SERVICES),
+    )
+
+
+def _live_results_dir(workload: str) -> Path:
+    """Stored runs of one workload (read at call time, so the folders can be swapped in tests)."""
+    return LIVE_EXPERIMENT_BOOKINFO_DIR if workload == "bookinfo" else LIVE_EXPERIMENT_RESULTS_DIR
+
+
+def available_live_experiment_workloads() -> list[str]:
+    """Workloads whose live runs have a stored summary."""
+    return [name for name in ("standin", "bookinfo") if (_live_results_dir(name) / "summary.json").exists()]
+
+
+def get_live_experiment_results(results_dir: Path | None = None, workload: str = "standin") -> dict[str, Any] | None:
+    """Summary of the stored live placement-drift runs of one workload, or None if no summary exists.
 
     The runs were executed by experiments/placement_drift/run_live_experiments.py; this only reads
     their summary.json, so the values are observations, not recomputed or simulated.
     """
-    from experiments.placement_drift.live.generate_workloads import IMAGE, REPLICAS, SERVICES
-    from experiments.placement_drift.live.scenarios import SCENARIOS_BY_ID, TARGET_SERVICE
+    from experiments.placement_drift.live.scenarios import SCENARIOS_BY_ID
+    from experiments.placement_drift.live.workloads import WORKLOADS
 
-    results_dir = results_dir or LIVE_EXPERIMENT_RESULTS_DIR
+    if workload not in WORKLOADS:
+        raise ValueError(f"Unknown workload '{workload}'; expected one of {sorted(WORKLOADS)}.")
+    results_dir = results_dir or _live_results_dir(workload)
     summary_file = results_dir / "summary.json"
     if not summary_file.exists():
         return None
     summary = json.loads(summary_file.read_text(encoding="utf-8"))
-    conditions = [
-        {
+    conditions = []
+    for c in summary["conditions"]:
+        # "runs" is already the stored run count, so the placements of every run get their own key.
+        placements = _condition_runs(results_dir, c["scenario_id"], c["config"])
+        conditions.append({
             **c,
             "scenario_name": SCENARIOS_BY_ID[c["scenario_id"]].name if c["scenario_id"] in SCENARIOS_BY_ID else c["scenario_id"],
-            "example_run": _example_run(results_dir, c["scenario_id"], c["config"]),
-        }
-        for c in summary["conditions"]
-    ]
+            "example_run": placements[0] if placements else None,
+            "run_placements": placements,
+        })
     try:
         source = str(results_dir.relative_to(PROJECT_ROOT))
     except ValueError:
         source = results_dir.name
+    note, services = _live_evidence_note(workload)
     return {
         "execution_mode": "LIVE_KIND_CLUSTER",
         "is_experimental_evidence": True,
-        "evidence_note": (
-            f"Observed on a local KinD cluster (nodes are containers on one host) with stand-in workloads: "
-            f"{len(SERVICES)} services x {REPLICAS} replicas running {IMAGE}. "
-            f"Disruptions target {TARGET_SERVICE}; all services are observed."
-        ),
+        "workload": workload,
+        "available_workloads": available_live_experiment_workloads(),
+        "evidence_note": note,
         "results_source": source.replace("\\", "/"),
-        "target_service": TARGET_SERVICE,
-        "services": SERVICES,
+        "target_service": WORKLOADS[workload].target_service,
+        "services": services,
         "total_runs": summary["total_runs"],
         "failed_runs": sum(c["failed_runs"] for c in conditions),
         "conditions": conditions,

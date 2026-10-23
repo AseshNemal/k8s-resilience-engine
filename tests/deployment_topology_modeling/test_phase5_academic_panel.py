@@ -25,8 +25,15 @@ def test_academic_panel_rendered_in_html(client):
     assert 'id="stat-pod-node-acc"' in html
     assert 'id="stat-owner-acc"' in html
     assert 'id="stat-conc-acc"' in html
-    assert 'id="stat-latency-overhead"' in html
+    # The build time includes reading the recording files, so it is not shown as the model's latency;
+    # it stays in the ground-truth JSON (certificate.runtime_overhead_ms).
+    assert 'id="stat-latency-overhead"' not in html
     assert 'id="btn-copy-accuracy-json"' in html
+    # One ring per measure, read from the counts the ground-truth endpoint returns, and the 2×2 of outcomes.
+    for measure in ("service_pod", "pod_node", "owner", "exposure"):
+        assert f'data-measure="{measure}"' in html
+    for cell in ("down_predicted_down", "down_predicted_up", "up_predicted_down", "up_predicted_up"):
+        assert f'data-cell="{cell}"' in html
 
 
 def test_accuracy_endpoint_returns_valid_certificate(client):
@@ -40,22 +47,47 @@ def test_accuracy_endpoint_returns_valid_certificate(client):
     assert "concentration_detection_accuracy" in data
     assert "is_statistically_sound" in data
 
-    # Measured against kubectl output of the stored KinD snapshot (3 pods, 1 service, 1 node failure).
+    # Pooled over every stored kubectl recording: the paymentservice baseline and the three
+    # bookinfo-exp node failures of 2026-10-22 (experiments/single-node-failure).
     assert data["service_pod_mapping_accuracy"] == pytest.approx(1.0)
     assert data["pod_node_mapping_accuracy"] == pytest.approx(1.0)
     assert data["exposure_detection_accuracy"] == pytest.approx(1.0)
-    # The snapshot holds no ReplicaSet objects, so owner resolution is not scored...
-    assert data["owner_resolution_accuracy"] is None
-    # ...and one tiny snapshot is never reported as statistically sound.
+    # The bookinfo-exp recordings hold ReplicaSets, Deployments and the selector query, so owners are scored...
+    assert data["owner_resolution_accuracy"] == pytest.approx(1.0)
+    # ...and a handful of recordings is never reported as statistically sound.
     assert data["is_statistically_sound"] is False
 
 
 def test_ground_truth_endpoint_reports_sample_sizes(client):
     data = client.get("/api/deployments/benchmarks/ground-truth").json()
-    assert data["pods_evaluated"] == 3
-    assert data["services_evaluated"] == 1
-    assert data["failure_experiments"] == 1
-    (check,) = data["exposure_checks"]
+    sources = [r["source"].rsplit("/", 1)[-1] for r in data["recordings"]]
+    assert "concentrated-baseline" in sources
+    assert data["pods_evaluated"] == sum(r["pods"] for r in data["recordings"]) == 27
+    assert data["failure_experiments"] == 4
+    assert data["counts"]["exposure"] == {"correct": 13, "compared": 13}
+    assert data["counts"]["owner"] == {"correct": 24, "compared": 24}  # the baseline has no owner recording
+    assert data["exposure_confusion"] == {
+        "down_predicted_down": 4, "down_predicted_up": 0, "up_predicted_up": 9, "up_predicted_down": 0}
+
+
+def test_the_bookinfo_recordings_can_be_shown_on_their_own(client):
+    data = client.get("/api/deployments/benchmarks/ground-truth", params={"recordings": "bookinfo-exp"}).json()
+    assert all("bookinfo-exp" in r["source"] for r in data["recordings"])
+    assert (data["pods_evaluated"], data["failure_experiments"]) == (24, 3)
+    assert data["counts"]["exposure"] == {"correct": 12, "compared": 12}
+    assert data["counts"]["owner"] == {"correct": 24, "compared": 24}
+    assert data["exposure_confusion"] == {
+        "down_predicted_down": 3, "down_predicted_up": 0, "up_predicted_up": 9, "up_predicted_down": 0}
+    assert {c["service"] for c in data["exposure_checks"]} == {"details", "productpage", "ratings", "reviews"}
+
+
+def test_the_baseline_recording_alone_is_unchanged():
+    from app.engine.deployment_topology_modeling.ground_truth_evaluation import (
+        KIND_CONCENTRATED_BASELINE, evaluate_snapshot)
+    ev = evaluate_snapshot(KIND_CONCENTRATED_BASELINE)
+    assert (ev.pods_evaluated, ev.services_evaluated, ev.failure_experiments) == (3, 1, 1)
+    (check,) = ev.exposure_checks
     assert check["failed_nodes"] == ["resilience-research-worker"]
     assert check["predicted_available"] is False
     assert check["observed_available"] is False
+    assert ev.certificate.owner_resolution_accuracy is None

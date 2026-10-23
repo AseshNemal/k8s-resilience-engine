@@ -76,7 +76,9 @@ This is an early-stage scaffold, not a working system yet:
   modes). Member 2's scripted chaos/benchmark dry-run routes remain, labelled; see the real-data rule below.
   Declared intent comes from, in order: a manifest path the caller names, `RESILIENCE_MANIFEST_PATH` (set on
   the backend, never from a request), the repository's own manifests, then the connected cluster's own
-  Deployment specs, which the same manifest parser reads (`service.py`, `_declared_target`). A cluster that
+  Deployments, which the same manifest parser reads (`service.py`, `_declared_target`): per Deployment the
+  manifest last applied with kubectl (`kubectl.kubernetes.io/last-applied-configuration`, untouched by
+  `kubectl scale`), else its live spec (`_declared_document`). A cluster that
   declares nothing answers `DECLARED_STATE_UNAVAILABLE`, never 100% compliance.
 - `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
   deployment, failure_impact, recommendation, validation); `sample_data/` is test-only.

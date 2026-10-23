@@ -709,11 +709,14 @@ def get_accuracy_certificate() -> Dict[str, Any]:
 @router.get(
     "/benchmarks/ground-truth",
     tags=[TAG_BENCHMARKS],
-    summary="[Validation] Model output vs kubectl ground truth for the stored KinD snapshot",
+    summary="[Validation] Model output vs kubectl ground truth for the stored KinD recordings",
 )
-def get_ground_truth_report() -> Dict[str, Any]:
+def get_ground_truth_report(
+    recordings: Optional[str] = Query(
+        None, description="Only the recordings whose folder name starts with this, e.g. bookinfo-exp; all when omitted"),
+) -> Dict[str, Any]:
     """Accuracies with their sample sizes and the per-failure exposure checks."""
-    return get_ground_truth_evaluation()
+    return get_ground_truth_evaluation(recordings)
 
 
 @router.get(
@@ -722,9 +725,12 @@ def get_ground_truth_report() -> Dict[str, Any]:
     summary="[Validation] Stored results of the live placement-drift runs on KinD",
     responses={404: {"description": "No live experiment results have been stored yet"}},
 )
-def get_live_experiments() -> Dict[str, Any]:
+def get_live_experiments(
+    workload: Literal["standin", "bookinfo"] = Query(
+        "standin", description="standin: the controlled stand-in runs; bookinfo: the real-application runs"),
+) -> Dict[str, Any]:
     """Per scenario and configuration: runs, unsettled runs, D_rate, exposure rates and target status."""
-    results = get_live_experiment_results()
+    results = get_live_experiment_results(workload=workload)
     if results is None:
         raise HTTPException(status_code=404, detail="No live experiment results found. Run experiments/placement_drift/run_live_experiments.py first.")
     return results

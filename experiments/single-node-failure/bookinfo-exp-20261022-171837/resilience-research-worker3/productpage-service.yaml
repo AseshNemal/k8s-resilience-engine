@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"labels":{"app":"productpage","experiment":"placement-drift","service":"productpage"},"name":"productpage","namespace":"bookinfo-exp"},"spec":{"ports":[{"name":"http","port":9080}],"selector":{"app":"productpage"}}}
+  creationTimestamp: "2026-10-22T08:11:35Z"
+  labels:
+    app: productpage
+    experiment: placement-drift
+    service: productpage
+  name: productpage
+  namespace: bookinfo-exp
+  resourceVersion: "210936"
+  uid: df1af7d2-fac7-4f15-bbf2-8d7dc36e976c
+spec:
+  clusterIP: 10.96.30.130
+  clusterIPs:
+  - 10.96.30.130
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http
+    port: 9080
+    protocol: TCP
+    targetPort: 9080
+  selector:
+    app: productpage
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}

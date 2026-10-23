@@ -20,13 +20,17 @@ def test_intent_tab_markup_presence(client):
     html = response.text
 
     assert 'id="tab-intent"' in html
-    assert "Declared Manifest Intent vs Live Placement Compliance" in html
+    assert "Does the cluster match the YAML?" in html
     assert 'id="compliance-overall-pill"' in html
     assert 'id="compliance-rate-val"' in html
     assert 'id="intent-comparison-table"' in html
     assert 'id="intent-table-body"' in html
     assert "Declared Replicas (YAML)" in html
     assert "Live Ready Replicas" in html
+    # The picture (booked seats vs running pods) comes before the table, which is under Show details
+    for role in ("plan-board", "plan-headline", "plan-source", "plan-cards"):
+        assert f'data-role="{role}"' in html
+    assert html.index('data-role="plan-board"') < html.index('id="intent-comparison-table"')
 
 
 def test_manifest_intent_api_endpoint(client):
