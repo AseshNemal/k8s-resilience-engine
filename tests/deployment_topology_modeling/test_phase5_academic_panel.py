@@ -25,7 +25,9 @@ def test_academic_panel_rendered_in_html(client):
     assert 'id="stat-pod-node-acc"' in html
     assert 'id="stat-owner-acc"' in html
     assert 'id="stat-conc-acc"' in html
-    assert 'id="stat-latency-overhead"' in html
+    # The build time includes reading the recording files, so it is not shown as the model's latency;
+    # it stays in the ground-truth JSON (certificate.runtime_overhead_ms).
+    assert 'id="stat-latency-overhead"' not in html
     assert 'id="btn-copy-accuracy-json"' in html
     # One ring per measure, read from the counts the ground-truth endpoint returns, and the 2×2 of outcomes.
     for measure in ("service_pod", "pod_node", "owner", "exposure"):
