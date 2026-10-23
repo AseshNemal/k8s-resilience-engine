@@ -19,8 +19,8 @@ class Setup:
     def __init__(self, *, gateway_options=None, fault_options=None, executor_options=None, graph=None):
         self.scenario = bookinfo_scenario("concentrated")
         self.graph = graph or self.scenario.deployment
-        self.gateway = FakeClusterGateway(self.graph, namespace=OFFLINE_NAMESPACE, scheduler=spread_least_loaded,
-                                          **(gateway_options or {}))
+        self.gateway = FakeClusterGateway(self.graph, namespace=OFFLINE_NAMESPACE,
+                                          **{"scheduler": spread_least_loaded, **(gateway_options or {})})
         self.gateway.remember_original()
         self.fault = FakeNodeFault(self.gateway, **(fault_options or {}))
         self.clock = FakeClock()
@@ -32,3 +32,20 @@ class Setup:
     def proposal(self):
         approval, live = approved_for_test(self.scenario)
         return approval, live, approval.yaml_snapshot
+
+    def probe_factory(self, *, broken=(), raises=False, **spec_overrides):
+        """A factory of probes over a fake backend, on this setup's clock, for the scenario's own workflow."""
+        from app.engine.recommendation_evaluation_validation.validation.workflow_probe import ProbeSpec, WorkflowProbe
+        from tests.support.member4_fake_gateway import FakeWorkflowBackend
+        workflow = self.scenario.workflow
+        self.backend = FakeWorkflowBackend(self.gateway, workflow.mandatory_services, broken=broken, raises=raises)
+        spec = ProbeSpec(workflow_id=workflow.workflow_id, url="http://127.0.0.1:18080/productpage",
+                         required_text=("Book Details",), forbidden_text=("currently unavailable",), min_samples=3,
+                         **spec_overrides)
+
+        def make():
+            def stepped(probe_spec):          # a request takes a little time on this setup's clock
+                self.clock.sleep(0.1)
+                return self.backend(probe_spec)
+            return WorkflowProbe(spec, stepped, clock=self.clock)
+        return make

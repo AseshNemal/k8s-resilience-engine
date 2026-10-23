@@ -167,6 +167,28 @@ def _node_restored(events: list[dict[str, Any]]) -> bool | None:
     return True if "NODE_RESTORED" in names else None
 
 
+PROBE_NOTE = ("The probe is recorded beside the readiness-derived comparison, not instead of it: the verdict is still the "
+              "readiness-derived one. Whether a probe disagreement should block a verdict is a decision to make before the "
+              "first real run, not after seeing one.")
+
+
+def _probe_comparison(planned: ExperimentRecord, observed: dict[str, Any] | None,
+                      probes: dict[str, Any]) -> dict[str, Any] | None:
+    after, baseline = probes.get("afterChange"), probes.get("baselineFailure")
+    if after is None:
+        return None
+    predicted = planned.predicted["workflowSurvivesAfter"]
+    probe, base = after["workflowSurvives"], (baseline or {}).get("workflowSurvives")
+    readiness = ((observed or {}).get("afterFailure") or {}).get("workflowSurvives")
+    return {
+        "predictedSurvives": predicted, "probeSurvives": probe, "readinessSurvives": readiness,
+        "matchesPrediction": None if probe is None else probe == predicted,
+        "agreesWithReadiness": None if probe is None or readiness is None else probe == readiness,
+        "baselineProbeSurvives": base,
+        "observedImprovement": None if probe is None or base is None else (probe and not base),
+        "note": PROBE_NOTE}
+
+
 def finished_record(planned: ExperimentRecord, run: ValidationRun, result: ValidationResult | None, *, now: datetime,
                     status: str | None = None, stop_reason: str | None = None) -> ExperimentRecord:
     """The planned record with the outcome of ``run`` added. ``result`` None means the run raised before a verdict."""
@@ -174,11 +196,21 @@ def finished_record(planned: ExperimentRecord, run: ValidationRun, result: Valid
     measured = result is not None and result.state is RunState.COMPLETED
     reasons = (result.reasons[0] if result and result.reasons else None) if result and not measured else None
     events = [dict(event) for event in run.events]
+    observed = _observed(run)
+    reader = getattr(run.executor, "probe_reports", None)
+    probes = reader() if callable(reader) else {}
+    if probes:
+        observed = {**(observed or {"failedNode": run.plan.predicted.failed_node, "basis": OBSERVATION_BASIS}), "probes": probes}
+    comparison = dict(result.comparison) if measured and result.comparison else None
+    if comparison is not None and probes:
+        entry = _probe_comparison(planned, observed, probes)
+        if entry is not None:
+            comparison["probe"] = entry
     started = next((event["at"] for event in events if event["event"] != "PLANNED"), None)
     return ExperimentRecord(
         **{**planned.__dict__,
            "status": ended, "validated": result.validated if measured else None, "is_measurement": measured,
-           "observed": _observed(run), "comparison": (result.comparison or None) if measured else None,
+           "observed": observed, "comparison": comparison,
            "prediction_error": result.prediction_error if measured else None,
            "failure": {"runEnded": ended, "stopReason": stop_reason or reasons,
                        "needsManualRestore": run.needs_manual_restore, "workloadsReverted": run.workloads_reverted,

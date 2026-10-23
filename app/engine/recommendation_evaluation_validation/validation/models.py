@@ -38,6 +38,9 @@ TERMINAL_STATES = frozenset({RunState.COMPLETED, RunState.INCONCLUSIVE, RunState
 TEST_ENVIRONMENT = "test"
 
 APPLY, FAIL_NODE, FAIL_BASELINE = "APPLY_TO_TEST_CLUSTER", "FAIL_NODE_IN_TEST_CLUSTER", "FAIL_BASELINE_IN_TEST_CLUSTER"
+# A second, separate authorization for the one act that destroys something: killing the container of a kind worker node.
+# FAIL_NODE says the run may inject its failure; this says the fault injector may kill THIS node of THIS plan.
+STOP_KIND_WORKER = "STOP_KIND_WORKER_CONTAINER"
 
 
 class ValidationRefusedError(Exception):

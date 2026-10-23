@@ -8,6 +8,7 @@ from .models import (
     APPLY,
     FAIL_BASELINE,
     FAIL_NODE,
+    STOP_KIND_WORKER,
     TEST_ENVIRONMENT,
     Authorization,
     RunState,
@@ -22,7 +23,7 @@ from .run import ValidationExecutor, ValidationPlan, ValidationRun, authorize, t
 
 __all__ = [
     "APPLY", "Authorization", "ClusterIdentity", "DisposableClusterDesignation", "FAIL_BASELINE", "FAIL_NODE",
-    "ResearchClusterAuthorization", "RunState", "TEST_ENVIRONMENT", "TestTarget", "ValidationExecutor",
+    "ResearchClusterAuthorization", "RunState", "STOP_KIND_WORKER", "TEST_ENVIRONMENT", "TestTarget", "ValidationExecutor",
     "ValidationInterrupted", "ValidationPlan", "ValidationRefusedError", "ValidationResult", "ValidationRun",
     "ValidationThresholds", "authorize", "predict_outcome", "to_validation_report", "verify_cluster",
 ]

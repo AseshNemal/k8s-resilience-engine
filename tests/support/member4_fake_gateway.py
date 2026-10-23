@@ -52,7 +52,7 @@ class FakeClusterGateway:
                  api_server: str = "https://127.0.0.1:6443", context: str | None = "kind-resilience-test",
                  namespace: str = "default", scheduler: Scheduler | None = None, settles: bool = True,
                  unreadable_uid: bool = False, fail_at: str | None = None,
-                 pending_after_patch: bool = False) -> None:
+                 pending_after_patch: bool = False, detection_polls: int = 0, recovery_polls: int = 0) -> None:
         self.graph = graph.model_copy(deep=True)
         self.deployments = live_deployments(self.graph)
         self.uid, self.api_server, self.context, self.namespace = uid, api_server, context, namespace
@@ -60,6 +60,11 @@ class FakeClusterGateway:
         self.settles = settles
         self.scheduler = scheduler
         self.not_ready: set[str] = set()
+        # A real control plane notices a dead node only after a delay, and a started node takes a while to report Ready:
+        # the number of times node_ready is asked before it changes its answer.
+        self.detection_polls, self.recovery_polls = detection_polls, recovery_polls
+        self._going_down: dict[str, int] = {}
+        self._coming_up: dict[str, int] = {}
         self.calls: list[str] = []
         self._version = 1
         self._original: DeploymentGraph | None = None
@@ -97,6 +102,17 @@ class FakeClusterGateway:
 
     def node_ready(self, node: str) -> bool | None:
         self.calls.append(f"node_ready:{node}")
+        if node in self._going_down:
+            if self._going_down[node] > 0:
+                self._going_down[node] -= 1
+                return True         # the control plane has not noticed yet
+            del self._going_down[node]
+            self.not_ready.add(node)
+        if node in self._coming_up:
+            if self._coming_up[node] > 0:
+                self._coming_up[node] -= 1
+                return False        # started, not yet reporting Ready
+            del self._coming_up[node]
         return node not in self.not_ready
 
     # -- writes ---------------------------------------------------------------------------------------------
@@ -151,10 +167,16 @@ class FakeClusterGateway:
 
     def fail_node(self, node: str) -> None:
         """Test hook for the node-fault injector double: the node stops answering."""
-        self.not_ready.add(node)
+        if self.detection_polls:
+            self._going_down[node] = self.detection_polls
+        else:
+            self.not_ready.add(node)
 
     def recover_node(self, node: str) -> None:
+        self._going_down.pop(node, None)
         self.not_ready.discard(node)
+        if self.recovery_polls:
+            self._coming_up[node] = self.recovery_polls
 
 
 def spread_least_loaded(graph: DeploymentGraph, services: list[str]) -> None:
@@ -207,3 +229,28 @@ class FakeNodeFault:
         self.calls.append(f"restore:{node}")
         if self.restores:
             self.gateway.recover_node(node)
+
+
+class FakeWorkflowBackend:
+    """The HTTP answer of an application whose pods run where the gateway says they do (TEST-ONLY).
+
+    A request succeeds while every mandatory service has a pod on a node that is up and the service is not ``broken``. A
+    ``broken`` service has a ready pod but cannot do its job, which is the case where readiness and a request disagree.
+    """
+
+    OK = "Book Details ... Book Reviews ..."
+    DEGRADED = "Book Details Sorry, product reviews are currently unavailable for this book."
+
+    def __init__(self, gateway: FakeClusterGateway, mandatory: Sequence[str], *, broken: Sequence[str] = (),
+                 raises: bool = False) -> None:
+        self.gateway, self.mandatory, self.broken, self.raises, self.requests = gateway, list(mandatory), set(broken), raises, 0
+
+    def __call__(self, spec):
+        from app.engine.recommendation_evaluation_validation.validation.workflow_probe import FetchResult
+        self.requests += 1
+        if self.raises:
+            raise RuntimeError("the fetch itself blew up")
+        alive = all(
+            name not in self.broken and any(pod.node not in self.gateway.not_ready for pod in service.pods)
+            for name in self.mandatory for service in self.gateway.graph.services if service.name == name)
+        return FetchResult(200, self.OK if alive else self.DEGRADED, 5.0, None)
