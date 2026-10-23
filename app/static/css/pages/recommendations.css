@@ -243,3 +243,234 @@
 .rec-summary__kind { display: inline-block; margin-left: var(--space-sm); padding: 0 6px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 11px; color: var(--color-text-muted); }
 .rec-summary__kind--missing { margin-left: 0; border-color: var(--color-danger); color: var(--color-danger); }
 @media (max-width: 640px) { .rec-summary { grid-template-columns: 1fr; } }
+
+/* ---- The stepped page: four steps, a Simple and a Research view of the same page ------------------------------------ */
+/* One column of blocks. The recommendation is drawn inside a region that is replaced on every reload, while the applied-change
+   panel must outlive it, so the region's children join this column (display: contents) and `order` puts each block in step order. */
+.rec-flow { display: flex; flex-direction: column; gap: var(--space-lg); }
+.rec-flow > [data-role="page-region"] { display: contents; }
+.rec-flow .rec-header { order: 0; margin-bottom: 0; }
+.rec-flow .rec-stepper { order: 1; }
+.rec-flow .rec-context { order: 10; margin-bottom: 0; }
+.rec-flow > [data-role="page-region"] > * { order: 20; }           /* loading, missing-evidence and "choose" states sit under step 1 */
+.rec-flow .rec-step--impact { order: 21; }
+.rec-flow .rec-step--candidates { order: 30; }
+.rec-flow .rec-step--approve { order: 40; }
+.rec-flow .rec-operation { order: 45; margin-bottom: 0; }
+.rec-flow .rec-detail-block { order: 60; }
+.rec-flow .rec-failures-block { order: 61; }
+.rec-flow [data-role="rec-failures"] { margin-bottom: 0; }
+
+/* The Simple view hides what only the research reading needs; the Research view is the same page with it shown. */
+.rec-flow[data-view="simple"] .rec-research-only { display: none !important; }
+
+.rec-view-switch { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.rec-view-switch__option { padding: var(--space-xs) var(--space-md); border: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.rec-view-switch__option + .rec-view-switch__option { border-left: 1px solid var(--color-border); }
+.rec-view-switch__option[aria-pressed="true"] { background: var(--color-primary); color: #fff; font-weight: 600; }
+.rec-view-switch__option:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+
+/* Where the person is: a number, a mark and a word, so the state is never carried by colour alone. */
+.rec-stepper { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: var(--space-md); }
+.rec-stepper__item { display: flex; flex: 1 1 0; align-items: center; gap: var(--space-sm); min-width: 0; font-size: 13px; color: var(--color-text-muted); }
+.rec-stepper__item:last-child { flex: 0 1 auto; }
+.rec-stepper__item:not(:last-child)::after { content: ""; flex: 1 1 1.5rem; height: 2px; background: var(--color-border); }
+.rec-stepper__mark { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 30px; height: 30px; border: 2px solid var(--color-border); border-radius: 50%; font-weight: 700; background: var(--color-surface); }
+.rec-stepper__label { overflow-wrap: anywhere; }
+.rec-stepper__item[data-state="current"] { color: var(--color-text); font-weight: 600; }
+.rec-stepper__item[data-state="current"] .rec-stepper__mark { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+.rec-stepper__item[data-state="done"] .rec-stepper__mark { background: var(--color-success); border-color: var(--color-success); color: #fff; }
+.rec-stepper__item[data-state="done"]::after { background: var(--color-success); }
+.rec-stepper__item[data-state="blocked"] { color: var(--color-text); }
+.rec-stepper__item[data-state="blocked"] .rec-stepper__mark { background: var(--color-warning); border-color: var(--color-warning); color: #fff; }
+
+.rec-step__head { margin-bottom: var(--space-md); }
+.rec-step__title { margin: 0; font-size: 18px; font-weight: 700; }
+.rec-step__sub { margin: var(--space-xs) 0 0; font-size: 13px; color: var(--color-text-muted); }
+
+.rec-evidence-details { margin-top: var(--space-sm); }
+.rec-evidence-details > summary { cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: var(--space-sm); }
+
+/* Step 2: what is lost if the node fails. */
+.rec-impact__banner { padding: var(--space-md) var(--space-lg); border: 1px solid var(--color-border); border-left-width: 4px; border-radius: var(--radius-medium); margin-bottom: var(--space-md); }
+.rec-impact__banner[data-state="lost"] { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface)); }
+.rec-impact__banner[data-state="survives"] { border-color: var(--color-success); background: color-mix(in srgb, var(--color-success) 8%, var(--color-surface)); }
+.rec-impact__lead { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-muted); }
+.rec-impact__headline { font-size: 22px; font-weight: 700; margin-top: 2px; }
+.rec-impact__sub { font-size: 12px; color: var(--color-text-muted); margin-top: var(--space-xs); }
+.rec-impact__tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-md); margin-bottom: var(--space-md); }
+.rec-tile { padding: var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface); min-width: 0; }
+.rec-tile__label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-muted); }
+.rec-tile__value { font-size: 24px; font-weight: 700; margin-top: 2px; overflow-wrap: anywhere; }
+.rec-tile__sub { font-size: 12px; color: var(--color-text-muted); margin-top: 2px; }
+.rec-impact__chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.rec-impact__chip { padding: 2px 10px; border: 1px solid var(--color-danger); border-radius: 999px; font-size: 12px; font-family: var(--font-mono); }
+
+/* Step 3: the candidates side by side, the selected one marked by its border and its badge. */
+.rec-candidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-md); }
+.rec-candidates .candidate-card + .candidate-card { margin-top: 0; }
+.candidate-card__description { margin: var(--space-sm) 0 0; font-size: 13px; color: var(--color-text-muted); }
+.candidate-card__reason { margin: var(--space-sm) 0 0; font-size: 12px; color: var(--color-danger); overflow-wrap: anywhere; }
+.rec-placement { margin-top: var(--space-md); }
+.rec-placement > summary { cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: var(--space-sm); }
+
+/* Step 4: the proposal beside what happens next. */
+.rec-approve { display: grid; grid-template-columns: minmax(0, 1fr) 17rem; gap: var(--space-lg); align-items: start; }
+.rec-approve__main > * + * { margin-top: var(--space-md); }
+.rec-plan { padding: var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface-soft); }
+.rec-plan__steps { margin: 0; padding-left: 1.2rem; display: grid; gap: var(--space-xs); font-size: 13px; }
+.rec-detail-block > * + * { margin-top: var(--space-md); }
+
+@media (max-width: 900px) {
+    .rec-impact__tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rec-approve { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+    .rec-stepper { display: grid; grid-template-columns: 1fr 1fr; }
+    .rec-stepper__item:not(:last-child)::after { display: none; }
+    .rec-stepper__item:last-child { flex: 1 1 0; }
+}
+
+/* The page's action buttons. The shared stylesheet defines only the secondary button, so Request Approval, Approve, Reject, Apply and
+   Confirm were plain browser buttons; they share the secondary button's size and differ only by their fill. */
+.primary-button, .success-button, .danger-button {
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: var(--radius-small);
+    border: 1px solid transparent; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.primary-button { background: var(--color-primary); }
+.primary-button:hover:not(:disabled) { background: var(--color-primary-dark); }
+.success-button { background: var(--color-success); }
+.success-button:hover:not(:disabled) { filter: brightness(0.92); }
+.danger-button { background: var(--color-danger); }
+.danger-button:hover:not(:disabled) { filter: brightness(0.92); }
+.primary-button:disabled, .success-button:disabled, .danger-button:disabled { opacity: 0.6; cursor: not-allowed; }
+.primary-button:focus-visible, .success-button:focus-visible, .danger-button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.approval-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.approval-actions:empty { display: none; }
+.rec-plan__steps { list-style: decimal; }
+
+/* The approval gate's own card (an exact marker the extension build patches) sits inside the step's card, so it carries no frame of its own. */
+.rec-step--approve > #approval-section { border: 0; padding: 0; box-shadow: none; background: none; }
+
+/* ---- Clean layout pass (follows the supplied mockup): wider rows, quieter borders, one memorable element per step ---- */
+.rec-step { border-radius: 12px; }
+.rec-step__title { font-size: 17px; }
+
+/* Step 1: the three choices and the one action on a single row. */
+.rec-inputs { align-items: flex-end; margin-bottom: var(--space-md); }
+.rec-inputs__input { padding: 10px 12px; border-radius: 8px; min-height: 42px; }
+.rec-inputs__action { flex: 0 0 auto; min-height: 42px; padding: 0 20px; font-size: 14px; }
+
+/* The stepper: the current step is the one blue thing in the row. */
+.rec-stepper__mark { width: 36px; height: 36px; font-size: 14px; }
+.rec-stepper__item[data-state="current"] { color: var(--color-primary); }
+.rec-stepper__item[data-state="current"] .rec-stepper__label { font-weight: 700; }
+
+/* Step 2: the verdict on the left, the four figures beside it, the services below. */
+.rec-impact__row { display: grid; grid-template-columns: minmax(15rem, 1.1fr) minmax(0, 2.6fr); gap: var(--space-md); align-items: stretch; margin-bottom: var(--space-md); }
+.rec-impact__row .rec-impact__banner { margin-bottom: 0; display: flex; flex-direction: column; justify-content: center; }
+.rec-impact__row .rec-impact__tiles { margin-bottom: 0; }
+.rec-impact__headline { font-size: 20px; }
+.rec-tile__value { font-size: 22px; }
+.rec-services td, .rec-services th { padding: 8px 12px; font-size: 13px; }
+.rec-services__name { font-family: var(--font-mono); font-weight: 600; }
+
+/* Step 3: candidates as cards in a row; the selected one carries a check. */
+.rec-candidates { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.candidate-card { position: relative; box-shadow: none; padding: var(--space-md); border-radius: 10px; }
+.candidate-card--selected { border-width: 2px; background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface)); }
+.candidate-card__heading { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
+.candidate-card__icon, .candidate-card .candidate-card__icon {
+    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 8px; background-color: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+    background-repeat: no-repeat; background-position: center; background-size: 20px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='8'/></svg>");
+}
+.candidate-card__icon[data-kind="topology_spread"] { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='9' width='5' height='6' rx='1'/><rect x='9.5' y='9' width='5' height='6' rx='1'/><rect x='16' y='9' width='5' height='6' rx='1'/></svg>"); }
+.candidate-card__icon[data-kind="replica_increase"] { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='8' width='11' height='11' rx='2'/><path d='M9 5h9a2 2 0 0 1 2 2v9'/></svg>"); }
+.candidate-card__icon[data-kind="pod_anti_affinity"] { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z'/></svg>"); }
+.candidate-card__check { position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--color-primary); color: #fff; font-size: 13px; font-weight: 700; }
+.candidate-card--selected .candidate-card__header { padding-right: 28px; }
+.candidate-card__stats { padding-top: var(--space-sm); border-top: 1px solid var(--color-border); }
+
+/* Step 4: the selected improvement, what happens next and the actions, side by side. */
+.rec-approve { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(12rem, 0.9fr); gap: var(--space-md); }
+.rec-approve__selected { padding: var(--space-md); border: 1px solid color-mix(in srgb, var(--color-success) 45%, var(--color-border)); border-radius: 10px; background: color-mix(in srgb, var(--color-success) 7%, var(--color-surface)); }
+.rec-selected__heading { display: flex; align-items: center; gap: var(--space-sm); }
+.rec-selected__title { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.rec-selected__change { margin: var(--space-sm) 0; font-size: 13px; color: var(--color-text-muted); }
+.rec-selected__outcome { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-md); margin: var(--space-sm) 0; }
+.rec-approve__actions { display: grid; gap: var(--space-sm); align-content: start; }
+.rec-approve__actions .approval-actions { flex-direction: column; align-items: stretch; }
+.rec-approve__actions .primary-button, .rec-approve__actions .success-button, .rec-approve__actions .danger-button { justify-content: center; min-height: 40px; }
+.rec-proposal { margin-top: var(--space-lg); }
+
+@media (max-width: 1100px) {
+    .rec-approve { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .rec-approve__actions { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+    .rec-impact__row { grid-template-columns: 1fr; }
+    .rec-approve { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+    .rec-selected__outcome { grid-template-columns: 1fr; }
+    .rec-inputs__action { width: 100%; }
+}
+
+/* Labels read as words, not as shouted codes; the choices and the action share a row. */
+.rec-flow .candidate-card__stat-label, .rec-flow .rec-tile__label, .rec-flow .rec-impact__lead, .rec-flow .op-subtitle {
+    text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600;
+}
+.rec-inputs__field { min-width: 0; }
+.rec-inputs__input { width: 100%; min-width: 0; }
+.candidate-card__stat-value { font-size: 15px; }
+
+/* The approval dialog. It was never styled on this page (its rules live in the deployments page's stylesheet), so it showed as plain text
+   under the page. It stays out of sight until the script adds .is-visible. */
+#approval-modal { position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center; padding: var(--space-lg); background: rgba(15, 23, 42, 0.55); }
+#approval-modal.is-visible { display: flex; }
+#approval-modal .modal { display: flex; flex-direction: column; width: 100%; max-width: 34rem; max-height: 90vh; overflow: auto; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25); }
+#approval-modal .modal__header { padding: var(--space-md) var(--space-lg); border-bottom: 1px solid var(--color-border); }
+#approval-modal .modal__title { margin: 0; font-size: 17px; font-weight: 700; }
+#approval-modal .modal__body { padding: var(--space-lg); font-size: 14px; }
+#approval-modal .modal__footer { display: flex; justify-content: flex-end; gap: var(--space-sm); padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--color-border); }
+
+/* The field the person has to use next stands out, and a sentence says why. */
+.rec-inputs__input[data-attention="true"] { border-color: var(--color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent); }
+.rec-hint { margin: 0 0 var(--space-md); padding: var(--space-sm) var(--space-md); border-left: 3px solid var(--color-primary); border-radius: var(--radius-small); background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)); font-size: 13px; }
+.rec-hint[hidden] { display: none; }
+
+/* A node name is long and has no spaces: smaller type and a break only where it must, so it is never split into fragments. */
+.rec-tile__value--name { font-size: 15px; font-family: var(--font-mono); overflow-wrap: anywhere; word-break: normal; line-height: 1.4; }
+@media (max-width: 1200px) {
+    .rec-impact__row { grid-template-columns: 1fr; }
+}
+
+/* ---- Less text in the plain view: long sentences are clamped (the full text is on hover and in the research view) ---- */
+.candidate-card__description, .candidate-card__reason {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.rec-flow[data-view="research"] .candidate-card__description, .rec-flow[data-view="research"] .candidate-card__reason { display: block; overflow: visible; }
+.rec-flow[data-view="simple"] .rec-outcome[data-state="ready"], .rec-flow[data-view="simple"] [data-role="rec-outcome"][data-declared="true"] { display: none; }
+.rec-declared { margin: 0; padding: var(--space-xs) var(--space-md); border-left: 3px solid var(--color-warning); border-radius: var(--radius-small); font-size: 13px; background: color-mix(in srgb, var(--color-warning) 8%, var(--color-surface)); }
+.rec-evidence-details[data-attention="true"] > summary::after { content: " · needs a look"; color: var(--color-warning); font-weight: 600; }
+.rec-proposal-details { margin-top: var(--space-md); }
+.rec-proposal-details > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.rec-proposal-details[open] > summary { margin-bottom: var(--space-sm); }
+.rec-flow[data-view="simple"] .rec-step__sub { font-size: 12px; }
+
+/* The approval column: quiet notes, clamped scope text, form fields that look like the rest of the page. */
+.rec-approve__actions .approval-note, .rec-approve__actions .text-sm { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.rec-approve__actions [role="alert"] { color: var(--color-danger); }
+.rec-scope { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.rec-flow[data-view="research"] .rec-scope { display: block; overflow: visible; }
+.form-input { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); color: var(--color-text); font: inherit; font-size: 13px; }
+.form-input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+textarea.form-input { resize: vertical; min-height: 4.5rem; }
+.form-group label { display: block; margin-bottom: var(--space-xs); font-size: 13px; font-weight: 600; }
+.rec-approve__actions .stack-sm { display: grid; gap: var(--space-xs); }
+/* With confidence and score left to the research view, the cost row is one cell, not a third of a row. */
+.rec-flow[data-view="simple"] .candidate-card__stats + .candidate-card__stats { grid-template-columns: 1fr; }
+
+.rec-selected__change { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.rec-flow[data-view="research"] .rec-selected__change { display: block; overflow: visible; }

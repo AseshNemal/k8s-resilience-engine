@@ -11,6 +11,10 @@
  * producer yet (baseline blast radius, validation results, simulated placement) is passed as null, and each
  * panel then shows an explicit missing-evidence state. See docs/RECOMMENDATION_LIVE_DATA.md.
  *
+ * The page is four steps (select, failure impact, candidates, approve) with a Simple and a Research view of the same page: the
+ * view only hides research-only blocks, it never changes what is computed or sent. The stepper shows where the person is from
+ * facts this script already holds.
+ *
  * Approval gate: an approval is requested for, and recorded against, the live recommendation shown here.
  * The server refuses to approve a record that has no verified link to live evidence.
  */
@@ -34,6 +38,40 @@
     const evidenceList = document.querySelector('[data-role="rec-evidence"]');
     const contextModule = window.ResilienceRecommendationContext;
     let controller = null;
+
+    // ---- Simple / Research view and the stepper ----------------------------------------------------------------------
+    const flowRoot = document.querySelector('[data-role="rec-flow"]');
+    const stepperList = document.querySelector('[data-role="rec-stepper"]');
+    const viewButtons = ["simple", "research"].map((name) => [name, document.querySelector(`[data-role="rec-view-${name}"]`)]);
+    const VIEW_KEY = "resilience.recommendations.view";
+    // Facts the stepper is drawn from. Nothing here is a result: it is only what the page already knows.
+    const stepFacts = { chosen: false, status: "loading", selected: false, applied: false };
+    let appliedFor = null;                                    // the recommendation the stored application belongs to, as the panel last reported
+
+    function storedView() {
+        try {
+            return window.localStorage.getItem(VIEW_KEY) === "research" ? "research" : "simple";
+        } catch (_error) {
+            return "simple";                                  // storage can be blocked: the page works without it
+        }
+    }
+
+    function setView(mode, remember) {
+        const chosen = mode === "research" ? "research" : "simple";
+        if (flowRoot) flowRoot.setAttribute("data-view", chosen);
+        viewButtons.forEach(([name, node]) => { if (node) node.setAttribute("aria-pressed", String(name === chosen)); });
+        if (!remember) return;
+        try {
+            window.localStorage.setItem(VIEW_KEY, chosen);
+        } catch (_error) {
+            // the choice is simply not remembered
+        }
+    }
+
+    function updateStepper() {
+        stepFacts.applied = !!currentRecommendation && appliedFor === currentRecommendation.id;
+        if (stepperList) view.renderStepper(stepperList, view.computeSteps(stepFacts));
+    }
 
     const APPROVAL_BASE = "/api/recommendations";
     const PROPOSAL_VERSION = "v1.0";
@@ -201,8 +239,9 @@
         const form = document.createElement("div");
         form.className = "stack-sm";
         const scope = document.createElement("div");
-        scope.className = "approval-note";
+        scope.className = "approval-note rec-scope";
         scope.textContent = offer.scope;
+        scope.setAttribute("title", offer.scope);              // the plain view clamps it; the whole text stays one hover away
         researchNameInput = document.createElement("input");
         researchNameInput.type = "text";
         researchNameInput.className = "form-input";
@@ -345,6 +384,8 @@
 
     // The panel tells the page when the stored application changed, so the Apply box never disagrees with it.
     function operationChanged(status) {
+        appliedFor = status && status.application ? status.recommendationId : null;
+        updateStepper();
         if (applicationBox && status && status.recommendationId === applicationBoxFor && currentRecommendation
                 && currentRecommendation.id === applicationBoxFor && applicationBox.isConnected !== false) {
             fillApplication(applicationBox, status);
@@ -557,8 +598,35 @@
         fillSelect(workflowSelect,
             v.workflows.map((w) => ({ value: w.value, label: w.label, disabled: !w.applicable })),
             v.workflowValue, v.workflowChoice === "choose" || !v.workflowId ? (v.workflows.length ? "Choose a workflow…" : "No approved frozen workflow") : null);
-        fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case (the node whose loss hurts most)");
+        fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case node");
+        if (nodeSelect) nodeSelect.setAttribute("title", "The node whose loss hurts most is assessed unless you choose one.");
+        // While the page waits for a choice, the field to use is marked and said in words.
+        const hint = view.nextActionHint(v);
+        [["namespace", namespaceSelect], ["workflow", workflowSelect]].forEach(([name, select]) => {
+            if (!select) return;
+            if (hint && hint.field === name) {
+                select.setAttribute("data-attention", "true");
+                select.setAttribute("aria-describedby", "rec-next-hint");
+            } else {
+                select.removeAttribute("data-attention");
+                select.removeAttribute("aria-describedby");
+            }
+        });
+        const hintLine = document.querySelector('[data-role="rec-hint"]');
+        if (hintLine) {
+            hintLine.textContent = hint ? hint.text : "";
+            hintLine.hidden = !hint;
+        }
         view.renderEvidenceChecklist(evidenceList, v.evidence);
+        const summary = view.evidenceSummary(v.evidence);
+        const evidenceSummaryLine = document.querySelector('[data-role="rec-evidence-summary"]');
+        const evidenceDetails = document.querySelector('[data-role="rec-evidence-details"]');
+        if (evidenceSummaryLine) evidenceSummaryLine.textContent = summary.text;
+        // The list stays collapsed (the blocked card or the hint already says what to do); a mark on its line says it needs a look.
+        if (evidenceDetails) {
+            if (summary.attention) evidenceDetails.setAttribute("data-attention", "true");
+            else evidenceDetails.removeAttribute("data-attention");
+        }
     }
 
     // What the person needs when the recommendation cannot be shown: the missing evidence and the exact next action.
@@ -603,12 +671,21 @@
             currentDeployment: detail.currentDeployment,
             simulatedDeployment: selected ? selected.simulatedDeployment : null,   // only a selected, feasible candidate has one
         };
+        view.renderImpactSummary(region.querySelector('[data-role="rec-impact"]'), detail);
         view.renderOutcome(region.querySelector('[data-role="rec-outcome"]'), detail.outcome);
         view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
             selected || null, v.cluster && v.cluster.identity ? v.cluster.identity : "");
+        view.renderSelectedImprovement(region.querySelector('[data-role="rec-selected"]'), selected || null);
         view.renderCandidateDetails(region.querySelector('[data-role="rec-detail-list"]'), detail);
         showMetrics(view.summarise(report, context));
-        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context);
+        // Each card says what it changes and, when it cannot be put forward, the engine's own reason.
+        const descriptions = {};
+        const reasons = {};
+        detail.candidates.forEach((c) => {
+            if (c.recommendedChange) descriptions[c.id] = c.recommendedChange;
+            if (!c.feasible && c.approval.reason) reasons[c.id] = c.approval.reason;
+        });
+        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context, { descriptions, reasons });
         view.renderPlacement(region.querySelector('[data-role="rec-placement-current"]'),
             region.querySelector('[data-role="rec-placement-predicted"]'), shown, context);
         view.renderRankingTable(region.querySelector('[data-role="rec-candidate-table-body"]'), report);
@@ -617,6 +694,13 @@
         initYamlToggle();
         initJsonPanel(region.querySelector("#rec-raw-recommendation"), detail);
         updateLastRefreshed(lastRefreshed);
+        const validationNote = region.querySelector('[data-role="rec-validation-note"]');
+        if (validationNote) {
+            validationNote.textContent = detail.validation && detail.validation.reason ? "Not yet validated by an experiment." : "";
+            if (detail.validation && detail.validation.reason) validationNote.setAttribute("title", detail.validation.reason);
+        }
+        stepFacts.selected = !!currentRecommendation;
+        updateStepper();                              // render() drew it before the selection was known
 
         if (currentRecommendation) {
             const requestedFor = currentRecommendation.id;
@@ -635,6 +719,10 @@
 
     function render(v) {
         renderContext(v);
+        stepFacts.chosen = !!(v.namespace && v.workflowId);
+        stepFacts.status = v.status;
+        if (v.status !== "ready") stepFacts.selected = false;
+        updateStepper();
         const busy = v.status === "loading" || v.status === "loading-recommendation";
         if (reloadButton) reloadButton.disabled = busy;
         if (v.status === "ready") {
@@ -644,12 +732,21 @@
             showDetail(v);
             if (declared) {
                 // Standing label: this is not observed and cannot be approved, whatever the candidates below say.
-                const note = document.createElement("p");
-                note.className = "ui-note";
-                note.setAttribute("data-role", "declared-note");
-                note.textContent = (v.detail && v.detail.declared && v.detail.declared.notApprovableBecause)
+                const full = (v.detail && v.detail.declared && v.detail.declared.notApprovableBecause)
                     || "This recommendation uses a workflow a person declared. It can be read, but it cannot be approved or applied.";
+                const note = document.createElement("p");
+                note.className = "ui-note rec-declared";
+                note.setAttribute("data-role", "declared-note");
+                note.setAttribute("title", full);
+                const short = document.createElement("span");
+                short.textContent = "Declared workflow, not observed: research approval only.";
+                const long = document.createElement("span");
+                long.className = "rec-research-only";
+                long.textContent = ` ${full}`;
+                note.append(short, long);
                 region.prepend(note);
+                const outcome = region.querySelector('[data-role="rec-outcome"]');
+                if (outcome) outcome.setAttribute("data-declared", "true");   // the notice above already says it; the plain view hides the repeat
             }
             return;
         }
@@ -666,13 +763,21 @@
         } else if (v.status === "needs-input") {
             applyBadge(sourceBadge, { variant: "muted", text: "Choose to continue" });
             region.replaceChildren();
-            const note = document.createElement("p");
-            note.className = "ui-note";
-            note.textContent = "More than one application or workflow is available, so none was chosen for you. Choose above to continue.";
-            region.appendChild(note);
+            if (!view.nextActionHint(v)) {        // with a hint the field to use is marked and the sentence is under it
+                const note = document.createElement("p");
+                note.className = "ui-note";
+                note.textContent = "Choose an application and a workflow above to continue.";
+                region.appendChild(note);
+            }
+        } else if (view.nextActionHint(v)) {
+            // Only a declared workflow exists: nothing is broken, a choice is waiting, and the hint under step 1 says so.
+            applyBadge(sourceBadge, { variant: "muted", text: "Choose to continue" });
+            region.replaceChildren();
         } else {
             applyBadge(sourceBadge, { variant: "muted", text: "Evidence missing" });
             renderStateCard(region, blockedDescriptor(v), { onRetry: () => controller.reload() });
+            // One sentence and the first thing to do; the rest of the list is for the research view.
+            if (region.querySelectorAll) region.querySelectorAll(".error-state li").forEach((item, index) => { if (index > 0) item.classList.add("rec-research-only"); });
         }
     }
 
@@ -702,6 +807,10 @@
         clusterIdentity,
         onUpdate: render,
     });
+
+    viewButtons.forEach(([name, node]) => { if (node) node.addEventListener("click", () => setView(name, true)); });
+    setView(storedView(), false);
+    updateStepper();
 
     if (reloadButton) reloadButton.addEventListener("click", () => controller.reload());
     if (namespaceSelect) namespaceSelect.addEventListener("change", () => controller.selectNamespace(namespaceSelect.value));

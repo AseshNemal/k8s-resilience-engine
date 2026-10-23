@@ -202,7 +202,9 @@ test("with several workflows a dropdown choice, not a typed ID, starts the recom
         "GET /api/recommendations/context?namespace=shop&workflow_id=checkout": { status: 200, body: chosen },
         [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} },
     });
-    assert.ok(text(env.region).includes("none was chosen for you"));
+    assert.equal(env.element('[data-role="rec-hint"]').textContent, "Choose a workflow to continue.", "the choice that is waiting is said under step 1");
+    assert.equal(env.element('[data-role="rec-workflow-select"]').attributes["data-attention"], "true");
+    assert.equal(env.region.children.length, 0, "and the page does not repeat it in a block of its own");
     assert.ok(!calls_include(env, "/live/detail"));
 
     const select = env.element('[data-role="rec-workflow-select"]');
@@ -561,4 +563,147 @@ test("an assessment that completes after a cluster change cannot replace current
     release(overview);
     await request;
     assert.equal(env.element('[data-role="rec-failures-result"]').children.length, 0);
+});
+
+// ---- the stepped page: stepper, failure impact, evidence summary and the Simple / Research switch -------------------------
+
+const stepStates = (env) => env.element('[data-role="rec-stepper"]').children.map((n) => n.attributes["data-state"]);
+const IMPACT = { blastRadius: 100, survivability: 0, failedServices: ["payment"], failedWorkflows: ["checkout"] };
+
+test("the stepper follows the page and the impact step shows the engine's result for the failure", async () => {
+    const env = await openPage({ [DETAIL]: { status: 200, body: { ...detailOf([cand()], "rec-live"), baselineImpact: IMPACT } },
+        "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
+
+    assert.deepEqual(stepStates(env), ["done", "done", "done", "current"]);
+    assert.ok(text(env.element('[data-role="rec-impact"]')).includes("If w1 fails"));
+    assert.ok(text(env.element('[data-role="rec-impact"]')).includes("The workflow does not survive"));
+    assert.ok(text(env.element('[data-role="rec-validation-note"]')) === "" || env.element('[data-role="rec-validation-note"]').textContent === "");
+});
+
+test("with missing evidence the stepper stops at the second step and nothing after it looks done", async () => {
+    const missing = contextOf({ workflows: [], workflowId: null, workflowChoice: "none", ready: false,
+        evidence: [ev("cluster", "available"), ev("application", "available"), ev("topology", "available"), ev("workflow", "missing"), ev("failureImpact", "missing")],
+        nextActions: ["Freeze a workflow"] });
+    const env = await openPage({ "GET /api/recommendations/context": { status: 200, body: missing } });
+
+    assert.deepEqual(stepStates(env), ["current", "todo", "todo", "todo"], "no workflow is chosen yet, so the first step is the one to do");
+    assert.equal(env.element('[data-role="rec-evidence-summary"]').textContent, "Evidence: 3 of 5 available");
+    assert.equal(env.element('[data-role="rec-evidence-details"]').attributes["data-attention"], "true", "missing evidence is marked on its line, and the card says what to do");
+});
+
+test("a recommendation with nothing selected stops the stepper at the third step and offers nothing to approve", async () => {
+    const env = await openPage({ [DETAIL]: { status: 200, body: { ...detailOf([cand({ feasible: false, selected: false, approval: NOT_READY() })], null), baselineImpact: IMPACT } } });
+
+    assert.deepEqual(stepStates(env), ["done", "done", "blocked", "todo"]);
+});
+
+test("the view switch changes only the view attribute, remembers the choice when it can, and works when storage is blocked", async () => {
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
+
+    assert.equal(env.element('[data-role="rec-view-simple"]').attributes["aria-pressed"], "true");
+    await env.element('[data-role="rec-view-research"]').listeners.click();     // storage is undefined in this environment: nothing throws
+    assert.equal(env.element('[data-role="rec-flow"]').attributes["data-view"], "research");
+    assert.equal(env.element('[data-role="rec-view-research"]').attributes["aria-pressed"], "true");
+    assert.equal(env.element('[data-role="rec-view-simple"]').attributes["aria-pressed"], "false");
+    await env.element('[data-role="rec-view-simple"]').listeners.click();
+    assert.equal(env.element('[data-role="rec-flow"]').attributes["data-view"], "simple");
+    assert.ok(!env.calls.some((c) => c[0] !== "GET" && !/approval|apply|reset/.test(c[1])), "switching view sends nothing");
+});
+
+// ---- step 1 says what to do next -----------------------------------------------------------------------------------------------------
+
+// What the backend sends when only a declared workflow exists: no workflow is chosen for the person ("none"), which the page treats as blocked.
+const onlyDeclared = () => declaredContext();
+const declaredRoutes = (extra = {}) => ({
+    "GET /api/recommendations/context": { status: 200, body: onlyDeclared() },
+    "GET /api/recommendations/context?namespace=shop": { status: 200, body: onlyDeclared() },
+    [D_DETAIL]: { status: 200, body: declaredBody(declaredCandidate()) },
+    "GET /api/recommendations/declared/rec-live/approval": { status: 404, body: {} }, ...extra });
+
+test("when only a declared workflow applies, the Workflow field is marked and the hint says the choice is the person's", async () => {
+    const env = await openPage(declaredRoutes());
+
+    const select = env.element('[data-role="rec-workflow-select"]');
+    const hint = env.element('[data-role="rec-hint"]');
+    assert.equal(select.attributes["data-attention"], "true");
+    assert.equal(select.attributes["aria-describedby"], "rec-next-hint");
+    assert.equal(hint.hidden, false);
+    assert.ok(hint.textContent.includes("Choose a workflow to continue") && hint.textContent.includes("never picked for you"));
+    assert.equal(env.element('[data-role="rec-namespace-select"]').attributes["data-attention"], undefined, "only the field to use next is marked");
+    assert.ok(!calls_include(env, "/declared/detail"), "a declared workflow is never chosen for the person");
+});
+
+test("choosing the workflow clears the mark and the hint", async () => {
+    const env = await openPage(declaredRoutes());
+    const select = env.element('[data-role="rec-workflow-select"]');
+
+    select.value = "declared:checkout";
+    await select.listeners.change();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.ok(calls_include(env, "/declared/detail?workflow_id=checkout&namespace=shop"));
+    assert.equal(select.attributes["data-attention"], undefined);
+    assert.equal(env.element('[data-role="rec-hint"]').hidden, true);
+    assert.equal(env.element('[data-role="rec-hint"]').textContent, "");
+});
+
+test("a page that is ready, or blocked for lack of evidence, marks nothing", async () => {
+    const ready = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
+    assert.equal(ready.element('[data-role="rec-workflow-select"]').attributes["data-attention"], undefined);
+    assert.equal(ready.element('[data-role="rec-hint"]').hidden, true);
+
+    const none = contextOf({ workflows: [], workflowId: null, workflowChoice: "none", ready: false,
+        evidence: [ev("cluster", "available"), ev("application", "available"), ev("topology", "available"), ev("workflow", "missing"), ev("failureImpact", "missing")] });
+    const blocked = await openPage({ "GET /api/recommendations/context": { status: 200, body: none } });
+    assert.equal(blocked.element('[data-role="rec-workflow-select"]').attributes["data-attention"], undefined);
+    assert.equal(blocked.element('[data-role="rec-hint"]').hidden, true);
+});
+
+test("the failure dropdown's empty choice is short, and its title keeps the full meaning", async () => {
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
+
+    const node = env.element('[data-role="rec-node-select"]');
+    assert.equal(node.children[0].textContent, "Worst case node");
+    assert.ok(node.attributes.title.includes("whose loss hurts most"));
+});
+
+// ---- less text: no repeated blocks, short notices with the full text kept ------------------------------------------------------------------
+
+test("with only a declared workflow to choose, the page shows no error block: the hint under step 1 is the whole message", async () => {
+    const env = await openPage(declaredRoutes());
+
+    assert.equal(env.region.children.length, 0, "no red card repeating the evidence list");
+    assert.equal(env.element('[data-role="source-badge"]').textContent, "Choose to continue");
+    assert.equal(env.element('[data-role="rec-hint"]').hidden, false);
+});
+
+test("the declared notice is one short line, with the full explanation kept for the research view and as a tooltip", async () => {
+    const env = await openDeclared();
+
+    const note = env.region.children[0];
+    assert.equal(note.attributes["data-role"], "declared-note");
+    assert.equal(note.children[0].textContent, "Declared workflow, not observed: research approval only.");
+    assert.match(note.children[1].className, /rec-research-only/);
+    assert.ok(note.children[1].textContent.includes("declared, see the research tier"));
+    assert.ok(note.attributes.title.includes("declared, see the research tier"));
+    assert.equal(env.element('[data-role="rec-outcome"]').attributes["data-declared"], "true", "the repeated outcome sentence is hidden in the plain view");
+});
+
+test("the validation note is one short line and keeps the engine's full statement as its tooltip", async () => {
+    const body = { ...detailOf([cand()], "rec-live"), validation: { available: false, reason: "No experiment has been run for this change." } };
+    const env = await openPage({ [DETAIL]: { status: 200, body }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
+
+    const note = env.element('[data-role="rec-validation-note"]');
+    assert.equal(note.textContent, "Not yet validated by an experiment.");
+    assert.equal(note.attributes.title, "No experiment has been run for this change.");
+});
+
+test("a card carries a reason only when its own change cannot be put forward, not for the notice every declared card would repeat", async () => {
+    const infeasible = cand({ id: "rec-a", feasible: false, selected: false, approval: NOT_READY("Not enough worker nodes."), predicted: { blastRadiusBefore: 100, blastRadiusAfter: 100, riskReduction: 0 } });
+    const declaredOnly = cand({ id: "rec-b", feasible: true, selected: false, approval: NOT_READY("Declared: research tier only.") });
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([infeasible, declaredOnly], null) } });
+
+    const shown = text(env.element('[data-role="rec-candidate-list"]'));
+    assert.ok(shown.includes("Not enough worker nodes."));
+    assert.ok(!shown.includes("Declared: research tier only."));
 });

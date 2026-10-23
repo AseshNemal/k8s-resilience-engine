@@ -9,26 +9,33 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
+<div class="rec-flow" data-role="rec-flow" data-view="simple">
+
+<div class="page-header rec-header">
     <h2 class="page-header__title">Recommendation Evaluation and Validation</h2>
     <p class="page-header__subtitle">
-        Compare deployment improvements through virtual simulation before applying them to Kubernetes.
-        Nothing is ever applied automatically, and every approval is bound to live cluster evidence.
+        Compare fixes for a failing node and approve one. Nothing changes on your cluster until you apply it.
     </p>
     <div class="page-header__meta">
-        <span class="component-owner">Owner: <strong>Member 4</strong></span>
-        <span class="contract-chip">In: DeploymentGraph</span>
-        <span class="contract-chip">In: FailureImpactReport</span>
-        <span class="contract-chip contract-chip--out">Out: RecommendationReport</span>
-        <span class="contract-chip contract-chip--out">Out: ValidationReport</span>
+        <span class="component-owner rec-research-only">Owner: <strong>Member 4</strong></span>
+        <span class="contract-chip rec-research-only">In: DeploymentGraph</span>
+        <span class="contract-chip rec-research-only">In: FailureImpactReport</span>
+        <span class="contract-chip contract-chip--out rec-research-only">Out: RecommendationReport</span>
+        <span class="contract-chip contract-chip--out rec-research-only">Out: ValidationReport</span>
         <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Not loaded</span>
-        <button type="button" class="secondary-button" data-role="reload-button">
-            Check for recommendations
-        </button>
+        <div class="rec-view-switch" role="group" aria-label="How much detail to show">
+            <button type="button" class="rec-view-switch__option" data-role="rec-view-simple" data-view-option="simple" aria-pressed="true">Simple</button>
+            <button type="button" class="rec-view-switch__option" data-role="rec-view-research" data-view-option="research" aria-pressed="false">Research</button>
+        </div>
     </div>
 </div>
 
-<section class="rec-context" aria-label="What to recommend for" data-role="rec-context">
+<ol class="rec-stepper" data-role="rec-stepper" aria-label="Progress through the recommendation"></ol>
+
+<section class="card rec-step rec-context" aria-labelledby="rec-step-1" data-role="rec-context">
+    <div class="rec-step__head">
+        <h3 class="rec-step__title" id="rec-step-1">1. Select application and workflow</h3>
+    </div>
     <p class="rec-context__cluster" data-role="rec-cluster" role="status" aria-live="polite">Looking for the connected cluster…</p>
     <div class="rec-inputs" role="group" aria-label="Application, workflow and failure">
         <label class="rec-inputs__field" for="rec-namespace-select">
@@ -43,12 +50,20 @@
             <span>Failure to protect against</span>
             <select class="rec-inputs__input" id="rec-node-select" data-role="rec-node-select" disabled></select>
         </label>
+        <button type="button" class="primary-button rec-inputs__action" data-role="reload-button">
+            Check for recommendations
+        </button>
     </div>
-    <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
+    <p class="rec-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
+    <details class="rec-evidence-details" data-role="rec-evidence-details">
+        <summary data-role="rec-evidence-summary">Evidence</summary>
+        <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
+    </details>
 </section>
 
-<section class="rec-operation card" data-role="rec-operation" aria-label="Applied change" hidden></section>
+<section class="rec-operation card rec-step" data-role="rec-operation" aria-label="Applied change" hidden></section>
 
+<section class="rec-research-only rec-failures-block">
     <div class="section-header">
         <h3 class="section-header__title">Every single point of failure</h3>
         <span class="section-header__note">
@@ -59,9 +74,12 @@
         <button type="button" class="secondary-button" id="btn-load-failures" data-role="rec-failures-load">Assess every worker node</button>
         <div data-role="rec-failures-result" aria-live="polite"></div>
     </div>
+</section>
 
 <div data-role="page-region">
     {{ loading_state("Asking for the current live recommendation…") }}
+</div>
+
 </div>
 
 <template data-role="operation-template">
@@ -129,99 +147,131 @@
 </template>
 
 <template data-role="page-template">
-    <div data-role="rec-outcome"></div>
-    <section class="metric-grid" aria-label="Recommendation metrics">
-        {{ metric_card("rec-baseline-blast-radius", "Baseline Blast Radius", icon_name="target", icon_color="red") }}
-        {{ metric_card("rec-best-predicted-blast-radius", "Best Predicted Blast Radius", icon_name="target", icon_color="green") }}
-        {{ metric_card("rec-risk-reduction", "Expected Risk Reduction", icon_name="trend-down", icon_color="teal") }}
-        {{ metric_card("rec-feasible-count", "Feasible Candidates", icon_name="check-circle", icon_color="purple") }}
+    <section class="card rec-step rec-step--impact" aria-labelledby="rec-step-2">
+        <div class="rec-step__head">
+            <h3 class="rec-step__title" id="rec-step-2">2. Failure impact</h3>
+        </div>
+        <div data-role="rec-impact"></div>
     </section>
 
-    <div class="section-header">
-        <h3 class="section-header__title">Recommendation Candidates</h3>
-        <span class="section-header__note">
-            Predicted values come from virtual simulation of the live topology; they are not observed results.
-        </span>
-    </div>
-    <div data-role="rec-candidate-list"></div>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Why each candidate is or is not recommended</h3>
-        <span class="section-header__note">Everything here was computed by the recommendation engine from the live evidence; nothing is applied.</span>
-    </div>
-    <div class="stack-md" data-role="rec-detail-list"></div>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Current vs. Predicted Placement</h3>
-        <span class="section-header__note">Placement is shown only when the recommendation engine supplies it.</span>
-    </div>
-    <div class="card placement-compare">
-        <div>
-            <div class="placement-compare__column-title">Current Placement</div>
-            <div data-role="rec-placement-current"></div>
+    <section class="card rec-step rec-step--candidates" aria-labelledby="rec-step-3">
+        <div class="rec-step__head">
+            <h3 class="rec-step__title" id="rec-step-3">3. Compare candidate improvements</h3>
+            <p class="rec-step__sub">Predictions from a simulation, not measurements.</p>
         </div>
-        <div>
-            <div class="placement-compare__column-title">Predicted Placement</div>
-            <div data-role="rec-placement-predicted"></div>
-        </div>
-    </div>
+        <div data-role="rec-outcome"></div>
+        <div class="rec-candidates" data-role="rec-candidate-list"></div>
+        <details class="rec-placement">
+            <summary>Pod placement, now and predicted</summary>
+            <div class="placement-compare">
+                <div>
+                    <div class="placement-compare__column-title">Current Placement</div>
+                    <div data-role="rec-placement-current"></div>
+                </div>
+                <div>
+                    <div class="placement-compare__column-title">Predicted Placement</div>
+                    <div data-role="rec-placement-predicted"></div>
+                </div>
+            </div>
+        </details>
+    </section>
 
-    <div class="section-header">
-        <h3 class="section-header__title">Candidate Ranking</h3>
-        <span class="section-header__note">Ranked by the reported score; infeasible candidates are not ranked.</span>
-    </div>
-    <div class="card">
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Rank</th>
-                        <th scope="col">Candidate</th>
-                        <th scope="col">Feasible</th>
-                        <th scope="col">Predicted Impact</th>
-                        <th scope="col">Reduction</th>
-                        <th scope="col">Cost</th>
-                        <th scope="col">Confidence</th>
-                        <th scope="col">Score</th>
-                    </tr>
-                </thead>
-                <tbody data-role="rec-candidate-table-body"></tbody>
-            </table>
+    <section class="card rec-step rec-step--approve" aria-labelledby="rec-step-4">
+        <div class="rec-step__head">
+            <h3 class="rec-step__title" id="rec-step-4">4. Review and approve proposal</h3>
+            <p class="rec-step__sub">Approving changes nothing on the cluster.</p>
         </div>
-    </div>
+        {# The extension build patches this exact opening tag to add its own note, so it must stay as written (tests/test_page_contracts.py). #}
+        <div class="card" id="approval-section">
+        <div class="rec-approve">
+            <div class="rec-approve__selected">
+                <div class="op-subtitle">Selected improvement</div>
+                <div class="rec-selected" data-role="rec-selected"></div>
+            </div>
+            <aside class="rec-plan" aria-label="What happens next">
+                <div class="op-subtitle">What happens next</div>
+                <ol class="rec-plan__steps">
+                    <li>Approve this proposal.</li>
+                    <li>A named person applies it.</li>
+                    <li>The rollout is watched and the impact recalculated.</li>
+                    <li>Reset restores the previous state.</li>
+                </ol>
+                <p class="ui-note" data-role="rec-validation-note"></p>
+            </aside>
+            <div class="rec-approve__actions">
+                <div data-role="approval-state-container">
+                    <!-- Approval state goes here -->
+                </div>
+                <div class="approval-actions" data-role="approval-actions">
+                    <button type="button" class="primary-button" id="btn-request-approval">Request Approval</button>
+                </div>
+            </div>
+        </div>
+        <details class="rec-proposal-details">
+            <summary>Proposal details</summary>
+            <div class="rec-proposal" data-role="rec-proposal-summary"></div>
+        </details>
+        </div>
+    </section>
 
-    <div class="section-header">
-        <h3 class="section-header__title">Validation</h3>
-        <span class="section-header__note">Predicted versus observed, after an approved change is measured.</span>
-    </div>
-    <div class="card" data-role="rec-validation"></div>
+    <section class="rec-research-only rec-detail-block">
+        <div class="metric-grid" aria-label="Recommendation metrics">
+            {{ metric_card("rec-baseline-blast-radius", "Baseline Blast Radius", icon_name="target", icon_color="red") }}
+            {{ metric_card("rec-best-predicted-blast-radius", "Best Predicted Blast Radius", icon_name="target", icon_color="green") }}
+            {{ metric_card("rec-risk-reduction", "Expected Risk Reduction", icon_name="trend-down", icon_color="teal") }}
+            {{ metric_card("rec-feasible-count", "Feasible Candidates", icon_name="check-circle", icon_color="purple") }}
+        </div>
 
-    <div class="section-header">
-        <h3 class="section-header__title">Approval Gate</h3>
-    </div>
-    <div class="card" id="approval-section">
-        <div data-role="rec-proposal-summary"></div>
-        <div data-role="approval-state-container">
-            <!-- Approval state goes here -->
+        <div class="section-header">
+            <h3 class="section-header__title">Why each candidate is or is not recommended</h3>
+            <span class="section-header__note">Everything here was computed by the recommendation engine from the live evidence; nothing is applied.</span>
         </div>
-        <div class="approval-actions" style="margin-top: var(--space-md);" data-role="approval-actions">
-            <button type="button" class="primary-button" id="btn-request-approval">Request Approval</button>
-        </div>
-    </div>
+        <div class="stack-md" data-role="rec-detail-list"></div>
 
-    <div class="section-header">
-        <h3 class="section-header__title">Raw Data</h3>
-    </div>
-    <div class="stack-md">
-        {{ raw_json_panel("rec-raw-recommendation", "View Raw RecommendationReport") }}
-        <div class="json-panel" id="rec-raw-yaml">
-            <button type="button" class="json-panel__toggle" data-role="json-toggle" aria-expanded="false">
-                <span data-role="json-toggle-label">View Generated YAML</span>
-                <span aria-hidden="true">▾</span>
-            </button>
-            <div class="json-panel__body" data-role="rec-yaml"></div>
+        <div class="section-header">
+            <h3 class="section-header__title">Candidate Ranking</h3>
+            <span class="section-header__note">Ranked by the reported score; infeasible candidates are not ranked.</span>
         </div>
-    </div>
+        <div class="card">
+            <div class="table-scroll">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Rank</th>
+                            <th scope="col">Candidate</th>
+                            <th scope="col">Feasible</th>
+                            <th scope="col">Predicted Impact</th>
+                            <th scope="col">Reduction</th>
+                            <th scope="col">Cost</th>
+                            <th scope="col">Confidence</th>
+                            <th scope="col">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="rec-candidate-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <h3 class="section-header__title">Validation</h3>
+            <span class="section-header__note">Predicted versus observed, after an approved change is measured.</span>
+        </div>
+        <div class="card" data-role="rec-validation"></div>
+
+        <div class="section-header">
+            <h3 class="section-header__title">Raw Data</h3>
+        </div>
+        <div class="stack-md">
+            {{ raw_json_panel("rec-raw-recommendation", "View Raw RecommendationReport") }}
+            <div class="json-panel" id="rec-raw-yaml">
+                <button type="button" class="json-panel__toggle" data-role="json-toggle" aria-expanded="false">
+                    <span data-role="json-toggle-label">View Generated YAML</span>
+                    <span aria-hidden="true">▾</span>
+                </button>
+                <div class="json-panel__body" data-role="rec-yaml"></div>
+            </div>
+        </div>
+    </section>
 </template>
 
 <div class="modal-backdrop" id="approval-modal" aria-hidden="true">

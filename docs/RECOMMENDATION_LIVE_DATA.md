@@ -89,3 +89,19 @@ marked as a live observation, a user declaration, a model assumption, a predicti
 **Applied change** panel (outside the re-rendered region, keyed by the stored application) shows "Applying change…" at once, then the real rollout, the automatic
 post-change analysis and a Before / Predicted / After comparison; Reset is explicit and has the same stages. The result is labelled *Post-change risk recalculated from live
 topology*: observed placement plus Component 3's model, not an experiment. Full description: `docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`.
+
+## The stepped page and its two views (2026-10-23)
+
+The recommendations page is four steps in the order a person uses them: **1 Select application and workflow**, **2 Failure impact**, **3 Compare candidate
+improvements**, **4 Review and approve proposal**, with a stepper that shows where the person is. The applied-change panel follows step 4. The stepper is drawn
+from facts the page already holds (a choice was made, the status, the engine selected a candidate, an application is stored for it); a step is never marked done
+without its own evidence, and a later step waits for an earlier one.
+
+**Simple** (default) and **Research** are one page: the switch only sets `data-view` on `.rec-flow` and CSS hides the blocks marked `rec-research-only`
+(contract chips, the metric cards, the per-candidate reasons, the ranking table, validation, the every-node overview, raw data, and each card's confidence and
+score). Nothing computed or sent changes. The choice is remembered in the browser when storage allows. A test fails if a block of the page is neither a step nor
+marked research-only. "Prediction, not observation" and the engine's validation note stay in both views.
+
+Step 2 shows Component 3's own result for the assessed failure, carried unchanged as `baselineImpact` (blast radius, survivability, services and workflows
+lost). **Nothing else is shown there**: the predictor measures no success rate, latency or error rate, and resource cost is a LOW / MEDIUM / HIGH label, not money.
+Approve and Apply remain two separate actions by a named person; there is no single "Approve and Implement" button.
