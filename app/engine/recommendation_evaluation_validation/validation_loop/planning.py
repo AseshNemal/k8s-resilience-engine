@@ -116,7 +116,7 @@ def select_candidates(live: LiveRecommendation, workflow: WorkflowGraph, workers
     for candidate in live.report.recommendations:
         standing = evaluate_eligibility(live, candidate.id)
         if not standing.eligible:
-            skipped.append({"id": candidate.id, "reason": standing.reason if hasattr(standing, "reason") else "not eligible"})
+            skipped.append({"id": candidate.id, "reason": standing.reason or "not eligible"})
             continue
         proposal = build_yaml_proposal(live, candidate.id)
         if proposal.status != GENERATED:

@@ -1,15 +1,10 @@
 """Runs are stored, the kill budget is durable, the loop runs in the background, and a cut-off run is recovered, never resumed."""
 
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import inspect
-from sqlalchemy.orm import Session
 
-from app.core.database import get_engine
 from app.engine.recommendation_evaluation_validation.validation import TestTarget, ValidationRefusedError
 from app.engine.recommendation_evaluation_validation.validation_loop.models import (
     CANDIDATE,
@@ -20,19 +15,7 @@ from app.engine.recommendation_evaluation_validation.validation_loop.repository 
 from app.engine.recommendation_evaluation_validation.validation_loop.worker import LoopWorker
 from tests.member4_validation_loop.support import WORKERS, calls, setup
 
-ROOT = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    url = f"sqlite:///{tmp_path / 'loop.db'}"
-    monkeypatch.setenv("DATABASE_URL", url)
-    config = Config(str(ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(ROOT / "alembic"))
-    command.upgrade(config, "head")
-    engine = get_engine(url)
-    yield LoopRepository(lambda: Session(engine), clock=lambda: NOW)
 
 
 def planned(repo, **options):
@@ -222,7 +205,7 @@ def test_a_restarted_backend_recovers_a_live_run_by_restoring_and_reverting_only
     grant = live_run_left_behind(repo)
     recoverer = FakeRecoverer()
 
-    recovered = LoopWorker(repo).reconcile(recoverer)
+    recovered = LoopWorker(repo).reconcile(lambda run: recoverer)
 
     run = repo.get_run(grant.run_id)
     assert recovered == [grant.run_id] and run["status"] == "INTERRUPTED"
@@ -235,7 +218,7 @@ def test_a_restarted_backend_recovers_a_live_run_by_restoring_and_reverting_only
 def test_recovery_never_repeats_a_node_failure_and_the_budget_is_untouched(repo):
     grant = live_run_left_behind(repo)
 
-    LoopWorker(repo).reconcile(FakeRecoverer())
+    LoopWorker(repo).reconcile(lambda run: FakeRecoverer())
 
     assert repo.used(grant.run_id) == 1      # the one failure that happened; recovery spent nothing and killed nothing
 
@@ -247,14 +230,14 @@ def test_the_outcome_is_recorded_before_another_run_may_start(repo):
 
     with pytest.raises(ValidationRefusedError):
         worker.start("next", lambda observer, abort: other_loop)          # still live: blocked
-    worker.reconcile(FakeRecoverer())
+    worker.reconcile(lambda run: FakeRecoverer())
     assert repo.blocking_run() is None                                    # recovered and recorded: the way is clear
 
 
 def test_a_recovery_that_cannot_complete_leaves_the_run_needing_a_person_and_blocks_the_next(repo):
     grant = live_run_left_behind(repo)
 
-    LoopWorker(repo).reconcile(FakeRecoverer(restore_ok=False))
+    LoopWorker(repo).reconcile(lambda run: FakeRecoverer(restore_ok=False))
 
     run = repo.get_run(grant.run_id)
     assert run["status"] == "NEEDS_MANUAL_RESTORE" and run["recovery"]["complete"] is False
@@ -265,7 +248,7 @@ def test_a_recovery_that_cannot_complete_leaves_the_run_needing_a_person_and_blo
 def test_a_failed_revert_also_needs_a_person_and_can_be_retried_to_success(repo):
     grant = live_run_left_behind(repo)
     worker = LoopWorker(repo)
-    worker.reconcile(FakeRecoverer(revert_ok=False))
+    worker.reconcile(lambda run: FakeRecoverer(revert_ok=False))
     assert repo.get_run(grant.run_id)["status"] == "NEEDS_MANUAL_RESTORE"
 
     worker.recover_run(grant.run_id, FakeRecoverer())
@@ -278,4 +261,4 @@ def test_reconcile_runs_once_per_process_and_ignores_runs_that_are_not_live(repo
     worker = LoopWorker(repo)
     recoverer = FakeRecoverer()
 
-    assert worker.reconcile(recoverer) == [] and worker.reconcile(recoverer) == [] and recoverer.calls == []
+    assert worker.reconcile(lambda run: recoverer) == [] and worker.reconcile(lambda run: recoverer) == [] and recoverer.calls == []

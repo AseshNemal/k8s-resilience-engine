@@ -23,7 +23,6 @@ from app.engine.recommendation_evaluation_validation.validation_loop.loop import
     ValidationLoop,
 )
 from app.engine.recommendation_evaluation_validation.validation_loop.models import (
-    BASELINE,
     ExperimentKey,
     ExperimentOutcome,
     RunStatus,
@@ -166,8 +165,12 @@ class LoopWorker:
                                   stop_reason="Recovery did not complete; restore the listed items by hand.")
         return recovery
 
-    def reconcile(self, recoverer: Recoverer) -> list[str]:
-        """On a fresh backend: recover every run that is marked live while nothing is working on it. Once per process."""
+    def reconcile(self, recoverers: Callable[[dict[str, Any]], Recoverer]) -> list[str]:
+        """On a fresh backend: recover every run that is marked live while nothing is working on it. Once per process.
+
+        ``recoverers`` builds the recoverer for a run from its stored record (its cluster and workers), because what has to be
+        restored depends on which cluster that run was stopping nodes of.
+        """
         recovered: list[str] = []
         with self._lock:
             if self._reconciled:
@@ -177,6 +180,6 @@ class LoopWorker:
             if self.is_working(run["runKey"]):
                 continue
             self._repo.add_event(run["runKey"], "RECONCILE", "The backend restarted while this run was live; recovering only.")
-            self.recover_run(run["runKey"], recoverer)
+            self.recover_run(run["runKey"], recoverers(run))
             recovered.append(run["runKey"])
         return recovered

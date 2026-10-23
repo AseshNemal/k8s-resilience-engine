@@ -244,6 +244,17 @@ class LoopRepository:
                 ValidationLoopExperimentRecord.status.in_((ExperimentStatus.PASS.value, ExperimentStatus.FAIL.value)))
             return [float(v) for v in session.scalars(query.order_by(ValidationLoopExperimentRecord.id.desc()).limit(limit)).all()]
 
+    def window_verified(self, cluster_uid: str) -> bool:
+        """True once an experiment on this cluster reached a PASS or FAIL verdict. The executor only produces one after the node was
+        observed NotReady and still NotReady at the end of the window, so it proves the failure window can be valid there."""
+        with self._session() as session:
+            found = session.scalar(
+                select(ValidationLoopExperimentRecord.id)
+                .join(ValidationLoopRunRecord, ValidationLoopRunRecord.run_key == ValidationLoopExperimentRecord.run_key)
+                .where(ValidationLoopRunRecord.cluster_uid == cluster_uid,
+                       ValidationLoopExperimentRecord.status.in_((ExperimentStatus.PASS.value, ExperimentStatus.FAIL.value))).limit(1))
+            return found is not None
+
     def _experiment(self, session: Session, run_key: str, key: ExperimentKey) -> ValidationLoopExperimentRecord | None:
         return session.scalar(select(ValidationLoopExperimentRecord).where(
             ValidationLoopExperimentRecord.run_key == run_key, ValidationLoopExperimentRecord.kind == key.kind,
