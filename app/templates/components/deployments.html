@@ -4,11 +4,11 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.47">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.47">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.47">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.47">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.47">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.48">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.48">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.48">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.48">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.48">
 {% endblock %}
 
 {% block content %}
@@ -48,40 +48,34 @@
 {# Failure and status messages for the live source (explicit error states, see connection-state.js) #}
 <div data-role="page-region"></div>
 
-{# The answer at a glance: can one worker-node failure take a service down? Each number opens the tab behind it. #}
+{# The answer at a glance, as a small picture of the cluster: every worker node with a dot per pod (red ring =
+   that service is exposed), the verdict beside it, and the key figures in one clickable line. #}
 <section class="verdict" data-role="verdict" data-state="loading" aria-live="polite" aria-label="Deployment verdict">
-    <div class="verdict__main">
-        <div class="verdict__words">
-            <span class="verdict__icon" data-role="verdict-icon">READING</span>
-            <h3 class="verdict__title" data-role="verdict-title">Reading the cluster…</h3>
-            <div class="verdict__detail">
-                <div class="verdict__names" data-role="verdict-names"></div>
-                <p class="verdict__text" data-role="verdict-text"></p>
-            </div>
+    <button type="button" class="verdict__map" data-goto-tab="topology" title="Open the topology picture">
+        <span class="verdict__nodes" data-role="verdict-map"></span>
+        <span class="verdict__legend"><span class="mini-pod" aria-hidden="true"></span> a pod &nbsp;·&nbsp; <span class="mini-pod mini-pod--exposed" aria-hidden="true"></span> its service is exposed</span>
+    </button>
+    <div class="verdict__words">
+        <span class="verdict__icon" data-role="verdict-icon">READING</span>
+        <h3 class="verdict__title" data-role="verdict-title">Reading the cluster…</h3>
+        <div class="verdict__detail">
+            <div class="verdict__names" data-role="verdict-names"></div>
+            <p class="verdict__text" data-role="verdict-text"></p>
         </div>
-    </div>
-    <div class="verdict__stats" aria-label="Deployment metrics">
-        {# Each figure: an icon, the label, the number and a small picture of it; a click opens its tab #}
-        <button type="button" class="verdict__stat verdict__stat--nodes" data-goto-tab="topology" title="Open the topology map">
-            <span class="verdict__stat-viz" data-viz="nodes"></span>
-            <span class="verdict__stat-value" data-metric="deployment-node-count">—</span>
-            <span class="verdict__stat-label"><span class="verdict__stat-icon" aria-hidden="true">🖥️</span>Worker nodes</span>
-        </button>
-        <button type="button" class="verdict__stat verdict__stat--services" data-goto-tab="intent" title="Compare with the declared YAML">
-            <span class="verdict__stat-viz" data-viz="services"></span>
-            <span class="verdict__stat-value" data-metric="deployment-service-count">—</span>
-            <span class="verdict__stat-label"><span class="verdict__stat-icon" aria-hidden="true">🧩</span>Services</span>
-        </button>
-        <button type="button" class="verdict__stat verdict__stat--pods" data-goto-tab="topology" title="Open the topology map">
-            <span class="verdict__stat-viz" data-viz="pods"></span>
-            <span class="verdict__stat-value" data-metric="deployment-ready-pods">—</span>
-            <span class="verdict__stat-label"><span class="verdict__stat-icon" aria-hidden="true">🟢</span>Ready pods</span>
-        </button>
-        <button type="button" class="verdict__stat verdict__stat--exposed" data-goto-tab="drift" title="See which services are exposed">
-            <span class="verdict__stat-viz" data-viz="exposed"></span>
-            <span class="verdict__stat-value" data-metric="deployment-exposed-services">—</span>
-            <span class="verdict__stat-label"><span class="verdict__stat-icon" aria-hidden="true">🎯</span>Exposed services</span>
-        </button>
+        <div class="verdict__stats" aria-label="Deployment metrics">
+            <button type="button" class="verdict__stat" data-goto-tab="topology" title="Open the topology picture">
+                <span aria-hidden="true">🖥️</span><strong data-metric="deployment-node-count">—</strong> worker nodes
+            </button>
+            <button type="button" class="verdict__stat" data-goto-tab="intent" title="Compare with the declared YAML">
+                <span aria-hidden="true">🧩</span><strong data-metric="deployment-service-count">—</strong> services
+            </button>
+            <button type="button" class="verdict__stat" data-goto-tab="topology" title="Open the topology picture">
+                <span aria-hidden="true">🟢</span><strong data-metric="deployment-ready-pods">—</strong> pods ready
+            </button>
+            <button type="button" class="verdict__stat verdict__stat--exposed" data-goto-tab="drift" title="See which services are exposed">
+                <span aria-hidden="true">🎯</span><strong data-metric="deployment-exposed-services">—</strong> exposed
+            </button>
+        </div>
     </div>
 </section>
 
@@ -174,13 +168,13 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.47"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.47"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.48"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.48"></script>
 {% endblock %}

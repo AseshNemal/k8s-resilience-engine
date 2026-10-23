@@ -33,7 +33,8 @@
     function namespaceOption(row) {
         const option = document.createElement("option");
         option.value = row.namespace;
-        option.textContent = `${row.namespace} · ${(row.graph?.services || []).length} services`;
+        // A namespace added from the URL without a listing has no known count: show its name, never "0 services".
+        option.textContent = row.graph ? `${row.namespace} · ${(row.graph.services || []).length} services` : row.namespace;
         return option;
     }
 
@@ -113,44 +114,44 @@
         );
     }
 
-    // The small picture under each key figure. Services take the colour the topology picture gave them.
-    function renderStatViz(deployment) {
-        const services = deployment.services || [];
-        const nodes = deployment.nodes || [];
+    // The small picture of the cluster in the verdict: a box per worker node with a dot per pod, in the colour the
+    // topology picture gave its service; a red ring marks a service that one node failure would take down.
+    function renderMiniMap(deployment) {
+        const box = document.querySelector('[data-role="verdict-map"]');
+        if (!box) return;
         const shortNode = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
-        const dot = (className, title, hue) => {
-            const span = document.createElement("span");
-            span.className = className;
-            span.title = title;
-            if (hue != null) span.style.setProperty("--svc-hue", hue);
-            return span;
-        };
-        const put = (name, children) => {
-            const box = document.querySelector(`[data-viz="${name}"]`);
-            if (box) box.replaceChildren(...children);
-        };
-        const hueOf = (name) => window.DeploymentsTopologyWidget?.hueOf?.(name);
-
-        put("nodes", nodes.map((n) => dot("viz-node", `${shortNode(n.name)}${n.ready === false ? " (not ready)" : ""}`)));
-        put("services", services.map((s) => dot("viz-svc", s.name, hueOf(s.name) ?? 210)));
-
-        const total = services.reduce((n, s) => n + (s.pods || []).length, 0);
-        const ready = services.reduce((n, s) => n + readyCount(s), 0);
-        const bar = dot("viz-bar", `${ready} of ${total} pods ready`);
-        const fill = dot("viz-bar__fill", "");
-        fill.style.width = total ? `${(ready / total) * 100}%` : "0%";
-        bar.appendChild(fill);
-        put("pods", [bar]);
-
-        const evaluated = services.filter((s) => readyCount(s) > 0);
-        put("exposed", [(() => {
-            const segs = dot("viz-segs", "");
-            evaluated.forEach((s) => {
-                const isExposed = exposedDomains(s).length > 0;
-                segs.appendChild(dot(`viz-seg ${isExposed ? "viz-seg--bad" : "viz-seg--ok"}`, `${s.name}: ${isExposed ? "exposed" : "safe"}`));
+        const hueOf = (name) => window.DeploymentsTopologyWidget?.hueOf?.(name) ?? 210;
+        const nodeNames = (deployment.nodes || []).map((n) => n.name).sort((a, b) => a.localeCompare(b));
+        const podsOn = {};
+        (deployment.services || []).forEach((svc) => {
+            const exposed = exposedDomains(svc).length > 0;
+            (svc.pods || []).forEach((pod) => {
+                const key = pod.node && nodeNames.includes(pod.node) ? pod.node : "";
+                (podsOn[key] = podsOn[key] || []).push({ svc: svc.name, pod, exposed });
             });
-            return segs;
-        })()]);
+        });
+        const dot = ({ svc, pod, exposed }) => {
+            const d = document.createElement("span");
+            d.className = `mini-pod${exposed ? " mini-pod--exposed" : ""}${pod.ready ? "" : " mini-pod--notready"}`;
+            d.style.setProperty("--svc-hue", hueOf(svc));
+            d.title = `${svc}${exposed ? " (exposed)" : ""}: ${pod.name}${pod.ready ? "" : " (not ready)"}`;
+            return d;
+        };
+        const nodeBox = (name, label) => {
+            const n = document.createElement("span");
+            n.className = name ? "mini-node" : "mini-node mini-node--pending";
+            const title = document.createElement("span");
+            title.className = "mini-node__name";
+            title.textContent = label;
+            const pods = document.createElement("span");
+            pods.className = "mini-node__pods";
+            (podsOn[name] || []).forEach((p) => pods.appendChild(dot(p)));
+            n.append(title, pods);
+            return n;
+        };
+        const boxes = nodeNames.map((n) => nodeBox(n, shortNode(n)));
+        if (podsOn[""]) boxes.push(nodeBox("", "⏳ no node"));
+        box.replaceChildren(...boxes);
     }
 
     // The sentence at the top of the page, from the same rule as the Exposed services tab.
@@ -233,7 +234,7 @@
                 window.DeploymentsTopologyWidget.renderZoneGrid(deployment);
                 window.DeploymentsTopologyWidget.renderConcentrationPanel(services);
             }
-            renderStatViz(deployment);  // after the topology picture, so the service colours match it
+            renderMiniMap(deployment);  // after the topology picture, so the service colours match it
 
             window.DeploymentsDriftWidget?.renderWhatIf(deployment);
 
