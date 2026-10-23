@@ -110,6 +110,9 @@ class KubernetesValidationExecutor:
         self.baseline_graph: DeploymentGraph = graph
         self._baseline = dict(gateway.read_deployments(self.namespace))
         self._baseline_versions = {name: d.resource_version for name, d in self._baseline.items()}
+        # What the baseline is held to is the spec (generation); the resourceVersion is only kept for the record, because a node
+        # failure makes the controller update a Deployment's status and so moves it without any edit to the spec.
+        self._baseline_generations = {name: d.generation for name, d in self._baseline.items()}
         self._restore_points: dict[str, LiveDeployment] = {}
         self._affected: list[str] = []
 
@@ -160,7 +163,7 @@ class KubernetesValidationExecutor:
         self._assert_same_cluster()
         live = self._gateway.read_deployments(self.namespace)
         patches = check_proposal(yaml_text, live, namespace=self.namespace, baseline_versions=self._baseline_versions,
-                                 max_added_replicas=self._max_added)
+                                 baseline_generations=self._baseline_generations, max_added_replicas=self._max_added)
         for patch in patches:      # the restore points are taken before the first write, from what was just read
             self._restore_points.setdefault(patch.name, live[patch.name])
         self._affected = [patch.name for patch in patches]

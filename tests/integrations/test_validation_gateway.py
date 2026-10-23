@@ -233,6 +233,21 @@ def test_a_restore_sets_back_what_was_there_and_removes_what_was_added(api, tmp_
     assert pod_spec["affinity"] == {"podAntiAffinity": None} and "resourceVersion" not in body.get("metadata", {})
 
 
+def test_a_restore_replaces_the_spread_list_so_an_entry_added_under_another_key_does_not_survive(api, tmp_path):
+    """A strategic merge patch merges this list by topologyKey: sending the old zone entry alone would leave an added hostname entry."""
+    from app.engine.recommendation_evaluation_validation.validation.cluster_gateway import LiveDeployment
+    zone = {"maxSkew": 1, "topologyKey": "topology.kubernetes.io/zone", "whenUnsatisfiable": "ScheduleAnyway"}
+    g = gateway(api, tmp_path, allow_writes=True)
+    before = g.read_deployments(NAMESPACE)["reviews"]
+    snapshot = LiveDeployment(name=before.name, namespace=before.namespace, resource_version="1", generation=1, replicas=2,
+                              selector=before.selector, pod_labels=before.pod_labels, topology_spread_constraints=(zone,))
+
+    g.restore_deployment(snapshot)
+    ((_, body, _),) = api.patches()
+
+    assert body["spec"]["template"]["spec"]["topologySpreadConstraints"] == [{"$patch": "replace"}, zone]
+
+
 # --- it is what the engine's gateway protocol asks for -------------------------------------------------------------------------
 
 def test_the_engines_identity_check_accepts_the_real_gateways_answer_for_the_designated_cluster(api, tmp_path):

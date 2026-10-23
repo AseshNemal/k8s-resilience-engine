@@ -165,3 +165,25 @@ def test_a_deployment_with_no_baseline_version_is_refused_not_assumed_unchanged(
         check_proposal(text, deployments, namespace=NAMESPACE, baseline_versions={})
 
     assert raised.value.code == "DEPLOYMENT_DRIFTED"
+
+
+def test_with_baseline_generations_a_status_only_version_change_is_not_drift_but_a_spec_edit_is():
+    text, deployments = generated("concentrated-replicas")
+    live = deployments["reviews"]
+    generations = {name: d.generation for name, d in deployments.items()}
+    status_only = {**deployments, "reviews": type(live)(**{**live.__dict__, "resource_version": "rv-status"})}
+    edited = {**deployments, "reviews": type(live)(**{**live.__dict__, "resource_version": "rv-edit", "generation": live.generation + 1})}
+
+    assert check_proposal(text, status_only, namespace=NAMESPACE, baseline_versions=versions(deployments), baseline_generations=generations)
+    with pytest.raises(ValidationRefusedError) as raised:
+        check_proposal(text, edited, namespace=NAMESPACE, baseline_versions=versions(deployments), baseline_generations=generations)
+    assert raised.value.code == "DEPLOYMENT_DRIFTED" and "generation" in raised.value.message
+
+
+def test_a_deployment_with_no_baseline_generation_is_refused_not_assumed_unchanged():
+    text, deployments = generated("concentrated-replicas")
+
+    with pytest.raises(ValidationRefusedError) as raised:
+        check_proposal(text, deployments, namespace=NAMESPACE, baseline_versions=versions(deployments), baseline_generations={})
+
+    assert raised.value.code == "DEPLOYMENT_DRIFTED"

@@ -120,11 +120,26 @@ def test_a_deployment_edited_after_the_baseline_was_captured_is_not_patched():
     _, _, text = s.proposal()
     executor = s.executor()
     live = s.gateway.deployments["reviews"]
-    s.gateway.deployments["reviews"] = type(live)(**{**live.__dict__, "resource_version": "rv-edited"})
+    # A real edit moves the generation (the spec changed) as well as the resourceVersion.
+    s.gateway.deployments["reviews"] = type(live)(**{**live.__dict__, "resource_version": "rv-edited", "generation": live.generation + 1})
 
     refused("DEPLOYMENT_DRIFTED", lambda: executor.apply(text))
 
     assert s.gateway.wrote is False
+
+
+def test_a_status_only_change_after_the_baseline_does_not_count_as_an_edit_and_the_write_uses_the_fresh_version():
+    """Stopping a node makes pods unready, so the controller updates the Deployment's status and its resourceVersion moves
+    while its spec (and so its generation) does not. That must not stop the after-change write."""
+    s = Setup()
+    _, _, text = s.proposal()
+    executor = s.executor()
+    live = s.gateway.deployments["reviews"]
+    s.gateway.deployments["reviews"] = type(live)(**{**live.__dict__, "resource_version": "rv-status-update"})
+
+    executor.apply(text)
+
+    assert s.gateway.wrote is True      # the fake refuses a write whose expected version is not the one it holds
 
 
 def test_the_cluster_is_asked_who_it_is_again_before_every_write():

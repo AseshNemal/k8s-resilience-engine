@@ -403,13 +403,17 @@ class KubernetesTestClusterGateway:
     def restore_deployment(self, snapshot: Any) -> None:
         """Put the replica count, the spread constraints and the required anti-affinity back to what ``snapshot`` held.
 
-        Fields the snapshot did not have are set to null, which a strategic merge patch reads as "remove". Nothing else on
+        Fields the snapshot did not have are set to null, which a strategic merge patch reads as "remove"; the spread list is
+        replaced as a whole (see below), so an entry added under a different key is removed too. Nothing else on
         the Deployment is touched, and no resourceVersion is sent: a restore is unconditional.
         """
         self._require_writes()
         anti = snapshot.pod_anti_affinity
+        # The spread list merges by topologyKey, so sending the old list alone would leave an entry the change added under another
+        # key in place. "$patch: replace" makes the list exactly what the snapshot held; an empty snapshot removes the key.
+        spread = list(snapshot.topology_spread_constraints)
         pod_spec: dict[str, Any] = {
-            "topologySpreadConstraints": list(snapshot.topology_spread_constraints) or None,
+            "topologySpreadConstraints": [{"$patch": "replace"}, *spread] if spread else None,
             # No anti-affinity before: remove the key. Some before: set each list back, or remove the one that was absent.
             "affinity": {"podAntiAffinity": None if not anti else {
                 REQUIRED_ANTI_AFFINITY: anti.get(REQUIRED_ANTI_AFFINITY) or None,

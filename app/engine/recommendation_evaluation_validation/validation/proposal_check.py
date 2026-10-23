@@ -151,8 +151,14 @@ def _check_document(document: Any, live: Mapping[str, LiveDeployment], namespace
 
 def check_proposal(yaml_text: str, live: Mapping[str, LiveDeployment], *, namespace: str,
                    baseline_versions: Mapping[str, str],
-                   max_added_replicas: int = DEFAULT_MAX_ADDED_REPLICAS) -> tuple[ProposedPatch, ...]:
-    """The patches ``yaml_text`` contains, or a ``ValidationRefusedError`` naming the first thing not allowed."""
+                   max_added_replicas: int = DEFAULT_MAX_ADDED_REPLICAS,
+                   baseline_generations: Mapping[str, int] | None = None) -> tuple[ProposedPatch, ...]:
+    """The patches ``yaml_text`` contains, or a ``ValidationRefusedError`` naming the first thing not allowed.
+
+    ``baseline_generations``, when given, is what the baseline is compared on: a Deployment's generation moves only when its spec
+    is edited, whereas its resourceVersion also moves when the controller updates its status (for example when pods become
+    unready after a node is stopped), which is not a change to what would be patched. Without it the resourceVersion is used.
+    """
     try:
         documents = [doc for doc in yaml.safe_load_all(yaml_text) if doc]
     except yaml.YAMLError as error:
@@ -165,6 +171,14 @@ def check_proposal(yaml_text: str, live: Mapping[str, LiveDeployment], *, namesp
     if len(set(names)) != len(names):
         raise _not_allowed("proposal", "names the same Deployment more than once")
     for patch in patches:
+        if baseline_generations is not None:
+            recorded_generation = baseline_generations.get(patch.name)
+            if recorded_generation is None or recorded_generation != live[patch.name].generation:
+                raise ValidationRefusedError(
+                    "DEPLOYMENT_DRIFTED", f"{patch.name} is at generation {live[patch.name].generation!r}, not the "
+                    f"{recorded_generation!r} captured with the baseline, so its spec was edited and the baseline no longer "
+                    f"describes what would be changed.")
+            continue
         recorded = baseline_versions.get(patch.name)
         if recorded is None or recorded != live[patch.name].resource_version:
             raise ValidationRefusedError(
