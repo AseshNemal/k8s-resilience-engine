@@ -173,6 +173,59 @@ def evaluate_disposable_scenarios(
     }
 
 
+def format_compact_summary(artifact: Mapping[str, object]) -> str:
+    """Format one synthetic result artifact for terminal demonstration."""
+
+    if artifact.get("evidenceStatus") != EVIDENCE_STATUS:
+        raise ValueError("compact output requires SYNTHETIC_DISPOSABLE results")
+    scenario_id = artifact.get("scenarioId")
+    if not isinstance(scenario_id, str) or not scenario_id:
+        raise ValueError("compact output requires a scenarioId")
+    result_payloads = artifact.get("results")
+    if not isinstance(result_payloads, list) or not result_payloads:
+        raise ValueError("compact output requires at least one scenario result")
+    reports = [
+        FailureImpactReport.model_validate(payload)
+        for payload in result_payloads
+    ]
+
+    lines = [
+        f"Component 3 disposable scenario: {scenario_id}",
+        f"Evidence status: {EVIDENCE_STATUS}",
+        f"Disclaimer: {DISCLAIMER}",
+        "",
+        (
+            "Node | Blast radius | Survivability | Failed services | "
+            "Workflow outcome"
+        ),
+    ]
+    for report in reports:
+        failed_services = ", ".join(report.failed_services) or "none"
+        workflow_outcome = (
+            "FAILED: " + ", ".join(report.failed_workflows)
+            if report.failed_workflows
+            else "SURVIVES"
+        )
+        lines.append(
+            f"{report.failed_node} | {report.blast_radius:.1f}% | "
+            f"{report.survivability:.1f}% | {failed_services} | "
+            f"{workflow_outcome}"
+        )
+
+    summary = artifact.get("summary")
+    if isinstance(summary, Mapping):
+        highest_risk = summary.get("highestRiskNodes")
+        if isinstance(highest_risk, list):
+            lines.extend(
+                [
+                    "",
+                    "Highest-risk nodes: "
+                    + (", ".join(map(str, highest_risk)) or "none"),
+                ]
+            )
+    return "\n".join(lines)
+
+
 def run_disposable_scenarios(
     *,
     input_dir: Path,
@@ -221,6 +274,11 @@ def _argument_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Write a new synthetic scenario result without overwriting",
     )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Print a concise terminal table; the saved artifact remains JSON",
+    )
     return parser
 
 
@@ -234,7 +292,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         output=arguments.output,
         generated_at=datetime.now(timezone.utc),
     )
-    print(json.dumps(artifact, indent=2))
+    if arguments.compact:
+        print(format_compact_summary(artifact))
+    else:
+        print(json.dumps(artifact, indent=2))
     return 0
 
 

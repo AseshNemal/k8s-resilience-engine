@@ -11,6 +11,8 @@ from experiments.failure_impact_validation.run_disposable_scenarios import (
     ARTIFACT_TYPE,
     cli,
     evaluate_disposable_scenarios,
+    format_compact_summary,
+    main,
     run_disposable_scenarios,
 )
 
@@ -93,6 +95,31 @@ def test_runner_can_evaluate_one_selected_node() -> None:
     }
     assert len(artifact["results"]) == 1
     assert artifact["results"][0]["failedNode"] == "synthetic-node-3"
+
+
+def test_compact_summary_explains_each_node_outcome() -> None:
+    metadata, workflow, deployment = _input_payloads()
+    artifact = evaluate_disposable_scenarios(
+        metadata=metadata,
+        workflow_payload=workflow,
+        deployment_payload=deployment,
+        failed_nodes=[],
+        generated_at=GENERATED_AT,
+    )
+
+    summary = format_compact_summary(artifact)
+
+    assert "Evidence status: SYNTHETIC_DISPOSABLE" in summary
+    assert "not observed Kubernetes evidence" in summary
+    assert (
+        "synthetic-node-1 | 100.0% | 0.0% | cartservice | FAILED: "
+        "synthetic-viva-01-checkout"
+    ) in summary
+    assert "synthetic-node-2 | 0.0% | 100.0% | none | SURVIVES" in summary
+    assert (
+        "synthetic-node-3 | 0.0% | 100.0% | emailservice | SURVIVES"
+    ) in summary
+    assert "Highest-risk nodes: synthetic-node-1" in summary
 
 
 def test_runner_rejects_unknown_node() -> None:
@@ -190,3 +217,34 @@ def test_cli_reports_missing_input_without_traceback(tmp_path, capsys) -> None:
     assert "error: Could not read" in captured.err
     assert "Traceback" not in captured.err
     assert captured.out == ""
+
+
+def test_cli_compact_mode_prints_table_and_saves_full_json(
+    tmp_path,
+    capsys,
+) -> None:
+    input_dir = tmp_path / "inputs"
+    output = tmp_path / "compact-result.json"
+    write_disposable_inputs(
+        input_dir,
+        "compact",
+        generated_at=GENERATED_AT,
+    )
+
+    exit_code = main(
+        [
+            "--input-dir",
+            str(input_dir),
+            "--output",
+            str(output),
+            "--compact",
+        ]
+    )
+    printed = capsys.readouterr().out
+    saved = json.loads(output.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert "Node | Blast radius | Survivability" in printed
+    assert not printed.lstrip().startswith("{")
+    assert saved["artifactType"] == ARTIFACT_TYPE
+    assert len(saved["results"]) == 3
