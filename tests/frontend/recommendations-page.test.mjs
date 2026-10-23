@@ -6,7 +6,7 @@ import { test } from "node:test";
 import vm from "node:vm";
 
 const read = (path) => readFileSync(new URL(`../../app/static/js/${path}`, import.meta.url), "utf8");
-const SCRIPTS = ["api.js", "connection-state.js", "recommendation-render.js", "recommendation-context.js", "components/recommendations.js"].map((p) => [p, read(p)]);
+const SCRIPTS = ["api.js", "connection-state.js", "recommendation-render.js", "recommendation-context.js", "recommendation-operation.js", "components/recommendations.js"].map((p) => [p, read(p)]);
 
 function makeEnvironment(routes) {
     const registry = new Map();
@@ -29,6 +29,9 @@ function makeEnvironment(routes) {
     };
     const template = element('[data-role="page-template"]');
     template.content = { cloneNode: () => ({ fragment: true }) };
+    // The applied-change panel's skeleton. (Its own lifecycle is tested against a tree-faithful DOM in recommendation-operation.test.mjs.)
+    element('[data-role="operation-template"]').content = { cloneNode: () => ({ fragment: true }) };
+    routes = { "GET /api/recommendations/applications/current": { status: 200, body: { application: null, tier: null } }, ...routes };
 
     const listeners = {};
     const document = {
@@ -50,8 +53,9 @@ function makeEnvironment(routes) {
     const fetch = async (url, init = {}) => {
         calls.push([init.method || "GET", url]);
         bodies.push(init.body ? JSON.parse(init.body) : null);
-        const route = routes[`${init.method || "GET"} ${url}`];
-        if (!route) throw new Error(`unexpected request ${init.method || "GET"} ${url}`);
+        const entry = routes[`${init.method || "GET"} ${url}`];
+        if (!entry) throw new Error(`unexpected request ${init.method || "GET"} ${url}`);
+        const route = typeof entry === "function" ? entry() : entry;      // a function answers from the server's state at that moment
         return {
             ok: route.status < 400, status: route.status,
             headers: { get: (name) => (route.headers || {})[name] ?? null },
@@ -67,7 +71,9 @@ function makeEnvironment(routes) {
         updateLastRefreshed: (el) => { if (el) el.textContent = "refreshed"; },
     };
     window.ResilienceUi = ui;
-    const sandbox = { window, document, fetch, console, AbortController, setTimeout, clearTimeout, URLSearchParams };
+    // Timers the page starts (the panel's polling) must not keep the test process alive after the test has finished.
+    const unrefTimeout = (fn, ms) => { const id = setTimeout(fn, ms); if (id && id.unref) id.unref(); return id; };
+    const sandbox = { window, document, fetch, console, AbortController, setTimeout: unrefTimeout, clearTimeout, URLSearchParams };
     vm.createContext(sandbox);
     for (const [name, code] of SCRIPTS) vm.runInContext(code, sandbox, { filename: name });
     return { element, listeners, windowListeners, calls, bodies, region: element('[data-role="page-region"]') };
@@ -122,7 +128,7 @@ async function openPage(routes) {
 test("the connected cluster, the only application and the only workflow are used without typing anything", async () => {
     const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
 
-    assert.deepEqual(env.calls.map((c) => `${c[0]} ${c[1]}`), ["GET /_extension/cluster", "GET /api/recommendations/context", DETAIL.slice(4).replace(/^/, "GET "), "GET /api/recommendations/rec-live/approval"]);
+    assert.deepEqual(env.calls.map((c) => `${c[0]} ${c[1]}`), ["GET /_extension/cluster", "GET /api/recommendations/applications/current", "GET /api/recommendations/context", DETAIL.slice(4).replace(/^/, "GET "), "GET /api/recommendations/rec-live/approval"]);
     assert.equal(env.element('[data-role="rec-cluster"]').textContent, "Connected cluster: docker-desktop");
     assert.equal(env.element('[data-role="source-badge"]').textContent, "Live evidence");
     assert.equal(env.element('[data-role="rec-namespace-select"]').value, "shop");
@@ -387,7 +393,7 @@ const D_APPROVAL = "GET /api/recommendations/declared/rec-live/approval";
 const D_APPLICATION = "GET /api/recommendations/declared/rec-live/application";
 const openApproved = (application, extra = {}) => openDeclared({
     [D_APPROVAL]: { status: 200, headers: { "X-Evidence-Provenance": "research-declared" }, body: approvedRecord },
-    [D_APPLICATION]: { status: 200, body: application }, ...extra });
+    [D_APPLICATION]: typeof application === "function" ? application : { status: 200, body: application }, ...extra });
 const posts = (env) => env.calls.map(([m, u], i) => [m, u, env.bodies[i]]).filter(([m]) => m === "POST");
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -395,15 +401,17 @@ test("an approved recommendation offers Apply, read from the research route, and
     const env = await openApproved(applicationStatus());
 
     const shown = text(env.element('[data-role="approval-state-container"]'));
-    assert.ok(shown.includes("Apply to the connected cluster") && shown.includes("Not applied"), shown);
+    assert.ok(shown.includes("Apply to the connected cluster"), shown);
     assert.ok(byId(env, "btn-apply") && byId(env, "apply-by"));
-    assert.equal(byId(env, "btn-reset"), undefined, "nothing to reset yet");
+    assert.equal(byId(env, "btn-reset"), undefined, "Reset belongs to the applied-change panel, which outlives this box");
     assert.deepEqual(posts(env), [], "reading changes nothing");
 });
 
-test("Apply asks once more before it sends, needs a name, and then shows what was applied with a way back", async () => {
-    const env = await openApproved(applicationStatus(), {
-        "POST /api/recommendations/declared/rec-live/apply": { status: 200, body: applicationStatus({ application: applicationOf("APPLIED"), rolloutComplete: false, canApply: false, canReset: true }) } });
+test("Apply asks once more before it sends, needs a name, shows Applying change… before the answer, and hands over to the panel", async () => {
+    let release;
+    const answer = new Promise((resolve) => { release = resolve; });
+    let server = applicationStatus();                                          // what the server will say once it has recorded the apply
+    const env = await openApproved(() => ({ status: 200, body: server }), { "POST /api/recommendations/declared/rec-live/apply": { status: 200, body: answer } });
 
     await byId(env, "btn-apply").listeners.click();
     assert.deepEqual(posts(env), [], "the first click only asks");
@@ -415,13 +423,38 @@ test("Apply asks once more before it sends, needs a name, and then shows what wa
     assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("Enter your name"));
 
     byId(env, "apply-by").value = "asesh";
-    await byId(env, "btn-confirm-apply").listeners.click();
+    const sent = byId(env, "btn-confirm-apply").listeners.click();
     await settle();
 
     assert.deepEqual(posts(env), [["POST", "/api/recommendations/declared/rec-live/apply", { appliedBy: "asesh" }]]);
+    assert.equal(env.element('[data-role="op-headline"]').textContent, "Applying change…", "on screen while the request is still out");
+    assert.equal(env.element('[data-role="rec-operation"]').hidden, false);
+    assert.equal(byId(env, "btn-apply").disabled, true, "the box cannot send a second apply");
+    server = applicationStatus({ application: applicationOf("APPLIED"), rolloutComplete: false, canApply: false, canReset: true,
+        operation: { direction: "apply", stage: "rollout", tone: "busy", headline: "Rolling out…", nextAction: "wait", steps: [], inProgress: true, pollMs: 3000, connectionLost: false },
+        analysis: {}, states: null });
+    release(server);
+    await sent;
+    await settle();
+
     const shown = text(env.element('[data-role="approval-state-container"]'));
-    assert.ok(shown.includes("APPLIED") && shown.includes("db in shop") && shown.includes("rolling out"), shown);
-    assert.ok(byId(env, "btn-reset") && !byId(env, "btn-apply"));
+    assert.ok(shown.includes("db in shop: applied") && shown.includes("“Applied change” above"), shown);
+    assert.equal(byId(env, "btn-apply"), undefined, "nothing to apply while it is applied");
+    assert.equal(byId(env, "btn-reset"), undefined, "and Reset is the panel's");
+    assert.equal(env.element('[data-role="op-headline"]').textContent, "Rolling out…");
+});
+
+test("a second Apply click while the first is on its way sends nothing", async () => {
+    const env = await openApproved(applicationStatus(), { "POST /api/recommendations/declared/rec-live/apply": { status: 200, body: new Promise(() => {}) } });
+    await byId(env, "btn-apply").listeners.click();
+    byId(env, "apply-by").value = "asesh";
+    const confirm = byId(env, "btn-confirm-apply");
+
+    confirm.listeners.click();
+    await settle();
+    await confirm.listeners.click();          // the same button, once more, before the page has finished redrawing
+
+    assert.equal(posts(env).length, 1);
 });
 
 test("Cancel puts the question away without sending anything", async () => {
@@ -434,23 +467,7 @@ test("Cancel puts the question away without sending anything", async () => {
     assert.ok(byId(env, "btn-apply") && !byId(env, "btn-confirm-apply"));
 });
 
-test("Reset is confirmed too, names who reset it, and goes back to offering Apply", async () => {
-    const env = await openApproved(applicationStatus({ application: applicationOf("APPLIED"), rolloutComplete: true, canApply: false, canReset: true }), {
-        "POST /api/recommendations/declared/rec-live/reset": { status: 200, body: applicationStatus({ application: applicationOf("RESET", { resetBy: "asesh" }), canApply: true, canReset: false }) } });
-
-    await byId(env, "btn-reset").listeners.click();
-    assert.deepEqual(posts(env), []);
-    byId(env, "apply-by").value = "asesh";
-    await byId(env, "btn-confirm-reset").listeners.click();
-    await settle();
-
-    assert.deepEqual(posts(env), [["POST", "/api/recommendations/declared/rec-live/reset", { resetBy: "asesh" }]]);
-    const shown = text(env.element('[data-role="approval-state-container"]'));
-    assert.ok(shown.includes("RESET") && shown.includes("reset by asesh"), shown);
-    assert.ok(byId(env, "btn-apply") && !byId(env, "btn-reset"));
-});
-
-test("when the server refuses, its reason is shown and the buttons are read again from the server", async () => {
+test("when the server refuses, its reason is shown in the panel and the box reads the state again", async () => {
     const env = await openApproved(applicationStatus(), {
         "POST /api/recommendations/declared/rec-live/apply": { status: 409, body: { detail: { code: "APPROVAL_STALE", message: "The topology changed since this was approved." } } } });
 
@@ -459,8 +476,10 @@ test("when the server refuses, its reason is shown and the buttons are read agai
     await byId(env, "btn-confirm-apply").listeners.click();
     await settle();
 
-    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("The topology changed since this was approved."));
+    assert.ok(text(env.element('[data-role="op-message"]')).includes("The topology changed since this was approved."));
+    assert.equal(env.element('[data-role="rec-operation"]').hidden, true, "the server recorded nothing, so there is no operation to show");
     assert.ok(byId(env, "btn-apply"), "the state was read again; it can still be tried");
+    assert.ok(env.calls.filter(([m, u]) => m === "GET" && u === "/api/recommendations/declared/rec-live/application").length >= 2);
 });
 
 test("another application being active explains why Apply is not offered", async () => {
@@ -470,13 +489,16 @@ test("another application being active explains why Apply is not offered", async
     assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("rec-other is still applied; reset it first."));
 });
 
-test("a failed reset shows the reason and can be tried again", async () => {
-    const env = await openApproved(applicationStatus({ application: applicationOf("RESET_FAILED", { detail: { message: "Could not reach the connected cluster." } }),
-        canApply: false, canReset: true }));
+test("an application the server holds is shown by the panel at load, whatever is selected, and reloading never applies it again", async () => {
+    const stored = applicationStatus({ application: applicationOf("APPLIED"), rolloutComplete: false, canApply: false, canReset: true, recommendationId: "rec-from-before",
+        operation: { direction: "apply", stage: "rollout", tone: "busy", headline: "Rolling out… waiting for the Deployments to settle on the new generation", nextAction: "wait",
+            steps: [], inProgress: true, pollMs: 3000, connectionLost: false }, analysis: {}, states: null });
+    const env = await openApproved(applicationStatus(), { "GET /api/recommendations/applications/current": { status: 200, body: stored } });
+    await settle();
 
-    const shown = text(env.element('[data-role="approval-state-container"]'));
-    assert.ok(shown.includes("RESET FAILED") && shown.includes("Could not reach the connected cluster."), shown);
-    assert.ok(byId(env, "btn-reset"));
+    assert.equal(env.element('[data-role="rec-operation"]').hidden, false);
+    assert.ok(env.element('[data-role="op-headline"]').textContent.startsWith("Rolling out"));
+    assert.deepEqual(posts(env), []);
 });
 
 test("a request that is only pending has no Apply section, and a frozen workflow uses the production routes", async () => {
@@ -488,4 +510,55 @@ test("a request that is only pending has no Apply section, and a frozen workflow
         "GET /api/recommendations/rec-live/application": { status: 200, body: applicationStatus({ tier: "production" }) } });
     assert.ok(env.calls.some(([, u]) => u === "/api/recommendations/rec-live/application"));
     assert.ok(!calls_include(env, "/declared"));
+});
+
+const FAILURES = "GET /api/recommendations/live/failures?workflow_id=checkout&namespace=shop";
+const overview = { scope: "Rankings stay separate", failures: [
+    { failedNode: "w2", blastRadiusBefore: 100, singlePointOfFailure: true, candidates: 4, feasible: 3, ranked: 3,
+        selected: { type: "REPLICA_INCREASE", service: "payment", predictedBlastRadius: 0, resourceCost: "MEDIUM" } },
+] };
+
+test("the failure panel controls exist outside the deferred page template", () => {
+    const html = readFileSync(new URL("../../app/templates/components/recommendations.html", import.meta.url), "utf8");
+    assert.ok(html.indexOf('data-role="rec-failures-load"') < html.indexOf('<template'), "button must be available when the script attaches its listener");
+    assert.ok(html.indexOf('data-role="rec-failures-result"') < html.indexOf('<template'), "results must survive detail rerenders");
+});
+
+test("assess every worker displays the overview and Show loads that failure's detail", async () => {
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") },
+        "GET /api/recommendations/rec-live/approval": { status: 404, body: {} },
+        [FAILURES]: { status: 200, body: overview },
+        [`${DETAIL}&failed_node=w2`]: { status: 200, body: detailOf([cand()], "rec-live") },
+    });
+    await env.element('[data-role="rec-failures-load"]').listeners.click();
+    const box = env.element('[data-role="rec-failures-result"]');
+    assert.ok(text(box).includes("Rankings stay separate") && text(box).includes("w2"));
+    const table = box.children.find(n => n.tag === "table");
+    const button = table.children[1].children[0].children.at(-1).children[0];
+    button.listeners.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(calls_include(env, "/live/detail?workflow_id=checkout&namespace=shop&failed_node=w2"));
+    assert.ok(text(box).includes("w2"), "opening a detail preserves the overview");
+});
+
+test("an assessment failure is explicit and the control can be retried", async () => {
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([], null) },
+        [FAILURES]: { status: 503, body: { detail: { code: "CLUSTER_CONNECTION_FAILED", message: "Cluster cannot be read" } } },
+    });
+    await env.element('[data-role="rec-failures-load"]').listeners.click();
+    assert.ok(text(env.element('[data-role="rec-failures-result"]')).includes("Cluster cannot be read"));
+    assert.equal(env.element('[data-role="rec-failures-load"]').disabled, false);
+});
+
+test("an assessment that completes after a cluster change cannot replace current evidence", async () => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([], null) },
+        [FAILURES]: { status: 200, body: pending },
+    });
+    const request = env.element('[data-role="rec-failures-load"]').listeners.click();
+    await env.windowListeners["resilience-cluster-changed"]();
+    release(overview);
+    await request;
+    assert.equal(env.element('[data-role="rec-failures-result"]').children.length, 0);
 });

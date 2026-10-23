@@ -26,7 +26,7 @@ def test_the_offline_source_is_not_the_live_source():
 def test_concentrated_bookinfo_gets_a_feasible_ranked_spread_for_reviews():
     live = bookinfo_scenario("concentrated").evaluate()
 
-    by_service = {c.service: c for c in live.report.recommendations}
+    by_service = {c.service: c for c in live.report.recommendations if c.type == "TOPOLOGY_SPREAD"}
     # reviews and ratings are both on w1; each is a concentration root cause, productpage/details are spread.
     assert set(by_service) == {"reviews", "ratings"}
     assert by_service["reviews"].feasible and by_service["reviews"].type == "TOPOLOGY_SPREAD"

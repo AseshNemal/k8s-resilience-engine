@@ -275,7 +275,7 @@ def test_a_concentrated_service_is_shown_with_everything_the_page_needs(client, 
     body = client.get(DETAIL, params={"workflow_id": "checkout", "namespace": "shop"}).json()
 
     assert body["outcome"]["state"] == "READY"
-    (candidate,) = body["candidates"]
+    (candidate,) = [c for c in body["candidates"] if c["type"] == "TOPOLOGY_SPREAD"]
     assert (candidate["service"], candidate["type"], candidate["feasible"], candidate["selected"]) == ("db", "TOPOLOGY_SPREAD", True, True)
     assert candidate["approval"] == {"ready": True, "reason": None, "requiresJustification": False}
     assert "topologySpreadConstraint" in candidate["recommendedChange"]

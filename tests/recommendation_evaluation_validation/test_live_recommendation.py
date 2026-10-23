@@ -80,7 +80,7 @@ def test_a_concentrated_service_gets_a_feasible_recommendation_with_a_predicted_
 
     assert response.status_code == 200
     report = response.json()
-    (candidate,) = report["recommendations"]
+    (candidate,) = [c for c in report["recommendations"] if c["type"] == "TOPOLOGY_SPREAD"]
     assert (candidate["type"], candidate["service"], candidate["feasible"]) == ("TOPOLOGY_SPREAD", "db", True)
     # Losing w1 takes all three db replicas, so the workflow fails; spread over three workers it survives.
     assert candidate["riskReduction"] == pytest.approx(100.0)
@@ -209,7 +209,8 @@ def test_the_real_topology_is_never_changed_by_the_simulation(monkeypatch, use_c
     results = [evaluate_candidate(inputs.deployment, spec, scheduling_evidence)
                for spec in generate_candidates(CandidateContextBuilder.build(inputs.deployment, impact))]
 
-    assert results and all(r.simulated_deployment is not None for r in results)
+    # a candidate is simulated exactly when it was verified feasible; some of the replica variants legitimately are not
+    assert results and any(r.feasible for r in results) and all((r.simulated_deployment is not None) == r.feasible for r in results)
     assert inputs.deployment.model_dump() == before
 
 
@@ -299,10 +300,10 @@ def test_without_scheduling_evidence_a_live_candidate_is_not_feasible_and_cannot
     response = client.get(LIVE, params=PARAMS)
     live = live_pipeline.build_live_recommendation("checkout", None, "shop")
 
-    (candidate,) = response.json()["recommendations"]
+    (candidate,) = [c for c in response.json()["recommendations"] if c["type"] == "TOPOLOGY_SPREAD"]
     assert (candidate["service"], candidate["feasible"], candidate["riskReduction"]) == ("db", False, 0)
     assert response.json()["selectedRecommendationId"] is None
-    (verdict,) = live.evidence["feasibility"].values()
+    verdict = next(v for k, v in live.evidence["feasibility"].items() if k.endswith("-topology-spread"))   # the plain spread; the replica variants have their own
     assert verdict["status"] == "INSUFFICIENT_EVIDENCE"
     assert any("taints" in item for item in verdict["missingEvidence"])
     assert any("declared placement intent" in item for item in verdict["missingEvidence"])
@@ -322,7 +323,7 @@ def test_with_scheduling_evidence_the_verdict_and_predicted_placement_are_in_the
 
     live = live_pipeline.build_live_recommendation("checkout", None, "shop")
 
-    (verdict,) = live.evidence["feasibility"].values()
+    verdict = next(v for k, v in live.evidence["feasibility"].items() if k.endswith("-topology-spread"))   # the plain spread; the replica variants have their own
     assert verdict["status"] == "FEASIBLE" and verdict["singleNodeResilience"] is True
     assert sorted(verdict["placement"].values()) == ["w1", "w2", "w3"]
     assert verdict["missingEvidence"] == []

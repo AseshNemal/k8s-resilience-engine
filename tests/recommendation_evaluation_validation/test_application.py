@@ -5,6 +5,7 @@ migrated database. Nothing here talks to a cluster.
 """
 
 import copy
+from dataclasses import replace
 
 import pytest
 from alembic import command
@@ -87,12 +88,12 @@ def test_apply_changes_only_what_was_approved_and_remembers_what_it_replaced(rea
 
     assert change.status == APPLIED and change.deployments == ["db"] and change.namespace == "shop"
     assert cluster.deployments["db"].has_hostname_spread and cluster.deployments["db"].replicas == 3
-    assert cluster.deployments["web"] == other_deployment()                           # nothing else was touched
+    assert cluster.deployments["web"] == replace(other_deployment(), uid="uid-web")  # nothing else was touched
     assert len(cluster.patches) == 1 and set(cluster.patches[0]) == {"apiVersion", "kind", "metadata", "spec"}
     before = change.before[0]
     assert before["name"] == "db" and before["replicas"] == 3 and before["topology_spread_constraints"] == []
     assert change.cluster["clusterUid"] == "uid-docker-desktop" and change.applied_by == "asesh"
-    assert [e["event"] for e in change.events] == ["applying", "patched", "applied"]
+    assert [e["event"] for e in change.events] == ["approval-verified", "snapshot-saved", "applying", "patched", "applied"]
 
 
 def test_the_state_being_replaced_is_stored_before_the_first_write(ready, cluster, session):

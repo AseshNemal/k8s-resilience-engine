@@ -45,8 +45,9 @@ def test_no_situation_that_is_not_verified_feasible_ever_yields_applicable_yaml(
     for candidate in live.report.recommendations:
         proposal = build_yaml_proposal(live, candidate.id)
         if proposal.status == "GENERATED":
-            # only a verified-feasible, ranked candidate may get text, and only offline text is non-applicable
-            assert candidate.feasible and live.report.selected_recommendation_id == candidate.id
+            # only a verified-feasible, RANKED candidate may get text (not only the selected one: a lower-ranked candidate can be
+            # approved with a written reason), and only offline text is non-applicable
+            assert candidate.feasible and live.evidence["ranking"]["candidates"][candidate.id]["rank"] is not None
         assert proposal.applicable is False      # offline evidence is never applicable
 
 

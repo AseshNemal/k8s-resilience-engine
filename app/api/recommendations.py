@@ -22,14 +22,20 @@ from app.engine.recommendation_evaluation_validation.application import (
     ApplicationRefused,
     ApplicationService,
     ApplyGateway,
+    ChangeAnalysisRepository,
 )
+from app.engine.recommendation_evaluation_validation.validation.experiment_repository import ExperimentRepository
+from app.engine.recommendation_evaluation_validation.application.analysis import ChangeAnalyser
+from app.engine.recommendation_evaluation_validation.application.live_analyser import ProductionAnalyser, ResearchAnalyser
 from app.engine.recommendation_evaluation_validation.approval.research import declaration_digest
 from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
 from app.engine.recommendation_evaluation_validation.approval.research import RESEARCH_SCOPE
 from app.engine.recommendation_evaluation_validation.declared_workflow import NOT_OBSERVED
 from app.engine.recommendation_evaluation_validation.live_pipeline import (
+    build_declared_failures,
     build_declared_recommendation,
+    build_live_failures,
     build_live_recommendation,
 )
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
@@ -226,18 +232,32 @@ def cluster_writes_enabled() -> bool:
     return os.environ.get(CLUSTER_WRITES_ENV) == "1"
 
 
+def get_change_analyser() -> ChangeAnalyser:
+    """How the production tier recalculates failure impact after a change (frozen workflow, live topology, Member 3)."""
+    return ProductionAnalyser()
+
+
+def get_research_change_analyser() -> ChangeAnalyser:
+    """The research tier's: the declared workflow, live topology, Member 3. Tests substitute both."""
+    return ResearchAnalyser()
+
+
 def get_application_service(db: Session = Depends(get_db),
-                            gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier)) -> ApplicationService:
+                            gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier),
+                            analyser: ChangeAnalyser = Depends(get_change_analyser)) -> ApplicationService:
     return ApplicationService(ApprovalRepository(db), AppliedChangeRepository(db), gateway, tier=PRODUCTION,
-                              trusted=has_verified_provenance, writes_enabled=cluster_writes_enabled())
+                              trusted=has_verified_provenance, writes_enabled=cluster_writes_enabled(),
+                              analyses=ChangeAnalysisRepository(db), analyser=analyser, experiments=ExperimentRepository(db))
 
 
 def get_research_application_service(db: Session = Depends(get_db),
-                                     gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier)) -> ApplicationService:
+                                     gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier),
+                                     analyser: ChangeAnalyser = Depends(get_research_change_analyser)) -> ApplicationService:
     """Applies a RESEARCH-approved recommendation. Its YAML is never 'applicable' at the production gate, by design."""
     return ApplicationService(ApprovalRepository(db), AppliedChangeRepository(db), gateway, tier=RESEARCH,
                               trusted=has_research_provenance, require_applicable=False,
-                              writes_enabled=cluster_writes_enabled())
+                              writes_enabled=cluster_writes_enabled(),
+                              analyses=ChangeAnalysisRepository(db), analyser=analyser, experiments=ExperimentRepository(db))
 
 
 def get_research_application_evaluator(
@@ -430,6 +450,41 @@ def reject_research_recommendation(
     return _to_response(approval)
 
 
+@router.get("/live/failures")
+def read_live_failures(
+    response: Response,
+    workflow_id: str | None = Query(None, description="Frozen workflow to assess (required)"),
+    namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+) -> dict:
+    """Every worker node assessed as the failure, each with its own selected candidate (read-only; nothing is applied)."""
+    if not workflow_id:
+        raise unavailable("RECOMMENDATION_EVIDENCE_UNAVAILABLE", "Name the frozen workflow to assess (workflow_id).", "recommendation")
+    try:
+        overview = build_live_failures(workflow_id, namespace)
+    except ValueError as error:
+        raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
+    response.headers["X-Evidence-Source"] = overview["source"]
+    return overview
+
+
+@router.get("/declared/failures")
+def read_declared_failures(
+    response: Response,
+    workflow_id: str | None = Query(None, description="Declared workflow to assess (required)"),
+    namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+) -> dict:
+    """The same overview for a DECLARED workflow. Labelled declared-workflow; nothing here is approvable."""
+    if not workflow_id:
+        raise unavailable("RECOMMENDATION_EVIDENCE_UNAVAILABLE", "Name the declared workflow to assess (workflow_id).", "recommendation")
+    try:
+        overview = build_declared_failures(workflow_id, namespace)
+    except ValueError as error:
+        raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
+    response.headers["X-Evidence-Source"] = overview["source"]
+    response.headers["X-Evidence-Approvable"] = "false"
+    return overview
+
+
 @router.get("/context")
 def read_recommendation_context(
     namespace: str | None = Query(None, description="Application namespace; default: the only one with applications"),
@@ -581,6 +636,33 @@ def _applied(service: ApplicationService, recommendation_id: str, action: Callab
     return service.status(recommendation_id)
 
 
+@router.get("/applications/current")
+def get_current_application(
+    production: ApplicationService = Depends(get_application_service),
+    research: ApplicationService = Depends(get_research_application_service),
+) -> dict:
+    """The most recent applied change of either tier, with its live status, whichever recommendation is selected on the page.
+
+    This is how a reloaded page finds the operation again without repeating Apply: the change is stored server-side under its own
+    application id, independent of the current rankings. It reads and records progress; it applies nothing.
+    """
+    last = production.repository.latest()
+    if last is None:
+        return {"application": None, "tier": None}
+    service = research if last.tier == RESEARCH else production
+    return service.status(last.recommendation_id)
+
+
+@router.get("/applications")
+def list_applications(limit: int = Query(20, ge=1, le=100), production: ApplicationService = Depends(get_application_service)) -> dict:
+    """Recent applied changes, newest first, as stored (no cluster read): the operation history."""
+    return {"applications": [{
+        "applicationId": c.application_id, "recommendationId": c.recommendation_id, "tier": c.tier, "namespace": c.namespace,
+        "status": c.status, "appliedBy": c.applied_by, "appliedAt": c.applied_at.isoformat(),
+        "resetAt": c.reset_at.isoformat() if c.reset_at else None, "deployments": c.deployments,
+        "rolloutState": (c.rollout or {}).get("state")} for c in production.repository.recent(limit)]}
+
+
 @router.get("/{recommendation_id}/application")
 def get_application(recommendation_id: str, service: ApplicationService = Depends(get_application_service)) -> dict:
     return service.status(recommendation_id)
@@ -603,6 +685,18 @@ def reset_recommendation(
     service: ApplicationService = Depends(get_application_service),
 ) -> dict:
     return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+
+
+@router.post("/{recommendation_id}/analysis/retry")
+def retry_analysis(recommendation_id: str, service: ApplicationService = Depends(get_application_service)) -> dict:
+    """Run a failed post-change recalculation again. It never applies or resets anything."""
+    return _applied(service, recommendation_id, lambda: service.retry_analysis(recommendation_id))
+
+
+@router.post("/declared/{recommendation_id}/analysis/retry")
+def retry_research_analysis(recommendation_id: str,
+                            service: ApplicationService = Depends(get_research_application_service)) -> dict:
+    return _applied(service, recommendation_id, lambda: service.retry_analysis(recommendation_id))
 
 
 @router.get("/declared/{recommendation_id}/application")

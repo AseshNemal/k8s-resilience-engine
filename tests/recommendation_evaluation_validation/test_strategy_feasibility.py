@@ -256,16 +256,20 @@ def types(g):
     return sorted(c.recommendation_type for c in generate_candidates(context(g)))
 
 
-def test_a_concentrated_service_with_several_replicas_gets_only_a_spread():
-    assert types(graph(["n1", "n1", "n1"])) == ["TOPOLOGY_SPREAD"]
+VARIANTS = ["REPLICA_INCREASE_ANTI_AFFINITY", "REPLICA_INCREASE_PLUS_2"]
+
+
+def test_a_concentrated_service_with_several_replicas_gets_a_spread_and_the_two_replica_variants_but_not_the_single_replica_increase():
+    assert types(graph(["n1", "n1", "n1"])) == sorted(["TOPOLOGY_SPREAD", *VARIANTS])
 
 
 def test_a_single_replica_service_gets_a_replica_increase_as_well_as_the_spread_that_cannot_help():
-    assert types(graph(["n1"])) == ["REPLICA_INCREASE", "TOPOLOGY_SPREAD"]
+    assert types(graph(["n1"])) == sorted(["REPLICA_INCREASE", "TOPOLOGY_SPREAD", *VARIANTS])
 
 
 def test_soft_anti_affinity_adds_a_hardening_candidate_and_required_anti_affinity_does_not():
-    assert types(graph(["n1", "n1"], pod_anti_affinity_rules=SOFT)) == ["POD_ANTI_AFFINITY", "TOPOLOGY_SPREAD"]
+    assert types(graph(["n1", "n1"], pod_anti_affinity_rules=SOFT)) == sorted(["POD_ANTI_AFFINITY", "TOPOLOGY_SPREAD", *VARIANTS])
+    # a required term already there: a patch would rewrite it, so neither the hardening nor a replica variant is offered
     assert types(graph(["n1", "n1"], pod_anti_affinity_rules=REQUIRED)) == ["TOPOLOGY_SPREAD"]
 
 

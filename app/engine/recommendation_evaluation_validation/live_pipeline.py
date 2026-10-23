@@ -82,7 +82,9 @@ from app.engine.recommendation_evaluation_validation.live_scheduling_evidence im
 from app.engine.recommendation_evaluation_validation.service import evaluate_candidate
 from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
     ANTI_AFFINITY_MODEL,
+    REPLICA_INCREASE_ANTI_AFFINITY_MODEL,
     REPLICA_INCREASE_MODEL,
+    REPLICA_INCREASE_PLUS_2_MODEL,
 )
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.recommendation import RecommendationCandidate, RecommendationReport
@@ -91,10 +93,13 @@ COMPONENT = "recommendation"
 
 # Spread and anti-affinity add no replicas, so they need no extra capacity; a replica increase adds one. The disruption of applying it
 # (a pod-template edit rolls out every pod of the Deployment) is a separate, future operational cost.
-RESOURCE_COST = {"TOPOLOGY_SPREAD": "LOW", "POD_ANTI_AFFINITY": "LOW", "REPLICA_INCREASE": "MEDIUM"}
+RESOURCE_COST = {"TOPOLOGY_SPREAD": "LOW", "POD_ANTI_AFFINITY": "LOW", "REPLICA_INCREASE": "MEDIUM",
+                 "REPLICA_INCREASE_ANTI_AFFINITY": "MEDIUM", "REPLICA_INCREASE_PLUS_2": "HIGH"}
 
 # The model each strategy's verdict was reached under (None: the plain spread's, which is the default of the digest).
-STRATEGY_MODELS = {"POD_ANTI_AFFINITY": ANTI_AFFINITY_MODEL, "REPLICA_INCREASE": REPLICA_INCREASE_MODEL}
+STRATEGY_MODELS = {"POD_ANTI_AFFINITY": ANTI_AFFINITY_MODEL, "REPLICA_INCREASE": REPLICA_INCREASE_MODEL,
+                   "REPLICA_INCREASE_ANTI_AFFINITY": REPLICA_INCREASE_ANTI_AFFINITY_MODEL,
+                   "REPLICA_INCREASE_PLUS_2": REPLICA_INCREASE_PLUS_2_MODEL}
 
 # Ordered so the dearest member decides the cost of a combination.
 COST_ORDER = ("LOW", "MEDIUM", "HIGH")
@@ -141,6 +146,18 @@ def _impact_snapshot(report) -> ImpactSnapshot:
         node_blast={risk.node: risk.blast_radius for risk in report.node_risk_ranking},
         basis=SINGLE_WORKFLOW,
     )
+
+
+def impact_detail(report) -> dict[str, Any]:
+    """Component 3's report for one assumed node failure, as the display detail the application analysis keeps.
+
+    Kept in ``details`` (display only, never part of an approval's fingerprint), so the pre-change baseline and the
+    proposal's prediction can be shown beside the post-change recalculation without being computed again.
+    """
+    return {
+        "blastRadius": report.blast_radius, "survivability": report.survivability,
+        "failedServices": list(report.failed_services), "failedWorkflows": list(report.failed_workflows),
+    }
 
 
 def scheduling_evidence_for(deployment) -> SchedulingEvidence:
@@ -257,6 +274,7 @@ def _evaluate_combinations(
             "currentPlacement": {svc: _current_placement(deployment, svc) for svc in result.services},
             "simulatedDeployment": _dump(simulation.simulated_deployment),
             "podsToRecreate": list(simulation.pods_to_recreate),
+            "predictedImpact": impact_detail(after),
         }
         outcomes[combo_id] = _Outcome(
             COMBINATION, simulation.service, True, after.blast_radius,
@@ -337,6 +355,9 @@ def _require_complete_topology(workflow, discovery) -> None:
             details={"services": [{"service": n, "reasons": r} for n, r in sorted(blocked.items())]})
 
 
+require_complete_topology = _require_complete_topology     # public name for Member 4's own post-change analysis
+
+
 def build_declared_recommendation(
     workflow_id: str,
     failed_node: str | None = None,
@@ -367,6 +388,76 @@ def build_declared_recommendation(
         EvidenceProvenance(DECLARED_WORKFLOW_SOURCE, namespace, discovery.captured_at, discovery.status, None),
         failed_node, scheduling_evidence=scheduling_evidence_for(deployment), combination_budget=combination_budget)
     return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts, "declaredWorkflow": declared.to_dict()})
+
+
+FAILURES_SCOPE = (
+    "Each worker node is assessed as its own failure, with its own candidates and its own ranking. A ranking compares candidates against ONE assessed "
+    "failure, so rankings of different failures are never merged or compared; open a failure to see its ranked candidates."
+)
+
+
+def failure_overview(workflow, deployment, provenance: EvidenceProvenance, *, scheduling_evidence: SchedulingEvidence,
+                     combination_budget: int = DEFAULT_EVALUATION_BUDGET) -> dict[str, Any]:
+    """Every worker node assessed as the failure, with that failure's own selected candidate. Reads nothing; changes nothing.
+
+    A node is a single point of failure for the workflow when its loss has a blast radius above zero. Nodes are listed worst first
+    (ties: by name). Per failure the full pipeline runs, so every number is the one the detail page shows for that node.
+    """
+    if not deployment.nodes:
+        raise EvidenceError("RECOMMENDATION_EVIDENCE_UNAVAILABLE", "The topology has no worker nodes, so there is no failure to recommend against.",
+                            http_status=409, component=COMPONENT)
+    failures = []
+    for node in sorted(n.name for n in deployment.nodes):
+        live = evaluate_recommendation(workflow, deployment, provenance, node, scheduling_evidence=scheduling_evidence,
+                                       combination_budget=combination_budget)
+        ranked = live.evidence["ranking"]["candidates"]
+        selected = next((c for c in live.report.recommendations if c.id == live.report.selected_recommendation_id), None)
+        failures.append({
+            "failedNode": node,
+            "blastRadiusBefore": live.evidence["blastRadiusBefore"],
+            "singlePointOfFailure": live.evidence["blastRadiusBefore"] > 0,
+            "candidates": len(live.report.recommendations),
+            "feasible": sum(1 for c in live.report.recommendations if c.feasible),
+            "ranked": sum(1 for entry in ranked.values() if entry.get("rank") is not None),
+            "selected": None if selected is None else {
+                "id": selected.id, "type": selected.type, "service": selected.service, "score": selected.score,
+                "predictedBlastRadius": selected.predicted_blast_radius, "riskReduction": selected.risk_reduction,
+                "resourceCost": selected.resource_cost},
+        })
+    failures.sort(key=lambda row: (-row["blastRadiusBefore"], row["failedNode"]))
+    return {"workflowId": workflow.workflow_id, "namespace": provenance.namespace, "source": provenance.source,
+            "scope": FAILURES_SCOPE, "failures": failures,
+            "singlePointsOfFailure": [row["failedNode"] for row in failures if row["singlePointOfFailure"]]}
+
+
+def build_live_failures(workflow_id: str, namespace: str = "default", *, combination_budget: int = DEFAULT_EVALUATION_BUDGET) -> dict[str, Any]:
+    """``failure_overview`` for a frozen workflow on the connected cluster (the same inputs as ``build_live_recommendation``)."""
+    inputs = get_runtime_component_inputs(workflow_id, namespace)
+    deployment, _facts = enrich_scheduling_facts(inputs.deployment, inputs.namespace)
+    return failure_overview(
+        inputs.workflow, deployment,
+        EvidenceProvenance(LIVE_EVIDENCE_SOURCE, inputs.namespace, inputs.topology_captured_at, inputs.topology_status,
+                           inputs.workflow_freeze_id),
+        scheduling_evidence=scheduling_evidence_for(deployment), combination_budget=combination_budget)
+
+
+def build_declared_failures(workflow_id: str, namespace: str = "default", *, combination_budget: int = DEFAULT_EVALUATION_BUDGET,
+                            declaration_path: str | None = None) -> dict[str, Any]:
+    """``failure_overview`` for a DECLARED workflow (same inputs, same labelling as ``build_declared_recommendation``)."""
+    from app.engine.deployment_topology_modeling.service import discover_live
+
+    declared = get_declared_workflow(workflow_id, declaration_path)
+    namespace = (namespace or "").strip()
+    if not namespace:
+        raise ValueError("namespace must be a non-empty string")
+    discovery = discover_live(namespace=namespace)
+    _require_complete_topology(declared.graph, discovery)
+    deployment, _facts = enrich_scheduling_facts(discovery.graph.model_copy(deep=True), namespace)
+    overview = failure_overview(
+        declared.graph.model_copy(deep=True), deployment,
+        EvidenceProvenance(DECLARED_WORKFLOW_SOURCE, namespace, discovery.captured_at, discovery.status, None),
+        scheduling_evidence=scheduling_evidence_for(deployment), combination_budget=combination_budget)
+    return {**overview, "declaredWorkflow": declared.to_dict()}
 
 
 def evaluate_recommendation(
@@ -416,7 +507,7 @@ def evaluate_recommendation(
             return
 
         coverage = _coverage(deployment, spec.service)
-        after_snapshot, predicted, reduction = None, before.blast_radius, 0.0
+        after_snapshot, predicted, reduction, predicted_impact = None, before.blast_radius, 0.0, None
         if simulated.feasible:
             try:
                 after = predict_failure_impact(workflow, simulated.simulated_deployment, failed_node)
@@ -425,6 +516,7 @@ def evaluate_recommendation(
             if after is not None:
                 after_snapshot = _impact_snapshot(after)
                 predicted, reduction = after.blast_radius, round(before.blast_radius - after.blast_radius, 2)
+                predicted_impact = impact_detail(after)
         candidate_id = f"rec-{workflow_id}-{spec.service}-{spec.recommendation_type}".lower().replace("_", "-")
         feasibility[candidate_id] = simulated.feasibility.to_dict() | {
             "constraintsDigest": scheduling_basis(deployment, [spec.service], model=STRATEGY_MODELS.get(spec.recommendation_type))}
@@ -444,6 +536,7 @@ def evaluate_recommendation(
             "simulatedDeployment": _dump(simulated.simulated_deployment) if simulated.feasible else None,
             "podsToRecreate": list(simulated.pods_to_recreate),
             "addedReplicas": list(simulated.added_replicas),
+            "predictedImpact": predicted_impact,
         }
         if spec.recommendation_type in PAIRABLE and simulated.feasible:      # verified individually, even when it improves nothing on its own
             members.append(Member(id=candidate_id, service=spec.service, feasibility=simulated.feasibility,
@@ -519,5 +612,6 @@ def evaluate_recommendation(
     }
     return LiveRecommendation(
         report=report, evidence=evidence,
-        details={"currentDeployment": _dump(deployment), "candidates": candidate_details},
+        details={"currentDeployment": _dump(deployment), "candidates": candidate_details,
+                 "baselineImpact": impact_detail(before)},
     )

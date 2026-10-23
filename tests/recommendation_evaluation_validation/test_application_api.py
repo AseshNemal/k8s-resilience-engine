@@ -120,3 +120,53 @@ def test_a_request_cannot_arm_the_backend(client, connected, approved_candidate,
                           headers={"RESILIENCE_ALLOW_CLUSTER_WRITES": "1"})
 
     assert refused.status_code == 403 and connected.patches == []
+
+
+# --- the operation: recovery, history, retry ----------------------------------------------------------------------------------------
+
+
+def test_the_current_application_is_found_again_whichever_recommendation_is_selected(client, connected, approved_candidate):
+    assert client.get(f"{PROD}/applications/current").json() == {"application": None, "tier": None}
+    client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
+
+    current = client.get(f"{PROD}/applications/current")
+
+    assert current.status_code == 200
+    body = current.json()
+    assert body["recommendationId"] == approved_candidate and body["tier"] == "research"
+    assert body["application"]["status"] == "APPLIED" and body["operation"]["direction"] == "apply"
+    assert body["analysis"]["apply"]["baseline"]["blastRadius"] == 100.0
+    assert body["rollout"]["state"] in ("rolling-out", "completed")
+    assert len(connected.patches) == 1, "asking again applied nothing"
+
+
+def test_the_history_lists_each_application_from_storage_without_reading_the_cluster(client, connected, approved_candidate):
+    client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
+    client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh"})
+    reads = connected.reads
+
+    history = client.get(f"{PROD}/applications").json()["applications"]
+
+    assert [(a["recommendationId"], a["status"], a["tier"]) for a in history] == [(approved_candidate, "RESET", "research")]
+    assert connected.reads == reads
+    assert client.get(f"{PROD}/applications", params={"limit": 0}).status_code == 422
+
+
+def test_retrying_an_analysis_that_did_not_fail_is_refused_and_applies_nothing(client, connected, approved_candidate):
+    client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
+    client.get(f"{RESEARCH}/{approved_candidate}/application")
+
+    refused = client.post(f"{RESEARCH}/{approved_candidate}/analysis/retry")
+
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] in ("ANALYSIS_NOT_RETRYABLE", "ROLLOUT_NOT_COMPLETE")
+    assert len(connected.patches) == 1 and connected.restores == []
+    assert client.post(f"{PROD}/{approved_candidate}/analysis/retry").status_code == 409
+
+
+def test_the_status_carries_the_operation_the_page_draws(client, connected, approved_candidate):
+    client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
+
+    body = client.get(f"{RESEARCH}/{approved_candidate}/application").json()
+
+    assert set(body["operation"]) >= {"direction", "stage", "stages", "tone", "headline", "nextAction", "steps", "inProgress", "pollMs", "connectionLost"}
+    assert body["states"]["experimentallyValidated"] is False and "experiments" in body

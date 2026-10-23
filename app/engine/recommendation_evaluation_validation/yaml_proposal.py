@@ -50,7 +50,9 @@ from app.engine.recommendation_evaluation_validation.feasibility_analyzer import
 from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
     ADDED_MARKER,
     ANTI_AFFINITY_MODEL,
+    REPLICA_INCREASE_ANTI_AFFINITY_MODEL,
     REPLICA_INCREASE_MODEL,
+    REPLICA_INCREASE_PLUS_2_MODEL,
     has_hostname_spread,
     has_required_anti_affinity,
     self_anti_affinity_term,
@@ -61,8 +63,12 @@ HOSTNAME = "kubernetes.io/hostname"
 TOPOLOGY_SPREAD = "TOPOLOGY_SPREAD"
 POD_ANTI_AFFINITY = "POD_ANTI_AFFINITY"
 REPLICA_INCREASE = "REPLICA_INCREASE"
+REPLICA_INCREASE_ANTI_AFFINITY = "REPLICA_INCREASE_ANTI_AFFINITY"
+REPLICA_INCREASE_PLUS_2 = "REPLICA_INCREASE_PLUS_2"
+REPLICA_TYPES = (REPLICA_INCREASE, REPLICA_INCREASE_ANTI_AFFINITY, REPLICA_INCREASE_PLUS_2)
 COMBINATION = "COMBINATION"
-MODELS = {TOPOLOGY_SPREAD: STRATEGY_MODEL, POD_ANTI_AFFINITY: ANTI_AFFINITY_MODEL, REPLICA_INCREASE: REPLICA_INCREASE_MODEL}
+MODELS = {TOPOLOGY_SPREAD: STRATEGY_MODEL, POD_ANTI_AFFINITY: ANTI_AFFINITY_MODEL, REPLICA_INCREASE: REPLICA_INCREASE_MODEL,
+          REPLICA_INCREASE_ANTI_AFFINITY: REPLICA_INCREASE_ANTI_AFFINITY_MODEL, REPLICA_INCREASE_PLUS_2: REPLICA_INCREASE_PLUS_2_MODEL}
 GENERATED, REFUSED = "GENERATED", "REFUSED"
 
 NOT_APPLIED = "PROPOSAL ONLY - NOT APPLIED. A prediction from a what-if simulation; nothing has been applied or measured."
@@ -162,21 +168,23 @@ def _patch_for(service: ServicePlacement, strategy: str, added: int = 0) -> Depl
                 f"The pod labels of {service.name} are not in the evidence, so the change cannot select them.")
     pod_spec: dict[str, Any] = {}
     spec: dict[str, Any] = {}
-    if strategy == POD_ANTI_AFFINITY:
-        if has_required_anti_affinity(service):
+    if strategy in (POD_ANTI_AFFINITY, REPLICA_INCREASE_ANTI_AFFINITY):
+        if has_required_anti_affinity(service) or (strategy == REPLICA_INCREASE_ANTI_AFFINITY and has_hostname_spread(service)):
             return ("ALREADY_CONSTRAINED",
                     f"{service.name} already has required pod anti-affinity. Kubernetes replaces that list as a whole "
                     f"when it is patched, so the existing terms would be dropped; that is a different change from the "
                     f"one that was verified.")
         pod_spec["affinity"] = {"podAntiAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": [
             self_anti_affinity_term(intent.selector)]}}
+        if strategy == REPLICA_INCREASE_ANTI_AFFINITY:
+            spec["replicas"] = service.declared_replicas + added
     else:
-        if has_hostname_spread(service) or (strategy == REPLICA_INCREASE and has_required_anti_affinity(service)):
+        if has_hostname_spread(service) or (strategy in REPLICA_TYPES and has_required_anti_affinity(service)):
             return ("ALREADY_CONSTRAINED",
                     f"{service.name} already has a placement constraint on {HOSTNAME}. A strategic merge on the same "
                     f"topology key would rewrite it, which is a different change from the one that was verified.")
         pod_spec["topologySpreadConstraints"] = [_spread_constraint(service)]
-        if strategy == REPLICA_INCREASE:
+        if strategy in REPLICA_TYPES:
             spec["replicas"] = service.declared_replicas + added
     document = {
         "apiVersion": "apps/v1", "kind": "Deployment",
@@ -223,7 +231,7 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
     standing = evaluate_eligibility(live, recommendation_id)
     if not standing.eligible:
         return _refuse(recommendation_id, "NOT_ELIGIBLE", standing.reason or "Not eligible for approval.", source)
-    if candidate.type not in (TOPOLOGY_SPREAD, POD_ANTI_AFFINITY, REPLICA_INCREASE, COMBINATION):
+    if candidate.type not in (TOPOLOGY_SPREAD, POD_ANTI_AFFINITY, COMBINATION, *REPLICA_TYPES):
         return _refuse(recommendation_id, "UNSUPPORTED_TYPE",
                        f"No YAML renderer exists for {candidate.type}.", source)
 
@@ -260,6 +268,6 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
             f"and testing only."),
         yaml=text, sha256=hashlib.sha256(text.encode()).hexdigest(), fingerprint=standing.fingerprint,
         evidence_source=source, patches=tuple(patches),
-        disclosures=DISCLOSURES + (REPLICA_DISCLOSURES if REPLICA_INCREASE in strategies.values() else ()),
+        disclosures=DISCLOSURES + (REPLICA_DISCLOSURES if any(kind in REPLICA_TYPES for kind in strategies.values()) else ()),
         pod_replacement={"included": False, "pods": churn, "note": REPLACEMENT_NOTE},
     )

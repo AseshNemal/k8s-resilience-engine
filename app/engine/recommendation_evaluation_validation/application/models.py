@@ -33,6 +33,7 @@ class AppliedChange:
     detail: dict[str, Any] | None = None
     reset_by: str | None = None
     reset_at: datetime | None = None
+    rollout: dict[str, Any] | None = None   # the watched rollout of the latest write (None: predates tracking)
     id: int | None = None
 
     @property
@@ -46,5 +47,6 @@ class AppliedChange:
             "yaml": self.yaml_applied, "yamlSha256": self.yaml_sha256, "before": self.before, "cluster": self.cluster,
             "appliedBy": self.applied_by, "appliedAt": self.applied_at.isoformat(),
             "resetBy": self.reset_by, "resetAt": self.reset_at.isoformat() if self.reset_at else None,
+            "rollout": self.rollout,
             "events": self.events, "detail": self.detail,
         }

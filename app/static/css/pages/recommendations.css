@@ -166,3 +166,80 @@
 .rec-detail__approval[data-ready="true"] { color: var(--color-success); }
 .rec-detail__approval[data-ready="false"] { color: var(--color-danger); }
 @media (max-width: 640px) { .rec-detail__row { grid-template-columns: 1fr; } }
+
+/* Keep the per-node assessment readable on narrow extension windows. */
+[data-role="rec-failures"] { margin-bottom: var(--space-lg); }
+[data-role="rec-failures-result"] { overflow-x: auto; }
+
+/* ---- The applied change: one persisted operation from Apply to Reset (drawn by recommendation-operation.js) ---- */
+.rec-operation { margin-bottom: var(--space-lg); }
+.rec-operation[hidden], .rec-operation [hidden] { display: none !important; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.op { display: grid; gap: var(--space-md); }
+.op__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.op__head .section-header__title { margin: 0; }
+
+/* Review → Approved → Applying → Rollout → Analysis → Results. The current one is marked by text and weight, not by colour alone. */
+.op-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs); counter-reset: stage; }
+.op-stage { counter-increment: stage; display: flex; align-items: center; gap: var(--space-xs); padding: 4px 10px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 12px; color: var(--color-text-muted); background: var(--color-surface-soft); }
+.op-stage::before { content: counter(stage); font-weight: 700; }
+.op-stage--done { color: var(--color-success); border-color: var(--color-success); }
+.op-stage--done::before { content: "✓"; }
+.op-stage--current { color: var(--color-text); border-color: var(--color-primary); border-width: 2px; font-weight: 700; background: var(--color-surface); }
+
+.op-headline { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+
+/* No completion percentage exists, so waiting is an indeterminate bar. */
+.op-progress { height: 6px; border-radius: 3px; background: var(--color-border); overflow: hidden; }
+.op-progress__bar { height: 100%; width: 35%; background: var(--color-primary); border-radius: 3px; animation: op-indeterminate 1.4s ease-in-out infinite; }
+@keyframes op-indeterminate { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .op-progress__bar { animation: none; width: 100%; opacity: 0.5; } }
+
+.op-actions, .op-confirm .approval-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.op-actions:empty { display: none; }
+
+.op-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); font-size: 13px; }
+.op-step { padding: 6px 10px; border: 1px solid var(--color-border); border-left-width: 4px; border-radius: var(--radius-small); }
+.op-step--done { border-left-color: var(--color-success); }
+.op-step--active { border-left-color: var(--color-primary); font-weight: 600; }
+.op-step--attention { border-left-color: var(--color-danger); }
+.op-step--pending { border-left-color: var(--color-border); color: var(--color-text-muted); }
+
+.op-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-md); }
+.op-cards:empty { display: none; }
+.op-card { display: grid; gap: var(--space-xs); align-content: start; padding: var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface-soft); min-width: 0; }
+.op-card .status-badge { justify-self: start; }
+.op-card__title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-muted); }
+.op-card__value { font-size: 26px; font-weight: 700; }
+.op-card__sub { font-size: 12px; overflow-wrap: anywhere; }
+.op-card__missing { font-size: 13px; color: var(--color-text-muted); }
+
+.op-bars { display: grid; gap: var(--space-xs); }
+.op-bar-row { display: grid; grid-template-columns: 6rem minmax(0, 1fr) 4.5rem; align-items: center; gap: var(--space-sm); font-size: 12px; }
+.op-bar-row__track { height: 10px; border-radius: 5px; background: var(--color-border); overflow: hidden; }
+.op-bar-row__fill { display: block; height: 100%; background: var(--color-primary); }
+.op-bar-row__value { text-align: right; font-variant-numeric: tabular-nums; }
+.op-reduction__line { margin: 0 0 var(--space-xs); font-size: 13px; }
+.op-subtitle { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-muted); margin-bottom: var(--space-xs); }
+
+.op-details > summary, .op-raw > summary { cursor: pointer; font-weight: 600; }
+.op-facts { display: grid; grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr); gap: var(--space-xs) var(--space-md); margin: 0; font-size: 13px; }
+.op-facts dt { color: var(--color-text-muted); }
+.op-facts dd { margin: 0; overflow-wrap: anywhere; }
+.op-events, .op-limits { margin: 0; padding-left: 1.2rem; font-size: 12px; overflow-wrap: anywhere; }
+.op-pre { margin: 0; padding: var(--space-sm); max-height: 20rem; overflow: auto; font-family: var(--font-mono); font-size: 12px; background: var(--color-surface-soft); border: 1px solid var(--color-border); border-radius: var(--radius-small); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Docker Desktop windows can be narrow: stack the cards and the facts, and let wide tables scroll inside their own box. */
+@media (max-width: 768px) {
+    .op-cards { grid-template-columns: 1fr; }
+    .op-facts { grid-template-columns: 1fr; }
+    .op-bar-row { grid-template-columns: 5rem minmax(0, 1fr) 4rem; }
+}
+
+/* The proposal under review: each fact says what kind of fact it is. */
+.rec-summary { display: grid; grid-template-columns: minmax(8rem, 13rem) minmax(0, 1fr); gap: var(--space-xs) var(--space-md); margin: 0 0 var(--space-md); font-size: 13px; }
+.rec-summary dt { color: var(--color-text-muted); }
+.rec-summary dd { margin: 0; overflow-wrap: anywhere; }
+.rec-summary__kind { display: inline-block; margin-left: var(--space-sm); padding: 0 6px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 11px; color: var(--color-text-muted); }
+.rec-summary__kind--missing { margin-left: 0; border-color: var(--color-danger); color: var(--color-danger); }
+@media (max-width: 640px) { .rec-summary { grid-template-columns: 1fr; } }

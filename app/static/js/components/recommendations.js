@@ -237,29 +237,44 @@
         renderApprovalState(result.payload, result.provenance);
     }
 
-    // ---- Apply and Reset (an approved change, on the connected cluster) --------------------------------
+    // ---- Apply (an approved change, on the connected cluster) ---------------------------------------------
+    // The approval box only OFFERS Apply for the selected, approved recommendation. What happens after the click (the immediate "Applying
+    // change…", the rollout, the analysis, Reset) belongs to the applied-change panel above, which is keyed by the application the server
+    // stored and so outlives this box, the selection and the rankings (recommendation-operation.js).
 
-    const APPLY_NOTE = "Applying changes the connected cluster. It patches only the Deployments in the approved YAML above (more replicas, a " +
-        "hostname spread, required anti-affinity), stores the state it replaces, and rolls their pods out again. Reset puts that stored " +
-        "state back.";
-    const APPLICATION_VARIANT = { APPLIED: "warning", RESET: "success", FAILED: "danger", RESET_FAILED: "danger", APPLYING: "warning" };
+    const operationModule = window.ResilienceRecommendationOperation;
+    const operationRoot = document.querySelector('[data-role="rec-operation"]');
+    const operationTemplate = document.querySelector('[data-role="operation-template"]');
+    let applicationBox = null;                              // the Apply box currently on screen, and the recommendation it is for
+    let applicationBoxFor = null;
+    let applyConfirming = false;
+    let operationPanel = null;
 
-    // Shown only for an APPROVED request. The server decides whether it can be applied or reset (canApply / canReset) and re-checks everything
-    // when it is asked; this collects the named person and asks once more before anything is written.
+    function operationBusy() {
+        return !!operationPanel && !!operationPanel.state().pending;
+    }
+
+    // Shown only for an APPROVED request. The server decides whether it can be applied (canApply) and re-checks everything when it is
+    // asked; this collects the named person and asks once more before anything is written.
     function renderApplication(stateContainer) {
         const box = document.createElement("div");
         box.className = "stack-sm";
         box.setAttribute("data-role", "application");
         stateContainer.append(box);
-        const requestedFor = currentRecommendation.id;
-        callApproval("GET", "/application").then((result) => {
-            if (!currentRecommendation || currentRecommendation.id !== requestedFor) return;
-            if (!result.ok) return fillApplication(box, null, errorText(result, "Could not read what has been applied."));
-            fillApplication(box, result.payload);
-        });
+        applicationBox = box;
+        applicationBoxFor = currentRecommendation.id;
+        applyConfirming = false;
+        refreshApplication(box, applicationBoxFor);
     }
 
-    function fillApplication(box, status, message, confirming) {
+    async function refreshApplication(box, requestedFor) {
+        const result = await callApproval("GET", "/application");
+        if (!currentRecommendation || currentRecommendation.id !== requestedFor || applicationBox !== box) return;
+        if (!result.ok) return fillApplication(box, null, errorText(result, "Could not read what has been applied."));
+        fillApplication(box, result.payload);
+    }
+
+    function fillApplication(box, status, message) {
         box.replaceChildren();
         const heading = document.createElement("strong");
         heading.textContent = "Apply to the connected cluster";
@@ -269,44 +284,39 @@
             return;
         }
         const application = status.application;
-        box.append(approvalBadge(application ? application.status.replace("_", " ") : "Not applied",
-            application ? (APPLICATION_VARIANT[application.status] || "muted") : "muted"));
+        const busy = operationBusy();
         if (application) {
-            const detail = document.createElement("div");
-            detail.className = "text-sm text-muted";
-            detail.setAttribute("data-role", "application-detail");
-            const rollout = status.rolloutComplete === true ? "rollout settled" : status.rolloutComplete === false ? "rolling out" : "rollout unknown";
-            detail.textContent = `${application.deployments.join(", ")} in ${application.namespace} · applied by ${application.appliedBy}` +
-                (application.resetBy ? ` · reset by ${application.resetBy}` : ` · ${rollout}`);
-            box.append(detail);
-            if (application.detail && application.detail.message) box.append(applicationNote(application.detail.message, true));
+            // Progress, the result and Reset are in the applied-change panel; this only says that it exists.
+            const line = document.createElement("div");
+            line.className = "text-sm text-muted";
+            line.setAttribute("data-role", "application-detail");
+            line.textContent = `${application.deployments.join(", ")} in ${application.namespace}: ${application.status.replace("_", " ").toLowerCase()}. `
+                + "Its progress, result and Reset are in “Applied change” above.";
+            box.append(line);
         }
-        if (status.canApply || status.canReset) {
+        if (status.canApply) {
             const who = document.createElement("input");
             who.type = "text";
             who.className = "form-input";
             who.id = "apply-by";
+            who.setAttribute("aria-label", "Your name");
             who.placeholder = "Your name";
             who.value = lastApplierName;
+            who.disabled = busy;
+            who.addEventListener("input", () => { lastApplierName = who.value; });
             box.append(who);
             const row = document.createElement("div");
             row.className = "approval-actions";
-            const submit = (action) => submitApplication(box, status, action, who);
-            if (confirming) {
-                box.append(applicationNote(confirming === "apply" ? APPLY_NOTE : "Reset puts back the replica count and placement constraints " +
-                    "stored when this was applied. Other changes made to those Deployments since are kept.", false));
-                row.append(button(confirming === "apply" ? "Confirm apply" : "Confirm reset",
-                    confirming === "apply" ? "danger-button" : "primary-button", confirming === "apply" ? "btn-confirm-apply" : "btn-confirm-reset",
-                    () => submit(confirming)),
-                    button("Cancel", "secondary-button", "btn-cancel-application", () => { lastApplierName = who.value.trim() || lastApplierName; fillApplication(box, status); }));
+            if (applyConfirming) {
+                box.append(applicationNote(operationModule ? operationModule.APPLY_NOTE : "Applying changes the connected cluster.", false));
+                row.append(button("Confirm apply", "danger-button", "btn-confirm-apply", () => submitApplication(box, status, who)),
+                    button("Cancel", "secondary-button", "btn-cancel-application", () => { applyConfirming = false; fillApplication(box, status); }));
             } else {
-                if (status.canReset) row.append(button("Reset to previous state", "secondary-button", "btn-reset",
-                    () => { lastApplierName = who.value.trim() || lastApplierName; fillApplication(box, status, null, "reset"); }));
-                if (status.canApply) row.append(button("Apply to cluster", "primary-button", "btn-apply",
-                    () => { lastApplierName = who.value.trim() || lastApplierName; fillApplication(box, status, null, "apply"); }));
+                row.append(button("Apply to cluster", "primary-button", "btn-apply", () => { applyConfirming = true; fillApplication(box, status); }));
             }
+            Array.from(row.children || []).forEach((control) => { control.disabled = busy; });
             box.append(row);
-        } else if (status.reason) {
+        } else if (status.reason && !application) {
             box.append(applicationNote(status.reason, false));
         }
         if (message) box.append(applicationNote(message, true));
@@ -320,17 +330,25 @@
         return note;
     }
 
-    async function submitApplication(box, status, action, whoInput) {
+    async function submitApplication(box, status, whoInput) {
         const by = (whoInput.value || "").trim();
-        if (!by) return fillApplication(box, status, "Enter your name: applying or resetting a change is done by a named person.", action);
+        if (!operationPanel || operationBusy()) return;                        // a second click while one request is in flight does nothing
+        if (!by) return fillApplication(box, status, "Enter your name: applying a change is done by a named person.");
         lastApplierName = by;
-        const result = await callApproval("POST", `/${action}`, action === "apply" ? { appliedBy: by } : { resetBy: by });
-        if (!result.ok) {
-            // The server's refusal is the message; the status is read again so the buttons match what is true now.
-            const again = await callApproval("GET", "/application");
-            return fillApplication(box, again.ok ? again.payload : status, errorText(result, `The ${action} did not complete.`));
+        applyConfirming = false;
+        const requestedFor = currentRecommendation.id;
+        const started = operationPanel.startApply(requestedFor, isDeclared() ? "research" : "production", by);
+        fillApplication(box, status);                                          // the controls are off the moment the request is on its way
+        await started;
+        if (applicationBox === box && currentRecommendation && currentRecommendation.id === requestedFor) refreshApplication(box, requestedFor);
+    }
+
+    // The panel tells the page when the stored application changed, so the Apply box never disagrees with it.
+    function operationChanged(status) {
+        if (applicationBox && status && status.recommendationId === applicationBoxFor && currentRecommendation
+                && currentRecommendation.id === applicationBoxFor && applicationBox.isConnected !== false) {
+            fillApplication(applicationBox, status);
         }
-        fillApplication(box, result.payload);
     }
 
     async function loadApprovalState() {
@@ -469,7 +487,65 @@
         select.disabled = options.length === 0 || (options.length === 1 && !placeholder);
     }
 
+    // ---- every failure (each worker node as its own failure) --------------------------------------------
+
+    const failuresButton = document.querySelector('[data-role="rec-failures-load"]');
+    const failuresResult = document.querySelector('[data-role="rec-failures-result"]');
+    let failuresGeneration = 0;
+    let failuresFor = "";                                  // which workflow and application the table on screen was assessed for
+
+    function failuresKey() {
+        const choice = controller ? controller.selection() : { workflowId: "", namespace: "", workflowKind: "frozen" };
+        return `${choice.workflowKind}|${choice.namespace}|${choice.workflowId}`;
+    }
+
+    async function loadFailures() {
+        const choice = controller.selection();
+        if (!failuresResult) return;
+        if (!choice.workflowId) {
+            return failuresResult.replaceChildren(approvalNoteElement("Choose a workflow first: the failures are assessed for one workflow.", true));
+        }
+        const params = new URLSearchParams({ workflow_id: choice.workflowId, namespace: choice.namespace });
+        const base = choice.workflowKind === "declared" ? "/api/recommendations/declared/failures" : "/api/recommendations/live/failures";
+        const key = failuresKey();
+        const generation = ++failuresGeneration;
+        failuresFor = key;
+        if (failuresButton) failuresButton.disabled = true;
+        failuresResult.replaceChildren(approvalNoteElement("Assessing every worker node…", false));
+        try {
+            // One full evaluation per worker node runs on the server, so this is allowed longer than a single recommendation.
+            const overview = await fetchJson(`${base}?${params.toString()}`, { timeout: 120000 });
+            if (generation !== failuresGeneration || key !== failuresKey()) return;             // the person chose something else while it ran
+            failuresFor = key;
+            view.renderFailures(failuresResult, overview, (node) => {
+                if (nodeSelect) nodeSelect.value = node;
+                controller.selectFailedNode(node);
+            });
+        } catch (error) {
+            if (generation !== failuresGeneration || key !== failuresKey()) return;
+            failuresResult.replaceChildren(approvalNoteElement(
+                (error && error.message) || "The failures could not be assessed.", true));
+        } finally {
+            if (failuresButton && generation === failuresGeneration) failuresButton.disabled = false;
+        }
+    }
+
+    function approvalNoteElement(text, alert) {
+        const note = document.createElement("div");
+        note.className = "approval-note";
+        if (alert) note.setAttribute("role", "alert");
+        note.textContent = text;
+        return note;
+    }
+
     function renderContext(v) {
+        // A table assessed for another workflow or application is not shown beside this one.
+        if (failuresResult && (v.status === "loading" || (failuresFor && failuresFor !== failuresKey()))) {
+            ++failuresGeneration;
+            failuresResult.replaceChildren();
+            failuresFor = "";
+            if (failuresButton) failuresButton.disabled = false;
+        }
         if (clusterLine) {
             clusterLine.textContent = v.cluster.identity
                 ? `Connected cluster: ${v.cluster.identity}`
@@ -528,6 +604,8 @@
             simulatedDeployment: selected ? selected.simulatedDeployment : null,   // only a selected, feasible candidate has one
         };
         view.renderOutcome(region.querySelector('[data-role="rec-outcome"]'), detail.outcome);
+        view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
+            selected || null, v.cluster && v.cluster.identity ? v.cluster.identity : "");
         view.renderCandidateDetails(region.querySelector('[data-role="rec-detail-list"]'), detail);
         showMetrics(view.summarise(report, context));
         view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context);
@@ -611,6 +689,13 @@
         }
     }
 
+    if (operationModule && operationRoot && operationTemplate) {
+        operationPanel = operationModule.createOperationPanel({
+            root: operationRoot, template: operationTemplate, document,
+            fetchImpl: (url, init) => fetch(url, init), onStatus: operationChanged,
+        });
+    }
+
     controller = contextModule.createController({
         // Discovery and the failure-impact prediction run server-side, so the default 8 s is too short.
         fetchJson: (url) => fetchJson(url, { timeout: 45000 }),
@@ -622,8 +707,16 @@
     if (namespaceSelect) namespaceSelect.addEventListener("change", () => controller.selectNamespace(namespaceSelect.value));
     if (workflowSelect) workflowSelect.addEventListener("change", () => controller.selectWorkflow(workflowSelect.value));
     if (nodeSelect) nodeSelect.addEventListener("change", () => controller.selectFailedNode(nodeSelect.value));
+    if (failuresButton) failuresButton.addEventListener("click", loadFailures);
     // Choices belong to one cluster: when the connection changes, nothing chosen before is kept.
-    window.addEventListener("resilience-cluster-changed", () => controller.clusterChanged());
+    window.addEventListener("resilience-cluster-changed", () => {
+        controller.clusterChanged();
+        if (operationPanel) operationPanel.clusterChanged();
+    });
+    window.addEventListener("pagehide", () => { if (operationPanel) operationPanel.destroy(); });
 
-    document.addEventListener("DOMContentLoaded", () => controller.start());
+    document.addEventListener("DOMContentLoaded", () => {
+        controller.start();
+        if (operationPanel) operationPanel.start();         // finds an applied change again after a reload; never applies anything
+    });
 })();

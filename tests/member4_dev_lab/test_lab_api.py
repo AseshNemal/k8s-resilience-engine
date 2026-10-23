@@ -78,7 +78,12 @@ def test_insufficient_evidence_stays_insufficient_evidence(client):
     detail = client.get("/api/dev-lab/scenarios/taints-unread").json()
     candidates = detail["detail"]["candidates"]
     assert candidates
-    assert all(c["feasibility"]["status"] == "INSUFFICIENT_EVIDENCE" for c in candidates)
+    statuses = {c["id"]: c["feasibility"]["status"] for c in candidates}
+    assert set(statuses.values()) <= {"INSUFFICIENT_EVIDENCE", "INFEASIBLE"} and "FEASIBLE" not in statuses.values()
+    # the unread taints are never read as "fine": the spread and the replica variants stay INSUFFICIENT_EVIDENCE; the only INFEASIBLE verdict
+    # is a required anti-affinity that cannot give more replicas than there are nodes a node each, which counting proves
+    assert all(s == "INSUFFICIENT_EVIDENCE" for i, s in statuses.items() if not i.endswith("anti-affinity"))
+    assert any(s == "INSUFFICIENT_EVIDENCE" for s in statuses.values())
     assert any(c["feasibility"]["missingEvidence"] for c in candidates)
     assert detail["detail"]["report"]["selectedRecommendationId"] is None
     assert detail["detail"]["yaml"]["available"] is False

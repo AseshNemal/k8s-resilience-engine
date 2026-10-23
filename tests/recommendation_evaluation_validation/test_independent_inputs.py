@@ -85,7 +85,7 @@ def test_the_live_path_reaches_a_feasible_verdict_from_component_2s_data_and_a_t
 
     live = live_pipeline.build_live_recommendation("checkout", None, "shop")
 
-    (verdict,) = live.evidence["feasibility"].values()
+    verdict = next(v for k, v in live.evidence["feasibility"].items() if k.endswith("-topology-spread"))   # the plain spread; the replica variants have their own
     assert verdict["status"] == "FEASIBLE" and verdict["missingEvidence"] == []
     assert live.report.selected_recommendation_id is not None
     facts = live.evidence["schedulingFacts"]
@@ -100,7 +100,7 @@ def test_containers_read_with_no_requests_are_a_fact_not_missing_evidence_as_in_
 
     live = live_pipeline.build_live_recommendation("checkout", None, "shop")
 
-    (verdict,) = live.evidence["feasibility"].values()
+    verdict = next(v for k, v in live.evidence["feasibility"].items() if k.endswith("-topology-spread"))   # the plain spread; the replica variants have their own
     assert verdict["status"] == "FEASIBLE" and verdict["missingEvidence"] == []
 
 
@@ -111,7 +111,7 @@ def test_what_was_never_read_stays_missing_and_is_named_never_invented(monkeypat
 
     live = live_pipeline.build_live_recommendation("checkout", None, "shop")
 
-    (verdict,) = live.evidence["feasibility"].values()
+    verdict = next(v for k, v in live.evidence["feasibility"].items() if k.endswith("-topology-spread"))   # the plain spread; the replica variants have their own
     assert verdict["status"] == "INSUFFICIENT_EVIDENCE"
     assert verdict["missingEvidence"] == ["resource requests of service db (no containers captured)"]
     assert live.report.selected_recommendation_id is None

@@ -30,7 +30,7 @@ Do not rename these folders without explicit approval.
 - Shared Pydantic schemas are integration contracts.
 - Other components should use the owning component's public `service.py` interface.
 - Member 4 must call Member 3 for failure-impact recalculation rather than duplicate that algorithm.
-- Never auto-apply Kubernetes YAML.
+- Never auto-apply Kubernetes YAML. Apply and Reset are explicit, named-person steps (`application/`); a status request reads the cluster and advances the stored rollout and post-change analysis but never patches (`docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`). That analysis is a model recalculation over observed placement, not an experiment.
 - Developer approval is required before cluster changes.
 
 ## Validation

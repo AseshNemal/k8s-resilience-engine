@@ -20,7 +20,9 @@ from app.engine.recommendation_evaluation_validation.simulation_result import (
 from app.engine.recommendation_evaluation_validation.strategy_feasibility import (
     ADDED_MARKER,
     check_pod_anti_affinity_feasibility,
+    check_replica_increase_anti_affinity_feasibility,
     check_replica_increase_feasibility,
+    check_replica_increase_plus_two_feasibility,
 )
 from app.engine.simulation import simulate_deployment_change
 from app.shared.sample_loader import load_sample_json
@@ -74,6 +76,8 @@ _STRATEGIES = {
     "TOPOLOGY_SPREAD": (check_topology_spread_feasibility, _spread_mutation),
     "POD_ANTI_AFFINITY": (check_pod_anti_affinity_feasibility, _spread_mutation),
     "REPLICA_INCREASE": (check_replica_increase_feasibility, _replica_mutation),
+    "REPLICA_INCREASE_ANTI_AFFINITY": (check_replica_increase_anti_affinity_feasibility, _replica_mutation),
+    "REPLICA_INCREASE_PLUS_2": (check_replica_increase_plus_two_feasibility, _replica_mutation),
 }
 
 

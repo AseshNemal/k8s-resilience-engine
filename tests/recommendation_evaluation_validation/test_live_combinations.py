@@ -303,7 +303,11 @@ def test_unknown_node_capacity_leaves_nothing_verified_and_nothing_combined(monk
     result = live()
 
     assert all(not c.feasible for c in result.report.recommendations)
-    assert all(v["status"] == "INSUFFICIENT_EVIDENCE" for v in result.evidence["feasibility"].values())
+    statuses = {candidate: v["status"] for candidate, v in result.evidence["feasibility"].items()}
+    assert set(statuses.values()) <= {"INSUFFICIENT_EVIDENCE", "INFEASIBLE"} and "FEASIBLE" not in statuses.values()
+    # unknown capacity is never turned into a verdict by guessing; only a required anti-affinity that cannot give 4 replicas 3 nodes is
+    # infeasible, which counting proves whatever the capacity is
+    assert all(status == "INSUFFICIENT_EVIDENCE" for candidate, status in statuses.items() if not candidate.endswith("anti-affinity"))
     assert result.evidence["combinations"]["considered"] == 0 and result.evidence["combinations"]["entries"] == {}
     assert result.report.selected_recommendation_id is None
     assert any("capacity" in item for v in result.evidence["feasibility"].values() for item in v["missingEvidence"])

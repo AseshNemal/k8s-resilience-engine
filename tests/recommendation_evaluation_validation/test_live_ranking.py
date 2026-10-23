@@ -40,7 +40,7 @@ def test_the_ranked_candidate_is_scored_by_the_formula_and_selected(client, monk
 
     report = client.get(LIVE, params=PARAMS).json()
 
-    (candidate,) = report["recommendations"]
+    (candidate,) = [c for c in report["recommendations"] if c["type"] == "TOPOLOGY_SPREAD"]
     # All risk removed at the assessed node and across the cluster (benefit 1), full evidence (confidence 1),
     # two of the three ready replicas get a new target node: 1 * 1 * (1 - 0.3 * 2/3) * (1 - 0.3 * 0) = 0.8.
     assert candidate["score"] == pytest.approx(0.8)
@@ -60,7 +60,7 @@ def test_the_evidence_explains_the_ranking_and_labels_the_weights_as_experimenta
     assert ranking["basis"] == "single-workflow" and ranking["formulaVersion"]
     assert "evidence coverage" in live.evidence["confidenceMeaning"].lower()
     assert "not the accuracy" in live.evidence["confidenceMeaning"].lower()
-    (entry,) = ranking["candidates"].values()
+    (entry,) = [e for k, e in ranking["candidates"].items() if k.endswith("-topology-spread")]
     assert entry["rank"] == 1 and entry["excluded"] is None
     assert entry["components"]["placementChurn"] == pytest.approx(2 / 3)
     assert entry["components"]["survivabilityBefore"] == pytest.approx(0.0)
@@ -75,10 +75,10 @@ def test_candidates_that_are_not_verified_feasible_stay_visible_unranked_with_th
 
     live = build_live_recommendation("checkout", "w1", "shop")
 
-    (candidate,) = live.report.recommendations
+    (candidate,) = [c for c in live.report.recommendations if c.type == "TOPOLOGY_SPREAD"]
     assert candidate.feasible is False and candidate.score == 0.0
     assert live.report.selected_recommendation_id is None
-    (entry,) = live.evidence["ranking"]["candidates"].values()
+    (entry,) = [e for k, e in live.evidence["ranking"]["candidates"].items() if k.endswith("-topology-spread")]
     assert entry["rank"] is None and entry["excluded"] == "INSUFFICIENT_EVIDENCE"
     assert live.evidence["ranking"]["selectedCandidate"] is None
 
@@ -132,7 +132,7 @@ def test_a_failed_member_3_prediction_on_the_simulated_graph_is_a_visible_exclus
 
     live = build_live_recommendation("checkout", "w1", "shop")
 
-    (entry,) = live.evidence["ranking"]["candidates"].values()
+    (entry,) = [e for k, e in live.evidence["ranking"]["candidates"].items() if k.endswith("-topology-spread")]
     assert entry["rank"] is None and entry["excluded"] == "MISSING_IMPACT_EVIDENCE"
     assert live.report.selected_recommendation_id is None
 
@@ -211,7 +211,7 @@ def test_a_candidate_without_verified_feasibility_cannot_even_be_requested_on_th
         client, monkeypatch, use_cluster):
     freeze_checkout(monkeypatch)
     use_cluster(concentrated_db())      # no scheduling evidence: the live topology cannot verify feasibility
-    (candidate,) = client.get(LIVE, params=PARAMS).json()["recommendations"]
+    (candidate,) = [c for c in client.get(LIVE, params=PARAMS).json()["recommendations"] if c["type"] == "TOPOLOGY_SPREAD"]
 
     response = request_live(client, candidate["id"])
 
@@ -223,7 +223,7 @@ def test_a_feasible_candidate_with_no_predicted_gain_is_shown_but_cannot_be_requ
     freeze_checkout(monkeypatch, mandatory=("web", "db", "cart"))
     use_cluster(two_concentrated_services())
     report = client.get(LIVE, params=PARAMS).json()
-    db = next(c for c in report["recommendations"] if c["service"] == "db")
+    db = next(c for c in report["recommendations"] if c["service"] == "db" and c["type"] == "TOPOLOGY_SPREAD")
 
     response = request_live(client, db["id"])
 

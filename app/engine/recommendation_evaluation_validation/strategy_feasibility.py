@@ -22,6 +22,13 @@ virtual replica co-located with the real one and asking whether the two can be p
 real replica staying where it is whenever it can. The added replica is not "placement churn": it is not an existing pod
 being recreated. It costs real CPU and memory (MEDIUM), which the capacity check already requires to be free.
 
+REPLICA_INCREASE_ANTI_AFFINITY and REPLICA_INCREASE_PLUS_2 (added 2026-10-23, "more candidates"). The two variants of a replica increase for a
+service that is concentrated on one node but is not necessarily a single replica: ONE more replica kept apart by a REQUIRED hostname
+anti-affinity (a hard guarantee instead of a spread's skew of one, and it leaves a replica Pending when nodes run out), and TWO more replicas
+kept apart by the hostname spread (a service that must survive more than the loss of one node's share, at twice the cost). Both are judged by
+the same search as every other strategy, on a virtual copy with the added replicas co-located with the real one; neither is offered for a
+Deployment that already has a hostname spread or required anti-affinity, because the patch would rewrite it.
+
 What is not modelled (stated on each result): an autoscaler that owns the replica count, a PodDisruptionBudget, the rollout's
 transient. Nothing here applies anything.
 """
@@ -56,6 +63,8 @@ INFEASIBLE, INSUFFICIENT, FEASIBLE = (FeasibilityStatus.INFEASIBLE, FeasibilityS
 # made under the new (it is part of ``scheduling_basis``).
 ANTI_AFFINITY_MODEL = "pod-anti-affinity/required/kubernetes.io-hostname/self-selector/v1"
 REPLICA_INCREASE_MODEL = "replica-increase/+1/with-hostname-spread/v1"
+REPLICA_INCREASE_ANTI_AFFINITY_MODEL = "replica-increase/+1/with-required-anti-affinity/v1"
+REPLICA_INCREASE_PLUS_2_MODEL = "replica-increase/+2/with-hostname-spread/v1"
 
 # The name given to a replica the change would add. It is never a pod that exists.
 ADDED_MARKER = "-added-"
@@ -219,3 +228,100 @@ def check_replica_increase_feasibility(
     return dataclasses.replace(
         result, reason=f"Adding a replica to {service_name} (with a hostname spread): {result.reason}",
         assumptions=REPLICA_INCREASE_ASSUMPTIONS, not_modeled=REPLICA_INCREASE_NOT_MODELED)
+
+
+VARIANT_ASSUMPTIONS = {
+    REPLICA_INCREASE_ANTI_AFFINITY_MODEL: (
+        "The proposal is modelled as one more replica together with a required podAntiAffinity term on kubernetes.io/hostname that selects "
+        "the service's own pods: at most one replica per node.",
+        "The added replica is placed by a deterministic least-loaded prediction; the real scheduler may place it differently.",
+        *ASSUMPTIONS[2:],
+    ),
+    REPLICA_INCREASE_PLUS_2_MODEL: (
+        "The proposal is modelled as two more replicas together with a topologySpreadConstraint on kubernetes.io/hostname "
+        "(maxSkew 1, whenUnsatisfiable DoNotSchedule) so the replicas are kept spread over the nodes.",
+        "The added replicas are placed by a deterministic least-loaded prediction; the real scheduler may place them differently.",
+        *ASSUMPTIONS[2:],
+    ),
+}
+
+
+def check_replica_increase_variant_feasibility(
+    deployment: DeploymentGraph, service_name: str, evidence: SchedulingEvidence | None = None, *, added: int,
+    hard: bool, **options: Any,
+) -> FeasibilityResult:
+    """Whether adding ``added`` replica(s) to a concentrated service, kept apart by a required hostname anti-affinity (``hard``) or by
+    a hostname spread, can be placed so that no single node failure takes the service down. The deployment is only read.
+
+    Unlike ``check_replica_increase_feasibility`` the service may already run several replicas, as long as every declared replica is
+    ready (a service with unready replicas has a smaller repair to make first)."""
+    evidence = evidence if evidence is not None else SchedulingEvidence.from_graph(deployment)
+    model = REPLICA_INCREASE_ANTI_AFFINITY_MODEL if hard else REPLICA_INCREASE_PLUS_2_MODEL
+    assumptions = VARIANT_ASSUMPTIONS[model]
+    service = _service(deployment, service_name)
+    if service is None:
+        return _not_found(service_name)
+    ready = [pod for pod in service.pods if pod.ready and pod.node != UNSCHEDULED_NODE]
+    if not ready or len(ready) != service.declared_replicas:
+        return FeasibilityResult(
+            status=INFEASIBLE,
+            reason=(f"{service_name} declares {service.declared_replicas} replica(s) and has {len(ready)} ready and placed. Adding replicas "
+                    f"is proposed only when every declared replica is ready, where repairing the unready ones is the smaller change."),
+            findings=(ConstraintFinding("REPLICAS_NOT_SETTLED", INFEASIBLE,
+                                        f"{service.declared_replicas} declared, {len(ready)} ready"),))
+    if has_hostname_spread(service) or has_required_anti_affinity(service):
+        return FeasibilityResult(
+            status=INFEASIBLE,
+            reason=(f"{service_name} already has a hostname spread or required anti-affinity. The proposal would rewrite it, which is a "
+                    f"different change from the one that is modelled here."),
+            findings=(ConstraintFinding("ALREADY_CONSTRAINED", INFEASIBLE, "existing placement constraint"),))
+    intent = service.declared_intent
+    if hard and (intent is None or not intent.selector):
+        return FeasibilityResult(
+            status=INSUFFICIENT,
+            reason=(f"The pod labels of {service_name} are not in the evidence, so an anti-affinity term cannot be written for its pods "
+                    f"and its feasibility is undecided."),
+            missing_evidence=(f"declared placement intent (pod labels) of service {service_name}",))
+
+    virtual = deepcopy(deployment)
+    twin, real = _service(virtual, service_name), ready[0]
+    names = [f"{service_name}{ADDED_MARKER}{i}" for i in range(1, added + 1)]
+    for name in names:      # co-located with a real replica: the search decides where each may go
+        twin.pods.append(PodModel(name=name, node=real.node, zone=real.zone, ready=True, phase="Running",
+                                  namespace=real.namespace, owner_kind=real.owner_kind, owner_name=real.owner_name,
+                                  owner_uid=real.owner_uid))
+    twin.declared_replicas += added
+    twin.ready_replicas += added
+    if twin.declared_intent is not None:
+        twin.declared_intent.declared_replicas += added
+    if hard:
+        twin.declared_intent.pod_anti_affinity_configured = True
+        twin.declared_intent.pod_anti_affinity_rules = {
+            **twin.declared_intent.pod_anti_affinity_rules,
+            "requiredDuringSchedulingIgnoredDuringExecution": [self_anti_affinity_term(twin.declared_intent.selector)]}
+    result = check_topology_spread_feasibility(virtual, service_name, evidence, **options)
+    label = "a required hostname anti-affinity" if hard else "a hostname spread"
+
+    if result.status is FEASIBLE:
+        recreate = tuple(pod for pod in result.pods_to_recreate if ADDED_MARKER not in pod)
+        hosting = sorted(set(result.placement.values()))
+        reason = (f"Under the modelled constraints {service_name} can run {len(ready) + added} replicas ({added} added) over "
+                  f"{len(hosting)} node(s) ({', '.join(hosting)}) with {label}, so no single node failure takes the service down. "
+                  f"This is a model prediction, not a scheduler guarantee. The change adds {added} replica(s), which request more CPU "
+                  f"and memory, and edits the pod template, so the Deployment rolls out."
+                  + (f" {len(recreate)} existing replica(s) would also change node." if recreate else ""))
+        return dataclasses.replace(result, reason=reason, pods_to_recreate=recreate, assumptions=assumptions,
+                                   not_modeled=REPLICA_INCREASE_NOT_MODELED)
+    return dataclasses.replace(
+        result, reason=f"Adding {added} replica(s) to {service_name} with {label}: {result.reason}",
+        assumptions=assumptions, not_modeled=REPLICA_INCREASE_NOT_MODELED)
+
+
+def check_replica_increase_anti_affinity_feasibility(deployment: DeploymentGraph, service_name: str,
+                                                     evidence: SchedulingEvidence | None = None, **options: Any) -> FeasibilityResult:
+    return check_replica_increase_variant_feasibility(deployment, service_name, evidence, added=1, hard=True, **options)
+
+
+def check_replica_increase_plus_two_feasibility(deployment: DeploymentGraph, service_name: str,
+                                                evidence: SchedulingEvidence | None = None, **options: Any) -> FeasibilityResult:
+    return check_replica_increase_variant_feasibility(deployment, service_name, evidence, added=2, hard=False, **options)

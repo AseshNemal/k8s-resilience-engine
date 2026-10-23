@@ -1,26 +1,51 @@
-"""An in-memory cluster for Apply and Reset: the real service against Deployments that remember what was written. TEST-ONLY."""
+"""An in-memory cluster for Apply and Reset: the real service against Deployments that remember what was written. TEST-ONLY.
+
+Rollout behaviour is scripted, not simulated: by default a Deployment is settled as soon as it is written, and a test that
+wants the controller to lag, a pod to be unschedulable or a Deployment to be replaced says so with ``rollout_lag`` or the
+other switches below.
+"""
 
 from copy import deepcopy
 from dataclasses import replace
 
-from app.integrations.kubernetes.client import ConnectionFailedError
-from app.integrations.kubernetes.validation_gateway import ConflictError, ObservedDeployment, ObservedIdentity
+from app.integrations.kubernetes.client import AuthFailedError, ConnectionFailedError
+from app.integrations.kubernetes.validation_gateway import (
+    ConflictError,
+    DeploymentRollout,
+    ObservedDeployment,
+    ObservedIdentity,
+)
 
 
 class FakeApplyGateway:
     def __init__(self, deployments: list[ObservedDeployment], *, uid: str | None = "uid-docker-desktop") -> None:
-        self.deployments = {d.name: d for d in deployments}
+        self.deployments = {d.name: replace(d, uid=d.uid or f"uid-{d.name}") for d in deployments}
         self.uid = uid
         self.patches: list[dict] = []
         self.restores: list[str] = []
         self.fail_patch_after_applying: str | None = None      # the request is applied, then the connection drops
         self.fail_restore = False
         self.moved_since_read: str | None = None               # someone edits this Deployment between read and patch
+        self.rollout_lag = 0                                    # reads that still show the controller behind after a write
+        self.unreachable = False                                # every read fails like a lost connection
+        self.credential_rejected = False                        # every read fails like an expired credential
+        self.blocked_reason: str | None = None                  # the scheduler cannot place the new pods
+        self.progress_failed: str | None = None                 # Progressing=False with this reason
+        self.stale_old_pods = 0                                 # old-generation pods still owned after the write
+        self.reads = 0
+
+    def _reachable(self) -> None:
+        if self.credential_rejected:
+            raise AuthFailedError("the cluster rejected the credential")
+        if self.unreachable:
+            raise ConnectionFailedError("ConnectError")
 
     def identity(self) -> ObservedIdentity:
+        self._reachable()
         return ObservedIdentity("docker-desktop", "https://127.0.0.1:6443", self.uid, ("desktop-worker", "desktop-worker2"))
 
     def read_deployments(self, namespace: str):
+        self._reachable()
         read = {n: deepcopy(d) for n, d in self.deployments.items() if d.namespace == namespace}
         if self.moved_since_read:
             moved = self.deployments[self.moved_since_read]
@@ -49,9 +74,36 @@ class FakeApplyGateway:
             raise ConnectionFailedError("ConnectError")
         current = self.deployments[snapshot.name]
         self.deployments[snapshot.name] = replace(
-            current, resource_version=str(int(current.resource_version) + 1), replicas=snapshot.replicas,
-            topology_spread_constraints=tuple(snapshot.topology_spread_constraints), pod_anti_affinity=snapshot.pod_anti_affinity)
+            current, resource_version=str(int(current.resource_version) + 1), generation=current.generation + 1,
+            replicas=snapshot.replicas, topology_spread_constraints=tuple(snapshot.topology_spread_constraints),
+            pod_anti_affinity=snapshot.pod_anti_affinity)
         self.restores.append(snapshot.name)
 
+    def replace_deployment(self, name: str) -> None:
+        """Delete and recreate a Deployment under the same name: same spec, another identity."""
+        self.deployments[name] = replace(self.deployments[name], uid=f"uid-{name}-recreated")
+
+    def read_rollout(self, namespace: str, names):
+        self.reads += 1
+        self._reachable()
+        lagging = self.rollout_lag > 0
+        if lagging:
+            self.rollout_lag -= 1
+        found = {}
+        for name in names:
+            deployment = self.deployments.get(name)
+            if deployment is None or deployment.namespace != namespace:
+                found[name] = DeploymentRollout(name, None, None, 0, None, None, None, missing=True)
+                continue
+            desired = deployment.replicas
+            # While lagging, the controller has not observed the new generation, yet the OLD pods are all ready: that must
+            # not count as a completed rollout.
+            found[name] = DeploymentRollout(
+                name=name, generation=deployment.generation,
+                observed_generation=deployment.generation - 1 if lagging else deployment.generation,
+                desired=desired, updated=desired, total=desired + self.stale_old_pods, ready=desired, available=desired,
+                progress_failed_reason=self.progress_failed, uid=deployment.uid, blocked_reason=self.blocked_reason)
+        return found
+
     def rollout_complete(self, namespace: str, names) -> bool:
-        return True
+        return all(r.observed_generation >= r.generation and not r.missing for r in self.read_rollout(namespace, names).values())

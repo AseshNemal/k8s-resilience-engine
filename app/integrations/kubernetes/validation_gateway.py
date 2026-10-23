@@ -83,6 +83,7 @@ class ObservedDeployment:
     pod_labels: Mapping[str, str]
     topology_spread_constraints: tuple[dict[str, Any], ...] = ()
     pod_anti_affinity: dict[str, Any] | None = None
+    uid: str | None = None      # the object's identity: a Deployment deleted and recreated under the same name has another
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -92,6 +93,26 @@ class ObservedDeployment:
     @property
     def has_required_anti_affinity(self) -> bool:
         return bool((self.pod_anti_affinity or {}).get(REQUIRED_ANTI_AFFINITY))
+
+
+@dataclass(frozen=True)
+class DeploymentRollout:
+    """The rollout-relevant status of one Deployment: which generation the controller has observed and how many
+    of the desired replicas are updated, ready and available. ``progress_failed_reason`` is the reason of a
+    Progressing=False condition (for example ProgressDeadlineExceeded); ``missing`` says the Deployment is gone."""
+
+    name: str
+    generation: int | None
+    observed_generation: int | None
+    desired: int
+    updated: int | None
+    ready: int | None
+    available: int | None
+    progress_failed_reason: str | None = None
+    missing: bool = False
+    uid: str | None = None
+    blocked_reason: str | None = None     # pods of this Deployment that the scheduler reports it cannot place
+    total: int | None = None              # status.replicas: every pod the Deployment still owns, old ones included
 
 
 @dataclass(frozen=True)
@@ -167,6 +188,24 @@ def _ready_condition(node: dict) -> bool | None:
         if condition.get("type") == "Ready":
             return condition.get("status") == "True"
     return None
+
+
+def _unschedulable(pods: Sequence[dict], selector: Mapping[str, str]) -> str | None:
+    """Why the scheduler cannot place the pods a selector matches, from their own PodScheduled condition; None if none are stuck."""
+    if not selector:
+        return None
+    stuck = []
+    for pod in pods:
+        labels = _meta(pod).get("labels") or {}
+        if any(labels.get(key) != value for key, value in selector.items()):
+            continue
+        for condition in (pod.get("status") or {}).get("conditions") or []:
+            if (condition.get("type") == "PodScheduled" and condition.get("status") == "False"
+                    and condition.get("reason") == "Unschedulable"):
+                stuck.append((_meta(pod).get("name"), condition.get("message") or "Unschedulable"))
+    if not stuck:
+        return None
+    return f"{len(stuck)} pod(s) cannot be scheduled ({stuck[0][0]}: {stuck[0][1]})"
 
 
 class KubernetesTestClusterGateway:
@@ -254,23 +293,47 @@ class KubernetesTestClusterGateway:
                 selector=dict((spec.get("selector") or {}).get("matchLabels") or {}),
                 pod_labels=dict(_meta(template).get("labels") or {}),
                 topology_spread_constraints=tuple(pod_spec.get("topologySpreadConstraints") or ()),
-                pod_anti_affinity=deepcopy((pod_spec.get("affinity") or {}).get("podAntiAffinity")) or None)
+                pod_anti_affinity=deepcopy((pod_spec.get("affinity") or {}).get("podAntiAffinity")) or None,
+                uid=meta.get("uid"))
         return found
 
     def rollout_complete(self, namespace: str, names: Sequence[str]) -> bool:
-        items = {_meta(i).get("name"): i for i in self._items(
-            "deployments", f"/apis/apps/v1/namespaces/{quote(namespace, safe='')}/deployments")}
+        return all(rollout.missing is False and (rollout.observed_generation or 0) >= (rollout.generation or 0)
+                   and rollout.updated == rollout.desired and rollout.total == rollout.desired
+                   and rollout.ready == rollout.desired and rollout.available == rollout.desired
+                   for rollout in self.read_rollout(namespace, names).values())
+
+    def read_rollout(self, namespace: str, names: Sequence[str]) -> dict[str, DeploymentRollout]:
+        """The rollout status of the named Deployments, for watching a change converge. Read only.
+
+        Two reads: the namespace's Deployments, and its pods, to see whether the scheduler is refusing the new ones
+        (a Pending pod whose PodScheduled condition is False/Unschedulable and whose labels match the Deployment's selector).
+        """
+        base = f"/apis/apps/v1/namespaces/{quote(namespace, safe='')}/deployments"
+        items = {_meta(i).get("name"): i for i in self._items("deployments", base)}
+        pods = self._items("pods", f"/api/v1/namespaces/{quote(namespace, safe='')}/pods") if items else []
+        found = {}
         for name in names:
             item = items.get(name)
             if item is None:
-                return False
+                found[name] = DeploymentRollout(name, None, None, 0, None, None, None, missing=True)
+                continue
             meta, spec, status = _meta(item), item.get("spec") or {}, item.get("status") or {}
-            wanted = 1 if spec.get("replicas") is None else spec["replicas"]
-            if ((status.get("observedGeneration") or 0) < (meta.get("generation") or 0)
-                    or (status.get("updatedReplicas") or 0) != wanted or (status.get("replicas") or 0) != wanted
-                    or (status.get("availableReplicas") or 0) != wanted):
-                return False
-        return True
+            progress_failed = None
+            for condition in status.get("conditions") or []:
+                if condition.get("type") == "Progressing" and condition.get("status") == "False":
+                    progress_failed = condition.get("reason") or "ProgressingFalse"
+            found[name] = DeploymentRollout(
+                name=name,
+                generation=int(meta.get("generation") or 0),
+                observed_generation=int(status.get("observedGeneration") or 0),
+                desired=1 if spec.get("replicas") is None else int(spec["replicas"]),
+                updated=int(status.get("updatedReplicas") or 0),
+                ready=int(status.get("readyReplicas") or 0),
+                available=int(status.get("availableReplicas") or 0),
+                progress_failed_reason=progress_failed, uid=meta.get("uid"), total=int(status.get("replicas") or 0),
+                blocked_reason=_unschedulable(pods, dict((spec.get("selector") or {}).get("matchLabels") or {})))
+        return found
 
     def node_ready(self, node: str) -> bool | None:
         return _ready_condition(self._get(f"/api/v1/nodes/{quote(node, safe='')}", "nodes"))

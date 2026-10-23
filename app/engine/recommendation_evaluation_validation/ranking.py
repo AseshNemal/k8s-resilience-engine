@@ -83,7 +83,8 @@ RESOURCE_FRACTION = MappingProxyType({"LOW": 0.0, "MEDIUM": 0.5, "HIGH": 1.0})
 # same pods: the least restrictive wins (the "minimal change"). A plain spread tolerates a skew of one; required
 # anti-affinity forbids a second replica on a node and leaves replicas Pending when nodes run out. A type that is not
 # listed sorts after every listed one, so it can never silently beat a known strategy.
-RESTRICTIVENESS = MappingProxyType({"TOPOLOGY_SPREAD": 0, "COMBINATION": 0, "POD_ANTI_AFFINITY": 1, "REPLICA_INCREASE": 2})
+RESTRICTIVENESS = MappingProxyType({"TOPOLOGY_SPREAD": 0, "COMBINATION": 0, "POD_ANTI_AFFINITY": 1, "REPLICA_INCREASE": 2,
+                                 "REPLICA_INCREASE_ANTI_AFFINITY": 3, "REPLICA_INCREASE_PLUS_2": 4})
 # Component 3 reports blast radius and survivability as percentages; the two views of one node must agree.
 _PERCENT_TOLERANCE = 0.01
 

@@ -397,3 +397,77 @@ test("the module fetches nothing and contains no sample, demo or round-robin log
     assert.doesNotMatch(source, /\bfetch\s*\(/);
     assert.doesNotMatch(source, /sample|demo|round-robin|% *nodes\.length|index *% */i);
 });
+
+// ---- per-node failure assessment -----------------------------------------------------------------
+test("each failure shows its own candidate and opens that node without merging rankings", () => {
+    const o = options(); const box = o.document.container(); const opened = [];
+    view.renderFailures(box, { scope: "Separate rankings", failures: [
+        { failedNode: "worker-a", blastRadiusBefore: 100, singlePointOfFailure: true, candidates: 4, feasible: 3, ranked: 3,
+            selected: { type: "REPLICA_INCREASE_PLUS_2", service: "<img src=x>", predictedBlastRadius: 0, resourceCost: "HIGH" } },
+        { failedNode: "worker-b", blastRadiusBefore: 0, singlePointOfFailure: false, candidates: 0, feasible: 0, ranked: 0, selected: null },
+    ] }, (node) => opened.push(node), o);
+    for (const expected of ["Separate rankings", "worker-a", "100%", "3 feasible · 3 ranked of 4", "Replica Increase Plus 2", "<img src=x>", "HIGH", "Nothing to fix"]) {
+        assert.ok(text(box).includes(expected), expected);
+    }
+    const buttons = find(box, n => n.tag === "button");
+    buttons[1].listeners.click();
+    assert.deepEqual(opened, ["worker-b"]);
+    walk(box, n => assert.equal("innerHTML" in n, false));
+});
+
+test("a failure assessment with no nodes states the missing evidence", () => {
+    const o = options(); const box = o.document.container();
+    view.renderFailures(box, { scope: "Separate rankings", failures: [] }, () => {}, o);
+    assert.ok(text(box).includes("No worker nodes"));
+});
+
+// ---- the proposal under review -------------------------------------------------------------------------------------------------------
+const reviewed = (over = {}) => ({
+    evidence: { source: "declared-workflow", namespace: "shop", workflowId: "checkout", workflowFreezeId: null, failedNode: "w1", failedNodeChosen: "highest blast radius" },
+    declared: { declaredBy: "asesh" }, ...over });
+const proposed = (over = {}) => ({
+    type: "TOPOLOGY_SPREAD", service: "db", recommendedChange: "Spread the replicas across nodes", feasibility: { status: "FEASIBLE" },
+    predicted: { blastRadiusBefore: 100, blastRadiusAfter: 0, riskReduction: 100 }, cost: { resource: "LOW", configuration: "1 Deployment pod-template edit(s)" },
+    yamlProposal: { deployments: [{ service: "db", deployment: "db", namespace: "shop" }] }, ...over });
+
+test("the proposal summary names the cluster, application, workflow and its provenance, failure, strategy, targets, benefit, cost and feasibility", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed(), proposed(), "docker-desktop", o);
+
+    const shown = text(box);
+    for (const expected of ["Connected cluster", "docker-desktop", "shop", "checkout — declared by asesh, not observed or frozen", "User declaration",
+        "w1 (the node whose loss hurts most)", "Model assumption", "Topology Spread for db", "db", "100% → 0% (100 percentage points)", "Low — 1 Deployment pod-template edit(s)", "Feasible"]) {
+        assert.ok(shown.includes(expected), `${expected} in ${shown}`);
+    }
+});
+
+test("a frozen workflow is labelled as observed evidence, and a chosen failure says it was chosen", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed({ evidence: { source: "live-discovery", namespace: "shop", workflowId: "checkout", workflowFreezeId: "freeze-9", failedNode: "w2", failedNodeChosen: "requested" }, declared: undefined }),
+        proposed(), "docker-desktop", o);
+
+    assert.ok(text(box).includes("frozen by Component 1 (freeze-9)") && text(box).includes("w2 (chosen by you)"));
+    assert.ok(!text(box).includes("User declaration"));
+});
+
+test("what the summary does not have is Missing evidence, never a default or a zero", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed(), proposed({ predicted: null, cost: null, yamlProposal: {} }), "", o);
+
+    const missing = find(box, (n) => n.className && n.className.includes("rec-summary__kind--missing")).map((n) => n.textContent);
+    assert.ok(missing.length >= 4 && missing.every((m) => m === "Missing evidence"), missing.join(","));
+    assert.ok(!/NaN|undefined|null/.test(text(box)));
+});
+
+test("the summary renders server text as text only", () => {
+    const o = options(); const box = o.document.container();
+
+    view.renderProposalSummary(box, reviewed({ evidence: { source: "live-discovery", namespace: "<img src=x onerror=1>", workflowId: "<script>", failedNode: "w1", failedNodeChosen: "requested" } }),
+        proposed(), "<b>x</b>", o);
+
+    walk(box, (n) => assert.equal("innerHTML" in n, false));
+    assert.ok(text(box).includes("<img src=x onerror=1>"));
+});

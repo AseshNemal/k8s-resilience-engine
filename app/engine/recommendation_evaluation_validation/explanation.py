@@ -27,6 +27,8 @@ from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERA
 TOPOLOGY_SPREAD = "TOPOLOGY_SPREAD"
 POD_ANTI_AFFINITY = "POD_ANTI_AFFINITY"
 REPLICA_INCREASE = "REPLICA_INCREASE"
+REPLICA_INCREASE_ANTI_AFFINITY = "REPLICA_INCREASE_ANTI_AFFINITY"
+REPLICA_INCREASE_PLUS_2 = "REPLICA_INCREASE_PLUS_2"
 COMBINATION = "COMBINATION"
 
 RECOMMENDED_CHANGE = {
@@ -46,6 +48,16 @@ RECOMMENDED_CHANGE = {
         "added replica runs on a different worker node from the existing one. The edit changes the replica count and the "
         "pod template, so the Deployment rolls out."
     ),
+    REPLICA_INCREASE_ANTI_AFFINITY: (
+        "Add one replica to the Deployment together with a required podAntiAffinity term on kubernetes.io/hostname, selecting the "
+        "service's own pods, so that no two replicas share a worker node. With more replicas than usable nodes the extra replica stays "
+        "Pending. The edit changes the replica count and the pod template, so the Deployment rolls out."
+    ),
+    REPLICA_INCREASE_PLUS_2: (
+        "Add two replicas to the Deployment together with a topologySpreadConstraint on kubernetes.io/hostname, so the replicas are "
+        "kept spread over the worker nodes. This costs twice the added CPU and memory of a single extra replica. The edit changes the "
+        "replica count and the pod template, so the Deployment rolls out."
+    ),
     COMBINATION: "Apply the listed changes to each of the listed services together, as one proposal.",
 }
 
@@ -53,6 +65,10 @@ COST_NOTE = {
     "MEDIUM": (
         "Adds a replica, so one more pod's CPU and memory is requested on the node it lands on (the capacity was "
         "checked). The pod-template edit also rolls out the Deployment; that rollout disruption is not modelled."
+    ),
+    "HIGH": (
+        "Adds two replicas, so two more pods' CPU and memory are requested on the nodes they land on (the capacity was checked). The "
+        "pod-template edit also rolls out the Deployment; that rollout disruption is not modelled."
     ),
     "LOW": (
         "Adds no replicas, so no extra CPU or memory is requested. The pod-template edit rolls out every pod of the "

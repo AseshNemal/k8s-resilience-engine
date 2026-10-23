@@ -57,6 +57,10 @@ This is an early-stage scaffold, not a working system yet:
   separate, narrower **research approval tier** (`approval/research.py`, developer-approved 2026-10-23) lets a named person approve such a
   recommendation for validation on a designated test cluster only, bound to the declaration's digest; its records say `workflowBasis: DECLARED`
   and are conditional on the declaration. The production gate, its routes and its tests are unchanged. See `docs/MEMBER4_INPUT_SOURCES.md`.
+  Apply is followed through as one persisted operation (`application/rollout.py`, `analysis.py`, `live_analyser.py`, `operation.py`; additive migration `f4b91c2d7e03`): the
+  rollout is watched from the Deployments' own generation and replica counts, the failure impact is recalculated from the freshly observed topology and compared with a
+  baseline stored before the change, Reset has its own rollout, restoration check and analysis, and an "Applied change" panel (`recommendation-operation.js`, outside the
+  re-rendered region) shows it from Apply to Reset. See `docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`.
   The offline harness and benchmark (`tests/support/member4_*.py`, `experiments/member4_offline_benchmark/`,
   see `docs/MEMBER4_OFFLINE_VALIDATION.md`) are test/research only and stamp a non-live evidence source the
   approval gate refuses.
@@ -204,5 +208,7 @@ contract instead when integrating against an unfinished upstream component.
 - Never apply Kubernetes recommendations automatically — always require developer approval
   before an `apply` step. Since 2026-10-23 that step exists: `application/` (`ApplicationService`, routes `.../apply`, `.../reset`, `.../application`,
   both tiers) applies an APPROVED change to the connected cluster on a named person's request and can put the stored prior state back. It re-checks the
-  evaluation, the server-generated YAML and the proposal whitelist first, applies one change at a time, and never runs on approval or on a read.
+  evaluation, the server-generated YAML and the proposal whitelist first, applies one change at a time, and never runs on approval or on a read. A status
+  request reads the cluster and advances the stored rollout and the post-change analysis (Member 3's evaluator on a freshly observed topology), but never patches;
+  see `docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`. That analysis is a model recalculation over observed placement, not an experiment.
 - Don't claim experimental validation before controlled experiments are actually run.

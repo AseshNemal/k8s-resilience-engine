@@ -60,7 +60,7 @@ class FakeApiServer:
                              "resourceVersion": f"rv-{service}-1", "generation": 3},
                 "spec": {"replicas": count, "selector": {"matchLabels": {"app": service}},
                          "template": {"metadata": {"labels": {"app": service}}, "spec": {}}},
-                "status": {"observedGeneration": 3, "replicas": count, "updatedReplicas": done, "availableReplicas": done}}
+                "status": {"observedGeneration": 3, "replicas": count, "updatedReplicas": done, "readyReplicas": done, "availableReplicas": done}}
 
     def _replicaset(self, service: str) -> dict:
         return {"metadata": {"name": f"{service}-rs", "namespace": self.namespace, "uid": f"rs-{service}",

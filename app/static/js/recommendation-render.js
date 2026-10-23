@@ -377,7 +377,97 @@
         }
     }
 
+    // ---- every failure ---------------------------------------------------------------------------------------
+
+    /** One row per worker node assessed as the failure, each with its own selected candidate. ``onOpen(node)`` shows that failure. */
+    function renderFailures(container, overview, onOpen, options) {
+        const doc = documentOf(options);
+        container.replaceChildren();
+        container.append(element(doc, "p", overview.scope, "rec-failures__scope"));
+        if (!overview.failures.length) {
+            container.append(missingState(doc, "No worker nodes", "The topology has no worker node to assess."));
+            return;
+        }
+        const table = element(doc, "table", undefined, "data-table");
+        const head = element(doc, "tr");
+        for (const title of ["Failed node", "Blast radius", "Single point of failure", "Candidates", "Selected for this failure", "Cost", ""]) {
+            head.append(element(doc, "th", title, undefined, { scope: "col" }));
+        }
+        const body = element(doc, "tbody");
+        for (const row of overview.failures) {
+            const tr = element(doc, "tr", undefined, undefined, { "data-node": row.failedNode });
+            const selected = row.selected;
+            const open = element(doc, "button", "Show", "secondary-button", { type: "button", "data-action": "open-failure" });
+            open.addEventListener("click", () => onOpen(row.failedNode));
+            for (const value of [
+                row.failedNode,
+                percent(row.blastRadiusBefore),
+                row.singlePointOfFailure ? "Yes" : "No",
+                `${row.feasible} feasible · ${row.ranked} ranked of ${row.candidates}`,
+                selected ? `${codeLabel(selected.type)} · ${selected.service} (${percent(selected.predictedBlastRadius)} after)` : (row.singlePointOfFailure ? "None can be selected" : "Nothing to fix"),
+                selected ? selected.resourceCost : MISSING,
+            ]) {
+                tr.append(element(doc, "td", value));
+            }
+            const action = element(doc, "td");
+            action.append(open);
+            tr.append(action);
+            body.append(tr);
+        }
+        table.append(element(doc, "thead"), body);
+        table.children[0].append(head);
+        container.append(table);
+    }
+
+    // ---- the proposal under review ---------------------------------------------------------------------------
+
+    /**
+     * What is about to be approved, in one place, each fact marked with what kind of fact it is: a live observation, a user
+     * declaration, a model assumption, a prediction, or missing evidence. Nothing is computed here; every value is the engine's.
+     * ``clusterIdentity`` is the connected cluster's name when the page runs in the extension (empty otherwise).
+     */
+    function renderProposalSummary(container, detail, candidate, clusterIdentity, options) {
+        const doc = documentOf(options);
+        container.replaceChildren();
+        if (!detail || !candidate) return;
+        const evidence = detail.evidence || {};
+        const declared = evidence.source === "declared-workflow";
+        const proposal = candidate.yamlProposal || {};
+        const deployments = (proposal.deployments || []).map((d) => d.deployment);
+        const declaration = (detail.declared && detail.declared.declaredBy) || null;
+        const rows = [
+            ["Connected cluster", clusterIdentity || null, "Live observation"],
+            ["Application (namespace)", evidence.namespace, "Live observation"],
+            ["Workflow", evidence.workflowId ? `${evidence.workflowId} — ${declared
+                ? `declared${declaration ? ` by ${declaration}` : ""}, not observed or frozen` : `frozen by Component 1 (${evidence.workflowFreezeId || "freeze id not reported"})`}` : null,
+                declared ? "User declaration" : "Live observation"],
+            ["Assessed failed node", evidence.failedNode ? `${evidence.failedNode} (${evidence.failedNodeChosen === "requested" ? "chosen by you" : "the node whose loss hurts most"})` : null,
+                "Model assumption"],
+            ["Candidate strategy", `${codeLabel(candidate.type)} for ${candidate.service}`, "Prediction"],
+            ["Target Deployments", deployments.length ? deployments.join(", ") : null, "Live observation"],
+            ["Proposed change", candidate.recommendedChange, "Prediction"],
+            ["Expected benefit", candidate.predicted ? `blast radius ${percent(candidate.predicted.blastRadiusBefore)} → ${percent(candidate.predicted.blastRadiusAfter)} (${candidate.predicted.riskReduction} percentage points)` : null,
+                "Prediction"],
+            ["Resource cost", candidate.cost ? `${codeLabel(candidate.cost.resource)} — ${candidate.cost.configuration}` : null, "Model assumption"],
+            ["Feasibility", candidate.feasibility ? codeLabel(candidate.feasibility.status) : null, "Live observation"],
+        ];
+        const list = element(doc, "dl", undefined, "rec-summary");
+        for (const [term, value, kind] of rows) {
+            list.append(element(doc, "dt", term));
+            const description = element(doc, "dd");
+            if (value === null || value === undefined || value === "") {
+                description.append(element(doc, "span", "Missing evidence", "rec-summary__kind rec-summary__kind--missing"));
+            } else {
+                description.append(element(doc, "span", value), element(doc, "span", kind, "rec-summary__kind"));
+            }
+            list.append(description);
+        }
+        container.append(element(doc, "div", "Proposal under review", "op-subtitle"), list);
+    }
+
     window.ResilienceRecommendations = {
+        renderProposalSummary,
+        renderFailures,
         rankCandidates,
         selectedCandidate,
         summarise,
