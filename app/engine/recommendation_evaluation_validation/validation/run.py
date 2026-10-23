@@ -14,8 +14,11 @@ The guards, each of which refuses before anything changes:
 * the apply re-checks that the approval is still current immediately before it writes.
 
 What happens if something goes wrong. An executor error ends the run FAILED, a cut-short run INTERRUPTED, unmeasurable
-or unsettled evidence INCONCLUSIVE. A node taken down for a failure is always restored in a ``finally``; if the restore
-itself fails the result says ``needsManualRestore``. None of these states can ever be ``validated``.
+or unsettled evidence INCONCLUSIVE. A node taken down for a failure is always restored in a ``finally``, and the
+Deployments the run wrote are reverted once the run ends, in whatever state; if either restore fails the result says
+``needsManualRestore``. The revert is covered by the apply authorization: it returns the cluster to the state the person
+authorized changing, so refusing it for want of a second signature would leave the test cluster dirty. None of these
+states can ever be ``validated``.
 
 Validation outcomes are separate from the simulation: the prediction is fixed into the plan before anything runs and is
 never rewritten by what was observed.
@@ -80,6 +83,12 @@ class ValidationExecutor(Protocol):
 
     def restore_node(self, node: str) -> None:
         """Bring the node back."""
+
+    def revert(self) -> None:
+        """Put every Deployment this run wrote back to what it was before the apply, and wait for it to settle.
+
+        Called whenever an apply was attempted, even one that failed halfway (it may have written part of the patch).
+        """
 
 
 def _sha256(text: str) -> str:
@@ -147,11 +156,24 @@ class ValidationRun:
         self._baseline: ObservedOutcome | None = None
         self._after: ObservedOutcome | None = None
         self._placed: DeploymentGraph | None = None
+        self._before_graph: DeploymentGraph | None = None
+        self._baseline_failure_graph: DeploymentGraph | None = None
+        self._after_graph: DeploymentGraph | None = None
         self._stop: str | None = None
         self._manual_restore = False
+        self._apply_attempted = False
+        self._reverted: bool | None = None
+        self._result: ValidationResult | None = None
         self._log("PLANNED", f"target {plan.target.name}, plan {plan.digest[:12]}")
 
     # -- bookkeeping ----------------------------------------------------------------------------------------
+
+    @property
+    def captured(self) -> dict[str, DeploymentGraph]:
+        """The placements this run actually observed, for the record. Only what was observed is present."""
+        graphs = {"baseline": self._before_graph, "baselineFailure": self._baseline_failure_graph,
+                  "placed": self._placed, "afterFailure": self._after_graph}
+        return {name: graph.model_copy(deep=True) for name, graph in graphs.items() if graph is not None}
 
     def _log(self, event: str, detail: str = "") -> None:
         self.events.append({"at": self._clock().isoformat(), "event": event, "detail": detail})
@@ -217,6 +239,7 @@ class ValidationRun:
 
         def run() -> None:
             graph = self._fail_and_restore(self.plan.predicted.failed_node)
+            self._baseline_failure_graph = graph.model_copy(deep=True)
             self._baseline = ObservedOutcome(self._predict(graph, self.plan.predicted.failed_node), MEASURED)
             self.state = RunState.BASELINE_MEASURED
             self._log("BASELINE_MEASURED")
@@ -232,9 +255,10 @@ class ValidationRun:
         self._log("AUTHORIZED", f"{APPLY} by {authorization.confirmed_by}")
 
         def run() -> None:
+            self._before_graph = self.executor.observe()
             if self._baseline is None:
-                self._baseline = ObservedOutcome(
-                    self._predict(self.executor.observe(), self.plan.predicted.failed_node), DERIVED)
+                self._baseline = ObservedOutcome(self._predict(self._before_graph, self.plan.predicted.failed_node), DERIVED)
+            self._apply_attempted = True      # set before the write: a patch that raised may still have been partly applied
             self.executor.apply(self.plan.yaml_text)
             self.state = RunState.APPLIED
             self._log("APPLIED", f"yaml {self.plan.yaml_sha256[:12]}")
@@ -263,6 +287,7 @@ class ValidationRun:
 
         def run() -> None:
             graph = self._fail_and_restore(self.plan.predicted.failed_node)
+            self._after_graph = graph.model_copy(deep=True)
             self._after = ObservedOutcome(self._predict(graph, self.plan.predicted.failed_node), MEASURED)
             self.state = RunState.FAILURE_OBSERVED
             self._log("FAILURE_OBSERVED")
@@ -270,8 +295,33 @@ class ValidationRun:
             self._log("NEEDS_MANUAL_RESTORE", self.plan.predicted.failed_node)
         return self.state
 
+    def revert_workloads(self) -> bool | None:
+        """Put the written Deployments back (once). None when nothing was applied; False when the revert failed."""
+        if not self._apply_attempted or self._reverted is not None:
+            return self._reverted
+        try:
+            self.executor.revert()
+            self._reverted = True
+            self._log("WORKLOADS_REVERTED")
+        except Exception as error:      # noqa: BLE001  (the Deployments may still carry the patch: say so)
+            self._reverted, self._manual_restore = False, True
+            self._log("REVERT_FAILED", str(error))
+        return self._reverted
+
     def finish(self) -> ValidationResult:
-        """The verdict. Only a run that observed the failure after the change can be COMPLETED."""
+        """The verdict, asked for as often as needed: a run that has ended always gives the same one.
+
+        Anything the run wrote is reverted first, so the verdict describes a cluster that has been put back.
+        """
+        if self._result is not None:
+            return self._result
+        self.revert_workloads()
+        result = self._verdict()
+        if result.state in TERMINAL_STATES:
+            self._result = result
+        return result
+
+    def _verdict(self) -> ValidationResult:
         p = self.plan.predicted
         predicted = {"failedNode": p.failed_node, "blastRadiusBefore": p.before.blast_radius,
                      "blastRadiusAfter": p.after.blast_radius, "riskReduction": p.risk_reduction,
@@ -286,13 +336,14 @@ class ValidationRun:
                 {"blastRadiusBefore": self._baseline.report.blast_radius, "baselineBasis": self._baseline.basis,
                  "blastRadiusAfter": self._after.report.blast_radius,
                  "failedServicesAfter": list(self._after.report.failed_services)},
-                comparison, error, self._manual_restore)
+                comparison, error, self._manual_restore, self._reverted)
         if self.state in TERMINAL_STATES:
             reason = self._stop or self.state.value
         else:
             reason = f"The run stopped at {self.state.value} before the failure was observed."
-        return ValidationResult(p.recommendation_id, self.state if self.state in TERMINAL_STATES else RunState.INCONCLUSIVE,
-                                False, (reason,), predicted, {}, {}, None, self._manual_restore)
+            self._stopped(RunState.INCONCLUSIVE, reason)      # the cluster has been put back; this run cannot go on
+        return ValidationResult(p.recommendation_id, self.state, False, (reason,), predicted, {}, {}, None,
+                                self._manual_restore, self._reverted)
 
     def execute(self, apply: Authorization, failure: Authorization, baseline: Authorization | None = None) -> ValidationResult:
         """All steps in order, stopping at the first run-ending state. Each authorization is still checked per step."""
@@ -300,9 +351,13 @@ class ValidationRun:
         if baseline is not None:
             steps.append(lambda: self.measure_baseline(baseline))
         steps += [lambda: self.apply(apply), self.observe_placement, lambda: self.inject_failure(failure)]
-        for step in steps:
-            if step() in TERMINAL_STATES:
-                break
+        try:
+            for step in steps:
+                if step() in TERMINAL_STATES:
+                    break
+        except BaseException:
+            self.revert_workloads()      # a refusal after the apply must not leave the test cluster patched
+            raise
         return self.finish()
 
 

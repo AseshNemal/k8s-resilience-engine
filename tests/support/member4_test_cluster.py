@@ -51,17 +51,19 @@ class FakeTestCluster:
 
     def __init__(self, graph: DeploymentGraph, *, name: str = "kind-test", environment: str = "test",
                  scheduler: Scheduler = spread, settles: bool = True, interrupt_at: str | None = None,
-                 fail_at: str | None = None, restore_fails: bool = False) -> None:
+                 fail_at: str | None = None, restore_fails: bool = False, revert_fails: bool = False) -> None:
         self.target = TestTarget(name, environment)
         self.graph = graph.model_copy(deep=True)
         self.scheduler, self.settles = scheduler, settles
         self.interrupt_at, self.fail_at, self.restore_fails = interrupt_at, fail_at, restore_fails
+        self.revert_fails = revert_fails
         self.calls: list[str] = []
         self.down: set[str] = set()
+        self._restore_point: DeploymentGraph | None = None
 
     @property
     def wrote(self) -> bool:
-        return any(call.startswith(("apply", "fail:")) for call in self.calls)
+        return any(call.startswith(("apply", "fail:", "revert")) for call in self.calls)
 
     def _maybe_break(self, stage: str) -> None:
         if self.interrupt_at == stage:
@@ -75,6 +77,8 @@ class FakeTestCluster:
 
     def apply(self, yaml_text: str) -> None:
         self.calls.append("apply")
+        if self._restore_point is None:
+            self._restore_point = self.graph.model_copy(deep=True)      # taken before anything is written
         self._maybe_break("apply")
         documents = [doc for doc in yaml.safe_load_all(yaml_text) if doc and doc.get("kind") == "Deployment"]
         services = []
@@ -112,3 +116,10 @@ class FakeTestCluster:
         if self.restore_fails:
             raise RuntimeError("could not bring the node back")
         self.down.discard(node)
+
+    def revert(self) -> None:
+        self.calls.append("revert")
+        if self.revert_fails:
+            raise RuntimeError("could not put the Deployments back")
+        if self._restore_point is not None:
+            self.graph = self._restore_point.model_copy(deep=True)

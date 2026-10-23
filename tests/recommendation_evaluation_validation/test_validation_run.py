@@ -139,9 +139,11 @@ def test_a_completed_run_reduces_to_the_shared_validation_report():
 
 def test_the_observed_side_agrees_with_component_3_on_the_same_placement():
     scenario, _, _, plan, cluster = prepare()
-    result = run_all(plan, cluster)
+    run = ValidationRun(plan, cluster)
+    result = run.execute(*grants(plan))
 
-    direct = predict_failure_impact(scenario.workflow, cluster.graph, plan.predicted.failed_node)
+    # The run reverts the cluster when it ends, so the placement the failure hit is the one the run recorded.
+    direct = predict_failure_impact(scenario.workflow, run.captured["placed"], plan.predicted.failed_node)
 
     assert result.observed["blastRadiusAfter"] == direct.blast_radius
 

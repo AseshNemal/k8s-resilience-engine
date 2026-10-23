@@ -127,12 +127,16 @@ class ValidationResult:
     observed: dict[str, Any] = field(default_factory=dict)
     comparison: dict[str, Any] = field(default_factory=dict)
     prediction_error: float | None = None
+    # True when the node or the workloads could not be put back; the cluster then needs a person.
     needs_manual_restore: bool = False
+    # None: nothing was applied, so there was nothing to revert. False: a revert was attempted and did not complete.
+    workloads_reverted: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "recommendationId": self.recommendation_id, "state": self.state.value, "validated": self.validated,
             "reasons": list(self.reasons), "predicted": self.predicted, "observed": self.observed,
             "comparison": self.comparison, "predictionError": self.prediction_error,
-            "needsManualRestore": self.needs_manual_restore, "isMeasurement": self.state is RunState.COMPLETED,
+            "needsManualRestore": self.needs_manual_restore, "workloadsReverted": self.workloads_reverted,
+            "isMeasurement": self.state is RunState.COMPLETED,
         }
