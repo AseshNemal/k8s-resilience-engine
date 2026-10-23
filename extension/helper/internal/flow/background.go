@@ -68,7 +68,7 @@ func (d Deps) stopBackground(ctx context.Context, r Result) Result {
 
 func enableDialog(c clusters.Context, paragraph string) approve.Request {
 	name := approve.Sanitize(c.Name, 80)
-	body := fmt.Sprintf("Cluster: %s\n\nThe extension's read-only token is renewed automatically while the extension is open.\n\n%s", name, paragraph)
+	body := fmt.Sprintf("Cluster: %s\n\nThe extension's cluster token is renewed automatically while the extension is open.\n\n%s", name, paragraph)
 	return approve.Request{Title: "Resilience Engine: keep access renewed in the background?", Body: capText(body, 1800), Timeout: 90 * time.Second}
 }
 

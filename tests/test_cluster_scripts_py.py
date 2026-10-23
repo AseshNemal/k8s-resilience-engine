@@ -382,5 +382,5 @@ def test_the_prompt_text_names_what_is_granted(tmp_path, capsys):
     grant(tmp_path, stdin="n\n")
 
     out = capsys.readouterr().out
-    assert "get/list on nodes, pods, services, deployments and replicasets" in out
+    assert "FULL ACCESS (read and write, every resource)" in out
     assert "Existing access objects are updated" in out

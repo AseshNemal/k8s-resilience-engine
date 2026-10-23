@@ -126,27 +126,14 @@ func TestPartialAccessIsNotUsable(t *testing.T) {
 	}
 }
 
-func TestRuleOrderDoesNotMatterButContentDoes(t *testing.T) {
-	objs := goodObjects(true)
-	objs[2].obj.Rules = []kube.PolicyRule{ // same rules, reversed order everywhere
-		{APIGroups: []string{"apps"}, Resources: []string{"replicasets", "deployments"}, Verbs: []string{"list", "get"}},
-		{APIGroups: []string{""}, Resources: []string{"services", "pods", "nodes"}, Verbs: []string{"list", "get"}},
-	}
-	if r := inspect(t, cluster(objs...)); r.Overall() != OverallApproved {
-		t.Fatalf("reordered rules should still match, got %s", r.Overall())
-	}
-}
-
 func TestWidenedClusterRoleIsDriftedAndNotUsable(t *testing.T) {
 	cases := map[string]func(cr *kube.Object){
 		"reads secrets": func(cr *kube.Object) {
 			cr.Rules = append(cr.Rules, kube.PolicyRule{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}})
 		},
-		"adds a write verb": func(cr *kube.Object) { cr.Rules[0].Verbs = append(cr.Rules[0].Verbs, "delete") },
-		"wildcard": func(cr *kube.Object) {
-			cr.Rules = []kube.PolicyRule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}}}
-		},
-		"drops a rule":    func(cr *kube.Object) { cr.Rules = cr.Rules[:1] },
+		"adds a rule":     func(cr *kube.Object) { cr.Rules = append(cr.Rules, kube.PolicyRule{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get"}}) },
+		"narrower verbs":  func(cr *kube.Object) { cr.Rules[0].Verbs = []string{"get", "list"} },
+		"only one group":  func(cr *kube.Object) { cr.Rules[0].APIGroups = []string{"apps"} },
 		"aggregation":     func(cr *kube.Object) { cr.AggregationRule = true },
 		"restricted name": func(cr *kube.Object) { cr.Rules[0].ResourceNames = []string{"only-this"} },
 	}
@@ -580,31 +567,31 @@ func TestRevokeStopsAtTheFirstRealFailureInsteadOfDeletingTheRest(t *testing.T) 
 
 // ---------------------------------------------------------------- the granted resources
 
-func TestRolePermitsExactlyTheFiveReadResources(t *testing.T) {
-	got := map[string]bool{}
-	for _, rule := range desiredRules() {
-		for _, verb := range rule.Verbs {
-			if verb != "get" && verb != "list" {
-				t.Errorf("verb %q is not read-only", verb)
-			}
-		}
-		for _, group := range rule.APIGroups {
-			for _, resource := range rule.Resources {
-				got[group+"/"+resource] = true
-			}
+func TestTheRoleIsOneFullAccessRuleForTheConnectedCluster(t *testing.T) {
+	rules := desiredRules()
+	if len(rules) != 1 {
+		t.Fatalf("rules = %+v, want exactly one", rules)
+	}
+	rule := rules[0]
+	for name, got := range map[string][]string{"apiGroups": rule.APIGroups, "resources": rule.Resources, "verbs": rule.Verbs} {
+		if len(got) != 1 || got[0] != "*" {
+			t.Errorf("%s = %v, want [*]", name, got)
 		}
 	}
-	want := map[string]bool{
-		"/nodes": true, "/pods": true, "/services": true,
-		"apps/deployments": true, "apps/replicasets": true,
+	if len(rule.ResourceNames) != 0 || len(rule.NonResourceURLs) != 0 {
+		t.Errorf("the rule must not be restricted by name or URL: %+v", rule)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("resources = %v, want exactly %v", got, want)
-	}
-	for resource := range want {
-		if !got[resource] {
-			t.Errorf("missing %s in %v", resource, got)
+}
+
+func TestThePermissionsTextSaysPlainlyThatTheAccessIsFullAndCanWrite(t *testing.T) {
+	text := strings.Join(Permissions(), "\n")
+	for _, want := range []string{"Full access", "write", "Secrets"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the approval text must say %q: %s", want, text)
 		}
+	}
+	if strings.Contains(strings.ToLower(text), "read-only") {
+		t.Errorf("the approval text still claims read-only access: %s", text)
 	}
 }
 
@@ -641,36 +628,66 @@ func TestRolesApprovedBeforeServicesAndReplicasetsAreDriftedAndRepairedByOneAppr
 	}
 }
 
-func TestAnOlderNarrowerRoleIsExplainedAsNeedingMoreAccessNotAsTampering(t *testing.T) {
-	objs := goodObjects(true)
-	objs[2].obj.Rules = []kube.PolicyRule{
-		{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
-		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
+func TestTheOldReadOnlyRoleIsExplainedAsNeedingMoreAccessNotAsTampering(t *testing.T) {
+	for name, rules := range map[string][]kube.PolicyRule{
+		"the five-resource read set": {
+			{APIGroups: []string{""}, Resources: []string{"nodes", "pods", "services"}, Verbs: []string{"get", "list"}},
+			{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets"}, Verbs: []string{"get", "list"}},
+		},
+		"the earlier three-resource set": {
+			{APIGroups: []string{""}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
+			{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			objs := goodObjects(true)
+			objs[2].obj.Rules = rules
+			r := inspect(t, cluster(objs...))
+
+			if !r.NeedsMoreAccess() || r.Usable() {
+				t.Fatalf("an older read-only role is an upgrade that waits for approval: needsMore=%v usable=%v", r.NeedsMoreAccess(), r.Usable())
+			}
+			for _, o := range r.Objects {
+				if o.Kind == KindClusterRole && !strings.Contains(o.Detail, "full access") {
+					t.Errorf("the detail should say the new version needs full access, got %q", o.Detail)
+				}
+			}
+			for _, c := range Plan(r) {
+				if strings.Contains(c.Detail, "reset") || !strings.Contains(c.Detail, "added") {
+					t.Errorf("an extension of the role must not be described as a reset: %q", c.Detail)
+				}
+			}
+		})
 	}
+}
+
+func TestOneApprovalMovesTheOldReadOnlyRoleToFullAccessAndItIsThenApproved(t *testing.T) {
+	objs := goodObjects(true)
+	objs[2].obj.Rules = []kube.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list"}}}
+	cs := cluster(objs...)
+
+	if err := Apply(ctx, cs, inspect(t, cs)); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if after := inspect(t, cs); after.Overall() != OverallApproved || !after.Usable() {
+		t.Fatalf("after one approval: overall = %s usable = %v", after.Overall(), after.Usable())
+	}
+}
+
+func TestARoleThatIsAlreadyFullAccessButHasBeenChangedIsTamperingNotAnUpgrade(t *testing.T) {
+	objs := goodObjects(true)
+	objs[2].obj.Rules = append(objs[2].obj.Rules, kube.PolicyRule{NonResourceURLs: []string{"/healthz"}, Verbs: []string{"get"}})
 	r := inspect(t, cluster(objs...))
 
-	if !r.NeedsMoreAccess() {
-		t.Fatal("a role that is only missing the newly required reads should be reported as needing more access")
-	}
-	var role ObjectState
-	for _, o := range r.Objects {
-		if o.Kind == KindClusterRole {
-			role = o
-		}
-	}
-	if !strings.Contains(role.Detail, "services") || !strings.Contains(role.Detail, "replicasets") {
-		t.Errorf("detail should name the added access, got %q", role.Detail)
-	}
-	for _, c := range Plan(r) {
-		if strings.Contains(c.Detail, "reset") || !strings.Contains(c.Detail, "added") {
-			t.Errorf("an extension of the role must not be described as a reset: %q", c.Detail)
-		}
+	if r.NeedsMoreAccess() {
+		t.Fatal("a role that already has the wildcard cannot be missing access")
 	}
 }
 
 func TestAWidenedRoleIsStillDescribedAsAResetAndNeverAsNeedingMoreAccess(t *testing.T) {
 	objs := goodObjects(true)
 	objs[2].obj.Rules = append(objs[2].obj.Rules, kube.PolicyRule{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}})
+	objs[2].obj.AggregationRule = true // could gain permissions from other roles: changed, not merely narrower
 	r := inspect(t, cluster(objs...))
 
 	if r.NeedsMoreAccess() {

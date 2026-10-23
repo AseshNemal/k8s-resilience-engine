@@ -85,7 +85,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <dl class="connect__details" data-role="connect-details" hidden>
             <dt>Cluster API</dt><dd data-role="connect-server"></dd>
             <dt>Credential</dt><dd data-role="connect-credential"></dd>
-            <dt>Access</dt><dd>Read-only: nodes, pods, services, deployments and replicasets</dd>
+            <dt>Access</dt><dd>Full access (read and write) to the connected cluster</dd>
             <dt>Renewal</dt><dd data-role="connect-expiry"></dd>
         </dl>
     </section>
@@ -95,7 +95,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <p class="ui-note" data-role="auto-note"></p>
         <div data-role="auto-controls">
             <p class="connect__lead">Local clusters (kind, or Docker Desktop's Kubernetes) appear here by themselves, marked
-                <em>Not connected</em> until you connect one. Connect it and approve read-only access once: the
+                <em>Not connected</em> until you connect one. Connect it and approve full access once: the
                 extension then keeps the credential renewed, reconnects the cluster by itself if the connection is
                 lost, and reads the applications in it. A cluster you disconnect stays disconnected until you connect
                 it again.</p>
@@ -113,7 +113,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
             <p class="ui-note">
                 A system dialog shows the exact cluster, the permissions and every change before anything happens, and
                 nothing is changed unless you approve there. Your own kubeconfig stays on this computer; the extension
-                only ever receives a read-only token that expires after hours.
+                only ever receives a short-lived token.
             </p>
         </div>
     </section>
@@ -134,9 +134,9 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <summary class="section-header__title" id="connect-new-title">Advanced: use a kubeconfig file</summary>
         <ol class="connect__steps">
             <li>In the project folder, run <code>./scripts/extension-cluster-access.sh</code> (on Windows, <code>scripts\\extension-cluster-access.cmd</code>). It asks before
-                creating a read-only service account in your kind cluster and writes
+                creating a full-access service account in your kind cluster and writes
                 <code>.kube/extension-readonly.kubeconfig</code>.</li>
-            <li>Choose that file here. The app checks that the credential cannot change the cluster and
+            <li>Choose that file here. The app checks that the credential can read the cluster and
                 refuses it otherwise.</li>
         </ol>
         <div class="connect__picker">

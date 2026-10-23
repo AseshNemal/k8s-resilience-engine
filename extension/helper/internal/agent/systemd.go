@@ -83,7 +83,7 @@ func (s *SystemdTimer) execLine() string { return `ExecStart="` + s.Exe + `" ren
 
 func (s *SystemdTimer) service() string {
 	var b strings.Builder
-	b.WriteString("[Unit]\nDescription=Resilience Engine: renew the read-only cluster token\n\n[Service]\nType=oneshot\n")
+	b.WriteString("[Unit]\nDescription=Resilience Engine: renew the cluster token\n\n[Service]\nType=oneshot\n")
 	b.WriteString(s.execLine() + "\n")
 	if kc := s.kubeconfigEnv(); kc != "" {
 		b.WriteString(`Environment="KUBECONFIG=` + kc + `"` + "\n")
@@ -93,7 +93,7 @@ func (s *SystemdTimer) service() string {
 }
 
 func (s *SystemdTimer) timer() string {
-	return "[Unit]\nDescription=Resilience Engine: check the read-only cluster token every " +
+	return "[Unit]\nDescription=Resilience Engine: check the cluster token every " +
 		fmt.Sprint(int(Interval.Minutes())) + " minutes\n\n[Timer]\n" +
 		"OnStartupSec=1min\n" +
 		"OnCalendar=*:0/" + fmt.Sprint(int(Interval.Minutes())) + "\n" +
