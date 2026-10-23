@@ -78,8 +78,9 @@ def test_a_node_failure_records_the_observed_outcome_and_starts_the_node_again(t
 
 def test_the_node_is_started_again_even_when_detection_times_out(tmp_path):
     kube, docker_calls = FakeKube(fail_detection=True), []
+    recorder, workdir = make(tmp_path, kube, docker_calls), tmp_path / "w1"
     with pytest.raises(ScenarioExecutionError):
-        make(tmp_path, kube, docker_calls).fail_node(tmp_path / "w1", "w1")
+        recorder.fail_node(workdir, "w1")
     assert docker_calls[-1] == ("start", "w1")
 
 
@@ -106,6 +107,7 @@ def test_the_mixed_setup_applies_the_no_rule_config_first_and_uncordons_afterwar
 
 def test_only_worker_nodes_are_stopped(tmp_path):
     kube, docker_calls = FakeKube(), []
+    recorder, workdir = make(tmp_path, kube, docker_calls), tmp_path / "cp"
     with pytest.raises(ChaosSafetyError):
-        make(tmp_path, kube, docker_calls).fail_node(tmp_path / "cp", "control-plane")
+        recorder.fail_node(workdir, "control-plane")
     assert docker_calls == []
