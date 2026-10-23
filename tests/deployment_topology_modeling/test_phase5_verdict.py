@@ -7,7 +7,8 @@ from app.main import app
 def test_verdict_banner_holds_the_headline_metrics_before_the_tabs():
     html = TestClient(app).get("/components/deployments").text
     assert 'data-role="verdict"' in html
-    for role in ("verdict-icon", "verdict-title", "verdict-text", "verdict-names"):
+    # A slim status bar: the status and one sentence (the exposed services are on the Exposed services tab)
+    for role in ("verdict-icon", "verdict-title"):
         assert f'data-role="{role}"' in html
     for metric in ("deployment-node-count", "deployment-service-count", "deployment-ready-pods", "deployment-exposed-services"):
         assert f'data-metric="{metric}"' in html

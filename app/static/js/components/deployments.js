@@ -114,67 +114,26 @@
         );
     }
 
-    // The small picture of the cluster in the verdict: a box per worker node with a dot per pod, in the colour the
-    // topology picture gave its service; a red ring marks a service that one node failure would take down.
-    function renderMiniMap(deployment) {
-        const box = document.querySelector('[data-role="verdict-map"]');
-        if (!box) return;
-        const shortNode = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
-        const hueOf = (name) => window.DeploymentsTopologyWidget?.hueOf?.(name) ?? 210;
-        const nodeNames = (deployment.nodes || []).map((n) => n.name).sort((a, b) => a.localeCompare(b));
-        const podsOn = {};
-        (deployment.services || []).forEach((svc) => {
-            const exposed = exposedDomains(svc).length > 0;
-            (svc.pods || []).forEach((pod) => {
-                const key = pod.node && nodeNames.includes(pod.node) ? pod.node : "";
-                (podsOn[key] = podsOn[key] || []).push({ svc: svc.name, pod, exposed });
-            });
-        });
-        const dot = ({ svc, pod, exposed }) => {
-            const d = document.createElement("span");
-            d.className = `mini-pod${exposed ? " mini-pod--exposed" : ""}${pod.ready ? "" : " mini-pod--notready"}`;
-            d.style.setProperty("--svc-hue", hueOf(svc));
-            d.title = `${svc}${exposed ? " (exposed)" : ""}: ${pod.name}${pod.ready ? "" : " (not ready)"}`;
-            return d;
-        };
-        const nodeBox = (name, label) => {
-            const n = document.createElement("span");
-            n.className = name ? "mini-node" : "mini-node mini-node--pending";
-            const title = document.createElement("span");
-            title.className = "mini-node__name";
-            title.textContent = label;
-            const pods = document.createElement("span");
-            pods.className = "mini-node__pods";
-            (podsOn[name] || []).forEach((p) => pods.appendChild(dot(p)));
-            n.append(title, pods);
-            return n;
-        };
-        const boxes = nodeNames.map((n) => nodeBox(n, shortNode(n)));
-        if (podsOn[""]) boxes.push(nodeBox("", "⏳ no node"));
-        box.replaceChildren(...boxes);
-    }
-
-    // The sentence at the top of the page, from the same rule as the Exposed services tab.
+    // The status bar's answer, from the same rule as the Exposed services tab. `detail` is its tooltip.
     function verdictFor(services) {
         const evaluated = services.filter((s) => readyCount(s) > 0);
         const exposed = evaluated.filter((s) => exposedDomains(s).length > 0);
         const unavailable = services.length - evaluated.length;
         const downNote = unavailable ? ` ${unavailable} service(s) have no ready replica at all.` : "";
         if (!evaluated.length) {
-            return { state: "muted", icon: "NO DATA", title: "No ready service to assess", text: `No service in this namespace has a ready replica.${downNote}` };
+            return { state: "muted", icon: "NO DATA", title: "No ready service to assess", detail: `No service in this namespace has a ready replica.${downNote}` };
         }
         if (!exposed.length) {
             return {
                 state: "ok", icon: "RESILIENT",
                 title: "No single node failure can take a service down",
-                text: `All ${evaluated.length} services keep ready replicas on more than one node.${downNote}`,
+                detail: `All ${evaluated.length} services keep ready replicas on more than one node.${downNote}`,
             };
         }
         return {
             state: "danger", icon: "AT RISK",
             title: `${exposed.length} of ${evaluated.length} services would go down if one node fails`,
-            text: `each has every ready copy on one node · click a name for why${downNote}`,
-            names: exposed.map((s) => s.name),
+            detail: `Every ready copy on one node: ${exposed.map((s) => s.name).join(", ")}.${downNote}`,
         };
     }
 
@@ -183,32 +142,14 @@
         document.querySelector(".dashboard-tabs-wrapper")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
-    // An exposed service's name opens its drill-down on the Exposed services tab.
-    function nameChip(name) {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "verdict__name";
-        chip.textContent = name;
-        chip.title = `Why is ${name} exposed?`;
-        chip.addEventListener("click", () => {
-            goToTab("drift");
-            window.DeploymentsModalManager?.openViolationModal(name);
-        });
-        return chip;
-    }
-
     function renderVerdict(verdict) {
         const box = document.querySelector('[data-role="verdict"]');
         if (!box) return;
-        const put = (role, text) => {
-            const node = box.querySelector(`[data-role="${role}"]`);
-            if (node) node.textContent = text;
-        };
         box.dataset.state = verdict.state;
-        put("verdict-icon", verdict.icon);
-        put("verdict-title", verdict.title);
-        put("verdict-text", verdict.text);
-        box.querySelector('[data-role="verdict-names"]')?.replaceChildren(...(verdict.names || []).map(nameChip));
+        box.querySelector('[data-role="verdict-icon"]').textContent = verdict.icon;
+        const title = box.querySelector('[data-role="verdict-title"]');
+        title.textContent = verdict.title;
+        title.title = verdict.detail;
     }
 
     async function loadPage() {
@@ -234,7 +175,6 @@
                 window.DeploymentsTopologyWidget.renderZoneGrid(deployment);
                 window.DeploymentsTopologyWidget.renderConcentrationPanel(services);
             }
-            renderMiniMap(deployment);  // after the topology picture, so the service colours match it
 
             window.DeploymentsDriftWidget?.renderWhatIf(deployment);
 
@@ -253,7 +193,7 @@
             const box = document.querySelector('[data-role="evidence-box"]');
             if (box) box.hidden = true;  // no live data shown, so nothing to vouch for
             renderVerdict({
-                state: "muted", icon: "NO DATA", title: "Could not read the cluster", text: "No verdict without live data; see the message above.",
+                state: "muted", icon: "NO DATA", title: "Could not read the cluster", detail: "No verdict without live data; see the message above.",
             });
             if (applyBadge && renderStateCard && describeError && region) {
                 applyBadge(sourceBadge, { variant: "danger", text: "Not showing live data" });
