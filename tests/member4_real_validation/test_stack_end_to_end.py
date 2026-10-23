@@ -190,3 +190,41 @@ def test_a_run_pointed_at_the_docker_desktop_cluster_never_gets_as_far_as_buildi
         stack_of(world)
 
     assert raised.value.code == "RESEARCH_CLUSTER_REFUSED" and world.api.methods == {"GET"}
+
+
+# --- the research tier, through the same real components ------------------------------------------------------------------------------
+
+def test_a_declared_workflow_experiment_runs_through_the_real_stack_and_its_record_is_conditional_on_the_declaration(session, tmp_path):
+    import dataclasses
+
+    from app.engine.recommendation_evaluation_validation.approval import DECLARED_WORKFLOW_SOURCE, ResearchApprovalService
+    from app.engine.recommendation_evaluation_validation.yaml_proposal import build_yaml_proposal
+    from tests.recommendation_evaluation_validation.test_research_approval import ACK
+    from tests.support.member4_approvals import InMemoryApprovals
+
+    world = FakeWorld(tmp_path)
+    scenario = scenario_of(world)
+    stack = stack_of(world)
+    evaluated = scenario.evaluate()
+    live = dataclasses.replace(evaluated, evidence={**evaluated.evidence, "source": DECLARED_WORKFLOW_SOURCE, "declaredWorkflow": {
+        "workflowId": "productpage-view", "declarationSha256": "d" * 64, "observed": False, "approved": False}})
+    selected = live.report.selected_recommendation_id
+    service = ResearchApprovalService(InMemoryApprovals())
+    service.request_research_approval(selected, "v1", live, acknowledged_by="asesh", acknowledgement=ACK,
+                                      proposal_yaml=build_yaml_proposal(live, selected).yaml)
+    approval = service.approve(selected, "v1", "", decided_by="asesh", evaluate=lambda _a: live)
+    plan = ValidationPlan.from_approval(approval, live, scenario.workflow, stack.executor.target, allow_declared_workflow=True)
+    arm_stop_authorizations(stack, plan, "asesh", count=1)
+    run = ValidationRun(plan, stack.executor)
+    repo = ExperimentRepository(session)
+    recorder = ExperimentRecorder(repo, clock=lambda: NOW)
+    experiment_id = recorder.start(plan, approval, stack.executor, run.thresholds)
+
+    result = recorder.execute(run, experiment_id, authorize(plan, APPLY, "asesh"), authorize(plan, FAIL_NODE, "asesh"))
+    record = repo.get(experiment_id)
+
+    assert result.state is RunState.COMPLETED and result.workloads_reverted is True
+    assert record.provenance["workflowBasis"] == "DECLARED" and record.provenance["conditionalOnDeclaration"] is True
+    assert record.provenance["researchAcknowledgement"]["by"] == "asesh" and record.evidence_class == "TEST_DOUBLE"
+    assert world.layout() == world.api.original and pending_records(world.recovery_dir) == []        # everything put back
+    assert repo.list_measurements() == []                                                             # and a double is never a measurement

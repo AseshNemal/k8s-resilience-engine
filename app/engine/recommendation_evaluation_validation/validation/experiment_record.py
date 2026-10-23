@@ -134,7 +134,11 @@ def planned_record(plan: ValidationPlan, approval: ApprovalModel, executor: Any,
         events=[], provenance={
             "approvalProvenance": dict(snapshot.get("provenance") or {}), "thresholds": asdict(thresholds),
             "rankingFormulaVersion": FORMULA_VERSION, "planDigest": plan.digest, "yamlSha256": plan.yaml_sha256,
-            "predictionBasis": PREDICTION_BASIS, "observationBasis": OBSERVATION_BASIS, "environment": environment},
+            "predictionBasis": PREDICTION_BASIS, "observationBasis": OBSERVATION_BASIS, "environment": environment,
+            # What the workflow rests on. DECLARED means a person stated it (research tier): every figure in this record is
+            # conditional on that statement, and the acknowledgement and the declaration's digest are kept with it.
+            "workflowBasis": plan.workflow_basis, "conditionalOnDeclaration": plan.declared,
+            "declaredWorkflow": plan.declaration, "researchAcknowledgement": plan.research_acknowledgement},
         created_at=now)
 
 

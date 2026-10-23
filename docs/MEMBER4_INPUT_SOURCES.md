@@ -55,26 +55,42 @@ How it is used:
 * `GET /api/recommendations/declared` and `/declared/detail`; the context lists `declaredWorkflows` apart from the frozen ones, never selects
   one for you, and the page labels it and shows a standing note.
 
-What it can never do. The approval gate trusts only `live-discovery`. A declared evaluation is refused at `approve`; the request route only
+What it can never do at the production gate (the research tier of section 4 is a separate, narrower door). That gate trusts only `live-discovery`. A declared evaluation is refused at its `approve`; the request route only
 ever evaluates frozen workflows, so a declared id sent to it is refused with `WORKFLOW_EVIDENCE_UNAVAILABLE` and no record is made; the
 declared detail forces `approval.ready = false` on every candidate with the reason; its YAML is generated for reading and marked not applicable.
 The engine's own eligibility verdict does not look at the evidence source (the gate does, later), which is why that override is made at the route.
 
-## 4. What this does not unblock, and the decision it leaves
+## 4. The research approval tier (approved by the developer, 2026-10-23)
 
-Everything up to the approval step now works without Member 1: candidates, feasibility, the virtual what-if, ranking, the YAML text, and the page.
-**Approval, applying and validation still need a workflow Member 1 froze.** The real-cluster validation (`ValidationPlan`) requires an approved
-recommendation with verified provenance, so it is blocked on the same thing. The ways forward, none taken:
+Everything up to the approval step works without Member 1. To let Member 4 approve, and so validate, until Member 1 can freeze a workflow,
+there is a second, separately named gate: `approval/research.py`, `ResearchApprovalService`. It does **not** widen the production gate.
 
-1. **Get real traces so Member 1 can freeze a workflow.** That is Member 1's pipeline. For this cluster it means a trace source for Bookinfo;
-   the earlier route was Istio, which the developer has said not to retry.
-2. **Extend the approval gate with a second, separately named tier for declared workflows**, accepted only by the research validation path
-   and never by the production page. This lets validation run on a declared workflow, so every validation result is conditional on the
-   declaration being right. For Bookinfo the architecture is documented, which makes that defensible for a placement-prediction study but it is a claim
-   about the declaration, not about discovery. **This changes an approval gate, so it is not done without the developer's explicit approval.**
+What stays exactly as it was: `ApprovalService`, its routes, `has_verified_provenance` (live evidence only) and their tests. The production
+`approve` still refuses a research record (`APPROVAL_PROVENANCE_UNVERIFIED`); the research gate refuses a production record. The only change to
+production code is two hooks in `ApprovalService` whose defaults are today's behaviour (`_require_provenance`, `require_applicable_yaml`).
+
+Everything the production gate checks is checked here too: verified feasible, ranked, bound to the exact plan and predicted effect, server-generated
+YAML regenerated at decision time. Four things differ, on purpose:
+
+1. the evidence must be a **declared-workflow** evaluation, never a live one;
+2. the request carries a **named person's written acknowledgement** (at least 20 characters) that the workflow is declared, not observed; the anonymous
+   `developer` is refused, and so is an anonymous decision;
+3. the approval is bound to the **declaration's digest**: it is evaluated again when decided, and a declaration that changed since makes it stale;
+4. the YAML may be marked "not applicable" (it always is for declared evidence), which only keeps it from being applied to the connected cluster.
+
+Routes (Member 4's own request bodies; no shared schema changed): `POST /api/recommendations/declared/{id}/request-approval`, `/approve`, `/reject`,
+`GET /declared/{id}/approval`. The declared detail offers the door per candidate (`researchApproval`) while the production controls stay off.
+
+Scope. A research approval is honoured only by `ValidationPlan.from_approval(..., allow_declared_workflow=True)`, which still requires a designated
+test target. The plan is refused if the declaration changed, or if the workflow handed in is not the declared one the evaluation used. Every experiment
+record made from it says `workflowBasis: DECLARED`, `conditionalOnDeclaration: true`, and keeps the acknowledgement and the digest;
+`ExperimentRepository.list_measurements(workflow_basis=...)` keeps DECLARED and FROZEN results apart. **Whatever such an experiment shows is conditional on
+the declaration being correct.** For Bookinfo the architecture is documented, which makes that defensible for a placement-prediction study; it is still a claim about
+the declaration, not about discovery. When Member 1 can freeze a workflow, frozen results are the stronger evidence and should be reported separately.
 
 ## 5. Status
 
-Tested with fakes only (a fake cluster source, a fake API server, Node tests). None of it has been run against the real cluster, and
-the installed extension is unchanged: nothing on the live page changes until the extension is updated and the declaration file is given to the
-backend. Before then, on the real cluster, the page behaves as in the screenshot (no frozen workflow).
+Tested with fakes and, read-only, against the real docker-desktop cluster: the taint reader, Member 2's analysis, a declared evaluation, the HTTP routes, and
+the research request, approval and validation-plan build on real Bookinfo data (approvals went to a throwaway database). **Never exercised against a real cluster:**
+applying the YAML and stopping a node (the executor), which waits on the readiness gates in `docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md`. The installed extension is
+unchanged: nothing on the live page changes until it is updated and the declaration file is given to the backend.

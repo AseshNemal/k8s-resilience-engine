@@ -83,9 +83,17 @@ class ApprovalService:
     candidate needs a documented justification in the approval note.
     """
 
+    # What this gate trusts. A subclass built for a narrower, explicitly named purpose (``research.py``) may change these two
+    # hooks; the production gate trusts live evidence only and refuses a proposal the engine marks as not applicable.
+    require_applicable_yaml = True
+
     def __init__(self, repository: ApprovalRepository, min_justification_chars: int = MIN_JUSTIFICATION_CHARS):
         self.repository = repository
         self.min_justification_chars = min_justification_chars
+
+    def _require_provenance(self, approval: ApprovalModel) -> None:
+        if not has_verified_provenance(approval):
+            raise UnverifiedProvenanceError()
 
     def request_approval(
         self,
@@ -191,8 +199,7 @@ class ApprovalService:
                 f"Version mismatch: expected {expected_proposal_version}, got {approval.proposal_version}"
             )
 
-        if not has_verified_provenance(approval):
-            raise UnverifiedProvenanceError()
+        self._require_provenance(approval)
 
         if evaluate is None:
             raise PreconditionError("There is no current evaluation to check this candidate against, so it "
@@ -213,7 +220,7 @@ class ApprovalService:
             raise StaleProposalError("The YAML stored with this request is not the YAML it was requested with "
                                      "(an integrity check only: the YAML is client-supplied and is not verified "
                                      "against the recommendation).")
-        yaml_verified = self._check_generated_yaml(approval, current, recommendation_id)
+        yaml_verified = self._check_generated_yaml(approval, current, recommendation_id, self.require_applicable_yaml)
         justification = (note or "").strip()
         if standing.requires_justification and len(justification) < self.min_justification_chars:
             raise PreconditionError(
@@ -234,7 +241,8 @@ class ApprovalService:
         return self.repository.update(approval)
 
     @staticmethod
-    def _check_generated_yaml(approval: ApprovalModel, current: LiveRecommendation, recommendation_id: str) -> bool:
+    def _check_generated_yaml(approval: ApprovalModel, current: LiveRecommendation, recommendation_id: str,
+                              require_applicable: bool = True) -> bool:
         """For a request whose YAML the server generated: the server must generate the same text again, now.
 
         Returns whether the YAML was verified (False for a client-supplied snapshot, which is never verified).
@@ -245,7 +253,8 @@ class ApprovalService:
         # Imported here: yaml_proposal builds on this package (eligibility), so a module-level import would be circular.
         from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
         regenerated = build_yaml_proposal(current, recommendation_id)
-        if regenerated.status != GENERATED or not regenerated.applicable or regenerated.sha256 != recorded.get("sha256"):
+        if (regenerated.status != GENERATED or (require_applicable and not regenerated.applicable)
+                or regenerated.sha256 != recorded.get("sha256")):
             raise StaleProposalError("The YAML the server generates for this recommendation now differs from the YAML "
                                      "it was requested with (the Deployment or its labels changed), so it is not what "
                                      "the developer was shown.")

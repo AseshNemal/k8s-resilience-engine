@@ -10,10 +10,13 @@ from app.engine.recommendation_evaluation_validation.approval import (
     StateTransitionError,
     VersionConflictError,
     PreconditionError,
+    ResearchApprovalService,
+    has_research_provenance,
     has_verified_provenance,
 )
 from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
+from app.engine.recommendation_evaluation_validation.approval.research import RESEARCH_SCOPE
 from app.engine.recommendation_evaluation_validation.declared_workflow import NOT_OBSERVED
 from app.engine.recommendation_evaluation_validation.live_pipeline import (
     build_declared_recommendation,
@@ -31,6 +34,22 @@ from app.shared.schemas.approval import (
     ApprovalDecisionRequest,
     ApprovalResponse,
 )
+from app.shared.schemas.base import APIModel
+
+
+class ResearchApprovalRequest(APIModel):
+    """A request to approve a DECLARED-workflow recommendation for research validation. Member 4's own body; no shared schema changes."""
+
+    recommendation_id: str
+    proposal_version: str
+    acknowledged_by: str
+    acknowledgement: str
+
+
+class ResearchDecisionRequest(APIModel):
+    note: str
+    expected_proposal_version: str
+    decided_by: str
 
 router = APIRouter(
     prefix="/api/recommendations",
@@ -46,6 +65,11 @@ def get_db():
 def get_approval_service(db: Session = Depends(get_db)) -> ApprovalService:
     repository = ApprovalRepository(db)
     return ApprovalService(repository)
+
+
+def get_research_approval_service(db: Session = Depends(get_db)) -> ResearchApprovalService:
+    """The research tier's gate, used only by the /declared routes. The production routes keep ``get_approval_service``."""
+    return ResearchApprovalService(ApprovalRepository(db))
 
 
 def get_recommendation_provider(
@@ -105,6 +129,26 @@ def get_declared_provider(
                                 component="recommendation") from error
 
     return provide
+
+
+def get_declared_evaluator() -> Callable[[ApprovalModel], LiveRecommendation]:
+    """Re-evaluates, on the server, the DECLARED workflow and failure a research request was made for (never a frozen one).
+
+    The workflow, namespace and failed node come from the provenance the server stored with the request, never from the client.
+    """
+
+    def evaluate(approval: ApprovalModel) -> LiveRecommendation:
+        provenance = (approval.evaluation_snapshot or {}).get("provenance") or {}
+        workflow_id, namespace = provenance.get("workflowId"), provenance.get("namespace")
+        if not workflow_id or not namespace:
+            raise PreconditionError("This approval request does not record the workflow and namespace it was computed for, so it "
+                                    "cannot be re-evaluated; reject it and request a new approval.")
+        try:
+            return build_declared_recommendation(workflow_id, provenance.get("failedNode"), namespace)
+        except ValueError as error:
+            raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
+
+    return evaluate
 
 
 def get_current_evaluator() -> Callable[[ApprovalModel], LiveRecommendation]:
@@ -200,14 +244,111 @@ def read_declared_recommendation_detail(
     response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
     shown = describe_live_recommendation(live)
     for candidate in shown["candidates"]:
+        eligible = bool(candidate["approval"]["ready"])      # the engine's own verdict on feasibility and ranking, before the override
         candidate["approval"] = {"ready": False, "reason": DECLARED_NOT_APPROVABLE, "requiresJustification": False,
                                  "declared": True}
+        # The research tier is a separate door with its own routes and a named acknowledgement; it never reopens the production controls above.
+        candidate["researchApproval"] = {
+            "available": eligible, "scope": RESEARCH_SCOPE if eligible else None,
+            "requestWith": f"POST /api/recommendations/declared/{candidate['id']}/request-approval" if eligible else None,
+            "requires": "the name of the person and a written acknowledgement that the workflow is declared, not observed",
+            "reason": None if eligible else "This candidate is not verified feasible and ranked, so it cannot be approved in any tier."}
     if shown["outcome"]["state"] == "READY":
         shown["outcome"] = {"state": "DECLARED_NOT_APPROVABLE", "message": DECLARED_NOT_APPROVABLE}
     shown["declared"] = {**(live.evidence.get("declaredWorkflow") or {}), "approvable": False, "limits": NOT_OBSERVED,
                          "notApprovableBecause": DECLARED_NOT_APPROVABLE}
     shown["schedulingFacts"] = live.evidence.get("schedulingFacts")
     return shown
+
+
+@router.get(
+    "/declared/{recommendation_id}/approval",
+    response_model=ApprovalResponse,
+    response_model_by_alias=True,
+)
+def get_research_approval(
+    recommendation_id: str,
+    response: Response,
+    service: ResearchApprovalService = Depends(get_research_approval_service),
+) -> ApprovalResponse:
+    approval = service.get_approval(recommendation_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    response.headers["X-Evidence-Provenance"] = "research-declared" if has_research_provenance(approval) else "unverified"
+    return _to_response(approval)
+
+
+@router.post(
+    "/declared/{recommendation_id}/request-approval",
+    response_model=ApprovalResponse,
+    response_model_by_alias=True,
+)
+def request_research_approval(
+    recommendation_id: str,
+    request: ResearchApprovalRequest,
+    response: Response,
+    service: ResearchApprovalService = Depends(get_research_approval_service),
+    provider: Callable[[], LiveRecommendation] = Depends(get_declared_provider),
+) -> ApprovalResponse:
+    """Put a DECLARED-workflow recommendation to the research tier. Needs a named person and a written acknowledgement.
+
+    The production approval routes are untouched and still refuse what this makes. Nothing is applied.
+    """
+    live = provider()
+    proposal = build_yaml_proposal(live, recommendation_id)
+    try:
+        approval = service.request_research_approval(
+            recommendation_id, request.proposal_version, live, acknowledged_by=request.acknowledged_by,
+            acknowledgement=request.acknowledgement, proposal_yaml=proposal.yaml if proposal.status == GENERATED else None)
+    except PreconditionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except StateTransitionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    response.headers["X-Evidence-Provenance"] = "research-declared"
+    return _to_response(approval)
+
+
+@router.post(
+    "/declared/{recommendation_id}/approve",
+    response_model=ApprovalResponse,
+    response_model_by_alias=True,
+)
+def approve_research_recommendation(
+    recommendation_id: str,
+    request: ResearchDecisionRequest,
+    service: ResearchApprovalService = Depends(get_research_approval_service),
+    evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_declared_evaluator),
+) -> ApprovalResponse:
+    try:
+        approval = service.approve(
+            recommendation_id=recommendation_id, expected_proposal_version=request.expected_proposal_version,
+            note=request.note, decided_by=request.decided_by, evaluate=evaluator)
+    except PreconditionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except (StateTransitionError, VersionConflictError) as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _to_response(approval)
+
+
+@router.post(
+    "/declared/{recommendation_id}/reject",
+    response_model=ApprovalResponse,
+    response_model_by_alias=True,
+)
+def reject_research_recommendation(
+    recommendation_id: str,
+    request: ResearchDecisionRequest,
+    service: ResearchApprovalService = Depends(get_research_approval_service),
+) -> ApprovalResponse:
+    try:
+        approval = service.reject(
+            recommendation_id=recommendation_id, expected_proposal_version=request.expected_proposal_version,
+            note=request.note, decided_by=request.decided_by)
+    except PreconditionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except (StateTransitionError, VersionConflictError) as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _to_response(approval)
 
 
 @router.get("/context")

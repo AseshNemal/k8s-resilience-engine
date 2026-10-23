@@ -53,8 +53,10 @@ This is an early-stage scaffold, not a working system yet:
   The protocol is `docs/MEMBER4_REAL_VALIDATION_PROTOCOL.md`; the gates, procedure and recovery are in
   `docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md`. Member 4 takes Member 2's node and intent facts from `analyze_live_topology` and reads node
   taints itself (`live_scheduling_evidence.py`), and when Member 1 has no frozen workflow it can evaluate a workflow a person **declared**
-  (`declared_workflow.py`, `/api/recommendations/declared`), labelled `declared-workflow` and never approvable; see
-  `docs/MEMBER4_INPUT_SOURCES.md`.
+  (`declared_workflow.py`, `/api/recommendations/declared`), labelled `declared-workflow` and never approvable by the production gate. A
+  separate, narrower **research approval tier** (`approval/research.py`, developer-approved 2026-10-23) lets a named person approve such a
+  recommendation for validation on a designated test cluster only, bound to the declaration's digest; its records say `workflowBasis: DECLARED`
+  and are conditional on the declaration. The production gate, its routes and its tests are unchanged. See `docs/MEMBER4_INPUT_SOURCES.md`.
   The offline harness and benchmark (`tests/support/member4_*.py`, `experiments/member4_offline_benchmark/`,
   see `docs/MEMBER4_OFFLINE_VALIDATION.md`) are test/research only and stamp a non-live evidence source the
   approval gate refuses.

@@ -32,8 +32,10 @@ from typing import Any, Protocol
 
 from app.engine.failure_impact_prediction.service import predict_failure_impact
 from app.engine.recommendation_evaluation_validation.approval import (
+    DECLARED_WORKFLOW_SOURCE,
     ApprovalModel,
     LiveRecommendation,
+    has_research_provenance,
     has_verified_provenance,
 )
 from app.engine.recommendation_evaluation_validation.approval.eligibility import evaluate_eligibility
@@ -103,6 +105,13 @@ class ValidationPlan:
         self.approval_id, self.recommendation_id = approval.id, approval.recommendation_id
         self.workflow, self.target, self.predicted = workflow, target, predicted
         self.yaml_text, self.yaml_sha256 = yaml_text, yaml_sha256
+        # What the workflow behind this plan rests on. FROZEN: Component 1 observed, approved and froze it. DECLARED: a person stated it
+        # (research tier); everything measured from such a plan is conditional on that statement and the record says so.
+        provenance = (approval.evaluation_snapshot or {}).get("provenance") or {}
+        self.declared = provenance.get("source") == DECLARED_WORKFLOW_SOURCE
+        self.workflow_basis = "DECLARED" if self.declared else "FROZEN"
+        self.declaration = provenance.get("declaredWorkflow") if self.declared else None
+        self.research_acknowledgement = provenance.get("researchAcknowledgement") if self.declared else None
         self.digest = _sha256(json.dumps({
             "fingerprint": predicted.fingerprint, "yaml": yaml_sha256, "failedNode": predicted.failed_node,
             "target": target.name}, sort_keys=True))
@@ -111,6 +120,14 @@ class ValidationPlan:
     def check_current(approval: ApprovalModel, live: LiveRecommendation) -> str:
         """Refuse unless ``approval`` is still the proposal ``live`` recommends; returns the YAML digest."""
         recommendation_id = approval.recommendation_id
+        provenance = (approval.evaluation_snapshot or {}).get("provenance") or {}
+        if provenance.get("source") == DECLARED_WORKFLOW_SOURCE:
+            # A declared approval is bound to the exact declaration it was made for: the evaluation now must come from the same file.
+            fresh = ((live.evidence or {}).get("declaredWorkflow") or {}).get("declarationSha256")
+            recorded = (provenance.get("declaredWorkflow") or {}).get("declarationSha256")
+            if (live.evidence or {}).get("source") != DECLARED_WORKFLOW_SOURCE or not recorded or fresh != recorded:
+                raise ValidationRefusedError("APPROVAL_STALE", "The declaration this approval was made for has changed, or the current "
+                                             "evaluation is not from a declared workflow, so nothing is written.")
         proposal = (approval.evaluation_snapshot or {}).get("proposal") or {}
         recorded_yaml = proposal.get("yaml") or {}
         standing = evaluate_eligibility(live, recommendation_id)
@@ -128,17 +145,30 @@ class ValidationPlan:
 
     @classmethod
     def from_approval(cls, approval: ApprovalModel, live: LiveRecommendation, workflow: WorkflowGraph,
-                      target: TestTarget) -> "ValidationPlan":
+                      target: TestTarget, *, allow_declared_workflow: bool = False) -> "ValidationPlan":
+        """The plan for one approved recommendation.
+
+        ``allow_declared_workflow`` is the one opt-in for the research tier: it additionally honours an approval made through
+        ``ResearchApprovalService`` for a workflow a person declared. Without it, only an approval verified against live evidence
+        from a frozen workflow is accepted, exactly as before.
+        """
         if approval.status is not ApprovalStatus.APPROVED:
             raise ValidationRefusedError("APPROVAL_NOT_APPROVED", f"The request is {approval.status.value}; only an "
                                          f"APPROVED request can be validated.")
         if not has_verified_provenance(approval):
-            raise ValidationRefusedError("APPROVAL_UNVERIFIED", "The approval has no verified link to live evidence.")
+            if not (allow_declared_workflow and has_research_provenance(approval)):
+                raise ValidationRefusedError("APPROVAL_UNVERIFIED", "The approval has no verified link to live evidence.")
         if target.environment != TEST_ENVIRONMENT:
             raise ValidationRefusedError("TARGET_NOT_TEST_ENVIRONMENT", f"{target.name!r} is a {target.environment!r} "
                                          f"environment; a validation run only writes to and breaks a test environment.")
         sha = cls.check_current(approval, live)
         predicted = predict_outcome(workflow, live, approval.recommendation_id)
+        if ((approval.evaluation_snapshot or {}).get("provenance") or {}).get("source") == DECLARED_WORKFLOW_SOURCE:
+            # The workflow handed in must be the declared one the evaluation used: its own "before" prediction has to equal the evaluation's.
+            before = (live.evidence or {}).get("blastRadiusBefore")
+            if before is None or abs(predicted.before.blast_radius - before) > 0.01:
+                raise ValidationRefusedError("APPROVAL_STALE", "The workflow given is not the declared workflow this evaluation was "
+                                             "computed from, so no prediction is taken from it.")
         return cls(approval, workflow, target, predicted, approval.yaml_snapshot, sha)
 
 

@@ -8,6 +8,12 @@ from .models import (
     has_verified_provenance,
 )
 from .repository import ApprovalRepository
+from .research import (
+    RESEARCH_TIER,
+    ResearchApprovalService,
+    has_research_provenance,
+    research_acknowledgement,
+)
 from .service import (
     ApprovalService,
     PreconditionError,
@@ -26,6 +32,8 @@ __all__ = [
     "LIVE_EVIDENCE_SOURCE",
     "LiveRecommendation",
     "PreconditionError",
+    "RESEARCH_TIER",
+    "ResearchApprovalService",
     "Standing",
     "StaleProposalError",
     "StateTransitionError",
@@ -33,6 +41,8 @@ __all__ = [
     "VersionConflictError",
     "audit_approvals",
     "evaluate_eligibility",
+    "has_research_provenance",
     "has_verified_provenance",
     "proposal_fingerprint",
+    "research_acknowledgement",
 ]

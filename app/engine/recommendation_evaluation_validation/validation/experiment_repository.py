@@ -71,12 +71,19 @@ class ExperimentRepository:
         rows = self.session.scalars(select(ValidationRunRecord).order_by(ValidationRunRecord.id.desc()))
         return [self._to_record(row) for row in rows]
 
-    def list_measurements(self) -> list[ExperimentRecord]:
-        """The only records that may be shown as experimental results: completed runs on a real cluster."""
+    def list_measurements(self, workflow_basis: str | None = None) -> list[ExperimentRecord]:
+        """The only records that may be shown as experimental results: completed runs on a real cluster.
+
+        ``workflow_basis`` narrows them to FROZEN (an observed, approved workflow) or DECLARED (a person's statement, so the result is
+        conditional on it); a record made before the field existed counts as FROZEN. Never mix the two in one claim without saying so.
+        """
         rows = self.session.scalars(select(ValidationRunRecord).where(
             ValidationRunRecord.status == RunState.COMPLETED.value, ValidationRunRecord.is_measurement.is_(True),
             ValidationRunRecord.evidence_class == REAL_CLUSTER).order_by(ValidationRunRecord.id.desc()))
-        return [self._to_record(row) for row in rows]
+        records = [self._to_record(row) for row in rows]
+        if workflow_basis is None:
+            return records
+        return [r for r in records if (r.provenance.get("workflowBasis") or "FROZEN") == workflow_basis]
 
     @staticmethod
     def _to_record(row: ValidationRunRecord) -> ExperimentRecord:
