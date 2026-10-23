@@ -17,7 +17,9 @@ policy also authorizes the CONTAINER:
   inspection of another container could carry its environment (secrets);
 * everything else, including exec, create, run, stop, rm, pause, copy, volumes, images, networks and the events stream, is refused.
 
-Read-only facts for the memory assessment (``/info``, the container list, one-shot stats of a named container) are allowed.
+Read-only facts for the memory assessment (``/info``, the container list, one-shot stats of a named container) are allowed with no
+options, and the proxy trims each answer to the few fields the assessment uses: a raw ``/info`` or container list describes the
+whole host and every container's labels, mounts and ports, none of which a run needs.
 
 Pure: the caller supplies a function that looks up a container's labels.
 """
@@ -36,6 +38,7 @@ _WORKER = re.compile(r"^(?P<cluster>[a-z0-9][a-z0-9-]{0,40})-worker[0-9]*$")
 _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
 _CONTAINER_PATH = re.compile(r"^/containers/(?P<name>[^/]+)/(?P<action>json|kill|start|stats)$")
 KILL_SIGNALS = frozenset({"SIGKILL", "KILL", "9"})
+READ_ONLY_ACTIONS = {"/_ping": "ping", "/info": "info", "/containers/json": "list"}
 
 Labels = Callable[[str], "dict[str, str] | None"]
 
@@ -63,8 +66,10 @@ def decide(method: str, path: str, query: str, labels_of: Labels, *, allowed_clu
     path = normalize(path)
     arguments = parse_qs(query or "")
 
-    if method == "GET" and path in ("/_ping", "/info", "/containers/json"):
-        return Decision(True, "read-only", action=path.strip("/"))
+    if method == "GET" and path in READ_ONLY_ACTIONS:
+        if arguments:
+            return _deny("this read-only endpoint takes no options here (no filters, no sizes, no streaming)")
+        return Decision(True, "read-only", action=READ_ONLY_ACTIONS[path])
 
     matched = _CONTAINER_PATH.match(path)
     if matched is None:

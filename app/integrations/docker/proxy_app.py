@@ -2,7 +2,7 @@
 
 Run as its own container (see ``extension/compose.yaml``), listening on a Unix socket shared with the backend and forwarding to
 the Docker socket only what ``policy.decide`` allows. It has no published port. A refused request gets a 403 with the reason and
-nothing reaches Docker. Inspect answers are trimmed to the fields a run needs.
+nothing reaches Docker. Every answer (inspect, info, list, stats) is trimmed to the fields a run needs.
 
     uvicorn app.integrations.docker.proxy_app:app --uds /run/docker-proxy/proxy.sock
 
@@ -39,6 +39,27 @@ def trim_inspection(body: dict) -> dict:
             "HostConfig": {"RestartPolicy": (body.get("HostConfig") or {}).get("RestartPolicy")}}
 
 
+def trim_info(body: dict) -> dict:
+    return {key: body.get(key) for key in ("MemTotal", "NCPU", "ServerVersion", "ContainersRunning")}
+
+
+def trim_list(body: list) -> list:
+    """Names and state only, plus kind's own two labels (to tell a node from an application); never ports, mounts or the rest."""
+    kept = ("io.x-k8s.kind.cluster", "io.x-k8s.kind.role")
+    return [{"Names": item.get("Names") or [], "State": item.get("State"),
+             "Labels": {k: v for k, v in (item.get("Labels") or {}).items() if k in kept}} for item in body if isinstance(item, dict)]
+
+
+def trim_stats(body: dict) -> dict:
+    memory = body.get("memory_stats") or {}
+    stats = memory.get("stats") or {}
+    return {"memory_stats": {"usage": memory.get("usage"), "limit": memory.get("limit"),
+                             "stats": {key: stats[key] for key in ("inactive_file", "cache") if key in stats}}}
+
+
+TRIMMERS = {"json": trim_inspection, "info": trim_info, "list": trim_list, "stats": trim_stats}
+
+
 def create_app(*, transport: httpx.BaseTransport | None = None, allowed_clusters: frozenset[str] | None = None,
                socket_path: str | None = None) -> FastAPI:
     clusters = allowed_clusters if allowed_clusters is not None else allowed_clusters_from_env()
@@ -70,8 +91,12 @@ def create_app(*, transport: httpx.BaseTransport | None = None, allowed_clusters
         except httpx.HTTPError as error:
             return Response(json.dumps({"message": f"Docker did not answer: {type(error).__name__}"}), status_code=502,
                             media_type="application/json")
-        if decision.action == "json" and answer.status_code == 200:
-            return Response(json.dumps(trim_inspection(answer.json())), media_type="application/json")
+        if decision.action in TRIMMERS and answer.status_code == 200:
+            try:
+                return Response(json.dumps(TRIMMERS[decision.action](answer.json())), media_type="application/json")
+            except ValueError:
+                return Response(json.dumps({"message": "Docker answered with something unreadable"}), status_code=502,
+                                media_type="application/json")
         return Response(answer.content, status_code=answer.status_code,
                         media_type=answer.headers.get("content-type", "application/json"))
 

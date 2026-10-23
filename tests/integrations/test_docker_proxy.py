@@ -102,9 +102,13 @@ class FakeDaemon:
         self.received.append((request.method, request.url.path, request.url.query.decode()))
         parts = request.url.path.split("/")
         if request.url.path == "/info":
-            return httpx.Response(200, json={"MemTotal": 4_000_000_000, "NCPU": 5, "ServerVersion": "29", "ContainersRunning": 6})
+            return httpx.Response(200, json={"MemTotal": 4_000_000_000, "NCPU": 5, "ServerVersion": "29", "ContainersRunning": 6,
+                                             "Name": "host-name", "DockerRootDir": "/var/lib/docker", "SecurityOptions": ["x"]})
         if request.url.path == "/containers/json":
-            return httpx.Response(200, json=[{"Names": ["/resilience-validation-worker"]}, {"Names": ["/postgres"]}])
+            return httpx.Response(200, json=[{"Names": ["/resilience-validation-worker"], "State": "running", "Image": "kindest/node",
+                                              "Labels": {**WORKER, "secret.label": "x"}, "Ports": [{"PrivatePort": 6443}],
+                                              "Mounts": [{"Source": "/secret"}]},
+                                             {"Names": ["/postgres"], "State": "running", "Labels": {"app": "db"}}])
         if len(parts) == 4 and parts[1] == "containers" and parts[3] == "json":
             labels = LABELS.get(parts[2])
             if labels is None:
@@ -116,7 +120,8 @@ class FakeDaemon:
         if parts[-1] in ("kill", "start"):
             return httpx.Response(204)
         if parts[-1] == "stats":
-            return httpx.Response(200, json={"memory_stats": {"usage": 600, "stats": {"inactive_file": 100}}})
+            return httpx.Response(200, json={"memory_stats": {"usage": 600, "stats": {"inactive_file": 100, "anon": 5}},
+                                             "networks": {"eth0": {"rx_bytes": 1}}, "name": "/x"})
         return httpx.Response(404, json={"message": "unexpected"})
 
 
@@ -170,6 +175,24 @@ def test_the_allowed_clusters_come_from_the_proxys_own_environment_and_default_t
     assert allowed_clusters_from_env({}) == {"resilience-validation"}
     assert allowed_clusters_from_env({"RESILIENCE_PROXY_ALLOWED_CLUSTERS": " Resilience-Validation , desktop "}) == {
         "resilience-validation", "desktop"}
+
+
+def test_info_list_and_stats_are_trimmed_to_what_the_assessment_uses(proxy):
+    info = proxy.get("/info").json()
+    listing = proxy.get("/containers/json").json()
+    stats = proxy.get("/containers/postgres/stats", params={"stream": "false", "one-shot": "true"}).json()
+
+    assert set(info) == {"MemTotal", "NCPU", "ServerVersion", "ContainersRunning"}
+    assert listing[0] == {"Names": ["/resilience-validation-worker"], "State": "running", "Labels": WORKER}
+    assert listing[1]["Labels"] == {} and "Ports" not in json.dumps(listing) and "Mounts" not in json.dumps(listing)
+    assert "secret.label" not in json.dumps(listing) and "host-name" not in json.dumps(info)
+    assert set(stats) == {"memory_stats"} and "anon" not in json.dumps(stats) and "networks" not in json.dumps(stats)
+
+
+@pytest.mark.parametrize("path, query", [("/info", "x=1"), ("/containers/json", "all=1"), ("/containers/json", "filters=%7B%7D"),
+                                         ("/_ping", "a=b")])
+def test_the_read_only_endpoints_take_no_options(path, query):
+    assert verdict("GET", path, query).allowed is False
 
 
 def test_trim_inspection_keeps_only_run_relevant_fields():
