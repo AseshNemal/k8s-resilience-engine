@@ -261,7 +261,7 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
         usable = [d for d in declared if d["applicable"]]
         evidence.append(_item("declaredWorkflow", "Declared workflow", AVAILABLE if usable else MISSING,
                               f"{len(usable)} of {len(declared)} declared workflow(s) apply to {chosen or 'the selected application'}. "
-                              "Declared, not observed: recommendations from it can be read but never approved.",
+                              "Declared, not observed: recommendations from it can be read; approving one is a research-only step.",
                               None if usable else "Declare a workflow whose services are in this application."))
 
     ready = bool(cluster["state"] == AVAILABLE and row and selected)

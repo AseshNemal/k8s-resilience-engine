@@ -107,8 +107,10 @@ def get_recommendation_provider(
 
 DECLARED_NOT_APPROVABLE = (
     "This recommendation was computed from a workflow a person declared, not one Component 1 observed from traces, approved and "
-    "froze. It can be read and studied, but it cannot be put to approval, applied or validated."
+    "froze. It can be read and studied. The production approval cannot be used for it; a named person can approve it for research "
+    "validation through the research tier, and anything measured from it is conditional on the declaration."
 )
+DECLARED_OUTCOME = "Evaluated from a declared workflow, not an observed one. Read the notice below before relying on it."
 
 
 def get_declared_provider(
@@ -254,7 +256,7 @@ def read_declared_recommendation_detail(
             "requires": "the name of the person and a written acknowledgement that the workflow is declared, not observed",
             "reason": None if eligible else "This candidate is not verified feasible and ranked, so it cannot be approved in any tier."}
     if shown["outcome"]["state"] == "READY":
-        shown["outcome"] = {"state": "DECLARED_NOT_APPROVABLE", "message": DECLARED_NOT_APPROVABLE}
+        shown["outcome"] = {"state": "DECLARED_NOT_APPROVABLE", "message": DECLARED_OUTCOME}
     shown["declared"] = {**(live.evidence.get("declaredWorkflow") or {}), "approvable": False, "limits": NOT_OBSERVED,
                          "notApprovableBecause": DECLARED_NOT_APPROVABLE}
     shown["schedulingFacts"] = live.evidence.get("schedulingFacts")

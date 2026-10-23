@@ -18,6 +18,7 @@ function makeEnvironment(routes) {
             setAttribute(name, value) { this.attributes[name] = value; },
             removeAttribute(name) { delete this.attributes[name]; },
             append(...nodes) { this.children.push(...nodes); },
+            prepend(...nodes) { this.children.unshift(...nodes); },
             appendChild(node) { this.children.push(node); return node; },
             replaceChildren(...nodes) { this.children = [...nodes]; },
             addEventListener(type, fn) { this.listeners[type] = fn; },
@@ -45,8 +46,10 @@ function makeEnvironment(routes) {
         addEventListener: (type, fn) => { listeners[type] = fn; },
     };
     const calls = [];
+    const bodies = [];   // the JSON body of each request, in the same order as `calls`
     const fetch = async (url, init = {}) => {
         calls.push([init.method || "GET", url]);
+        bodies.push(init.body ? JSON.parse(init.body) : null);
         const route = routes[`${init.method || "GET"} ${url}`];
         if (!route) throw new Error(`unexpected request ${init.method || "GET"} ${url}`);
         return {
@@ -67,7 +70,7 @@ function makeEnvironment(routes) {
     const sandbox = { window, document, fetch, console, AbortController, setTimeout, clearTimeout, URLSearchParams };
     vm.createContext(sandbox);
     for (const [name, code] of SCRIPTS) vm.runInContext(code, sandbox, { filename: name });
-    return { element, listeners, windowListeners, calls, region: element('[data-role="page-region"]') };
+    return { element, listeners, windowListeners, calls, bodies, region: element('[data-role="page-region"]') };
 }
 
 function text(node) {
@@ -278,4 +281,97 @@ test("a failing approval lookup is reported on the page and does not hide the re
 test("the page only reads: it never sends a change except an approval request the person clicked", async () => {
     const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
     assert.ok(env.calls.every(([method]) => method === "GET"));
+});
+
+// ---- declared workflows: the research tier's own door, never the production controls ---------------------------------------------------------
+
+const declaredWf = { workflowId: "checkout", declaredBy: "asesh", services: ["payment", "web"], applicable: true, reason: null, declared: true, approvable: false };
+const declaredContext = () => contextOf({ workflows: [], workflowId: null, workflowChoice: "none", ready: false, declaredWorkflows: [declaredWf],
+    evidence: [ev("cluster", "available"), ev("application", "available"), ev("topology", "available"), ev("workflow", "missing"), ev("failureImpact", "missing")] });
+const D_DETAIL = "GET /api/recommendations/declared/detail?workflow_id=checkout&namespace=shop";
+const researchOffer = (over = {}) => ({ available: true, scope: "Research validation on a designated disposable test cluster only.", reason: null, ...over });
+const declaredCandidate = (over = {}) => cand({ approval: { ready: false, reason: "declared", requiresJustification: false, declared: true }, researchApproval: researchOffer(), ...over });
+const declaredBody = (candidate) => ({ ...detailOf([candidate], "rec-live", { state: "DECLARED_NOT_APPROVABLE", message: "Evaluated from a declared workflow." }),
+    declared: { workflowId: "checkout", observed: false, approvable: false, notApprovableBecause: "declared, see the research tier" } });
+
+async function openDeclared(extraRoutes = {}, candidate = declaredCandidate()) {
+    const env = await openPage({
+        "GET /api/recommendations/context": { status: 200, body: declaredContext() },
+        "GET /api/recommendations/context?namespace=shop": { status: 200, body: declaredContext() },
+        [D_DETAIL]: { status: 200, body: declaredBody(candidate) },
+        "GET /api/recommendations/declared/rec-live/approval": { status: 404, body: {} }, ...extraRoutes });
+    const select = env.element('[data-role="rec-workflow-select"]');
+    select.value = "declared:checkout";
+    await select.listeners.change();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return env;
+}
+
+function allNodes(node, found = []) { found.push(node); (node.children || []).forEach((child) => allNodes(child, found)); return found; }
+const byId = (env, id) => allNodes(env.element('[data-role="approval-state-container"]')).concat(allNodes(env.element('[data-role="approval-actions"]'))).find((n) => n.id === id);
+
+test("a declared workflow is asked for through the declared route, and the badge and the notice say it is declared", async () => {
+    const env = await openDeclared();
+
+    assert.ok(env.calls.some(([m, u]) => m === "GET" && u.includes("/declared/detail?workflow_id=checkout&namespace=shop")));
+    assert.ok(!calls_include(env, "/live/detail"));
+    assert.equal(env.element('[data-role="source-badge"]').textContent, "Declared workflow · not approvable");
+    assert.ok(text(env.region).includes("declared, see the research tier"), "the standing notice");
+});
+
+test("for a declared workflow the production request button is replaced by the research form, and the production route is never used", async () => {
+    const env = await openDeclared();
+
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("No research approval requested") && shown.includes("Research validation on a designated disposable test cluster only."));
+    assert.ok(byId(env, "research-ack-by") && byId(env, "research-ack-text") && byId(env, "btn-request-research"));
+    assert.equal(byId(env, "btn-request-approval"), undefined, "no production request button");
+    assert.ok(env.calls.some(([, u]) => u === "/api/recommendations/declared/rec-live/approval"), "the approval state is read from the research route");
+    assert.ok(!calls_include(env, "/api/recommendations/rec-live/approval"));
+});
+
+test("the research request sends the named person and the written acknowledgement to the research route, and shows the pending state", async () => {
+    const pending = { id: 1, recommendationId: "rec-live", proposalVersion: "v1.0", status: "PENDING_APPROVAL", requestedAt: "2026-10-23T00:00:00Z", requestedBy: "asesh",
+        recommendationSnapshot: {}, yamlSnapshot: null, evaluationSnapshot: {} };
+    const env = await openDeclared({ "POST /api/recommendations/declared/rec-live/request-approval?workflow_id=checkout&namespace=shop":
+        { status: 200, body: pending, headers: { "X-Evidence-Provenance": "research-declared" } } });
+    byId(env, "research-ack-by").value = "asesh";
+    byId(env, "research-ack-text").value = "I understand this workflow is declared by me, not observed, and approve it for research validation only.";
+
+    await byId(env, "btn-request-research").listeners.click();
+
+    const index = env.calls.findIndex(([m, u]) => m === "POST" && u.includes("/declared/rec-live/request-approval"));
+    assert.ok(index >= 0);
+    assert.deepEqual(env.bodies[index], { recommendationId: "rec-live", proposalVersion: "v1.0", acknowledgedBy: "asesh",
+        acknowledgement: "I understand this workflow is declared by me, not observed, and approve it for research validation only." });
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("PENDING_APPROVAL") && shown.includes("Research tier"), shown);
+    assert.ok(byId(env, "btn-show-approve") && byId(env, "btn-show-reject"));
+    assert.ok(!byId(env, "btn-show-approve").disabled, "a research-declared record can be approved");
+});
+
+test("a research request without a name is stopped on the page and nothing is sent", async () => {
+    const env = await openDeclared();
+    byId(env, "research-ack-by").value = "   ";
+
+    await byId(env, "btn-request-research").listeners.click();
+
+    assert.ok(!env.calls.some(([m]) => m === "POST"));
+    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("Enter your name"));
+});
+
+test("a declared candidate the server does not offer to the research tier gets a disabled button and the reason", async () => {
+    const env = await openDeclared({}, declaredCandidate({ researchApproval: researchOffer({ available: false, reason: "not verified feasible and ranked" }) }));
+
+    assert.equal(byId(env, "btn-request-research").disabled, true);
+    assert.equal(byId(env, "research-ack-by"), undefined, "no form when there is nothing to request");
+    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("not verified feasible and ranked"));
+});
+
+test("a frozen workflow still uses the production request button and routes, unchanged", async () => {
+    const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
+
+    assert.ok(byId(env, "btn-request-approval"));
+    assert.equal(byId(env, "btn-request-research"), undefined);
+    assert.ok(!calls_include(env, "/declared"));
 });

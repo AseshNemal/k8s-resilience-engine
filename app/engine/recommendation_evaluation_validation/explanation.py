@@ -93,12 +93,19 @@ def _feasibility(entry: dict[str, Any] | None, reason: str | None) -> dict[str, 
     }
 
 
+def _score_text(score: Any) -> str:
+    """A ranking score for a sentence: four decimals at most, so 0.7224999999999999 reads as 0.7225 (the number itself is unchanged)."""
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return str(score)
+    return f"{score:.4f}".rstrip("0").rstrip(".")
+
+
 def _selection_text(candidate_id: str, ranking: dict[str, Any] | None, selected: str | None) -> str:
     """Why this candidate is or is not the selection, in the ranking's own words."""
     if not ranking:
         return "The ranking did not report this candidate."
     if candidate_id == selected:
-        return f"Selected: top-ranked feasible candidate (rank 1, score {ranking.get('score')}). {ranking.get('detail', '')}".strip()
+        return f"Selected: top-ranked feasible candidate (rank 1, score {_score_text(ranking.get('score'))}). {ranking.get('detail', '')}".strip()
     if ranking.get("rank") is not None:
         return f"Ranked {ranking['rank']}; not the selection. {ranking.get('detail', '')}".strip()
     excluded = ranking.get("excluded")

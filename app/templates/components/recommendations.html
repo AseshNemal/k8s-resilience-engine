@@ -36,7 +36,7 @@
             <select class="rec-inputs__input" id="rec-namespace-select" data-role="rec-namespace-select" disabled></select>
         </label>
         <label class="rec-inputs__field" for="rec-workflow-select">
-            <span>Approved frozen workflow</span>
+            <span>Workflow</span>
             <select class="rec-inputs__input" id="rec-workflow-select" data-role="rec-workflow-select" disabled></select>
         </label>
         <label class="rec-inputs__field" for="rec-node-select">
@@ -161,6 +161,10 @@
                 <div><strong>Service:</strong> <span id="modal-context-service"></span></div>
                 <div><strong>Recommendation Type:</strong> <span id="modal-context-type"></span></div>
                 <div><strong>Proposal Version:</strong> <span id="modal-context-version">v1.0</span></div>
+            </div>
+            <div class="form-group" style="margin-top: var(--space-md);" id="research-decider-group" hidden>
+                <label for="research-decider">Your name (a research decision is made by a named person)</label>
+                <input type="text" id="research-decider" class="form-input" autocomplete="off">
             </div>
             <div class="form-group" style="margin-top: var(--space-md);">
                 <label for="approval-note">Decision Note (Optional)</label>

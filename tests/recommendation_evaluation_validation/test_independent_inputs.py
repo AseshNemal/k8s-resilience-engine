@@ -238,3 +238,20 @@ def test_the_declared_path_changes_nothing_in_the_cluster_or_in_component_1(use_
 
     assert all(call.split(":")[0] in ("nodes", "pods", "deployments", "services", "replicasets", "raw", "workload-namespaces")
                for call in source.calls)
+
+
+@pytest.mark.parametrize("score, text", [(0.7224999999999999, "0.7225"), (0.8, "0.8"), (1.0, "1"), (0.0, "0"), (None, "None")])
+def test_a_ranking_score_in_a_sentence_has_no_floating_point_noise(score, text):
+    from app.engine.recommendation_evaluation_validation.explanation import _score_text
+
+    assert _score_text(score) == text
+
+
+def test_the_selection_sentence_uses_it_and_the_score_itself_is_untouched(use_cluster, declared, no_frozen_workflow):
+    use_cluster(concentrated_db())
+
+    shown = describe_live_recommendation(live_pipeline.build_declared_recommendation("checkout", None, "shop"))
+    selected = next(c for c in shown["candidates"] if c["selected"])
+
+    assert "0000000" not in selected["selectionJustification"] and "9999999" not in selected["selectionJustification"]
+    assert selected["score"] == pytest.approx(selected["ranking"]["score"])

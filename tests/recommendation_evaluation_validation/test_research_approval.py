@@ -271,3 +271,69 @@ def test_a_frozen_workflow_plan_is_unchanged_and_says_it_is_frozen():
     plan = ValidationPlan.from_approval(approval, live, scenario.workflow, TARGET)
 
     assert plan.workflow_basis == "FROZEN" and plan.declared is False and plan.declaration is None
+
+
+# --- tier separation: neither gate can decide, or hide, the other's records ------------------------------------------------------------
+
+def production_record(monkeypatch, repository):
+    freeze_checkout(monkeypatch)
+    live = live_pipeline.build_live_recommendation("checkout", None, "shop")
+    selected = live.report.selected_recommendation_id
+    ApprovalService(repository).request_approval(selected, "v1", live.report, requested_by="t", evidence=live.evidence,
+                                                 proposal_yaml=build_yaml_proposal(live, selected).yaml)
+    return selected
+
+
+def test_the_research_gate_cannot_reject_a_production_record(monkeypatch, use_cluster, declared):
+    use_cluster(concentrated_db())
+    repository = InMemoryApprovals()
+    selected = production_record(monkeypatch, repository)
+
+    with pytest.raises(ResearchProvenanceError):
+        ResearchApprovalService(repository).reject(selected, "v1", "no", decided_by="asesh")
+
+    assert repository.get_by_recommendation_id(selected).status is ApprovalStatus.PENDING_APPROVAL      # untouched
+
+
+@pytest.mark.parametrize("decider", ["", "  ", "developer"])
+def test_a_research_rejection_needs_a_named_person(world, decider):
+    service = ResearchApprovalService(InMemoryApprovals())
+    selected, _ = requested(service, world)
+
+    with pytest.raises(PreconditionError):
+        service.reject(selected, "v1", "no", decided_by=decider)
+
+
+def test_a_named_person_can_reject_a_research_request(world):
+    service = ResearchApprovalService(InMemoryApprovals())
+    selected, _ = requested(service, world)
+
+    rejected = service.reject(selected, "v1", "not now", decided_by="asesh")
+
+    assert rejected.status is ApprovalStatus.REJECTED and rejected.decided_by == "asesh"
+
+
+@pytest.mark.parametrize("decide", [False, True])
+def test_a_research_request_cannot_shadow_an_existing_production_record(monkeypatch, use_cluster, declared, decide):
+    use_cluster(concentrated_db())
+    repository = InMemoryApprovals()
+    selected = production_record(monkeypatch, repository)
+    if decide:
+        ApprovalService(repository).reject(selected, "v1", "n", decided_by="t")        # even a decided production record is not hidden
+    live = evaluate_declared()
+
+    with pytest.raises(PreconditionError) as raised:
+        requested(ResearchApprovalService(repository), live)
+
+    assert "not a research-tier one" in str(raised.value)
+    assert has_verified_provenance(repository.get_by_recommendation_id(selected)) is True       # the production record is still what a gate sees
+
+
+def test_a_second_research_request_after_a_decided_research_one_is_allowed(world):
+    service = ResearchApprovalService(InMemoryApprovals())
+    selected, _ = requested(service, world)
+    service.reject(selected, "v1", "not now", decided_by="asesh")
+
+    again = requested(service, world)[1]
+
+    assert again.status is ApprovalStatus.PENDING_APPROVAL and has_research_provenance(again)

@@ -104,7 +104,7 @@ def test_the_context_lists_declared_workflows_apart_from_frozen_ones_and_never_s
     assert item["workflowId"] == "checkout" and item["declared"] is True and item["approvable"] is False and item["applicable"] is True
     assert item["freezeId"] is None and item["declaredBy"] == "asesh" and "not observed" in item["limits"]
     entry = next(e for e in context["evidence"] if e["id"] == "declaredWorkflow")
-    assert entry["state"] == "available" and "never approved" in entry["detail"]
+    assert entry["state"] == "available" and "research-only step" in entry["detail"]
     # the frozen-workflow line still says what it said: declaring a workflow does not pretend one was frozen
     assert next(e for e in context["evidence"] if e["id"] == "workflow")["state"] == "missing"
 

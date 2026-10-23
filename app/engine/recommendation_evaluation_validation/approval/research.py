@@ -122,10 +122,27 @@ class ResearchApprovalService(ApprovalService):
             raise PreconditionError("The evaluation does not record which declaration it came from, so it cannot be approved.")
         if proposal_yaml is None:
             raise PreconditionError("The server generated no YAML for this candidate, so there is nothing to approve.")
+        # Recommendation ids come from the workflow, service and type, so a production record can share one with this request. The
+        # latest record for an id is the one a gate sees, so a research request must not shadow a production one: it refuses.
+        existing = self.repository.get_by_recommendation_id(recommendation_id)
+        if existing is not None and not has_research_provenance(existing):
+            raise PreconditionError(f"{recommendation_id} already has an approval record that is not a research-tier one; the tiers are "
+                                    f"kept apart, so this request would hide it. Decide that record first.")
         evidence = {**live.evidence, "researchTier": RESEARCH_TIER, "researchAcknowledgement": {
             "by": who, "statement": statement, "at": datetime.now(timezone.utc).isoformat(), "scope": RESEARCH_SCOPE}}
         return self.request_approval(recommendation_id, proposal_version, live.report, requested_by=who,
                                      evidence=evidence, proposal_yaml=proposal_yaml)
+
+    def reject(self, recommendation_id: str, expected_proposal_version: str, note: str,
+               decided_by: str = ANONYMOUS) -> ApprovalModel:
+        """Reject a research request. Only a research-tier record can be decided here, and only by a named person."""
+        who = (decided_by or "").strip()
+        if not who or who.lower() == ANONYMOUS:
+            raise PreconditionError("A research decision is made by a named person.")
+        existing = self.repository.get_by_recommendation_id(recommendation_id)
+        if existing is not None:
+            self._require_provenance(existing)      # a production record is not this gate's to decide
+        return super().reject(recommendation_id, expected_proposal_version, note, decided_by=who)
 
     def approve(
         self, recommendation_id: str, expected_proposal_version: str, note: str, decided_by: str = ANONYMOUS,

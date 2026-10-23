@@ -40,6 +40,17 @@
     const approvalModal = document.getElementById("approval-modal");
     let currentRecommendation = null;
     let currentApproval = { ready: false, reason: "" };   // the server's verdict for the selected candidate
+    // Declared workflows only: the server's offer of the separate research tier for the selected candidate. The production controls
+    // above stay off for such a candidate; this is a different door, with its own routes and a named person's acknowledgement.
+    let currentResearch = null;
+    let lastResearchName = "";                            // remembered in memory only, to save retyping within this page
+    let researchNameInput = null;
+    let researchAckInput = null;
+    const RESEARCH_PLACEHOLDER = "I understand this workflow is declared by me, not observed, and approve it for research validation only.";
+
+    function isDeclared() {
+        return !!controller && controller.selection().workflowKind === "declared";
+    }
 
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
@@ -62,7 +73,9 @@
     async function callApproval(method, path, body) {
         // Requesting an approval recomputes the recommendation on the server, so it needs the same inputs.
         const query = path === "/request-approval" ? inputQuery() : "";
-        const response = await fetch(`${APPROVAL_BASE}/${encodeURIComponent(currentRecommendation.id)}${path}${query}`, {
+        // A declared workflow's approvals live under /declared: the research tier's own routes, never the production ones.
+        const base = isDeclared() ? `${APPROVAL_BASE}/declared` : APPROVAL_BASE;
+        const response = await fetch(`${base}/${encodeURIComponent(currentRecommendation.id)}${path}${query}`, {
             method,
             headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
             body: body ? JSON.stringify(body) : undefined,
@@ -108,7 +121,9 @@
         stateContainer.replaceChildren();
         actionsContainer.replaceChildren();
 
-        if (!approval) {
+        if (!approval && isDeclared()) {
+            renderResearchRequest(stateContainer, actionsContainer);
+        } else if (!approval) {
             stateContainer.append(approvalBadge("No Approval Requested", "muted"));
             const request = button("Request Approval", "primary-button", "btn-request-approval", requestApproval);
             if (!currentRecommendation.feasible || !currentApproval.ready) {
@@ -124,6 +139,14 @@
             version.className = "text-sm text-muted";
             version.textContent = `Proposal Version: ${approval.proposalVersion}`;
             stack.append(approvalBadge(approval.status, variant), version);
+            if (provenance === "research-declared") {
+                const research = document.createElement("div");
+                research.className = "approval-note";
+                research.setAttribute("data-role", "research-note");
+                research.textContent = "Research tier: this workflow was declared, not observed. A decision here applies nothing and counts "
+                    + "for validation on a designated test cluster only; results from it are conditional on the declaration.";
+                stack.append(research);
+            }
             if (provenance === "unverified") {
                 const warning = document.createElement("div");
                 warning.className = "approval-note";
@@ -156,6 +179,60 @@
             problem.textContent = message;
             stateContainer.append(problem);
         }
+    }
+
+    // The research tier's request form, for a declared workflow only. The server decides whether the candidate may be put forward at all
+    // (currentResearch.available); this only collects the named person and the written acknowledgement it requires.
+    function renderResearchRequest(stateContainer, actionsContainer) {
+        stateContainer.append(approvalBadge("No research approval requested", "muted"));
+        const offer = currentResearch;
+        if (!offer || !offer.available) {
+            const why = document.createElement("div");
+            why.className = "approval-note";
+            why.textContent = (offer && offer.reason) || "This candidate cannot be put forward.";
+            stateContainer.append(why);
+            const blocked = button("Request research approval", "primary-button", "btn-request-research", () => {});
+            blocked.disabled = true;
+            actionsContainer.append(blocked);
+            return;
+        }
+        const form = document.createElement("div");
+        form.className = "stack-sm";
+        const scope = document.createElement("div");
+        scope.className = "approval-note";
+        scope.textContent = offer.scope;
+        researchNameInput = document.createElement("input");
+        researchNameInput.type = "text";
+        researchNameInput.className = "form-input";
+        researchNameInput.id = "research-ack-by";
+        researchNameInput.placeholder = "Your name";
+        researchNameInput.value = lastResearchName;
+        researchAckInput = document.createElement("textarea");
+        researchAckInput.className = "form-input";
+        researchAckInput.id = "research-ack-text";
+        researchAckInput.rows = 3;
+        researchAckInput.placeholder = RESEARCH_PLACEHOLDER;
+        researchAckInput.value = "";
+        form.append(scope, researchNameInput, researchAckInput);
+        stateContainer.append(form);
+        actionsContainer.append(button("Request research approval", "primary-button", "btn-request-research", requestResearchApproval));
+    }
+
+    async function requestResearchApproval() {
+        const by = ((researchNameInput && researchNameInput.value) || "").trim();
+        const statement = ((researchAckInput && researchAckInput.value) || "").trim();
+        if (!by) return renderApprovalState(null, null, "Enter your name: a research approval is made by a named person.");
+        lastResearchName = by;
+        const result = await callApproval("POST", "/request-approval", {
+            recommendationId: currentRecommendation.id,
+            proposalVersion: PROPOSAL_VERSION,
+            acknowledgedBy: by,
+            acknowledgement: statement,
+        });
+        if (!result.ok) {
+            return renderApprovalState(null, null, errorText(result, "Could not request the research approval."));
+        }
+        renderApprovalState(result.payload, result.provenance);
     }
 
     async function loadApprovalState() {
@@ -192,7 +269,19 @@
         const reject = approvalModal.querySelector("#modal-confirm-reject");
         approve.style.display = "none";
         reject.style.display = "none";
-        if (action === "approve") {
+        // A research decision is made by a named person; the field is in the template and only shown for a declared workflow.
+        const declared = isDeclared();
+        const deciderGroup = approvalModal.querySelector("#research-decider-group");
+        const decider = approvalModal.querySelector("#research-decider");
+        if (deciderGroup) deciderGroup.hidden = !declared;
+        if (decider) decider.value = declared ? lastResearchName : "";
+        if (action === "approve" && declared) {
+            message.textContent =
+                "Approve this recommendation for RESEARCH validation? The workflow was declared, not observed, so anything measured from it is " +
+                "conditional on that declaration. This approval does NOT apply the change; it only authorizes this exact proposal.";
+            approve.style.display = "inline-flex";
+            approve.onclick = () => submitApprovalDecision("approve");
+        } else if (action === "approve") {
             message.textContent =
                 "Approve this recommendation? This approval does NOT apply the change automatically. " +
                 "It only authorizes this exact proposal for a future controlled test-environment application.";
@@ -216,10 +305,13 @@
 
     async function submitApprovalDecision(action) {
         const note = approvalModal.querySelector("#approval-note").value;
-        const result = await callApproval("POST", `/${action}`, {
-            note,
-            expectedProposalVersion: PROPOSAL_VERSION,
-        });
+        const body = { note, expectedProposalVersion: PROPOSAL_VERSION };
+        if (isDeclared()) {
+            const decider = approvalModal.querySelector("#research-decider");
+            body.decidedBy = ((decider && decider.value) || "").trim();
+            if (body.decidedBy) lastResearchName = body.decidedBy;
+        }
+        const result = await callApproval("POST", `/${action}`, body);
         hideApprovalModal();
         if (!result.ok) {
             return renderApprovalState(null, null, errorText(result, "The decision could not be recorded."));
@@ -326,6 +418,7 @@
         currentRecommendation = report.selectedRecommendationId ? shown : null;
         const selected = currentRecommendation && detail.candidates.find((c) => c.id === currentRecommendation.id);
         currentApproval = selected ? selected.approval : { ready: false, reason: "No candidate is selected." };
+        currentResearch = selected && selected.researchApproval ? selected.researchApproval : null;
 
         // Evidence next to the report: what the engine returned, never anything computed here. Without a YAML generator
         // and without applied changes there is no YAML proposal and no validation: those panels say so.
@@ -377,7 +470,7 @@
                 // Standing label: this is not observed and cannot be approved, whatever the candidates below say.
                 const note = document.createElement("p");
                 note.className = "ui-note";
-                note.dataset.role = "declared-note";
+                note.setAttribute("data-role", "declared-note");
                 note.textContent = (v.detail && v.detail.declared && v.detail.declared.notApprovableBecause)
                     || "This recommendation uses a workflow a person declared. It can be read, but it cannot be approved or applied.";
                 region.prepend(note);
@@ -386,6 +479,7 @@
         }
         currentRecommendation = null;
         currentApproval = { ready: false, reason: "" };
+        currentResearch = null;
         if (busy) {
             applyBadge(sourceBadge, { variant: "muted", text: "Loading…" });
             region.replaceChildren();

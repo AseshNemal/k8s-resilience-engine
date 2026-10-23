@@ -130,3 +130,33 @@ def test_a_workflow_that_is_not_declared_cannot_be_requested_through_the_researc
                           json=request_body("some-candidate"))
 
     assert refused.status_code == 404 and refused.json()["detail"]["code"] == "DECLARED_WORKFLOW_UNAVAILABLE"
+
+
+def test_the_research_reject_route_cannot_touch_a_production_record_and_needs_a_named_person(client, monkeypatch, use_cluster, declared, sqlite_url):
+    from tests.recommendation_evaluation_validation.test_independent_inputs import freeze_checkout
+
+    use_cluster(concentrated_db())
+    freeze_checkout(monkeypatch)
+    candidate = client.get(f"{PROD}/live", params=PARAMS).json()["selectedRecommendationId"]
+    client.post(f"{PROD}/{candidate}/request-approval", params=PARAMS, json={"recommendationId": candidate, "proposalVersion": "v1"})
+
+    wrong_tier = client.post(f"{RESEARCH}/{candidate}/reject", params=PARAMS, json=decision())
+    anonymous = client.post(f"{RESEARCH}/{candidate}/reject", params=PARAMS, json=decision(decidedBy="developer"))
+
+    assert wrong_tier.status_code == 409 and wrong_tier.json()["detail"]["code"] == "APPROVAL_RESEARCH_PROVENANCE_MISSING"
+    assert anonymous.status_code == 422
+    assert client.get(f"{PROD}/{candidate}/approval").json()["status"] == "PENDING_APPROVAL"      # still pending, still the production gate's
+
+
+def test_a_research_request_over_a_production_record_is_refused_over_http(client, monkeypatch, use_cluster, declared, sqlite_url):
+    from tests.recommendation_evaluation_validation.test_independent_inputs import freeze_checkout
+
+    use_cluster(concentrated_db())
+    freeze_checkout(monkeypatch)
+    candidate = client.get(f"{PROD}/live", params=PARAMS).json()["selectedRecommendationId"]
+    client.post(f"{PROD}/{candidate}/request-approval", params=PARAMS, json={"recommendationId": candidate, "proposalVersion": "v1"})
+
+    refused = client.post(f"{RESEARCH}/{candidate}/request-approval", params=PARAMS, json=request_body(candidate))
+
+    assert refused.status_code == 422 and "not a research-tier one" in refused.json()["detail"]
+    assert client.get(f"{PROD}/{candidate}/approval").headers["X-Evidence-Provenance"] == "verified"
