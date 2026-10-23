@@ -18,7 +18,7 @@ def test_drift_tab_markup_presence(client):
     html = response.text
 
     assert 'id="tab-drift"' in html
-    assert "Resilience Drift & Failure Exposure" in html
+    assert "Which services would one node failure take down?" in html
     assert 'id="spof-banner-badge"' in html
     assert 'id="spof-banner-count"' in html
 
@@ -28,6 +28,15 @@ def test_drift_tab_markup_presence(client):
     assert 'id="count-resource-drift"' in html
     assert 'id="count-contention-drift"' in html
     assert 'id="count-spread-drift"' in html
+
+    # The what-if board (crash a node, see who survives) comes first; the drill-down list is under Show details
+    for role in ("whatif", "whatif-nodes", "whatif-services", "whatif-play", "whatif-reset", "whatif-headline"):
+        assert f'data-role="{role}"' in html
+    assert html.index('data-role="whatif"') < html.index('id="spof-workloads-list"')
+    # Below the board: replica concentration per service and failure-domain exposure per node
+    for role in ("conc-rows", "expo-rows", "expo-summary"):
+        assert f'data-role="{role}"' in html
+    assert html.index('data-role="whatif"') < html.index('data-role="conc-rows"')
 
     # Lists
     assert 'id="spof-workloads-list"' in html

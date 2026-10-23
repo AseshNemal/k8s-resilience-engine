@@ -1,0 +1,1244 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "1"
+                },
+                "creationTimestamp": "2026-10-22T08:11:35Z",
+                "generation": 6,
+                "labels": {
+                    "app": "details",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "864bc5474d",
+                    "version": "v1"
+                },
+                "name": "details-v1-864bc5474d",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "details-v1",
+                        "uid": "9c36be64-1380-4bb9-af5d-3dcb83ea1de6"
+                    }
+                ],
+                "resourceVersion": "234087",
+                "uid": "be812be5-ec1e-4819-ac52-98e73510f806"
+            },
+            "spec": {
+                "replicas": 0,
+                "selector": {
+                    "matchLabels": {
+                        "app": "details",
+                        "pod-template-hash": "864bc5474d",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "details",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "864bc5474d",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "image": "registry.istio.io/release/examples-bookinfo-details-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "details",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File"
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-details",
+                        "serviceAccountName": "bookinfo-details",
+                        "terminationGracePeriodSeconds": 30,
+                        "topologySpreadConstraints": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "details",
+                                        "version": "v1"
+                                    }
+                                },
+                                "maxSkew": 1,
+                                "topologyKey": "kubernetes.io/hostname",
+                                "whenUnsatisfiable": "DoNotSchedule"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "observedGeneration": 6,
+                "replicas": 0,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "1",
+                    "deployment.kubernetes.io/max-replicas": "2",
+                    "deployment.kubernetes.io/revision": "2"
+                },
+                "creationTimestamp": "2026-10-22T11:48:39Z",
+                "generation": 4,
+                "labels": {
+                    "app": "details",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "c6c6cd7d5",
+                    "version": "v1"
+                },
+                "name": "details-v1-c6c6cd7d5",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "details-v1",
+                        "uid": "9c36be64-1380-4bb9-af5d-3dcb83ea1de6"
+                    }
+                ],
+                "resourceVersion": "235122",
+                "uid": "da4d914d-7dd4-4875-b115-5a8571010f05"
+            },
+            "spec": {
+                "replicas": 1,
+                "selector": {
+                    "matchLabels": {
+                        "app": "details",
+                        "pod-template-hash": "c6c6cd7d5",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "details",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "c6c6cd7d5",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "image": "registry.istio.io/release/examples-bookinfo-details-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "details",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File"
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-details",
+                        "serviceAccountName": "bookinfo-details",
+                        "terminationGracePeriodSeconds": 30
+                    }
+                }
+            },
+            "status": {
+                "availableReplicas": 1,
+                "fullyLabeledReplicas": 1,
+                "observedGeneration": 4,
+                "readyReplicas": 1,
+                "replicas": 1,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "2"
+                },
+                "creationTimestamp": "2026-10-22T11:48:40Z",
+                "generation": 3,
+                "labels": {
+                    "app": "productpage",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "656d587f97",
+                    "version": "v1"
+                },
+                "name": "productpage-v1-656d587f97",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "productpage-v1",
+                        "uid": "c40431d4-2a7e-408d-9b4c-ef73f5dda4e1"
+                    }
+                ],
+                "resourceVersion": "235151",
+                "uid": "93d285d7-6d14-4d9b-96d8-b9701d418333"
+            },
+            "spec": {
+                "replicas": 3,
+                "selector": {
+                    "matchLabels": {
+                        "app": "productpage",
+                        "pod-template-hash": "656d587f97",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "productpage",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "656d587f97",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "image": "registry.istio.io/release/examples-bookinfo-productpage-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "productpage",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File",
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": "/tmp",
+                                        "name": "tmp"
+                                    }
+                                ]
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-productpage",
+                        "serviceAccountName": "bookinfo-productpage",
+                        "terminationGracePeriodSeconds": 30,
+                        "volumes": [
+                            {
+                                "emptyDir": {},
+                                "name": "tmp"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "availableReplicas": 3,
+                "fullyLabeledReplicas": 3,
+                "observedGeneration": 3,
+                "readyReplicas": 3,
+                "replicas": 3,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "1"
+                },
+                "creationTimestamp": "2026-10-22T08:11:36Z",
+                "generation": 4,
+                "labels": {
+                    "app": "productpage",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "97577d494",
+                    "version": "v1"
+                },
+                "name": "productpage-v1-97577d494",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "productpage-v1",
+                        "uid": "c40431d4-2a7e-408d-9b4c-ef73f5dda4e1"
+                    }
+                ],
+                "resourceVersion": "234228",
+                "uid": "4042641e-cbf3-41fc-b5ba-ef5c9da6d44e"
+            },
+            "spec": {
+                "replicas": 0,
+                "selector": {
+                    "matchLabels": {
+                        "app": "productpage",
+                        "pod-template-hash": "97577d494",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "productpage",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "97577d494",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "image": "registry.istio.io/release/examples-bookinfo-productpage-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "productpage",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File",
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": "/tmp",
+                                        "name": "tmp"
+                                    }
+                                ]
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-productpage",
+                        "serviceAccountName": "bookinfo-productpage",
+                        "terminationGracePeriodSeconds": 30,
+                        "topologySpreadConstraints": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "productpage",
+                                        "version": "v1"
+                                    }
+                                },
+                                "maxSkew": 1,
+                                "topologyKey": "kubernetes.io/hostname",
+                                "whenUnsatisfiable": "DoNotSchedule"
+                            }
+                        ],
+                        "volumes": [
+                            {
+                                "emptyDir": {},
+                                "name": "tmp"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "observedGeneration": 4,
+                "replicas": 0,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "1"
+                },
+                "creationTimestamp": "2026-10-22T08:11:35Z",
+                "generation": 6,
+                "labels": {
+                    "app": "ratings",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "69bb54fb6d",
+                    "version": "v1"
+                },
+                "name": "ratings-v1-69bb54fb6d",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "ratings-v1",
+                        "uid": "1693a19e-4f66-4ca0-9de6-de36df06231a"
+                    }
+                ],
+                "resourceVersion": "234142",
+                "uid": "9e086b28-511b-4942-9849-5b89cdf39891"
+            },
+            "spec": {
+                "replicas": 0,
+                "selector": {
+                    "matchLabels": {
+                        "app": "ratings",
+                        "pod-template-hash": "69bb54fb6d",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "ratings",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "69bb54fb6d",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "image": "registry.istio.io/release/examples-bookinfo-ratings-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "ratings",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File"
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-ratings",
+                        "serviceAccountName": "bookinfo-ratings",
+                        "terminationGracePeriodSeconds": 30,
+                        "topologySpreadConstraints": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "ratings",
+                                        "version": "v1"
+                                    }
+                                },
+                                "maxSkew": 1,
+                                "topologyKey": "kubernetes.io/hostname",
+                                "whenUnsatisfiable": "DoNotSchedule"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "observedGeneration": 6,
+                "replicas": 0,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "1",
+                    "deployment.kubernetes.io/max-replicas": "2",
+                    "deployment.kubernetes.io/revision": "2"
+                },
+                "creationTimestamp": "2026-10-22T11:48:39Z",
+                "generation": 4,
+                "labels": {
+                    "app": "ratings",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "69cf94fb77",
+                    "version": "v1"
+                },
+                "name": "ratings-v1-69cf94fb77",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "ratings-v1",
+                        "uid": "1693a19e-4f66-4ca0-9de6-de36df06231a"
+                    }
+                ],
+                "resourceVersion": "235130",
+                "uid": "97df451a-c39c-41fe-b250-1f64a7216240"
+            },
+            "spec": {
+                "replicas": 1,
+                "selector": {
+                    "matchLabels": {
+                        "app": "ratings",
+                        "pod-template-hash": "69cf94fb77",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "ratings",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "69cf94fb77",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "image": "registry.istio.io/release/examples-bookinfo-ratings-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "ratings",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File"
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-ratings",
+                        "serviceAccountName": "bookinfo-ratings",
+                        "terminationGracePeriodSeconds": 30
+                    }
+                }
+            },
+            "status": {
+                "availableReplicas": 1,
+                "fullyLabeledReplicas": 1,
+                "observedGeneration": 4,
+                "readyReplicas": 1,
+                "replicas": 1,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "5"
+                },
+                "creationTimestamp": "2026-10-22T11:49:54Z",
+                "generation": 3,
+                "labels": {
+                    "app": "reviews",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "577c679ff5",
+                    "version": "v1"
+                },
+                "name": "reviews-v1-577c679ff5",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "reviews-v1",
+                        "uid": "d4f83e13-da2d-43b3-a58c-6e8f6845279a"
+                    }
+                ],
+                "resourceVersion": "234792",
+                "uid": "ca416660-5b5b-43b8-a433-444f8803e321"
+            },
+            "spec": {
+                "replicas": 3,
+                "selector": {
+                    "matchLabels": {
+                        "app": "reviews",
+                        "pod-template-hash": "577c679ff5",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": "2026-10-22T17:19:54+05:30"
+                        },
+                        "labels": {
+                            "app": "reviews",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "577c679ff5",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "env": [
+                                    {
+                                        "name": "LOG_DIR",
+                                        "value": "/tmp/logs"
+                                    }
+                                ],
+                                "image": "registry.istio.io/release/examples-bookinfo-reviews-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "reviews",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File",
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": "/tmp",
+                                        "name": "tmp"
+                                    },
+                                    {
+                                        "mountPath": "/opt/ibm/wlp/output",
+                                        "name": "wlp-output"
+                                    }
+                                ]
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-reviews",
+                        "serviceAccountName": "bookinfo-reviews",
+                        "terminationGracePeriodSeconds": 30,
+                        "volumes": [
+                            {
+                                "emptyDir": {},
+                                "name": "wlp-output"
+                            },
+                            {
+                                "emptyDir": {},
+                                "name": "tmp"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "availableReplicas": 3,
+                "fullyLabeledReplicas": 3,
+                "observedGeneration": 3,
+                "readyReplicas": 3,
+                "replicas": 3,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "3"
+                },
+                "creationTimestamp": "2026-10-22T11:43:08Z",
+                "generation": 3,
+                "labels": {
+                    "app": "reviews",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "587c4c866d",
+                    "version": "v1"
+                },
+                "name": "reviews-v1-587c4c866d",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "reviews-v1",
+                        "uid": "d4f83e13-da2d-43b3-a58c-6e8f6845279a"
+                    }
+                ],
+                "resourceVersion": "233729",
+                "uid": "1cea0aff-b127-439a-bbd0-4f52ae3abbb3"
+            },
+            "spec": {
+                "replicas": 0,
+                "selector": {
+                    "matchLabels": {
+                        "app": "reviews",
+                        "pod-template-hash": "587c4c866d",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": "2026-10-22T17:13:08+05:30"
+                        },
+                        "labels": {
+                            "app": "reviews",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "587c4c866d",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "env": [
+                                    {
+                                        "name": "LOG_DIR",
+                                        "value": "/tmp/logs"
+                                    }
+                                ],
+                                "image": "registry.istio.io/release/examples-bookinfo-reviews-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "reviews",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File",
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": "/tmp",
+                                        "name": "tmp"
+                                    },
+                                    {
+                                        "mountPath": "/opt/ibm/wlp/output",
+                                        "name": "wlp-output"
+                                    }
+                                ]
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-reviews",
+                        "serviceAccountName": "bookinfo-reviews",
+                        "terminationGracePeriodSeconds": 30,
+                        "topologySpreadConstraints": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "reviews",
+                                        "version": "v1"
+                                    }
+                                },
+                                "maxSkew": 1,
+                                "topologyKey": "kubernetes.io/hostname",
+                                "whenUnsatisfiable": "DoNotSchedule"
+                            }
+                        ],
+                        "volumes": [
+                            {
+                                "emptyDir": {},
+                                "name": "wlp-output"
+                            },
+                            {
+                                "emptyDir": {},
+                                "name": "tmp"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "observedGeneration": 3,
+                "replicas": 0,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "2"
+                },
+                "creationTimestamp": "2026-10-22T11:38:05Z",
+                "generation": 2,
+                "labels": {
+                    "app": "reviews",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "5dcbf7cc45",
+                    "version": "v1"
+                },
+                "name": "reviews-v1-5dcbf7cc45",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "reviews-v1",
+                        "uid": "d4f83e13-da2d-43b3-a58c-6e8f6845279a"
+                    }
+                ],
+                "resourceVersion": "233070",
+                "uid": "1d882d74-8ccc-4003-8a9c-88350a18f8d0"
+            },
+            "spec": {
+                "replicas": 0,
+                "selector": {
+                    "matchLabels": {
+                        "app": "reviews",
+                        "pod-template-hash": "5dcbf7cc45",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": "2026-10-22T17:08:05+05:30"
+                        },
+                        "labels": {
+                            "app": "reviews",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "5dcbf7cc45",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "env": [
+                                    {
+                                        "name": "LOG_DIR",
+                                        "value": "/tmp/logs"
+                                    }
+                                ],
+                                "image": "registry.istio.io/release/examples-bookinfo-reviews-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "reviews",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File",
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": "/tmp",
+                                        "name": "tmp"
+                                    },
+                                    {
+                                        "mountPath": "/opt/ibm/wlp/output",
+                                        "name": "wlp-output"
+                                    }
+                                ]
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-reviews",
+                        "serviceAccountName": "bookinfo-reviews",
+                        "terminationGracePeriodSeconds": 30,
+                        "topologySpreadConstraints": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "reviews",
+                                        "version": "v1"
+                                    }
+                                },
+                                "maxSkew": 1,
+                                "topologyKey": "kubernetes.io/hostname",
+                                "whenUnsatisfiable": "DoNotSchedule"
+                            }
+                        ],
+                        "volumes": [
+                            {
+                                "emptyDir": {},
+                                "name": "wlp-output"
+                            },
+                            {
+                                "emptyDir": {},
+                                "name": "tmp"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "observedGeneration": 2,
+                "replicas": 0,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "4"
+                },
+                "creationTimestamp": "2026-10-22T11:48:40Z",
+                "generation": 7,
+                "labels": {
+                    "app": "reviews",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "6fc8844d8b",
+                    "version": "v1"
+                },
+                "name": "reviews-v1-6fc8844d8b",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "reviews-v1",
+                        "uid": "d4f83e13-da2d-43b3-a58c-6e8f6845279a"
+                    }
+                ],
+                "resourceVersion": "234482",
+                "uid": "fd9f1a34-31ed-4339-9763-7d00d41d7a39"
+            },
+            "spec": {
+                "replicas": 0,
+                "selector": {
+                    "matchLabels": {
+                        "app": "reviews",
+                        "pod-template-hash": "6fc8844d8b",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": "2026-10-22T17:13:08+05:30"
+                        },
+                        "labels": {
+                            "app": "reviews",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "6fc8844d8b",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "env": [
+                                    {
+                                        "name": "LOG_DIR",
+                                        "value": "/tmp/logs"
+                                    }
+                                ],
+                                "image": "registry.istio.io/release/examples-bookinfo-reviews-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "reviews",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File",
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": "/tmp",
+                                        "name": "tmp"
+                                    },
+                                    {
+                                        "mountPath": "/opt/ibm/wlp/output",
+                                        "name": "wlp-output"
+                                    }
+                                ]
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-reviews",
+                        "serviceAccountName": "bookinfo-reviews",
+                        "terminationGracePeriodSeconds": 30,
+                        "volumes": [
+                            {
+                                "emptyDir": {},
+                                "name": "wlp-output"
+                            },
+                            {
+                                "emptyDir": {},
+                                "name": "tmp"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "observedGeneration": 7,
+                "replicas": 0,
+                "terminatingReplicas": 0
+            }
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+                "annotations": {
+                    "deployment.kubernetes.io/desired-replicas": "3",
+                    "deployment.kubernetes.io/max-replicas": "4",
+                    "deployment.kubernetes.io/revision": "1"
+                },
+                "creationTimestamp": "2026-10-22T08:11:35Z",
+                "generation": 8,
+                "labels": {
+                    "app": "reviews",
+                    "experiment": "placement-drift",
+                    "pod-template-hash": "7dc5ff46f7",
+                    "version": "v1"
+                },
+                "name": "reviews-v1-7dc5ff46f7",
+                "namespace": "bookinfo-exp",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Deployment",
+                        "name": "reviews-v1",
+                        "uid": "d4f83e13-da2d-43b3-a58c-6e8f6845279a"
+                    }
+                ],
+                "resourceVersion": "234237",
+                "uid": "5b8838fe-de0f-49dc-a8aa-43ebffa03753"
+            },
+            "spec": {
+                "replicas": 0,
+                "selector": {
+                    "matchLabels": {
+                        "app": "reviews",
+                        "pod-template-hash": "7dc5ff46f7",
+                        "version": "v1"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "reviews",
+                            "experiment": "placement-drift",
+                            "pod-template-hash": "7dc5ff46f7",
+                            "version": "v1"
+                        }
+                    },
+                    "spec": {
+                        "automountServiceAccountToken": false,
+                        "containers": [
+                            {
+                                "env": [
+                                    {
+                                        "name": "LOG_DIR",
+                                        "value": "/tmp/logs"
+                                    }
+                                ],
+                                "image": "registry.istio.io/release/examples-bookinfo-reviews-v1:1.20.3",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "reviews",
+                                "ports": [
+                                    {
+                                        "containerPort": 9080,
+                                        "protocol": "TCP"
+                                    }
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": "100m",
+                                        "memory": "128Mi"
+                                    }
+                                },
+                                "terminationMessagePath": "/dev/termination-log",
+                                "terminationMessagePolicy": "File",
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": "/tmp",
+                                        "name": "tmp"
+                                    },
+                                    {
+                                        "mountPath": "/opt/ibm/wlp/output",
+                                        "name": "wlp-output"
+                                    }
+                                ]
+                            }
+                        ],
+                        "dnsPolicy": "ClusterFirst",
+                        "restartPolicy": "Always",
+                        "schedulerName": "default-scheduler",
+                        "securityContext": {},
+                        "serviceAccount": "bookinfo-reviews",
+                        "serviceAccountName": "bookinfo-reviews",
+                        "terminationGracePeriodSeconds": 30,
+                        "topologySpreadConstraints": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "reviews",
+                                        "version": "v1"
+                                    }
+                                },
+                                "maxSkew": 1,
+                                "topologyKey": "kubernetes.io/hostname",
+                                "whenUnsatisfiable": "DoNotSchedule"
+                            }
+                        ],
+                        "volumes": [
+                            {
+                                "emptyDir": {},
+                                "name": "wlp-output"
+                            },
+                            {
+                                "emptyDir": {},
+                                "name": "tmp"
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {
+                "observedGeneration": 8,
+                "replicas": 0,
+                "terminatingReplicas": 0
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}

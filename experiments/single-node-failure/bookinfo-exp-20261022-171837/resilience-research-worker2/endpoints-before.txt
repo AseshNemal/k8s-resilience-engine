@@ -1,0 +1,5 @@
+NAME                ADDRESSTYPE   PORTS   ENDPOINTS                              AGE
+details-lws6x       IPv4          9080    10.244.1.144                           3h40m
+productpage-ttdd8   IPv4          9080    10.244.1.142,10.244.2.145,10.244.3.6   3h40m
+ratings-whxxg       IPv4          9080    10.244.1.143                           3h40m
+reviews-w2lgc       IPv4          9080    10.244.3.9,10.244.3.8,10.244.3.7       3h40m

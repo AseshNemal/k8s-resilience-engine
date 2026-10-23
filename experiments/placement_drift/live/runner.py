@@ -19,7 +19,8 @@ from typing import Any, Callable
 from app.engine.deployment_topology_modeling import placement_metrics as pm
 from experiments.placement_drift.exceptions import ScenarioExecutionError
 from experiments.placement_drift.live.kubectl import Kubectl
-from experiments.placement_drift.live.scenarios import TARGET_SERVICE, LiveScenario, RunContext
+from experiments.placement_drift.live.scenarios import LiveScenario, RunContext
+from experiments.placement_drift.live.workloads import STANDIN, Workload
 
 EXPERIMENT_LABEL = "experiment"  # every experiment pod (workload and filler) carries this label key
 
@@ -71,6 +72,8 @@ class RunRecord:
     t0: dict[str, Any] = field(default_factory=dict)
     t1: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    workload: str = STANDIN.name
+    target_service: str = STANDIN.target_service
 
 
 class LiveExperimentRunner:
@@ -84,8 +87,10 @@ class LiveExperimentRunner:
         observe_nodes: Callable[[], list[Any]] | None = None,
         disruption_timeout_s: int = 90,
         settle_s: float = 3.0,
+        workload: Workload = STANDIN,
     ):
         self.kube = kube
+        self.workload = workload
         self.configs = configs
         self.deployments = deployments
         self.results_dir = results_dir
@@ -122,7 +127,8 @@ class LiveExperimentRunner:
         self.reset(manifest)
 
         t0 = self.observe(self.kube.namespace, manifest)
-        ctx = RunContext(kube=self.kube, t0=t0, deployments=self.deployments, observe_nodes=self.observe_nodes)
+        ctx = RunContext(kube=self.kube, t0=t0, deployments=self.deployments, observe_nodes=self.observe_nodes,
+                         workload=self.workload)
         error = None
         try:
             action = scenario.disrupt(ctx)
@@ -154,14 +160,16 @@ class LiveExperimentRunner:
             compliance_rate_t1=t1.report.constraint_compliance_rate,
             changed_services=drift.changed_services,
             transitions=drift.transitions,
-            target_status_t0=_statuses(t0)[TARGET_SERVICE].value,
-            target_status_t1=_statuses(t1)[TARGET_SERVICE].value,
+            target_status_t0=_statuses(t0)[self.workload.target_service].value,
+            target_status_t1=_statuses(t1)[self.workload.target_service].value,
             moved_pods=_moved_pods(t0, t1),
             observation_ms_t0=t0.graph.validation.runtime_overhead_ms,
             observation_ms_t1=t1.graph.validation.runtime_overhead_ms,
             t0=_placement(t0),
             t1=_placement(t1),
             error=error,
+            workload=self.workload.name,
+            target_service=self.workload.target_service,
         )
 
     def _run_and_store(self, scenario: LiveScenario, config: str, repetition: int) -> RunRecord | None:

@@ -1,48 +1,56 @@
-{# Tab 2: Declared Manifest Intent vs Live Cluster State #}
+{# Tab 3: Declared Manifest Intent vs Live Cluster State, as a picture: the copies the YAML asks for
+   (empty seats) and the pods really running (filled seats), per service. The table is behind "Show details". #}
 <div class="tab-pane" id="tab-intent" role="tabpanel" aria-labelledby="tab-btn-intent" hidden>
     <div class="tab-pane__header">
         <div>
-            <h3 class="tab-pane__title">Declared Manifest Intent vs Live Placement Compliance</h3>
-            <p class="tab-pane__desc">Side-by-side reconciliation between developer YAML specifications and active cluster state.</p>
+            <h3 class="tab-pane__title">Does the cluster match the YAML?</h3>
+            <p class="tab-pane__desc">Like booked seats and the people who came: the YAML books the copies, the cluster shows who is really running.</p>
         </div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <div class="compliance-metric-pill" title="Services whose declared ready-replica count equals the live ready count">
-                Replica match: <strong id="replica-match-val">n/a</strong>
-            </div>
+        <div class="compliance-metric-pill" title="Services whose declared ready-replica count equals the live ready count">
+            Replica match: <strong id="replica-match-val">n/a</strong>
+        </div>
+    </div>
+
+    <section class="plan" data-role="plan-board" aria-label="Declared copies against running pods, per service">
+        <div class="plan__top">
+            <p class="plan__headline" data-role="plan-headline" aria-live="polite">Reading the declared intent…</p>
+            {# Where the YAML comes from, on hover: needed when asked, not read out in a demo #}
+            <button type="button" class="plan__info" data-role="plan-source" aria-label="Where the YAML comes from">ⓘ</button>
+        </div>
+        <div class="plan__cards" data-role="plan-cards"></div>
+    </section>
+
+    <details class="show-details" data-role="intent-details">
+        <summary>Show details</summary>
+        <div class="show-details__body">
+            <p class="ui-note manifest-source" data-role="manifest-source" aria-live="polite">Checking which manifest is used…</p>
             <div class="compliance-metric-pill" id="compliance-overall-pill" title="Services that satisfy their declared spread/affinity rules ÷ services that declare such rules (live cluster only)">
                 Placement-rule compliance: <strong id="compliance-rate-val">n/a</strong>
             </div>
+            <ul class="show-details__notes">
+                <li><strong>Replica drift</strong> = the cluster runs a different number of ready copies than the YAML declares.</li>
+                <li><strong>Placement-rule compliance</strong> = of the services that declare a spread/anti-affinity rule, how many actually satisfy it. No rule declared → nothing to check (n/a).</li>
+                <li>Limits are shown for information only; they do not count towards compliance.</li>
+            </ul>
+            <h4 class="show-details__title">Table view</h4>
+            <div class="intent-table-container card card--glass">
+                <table class="intent-table intent-table--all" id="intent-comparison-table" data-role="intent-table">
+                    <thead>
+                        <tr>
+                            <th>Microservice</th>
+                            <th>Declared Replicas (YAML)</th>
+                            <th>Live Ready Replicas</th>
+                            <th>Result</th>
+                            <th class="intent-col--extra">CPU / Mem Limits (info)</th>
+                            <th class="intent-col--extra">Anti-Affinity</th>
+                            <th class="intent-col--extra">Topology Spread</th>
+                        </tr>
+                    </thead>
+                    <tbody id="intent-table-body">
+                        <!-- Populated by deployments_intent_widget.js -->
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </div>
-
-    <p class="ui-note manifest-source" data-role="manifest-source" aria-live="polite">Checking which manifest is used…</p>
-
-    <details class="tab-help">
-        <summary>ℹ️ What am I looking at?</summary>
-        <ul>
-            <li><strong>Declared</strong> = what the developer wrote in the YAML. <strong>Live</strong> = what is really running now.</li>
-            <li><strong>Replica drift</strong> = the cluster runs a different number of ready copies than the YAML declares.</li>
-            <li><strong>Placement-rule compliance</strong> = of the services that declare a spread/anti-affinity rule, how many actually satisfy it. No rule declared → nothing to check (n/a).</li>
-            <li>Limits are shown for information only; they do not count towards compliance.</li>
-        </ul>
     </details>
-
-    <div class="intent-table-container card card--glass">
-        <table class="intent-table" id="intent-comparison-table">
-            <thead>
-                <tr>
-                    <th>Microservice</th>
-                    <th>Declared Replicas (YAML)</th>
-                    <th>Live Ready Replicas</th>
-                    <th>CPU / Mem Limits (info)</th>
-                    <th>Anti-Affinity</th>
-                    <th>Topology Spread</th>
-                    <th>Replicas</th>
-                </tr>
-            </thead>
-            <tbody id="intent-table-body">
-                <!-- Populated by deployments_intent_widget.js -->
-            </tbody>
-        </table>
-    </div>
 </div>

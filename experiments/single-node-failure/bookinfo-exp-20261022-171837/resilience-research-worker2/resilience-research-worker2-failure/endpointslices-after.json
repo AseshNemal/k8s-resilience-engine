@@ -1,0 +1,312 @@
+{
+  "items": [
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": [
+        {
+          "addresses": [
+            "10.244.1.144"
+          ],
+          "conditions": {
+            "ready": false,
+            "serving": false,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker2",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "details-v1-c6c6cd7d5-txfgn",
+            "namespace": "bookinfo-exp",
+            "uid": "b7635cac-02ce-4595-9b09-371b97e079b9"
+          }
+        }
+      ],
+      "kind": "EndpointSlice",
+      "metadata": {
+        "annotations": {
+          "endpoints.kubernetes.io/last-change-trigger-time": "2026-10-22T11:52:51Z"
+        },
+        "creationTimestamp": "2026-10-22T08:11:34Z",
+        "generateName": "details-",
+        "generation": 23,
+        "labels": {
+          "app": "details",
+          "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+          "experiment": "placement-drift",
+          "kubernetes.io/service-name": "details",
+          "service": "details"
+        },
+        "name": "details-lws6x",
+        "namespace": "bookinfo-exp",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Service",
+            "name": "details",
+            "uid": "3cec5339-0517-4f64-ae15-ab805b2fa94b"
+          }
+        ],
+        "resourceVersion": "234995",
+        "uid": "31fc5f34-debf-46e7-a4d8-c03f5bf626bc"
+      },
+      "ports": [
+        {
+          "name": "http",
+          "port": 9080,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": [
+        {
+          "addresses": [
+            "10.244.1.142"
+          ],
+          "conditions": {
+            "ready": false,
+            "serving": false,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker2",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "productpage-v1-656d587f97-g78d2",
+            "namespace": "bookinfo-exp",
+            "uid": "9f14e7ef-caaa-4be7-b71c-b16a6c687ff2"
+          }
+        },
+        {
+          "addresses": [
+            "10.244.2.145"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker3",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "productpage-v1-656d587f97-gsc95",
+            "namespace": "bookinfo-exp",
+            "uid": "a5d24e42-edd0-41ed-ab82-700ba14e8c84"
+          }
+        },
+        {
+          "addresses": [
+            "10.244.3.6"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "productpage-v1-656d587f97-4ct6x",
+            "namespace": "bookinfo-exp",
+            "uid": "650e9b18-3184-44ed-8100-508039ca98f9"
+          }
+        }
+      ],
+      "kind": "EndpointSlice",
+      "metadata": {
+        "annotations": {
+          "endpoints.kubernetes.io/last-change-trigger-time": "2026-10-22T11:52:51Z"
+        },
+        "creationTimestamp": "2026-10-22T08:11:36Z",
+        "generateName": "productpage-",
+        "generation": 17,
+        "labels": {
+          "app": "productpage",
+          "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+          "experiment": "placement-drift",
+          "kubernetes.io/service-name": "productpage",
+          "service": "productpage"
+        },
+        "name": "productpage-ttdd8",
+        "namespace": "bookinfo-exp",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Service",
+            "name": "productpage",
+            "uid": "df1af7d2-fac7-4f15-bbf2-8d7dc36e976c"
+          }
+        ],
+        "resourceVersion": "235002",
+        "uid": "3400c463-d396-4e15-8b99-1c6ddd585654"
+      },
+      "ports": [
+        {
+          "name": "http",
+          "port": 9080,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": [
+        {
+          "addresses": [
+            "10.244.1.143"
+          ],
+          "conditions": {
+            "ready": false,
+            "serving": false,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker2",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "ratings-v1-69cf94fb77-slc7k",
+            "namespace": "bookinfo-exp",
+            "uid": "e59dfd70-1380-4609-bed5-2d02ed70ab95"
+          }
+        }
+      ],
+      "kind": "EndpointSlice",
+      "metadata": {
+        "annotations": {
+          "endpoints.kubernetes.io/last-change-trigger-time": "2026-10-22T11:52:51Z"
+        },
+        "creationTimestamp": "2026-10-22T08:11:35Z",
+        "generateName": "ratings-",
+        "generation": 23,
+        "labels": {
+          "app": "ratings",
+          "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+          "experiment": "placement-drift",
+          "kubernetes.io/service-name": "ratings",
+          "service": "ratings"
+        },
+        "name": "ratings-whxxg",
+        "namespace": "bookinfo-exp",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Service",
+            "name": "ratings",
+            "uid": "eb199b70-5d12-49ef-b28d-c7fabc230e85"
+          }
+        ],
+        "resourceVersion": "234960",
+        "uid": "a4b03874-7915-489c-91be-2a604993c1de"
+      },
+      "ports": [
+        {
+          "name": "http",
+          "port": 9080,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": [
+        {
+          "addresses": [
+            "10.244.3.9"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "reviews-v1-577c679ff5-vnlwl",
+            "namespace": "bookinfo-exp",
+            "uid": "7d2e2162-11fb-4ca9-97e3-29fb44cb8209"
+          }
+        },
+        {
+          "addresses": [
+            "10.244.3.8"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "reviews-v1-577c679ff5-7dl6z",
+            "namespace": "bookinfo-exp",
+            "uid": "316163fe-dbed-4d62-a3f9-70c9ffdf7f4e"
+          }
+        },
+        {
+          "addresses": [
+            "10.244.3.7"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "nodeName": "resilience-research-worker",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "reviews-v1-577c679ff5-ff49t",
+            "namespace": "bookinfo-exp",
+            "uid": "4187c14d-292c-4fad-88ca-ccc8bd6073a8"
+          }
+        }
+      ],
+      "kind": "EndpointSlice",
+      "metadata": {
+        "annotations": {
+          "endpoints.kubernetes.io/last-change-trigger-time": "2026-10-22T11:51:40Z"
+        },
+        "creationTimestamp": "2026-10-22T08:11:35Z",
+        "generateName": "reviews-",
+        "generation": 44,
+        "labels": {
+          "app": "reviews",
+          "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+          "experiment": "placement-drift",
+          "kubernetes.io/service-name": "reviews",
+          "service": "reviews"
+        },
+        "name": "reviews-w2lgc",
+        "namespace": "bookinfo-exp",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Service",
+            "name": "reviews",
+            "uid": "7c09f8ea-9d1d-41f8-bc92-5c7e6b0fa728"
+          }
+        ],
+        "resourceVersion": "234789",
+        "uid": "fba02300-3029-4ee7-a96e-d28d7261fcf3"
+      },
+      "ports": [
+        {
+          "name": "http",
+          "port": 9080,
+          "protocol": "TCP"
+        }
+      ]
+    }
+  ]
+}

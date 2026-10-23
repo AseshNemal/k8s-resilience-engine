@@ -1,47 +1,41 @@
-{# Tab 1: Physical Topology Map View #}
+{# Tab 1: Physical Topology Map View. One question, one picture; the rest is behind "Show details". #}
 <div class="tab-pane active" id="tab-topology" role="tabpanel" aria-labelledby="tab-btn-topology">
     <div class="tab-pane__header">
         <div>
-            <h3 class="tab-pane__title">Physical Cluster & Failure Domain Topology</h3>
-            <p class="tab-pane__desc">Worker nodes (grouped by zone label when present) and the pods each one hosts. Faded, dashed pods are not ready; free capacity is allocatable minus pod requests.</p>
+            <h3 class="tab-pane__title">Where are the pods running?</h3>
+            <p class="tab-pane__desc">Each line joins a service to one of its pods, and each pod sits on the worker node that runs it.</p>
         </div>
         <div class="tab-pane__controls">
-            <label class="control-label" for="filter-topology-zone">Filter Zone:</label>
+            <label class="control-label" for="filter-topology-zone">Zone:</label>
             <select class="topology-select" id="filter-topology-zone">
                 <option value="all">All Zones</option>
             </select>
         </div>
     </div>
 
-    <details class="tab-help">
-        <summary>ℹ️ What am I looking at?</summary>
-        <ul>
-            <li>Each box is a <strong>worker node</strong> (a machine). Each chip is a <strong>pod</strong> (one running copy of a service).</li>
-            <li>Kubernetes decides which node each pod runs on. This map is read from the cluster, not from the YAML.</li>
-            <li><strong>Click a node</strong> to simulate its failure: services whose every ready copy is on that node turn red. Those services would have 0 ready replicas.</li>
-        </ul>
-    </details>
-
     <div class="failure-sim" data-role="failure-sim-result">
-        👆 Click a node below to see what happens if it fails.
+        👆 Hover a service to trace its pods. Click a worker node to see what happens if it fails.
     </div>
 
     <div class="zone-grid" id="deployment-zone-grid" data-role="deployment-zone-grid">
         <!-- Rendered dynamically by deployments_topology_widget.js or SSR fallback -->
     </div>
 
-    <div class="section-divider"></div>
-
-    <div class="section-header">
-        <h4 class="section-header__title">Replica Concentration Distribution</h4>
-        <span class="section-header__note">Workload spreading across host failure domains</span>
-    </div>
-    <div class="card card--glass">
-        <div class="concentration-panel" id="deployment-concentration-panel" data-role="deployment-concentration-panel">
-            <!-- Rendered by deployments_topology_widget.js -->
+    <details class="show-details">
+        <summary>Show details</summary>
+        <div class="show-details__body">
+            <ul class="show-details__notes">
+                <li>The map is read from the cluster, not from the YAML: Kubernetes decides which node each pod runs on.</li>
+                <li>Faded, dashed pods are not ready. Free capacity is allocatable minus pod requests.</li>
+                <li>Clicking a node turns red every service whose ready copies are all on that node: it would have 0 ready replicas.</li>
+            </ul>
+            <h4 class="show-details__title">Replica Concentration</h4>
+            <div class="concentration-panel" id="deployment-concentration-panel" data-role="deployment-concentration-panel">
+                <!-- Rendered by deployments_topology_widget.js -->
+            </div>
+            <p class="ui-note">
+                Replica concentration = largest share of a service's ready replicas on one node. Red = all ready replicas on one node.
+            </p>
         </div>
-        <p class="ui-note">
-            Replica concentration = largest share of a service's ready replicas on one node. Red = concentrated: all ready replicas on one node, so that node's failure leaves the service with 0 ready replicas.
-        </p>
-    </div>
+    </details>
 </div>

@@ -10,9 +10,11 @@ from typing import Any, Callable
 
 from experiments.placement_drift.constants import DisruptionType
 from experiments.placement_drift.live.kubectl import Kubectl
+from experiments.placement_drift.live.workloads import STANDIN, Workload
 
-TARGET_SERVICE = "paymentservice"
-TARGET_REPLICAS = 3
+# The stand-in workload's target; kept as names because the stored results and the dashboard use them.
+TARGET_SERVICE = STANDIN.target_service
+TARGET_REPLICAS = STANDIN.target_replicas
 FILLER_LABEL = "experiment=placement-drift-filler"
 FILLER_HEADROOM_CORES = 0.03  # leaves less than one 50m target pod of free CPU on a filled node
 
@@ -23,11 +25,12 @@ class RunContext:
     t0: Any                    # service.TopologyAnalysis observed at T0
     deployments: list[str]
     observe_nodes: Callable[[], list[Any]] = None  # fresh ClusterNode list (used by contention)
+    workload: Workload = STANDIN   # which target the scenarios disrupt
     notes: dict[str, Any] = field(default_factory=dict)
 
 
-def _target_pods(t0) -> list[Any]:
-    return next(s.pods for s in t0.graph.services if s.name == TARGET_SERVICE)
+def _target_pods(ctx: RunContext) -> list[Any]:
+    return next(s.pods for s in ctx.t0.graph.services if s.name == ctx.workload.target_service)
 
 
 def _busiest_node(pods) -> str:
@@ -52,24 +55,27 @@ def _initial(ctx: RunContext) -> dict[str, Any]:
 
 
 def _scale_up(ctx):
-    ctx.kube.scale(TARGET_SERVICE, 6)
-    return {"action": f"kubectl scale deployment/{TARGET_SERVICE} --replicas=6"}
+    target = ctx.workload.target_deployment
+    ctx.kube.scale(target, 6)
+    return {"action": f"kubectl scale deployment/{target} --replicas=6"}
 
 
 def _scale_down(ctx):
-    ctx.kube.scale(TARGET_SERVICE, 2)
-    return {"action": f"kubectl scale deployment/{TARGET_SERVICE} --replicas=2"}
+    target = ctx.workload.target_deployment
+    ctx.kube.scale(target, 2)
+    return {"action": f"kubectl scale deployment/{target} --replicas=2"}
 
 
 def _rolling_update(ctx):
-    ctx.kube.rollout_restart(TARGET_SERVICE)
-    return {"action": f"kubectl rollout restart deployment/{TARGET_SERVICE}"}
+    target = ctx.workload.target_deployment
+    ctx.kube.rollout_restart(target)
+    return {"action": f"kubectl rollout restart deployment/{target}"}
 
 
 def _pod_deletion(ctx):
     # Delete the target pod that sits on the node with the FEWEST target pods: its replacement
     # decides whether the service stays spread.
-    pods = _target_pods(ctx.t0)
+    pods = _target_pods(ctx)
     counts = Counter(p.node for p in pods)
     victim = min(pods, key=lambda p: (counts[p.node], p.name))
     ctx.kube.delete_pod(victim.name)
@@ -79,11 +85,12 @@ def _pod_deletion(ctx):
 def _cordon(ctx):
     # Cordon the node with the most target pods, then restart the target so new pods must be
     # scheduled while that node is unavailable (cordon alone moves no pod).
-    node = _busiest_node(_target_pods(ctx.t0))
+    node = _busiest_node(_target_pods(ctx))
+    target = ctx.workload.target_deployment
     ctx.notes["cordoned"] = node
     ctx.kube.cordon(node)
-    ctx.kube.rollout_restart(TARGET_SERVICE)
-    return {"action": f"kubectl cordon {node}; kubectl rollout restart deployment/{TARGET_SERVICE}", "node": node}
+    ctx.kube.rollout_restart(target)
+    return {"action": f"kubectl cordon {node}; kubectl rollout restart deployment/{target}", "node": node}
 
 
 def _uncordon_noted(key: str):
@@ -129,8 +136,9 @@ def _constrained_resources(ctx):
     use the remaining node: does limited capacity cause co-location?"""
     import tempfile
 
-    ctx.kube.scale(TARGET_SERVICE, 0)
-    ctx.kube.wait_until_no_pods(f"app={TARGET_SERVICE}")
+    target = ctx.workload.target_deployment
+    ctx.kube.scale(target, 0)
+    ctx.kube.wait_until_no_pods(ctx.workload.target_selector)
     nodes = ctx.observe_nodes()
     free = {n.name: float(n.cpu_available) for n in nodes}
     keep = max(free, key=lambda n: (free[n], n))
@@ -146,7 +154,7 @@ def _constrained_resources(ctx):
         ctx.kube.apply(f.name)
         fillers[node] = cpu_m
     ctx.kube.wait_until_stable([f"capacity-filler-{n}" for n in fillers])
-    ctx.kube.scale(TARGET_SERVICE, TARGET_REPLICAS)
+    ctx.kube.scale(target, ctx.workload.target_replicas)
     return {"action": "scale target to 0, fill CPU on all workers but one, scale target to 3",
             "kept_free_node": keep, "filler_cpu_millicores": fillers}
 

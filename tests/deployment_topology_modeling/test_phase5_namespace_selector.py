@@ -68,3 +68,21 @@ def test_intent_table_matches_deployments_to_their_live_service():
     source = (JS / "deployments_intent_widget.js").read_text(encoding="utf-8")
     assert "deploymentNames ?? s.deployment_names" in source
     assert "const liveMap = buildLiveMap(liveServices);" in source
+
+
+def test_page_shows_where_and_when_its_data_was_read(client):
+    html = client.get("/components/deployments").text
+    assert 'data-role="evidence-box"' in html
+    for role in ("evidence-namespace", "evidence-time", "evidence-snapshot", "evidence-took", "evidence-command"):
+        assert f'data-role="{role}"' in html
+    source = (JS / "deployments.js").read_text(encoding="utf-8")
+    assert "renderEvidence(body);" in source
+    assert "get pods -o wide" in source
+
+
+def test_main_output_is_labelled_and_sits_before_the_accuracy_panel(client):
+    html = client.get("/components/deployments").text
+    assert "Main output: DeploymentGraph" in html
+    assert 'id="deployment-raw-json"' in html
+    assert 'data-role="output-snapshot"' in html
+    assert html.index("Main output: DeploymentGraph") < html.index("How accurate is the model?")

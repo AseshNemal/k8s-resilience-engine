@@ -68,6 +68,46 @@ def test_example_run_carries_placement_and_concentration(tmp_path):
     assert run["concentration_t1"]["paymentservice"] == {"ratio": pytest.approx(0.6667), "ready_replicas": 3}
 
 
+def test_every_successful_run_is_served_in_repetition_order(tmp_path):
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "results_dir": str(tmp_path), "total_runs": 3,
+        "conditions": [_condition("02_scale_up", "A-no-rule", False)],
+    }), encoding="utf-8")
+    snap = {"reviews": {"ready_replicas": 1, "replica_concentration": 1.0, "pods": [["r0", "w1", True]]}}
+    for rep, failed in ((2, False), (1, False), (3, True)):  # written out of order; run 3 failed
+        (tmp_path / f"02_scale_up__A-no-rule__run{rep}.json").write_text(json.dumps({
+            "repetition": rep, "failed": failed, "action": {"action": "kubectl scale"}, "stable_after_disruption": True,
+            "target_status_t0": "EXPOSED", "target_status_t1": "EXPOSED", "t0": snap, "t1": snap,
+        }), encoding="utf-8")
+
+    condition = service.get_live_experiment_results(tmp_path)["conditions"][0]
+
+    assert [r["repetition"] for r in condition["run_placements"]] == [1, 2]
+    assert condition["example_run"] == condition["run_placements"][0]
+    assert condition["runs"] == 2  # the stored count is not replaced by the list
+
+
+def test_each_run_carries_its_stored_measurements(tmp_path):
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "results_dir": str(tmp_path), "total_runs": 1,
+        "conditions": [_condition("08_constrained_resources", "B-spread", True)],
+    }), encoding="utf-8")
+    snap = {"reviews": {"ready_replicas": 1, "replica_concentration": 1.0, "pods": [["r0", "w3", True]]}}
+    (tmp_path / "08_constrained_resources__B-spread__run1.json").write_text(json.dumps({
+        "repetition": 1, "action": {"action": "fill"}, "stable_after_disruption": False,
+        "target_status_t0": "NOT_EXPOSED", "target_status_t1": "EXPOSED", "t0": snap, "t1": snap,
+        "d_rate": 0.25, "exposure_rate_t0": 0.0, "exposure_rate_t1": 0.25, "compliance_rate_t1": 1.0,
+        "changed_services": ["reviews"],
+    }), encoding="utf-8")
+
+    (run,) = service.get_live_experiment_results(tmp_path)["conditions"][0]["run_placements"]
+
+    assert run["d_rate"] == pytest.approx(0.25)
+    assert (run["exposure_rate_t0"], run["exposure_rate_t1"]) == (pytest.approx(0.0), pytest.approx(0.25))
+    assert run["compliance_rate_t1"] == pytest.approx(1.0)
+    assert run["changed_services"] == ["reviews"]
+
+
 def test_missing_results_return_none(tmp_path):
     assert service.get_live_experiment_results(tmp_path) is None
 
@@ -94,3 +134,62 @@ def test_page_has_live_experiments_tab(client):
     assert 'id="tab-btn-live-experiments"' in html
     assert 'id="tab-live-experiments"' in html
     assert "deployments_live_experiments_widget.js" in html
+
+
+def test_bookinfo_results_name_their_own_workload_and_target(tmp_path):
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "results_dir": "bookinfo-five-repetitions", "total_runs": 2,
+        "conditions": [_condition("08_constrained_resources", "A-no-rule", True)],
+    }), encoding="utf-8")
+
+    data = service.get_live_experiment_results(tmp_path, workload="bookinfo")
+
+    assert data["workload"] == "bookinfo"
+    assert data["target_service"] == "reviews"
+    assert data["services"] == ["details", "ratings", "reviews", "productpage"]
+    assert "Bookinfo" in data["evidence_note"]
+    assert "bookinfo-exp" in data["evidence_note"]
+
+
+def test_unknown_workload_is_refused():
+    with pytest.raises(ValueError):
+        service.get_live_experiment_results(workload="boutique")
+
+
+def test_endpoint_serves_the_requested_workload(client, tmp_path, monkeypatch):
+    standin, bookinfo = tmp_path / "standin", tmp_path / "bookinfo"
+    for folder, scenario in ((standin, "01_initial_deployment"), (bookinfo, "08_constrained_resources")):
+        folder.mkdir()
+        (folder / "summary.json").write_text(json.dumps({
+            "results_dir": folder.name, "total_runs": 2, "conditions": [_condition(scenario, "A-no-rule", False)],
+        }), encoding="utf-8")
+    monkeypatch.setattr(service, "LIVE_EXPERIMENT_RESULTS_DIR", standin)
+    monkeypatch.setattr(service, "LIVE_EXPERIMENT_BOOKINFO_DIR", bookinfo)
+
+    default = client.get("/api/deployments/benchmarks/live-experiments").json()
+    real_app = client.get("/api/deployments/benchmarks/live-experiments?workload=bookinfo").json()
+
+    assert (default["workload"], default["target_service"]) == ("standin", "paymentservice")
+    assert default["conditions"][0]["scenario_id"] == "01_initial_deployment"
+    assert (real_app["workload"], real_app["target_service"]) == ("bookinfo", "reviews")
+    assert real_app["conditions"][0]["scenario_id"] == "08_constrained_resources"
+    assert real_app["available_workloads"] == ["standin", "bookinfo"]
+    assert client.get("/api/deployments/benchmarks/live-experiments?workload=other").status_code == 422
+
+
+def test_tab_opens_on_the_experiment_player_with_the_table_under_details(client):
+    html = client.get("/components/deployments").text
+    for role in ("xp", "xp-list", "xp-config", "xp-runs", "xp-play", "xp-before", "xp-action", "xp-after", "xp-verdict"):
+        assert f'data-role="{role}"' in html
+    assert 'data-config="A-no-rule"' in html
+    assert 'data-config="B-spread"' in html
+    assert 'data-role="live-exp-hero"' not in html  # the main-finding card was removed
+    assert html.index('data-role="xp"') < html.index('data-role="live-exp-table-body"')
+
+
+def test_tab_offers_both_workloads_and_a_comparison(client):
+    html = client.get("/components/deployments").text
+    assert 'data-workload="standin"' in html
+    assert 'data-workload="bookinfo"' in html
+    assert 'data-role="live-exp-compare-card"' in html
+    assert 'data-role="live-exp-target"' in html
