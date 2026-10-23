@@ -822,7 +822,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     // nodes as one. A record without a usable count adds nothing.
     function podsMoved(transitions) {
         return (transitions || []).reduce((total, record) => {
-            const count = Number(record && record.pod_count);
+            const count = Number(record?.pod_count);
             return total + (Number.isFinite(count) && count > 0 ? count : 0);
         }, 0);
     }
@@ -860,7 +860,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
     async function runSimulation() {
         const parts = simulationParts();
-        if (!parts || !parts.select || !parts.select.value) return;
+        if (!parts?.select?.value) return;
         if (simulationInFlight) {
             // A change made while a run is under way is run straight after it, never alongside it.
             simulationRerun = true;
@@ -905,7 +905,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
     async function loadSimulationNamespaces() {
         const parts = simulationParts();
-        if (!parts || !parts.select) return;
+        if (!parts?.select) return;
         try {
             const overview = await api().fetchJson("/api/deployments/discovery/all");
             const rows = overview.namespaces || [];
