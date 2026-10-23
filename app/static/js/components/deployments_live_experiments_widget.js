@@ -43,8 +43,10 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const lines = Object.entries(cond.target_status_t1_counts || {}).map(([s, n]) => `Target ${s.replace("_", " ")}: ${n}/${ok} runs`);
         if (cond.unstable_runs > 0) lines.push(`Pods stuck: ${cond.unstable_runs}/${ok} runs`);
         if (cond.failed_runs > 0) lines.push(`Failed: ${cond.failed_runs}/${cond.runs} runs`);
-        lines.push(statWithCi("D_rate", cond.d_rate));
-        lines.push(`Exposure rate: ${pct(cond.exposure_rate_t0?.mean)} → ${pct(cond.exposure_rate_t1?.mean)}`);
+        lines.push(
+            statWithCi("D_rate", cond.d_rate),
+            `Exposure rate: ${pct(cond.exposure_rate_t0?.mean)} → ${pct(cond.exposure_rate_t1?.mean)}`,
+        );
         if (cond.compliance_rate_t1?.mean != null) lines.push(`Compliance: ${pct(cond.compliance_rate_t1.mean)}`);
         return lines.join("\n");
     }
@@ -175,7 +177,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     // ---------------------------------------------------------------------------------------------------------
 
     const SCENARIO_ICONS = { "01": "🚀", "02": "⬆️", "03": "⬇️", "04": "🔄", "05": "🗑️", "06": "🚧", "07": "🧹", "08": "🔥" };
-    const NO_NODE = ["unscheduled", "Pending (no node)"];
+    const NO_NODE = new Set(["unscheduled", "Pending (no node)"]);
     const PLAY_MS = 3200;
     const player = { data: null, scenarios: [], scenario: null, config: "A-no-rule", run: 0, timer: null };
     const shortNodeName = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
@@ -195,8 +197,11 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const nodes = {};
         let pending = 0;
         pods.forEach((p) => {
-            if (!p.node || NO_NODE.includes(p.node)) pending++;
-            else (nodes[p.node] = nodes[p.node] || []).push(p);
+            if (!p.node || NO_NODE.has(p.node)) pending++;
+            else {
+                nodes[p.node] = nodes[p.node] || [];
+                nodes[p.node].push(p);
+            }
         });
         return { nodes, pending, total: pods.length };
     }
@@ -220,7 +225,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
     function allNodes(run) {
         const names = new Set();
         [run.t0, run.t1].forEach((snap) => Object.values(snap || {}).forEach((pods) => pods.forEach((p) => {
-            if (p.node && !NO_NODE.includes(p.node)) names.add(p.node);
+            if (p.node && !NO_NODE.has(p.node)) names.add(p.node);
         })));
         return [...names].sort((a, b) => a.localeCompare(b));
     }
@@ -257,9 +262,9 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const cols = el("div", "xp-snap__nodes");
         // The target first, then the others by name.
         const others = Object.keys(snapshot || {}).filter((s) => s !== target).sort((a, b) => a.localeCompare(b));
-        const services = (snapshot || {})[target] ? [target, ...others] : others;
+        const services = snapshot?.[target] ? [target, ...others] : others;
         const podsOn = (node) => services.flatMap((svc) => (snapshot[svc] || [])
-            .filter((p) => (node ? p.node === node : !p.node || NO_NODE.includes(p.node)))
+            .filter((p) => (node ? p.node === node : !p.node || NO_NODE.has(p.node)))
             .map((p) => ({ svc, p })));
 
         nodes.forEach((node) => {
@@ -527,16 +532,17 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         Object.entries(snapshot).forEach(([svc, pods]) => {
             pods.forEach((p) => {
                 const key = p.node || "Pending (no node)";
-                (byNode[key] = byNode[key] || []).push({ svc, ready: p.ready });
+                byNode[key] = byNode[key] || [];
+                byNode[key].push({ svc, ready: p.ready });
             });
         });
         // Show "worker2" instead of "resilience-research-worker2"; the full name is in the tooltip.
         // Pods with no node (stored as "unscheduled" or null) are Pending: created but not placed anywhere.
-        const PENDING_KEYS = ["unscheduled", "Pending (no node)"];
+        const PENDING_KEYS = new Set(["unscheduled", "Pending (no node)"]);
         const short = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
         const cols = el("div", "placement-snap__cols");
         Object.keys(byNode).sort((a, b) => a.localeCompare(b)).forEach((node) => {
-            const pending = PENDING_KEYS.includes(node);
+            const pending = PENDING_KEYS.has(node);
             const col = el("div", pending ? "placement-snap__col placement-snap__col--pending" : "placement-snap__col");
             const label = el("div", "placement-snap__node", pending ? "⏳ Waiting: no node found (Pending)" : `🖥️ ${short(node)}`);
             label.title = pending ? "Kubernetes created these pods but could not place them on any node" : node;
@@ -886,7 +892,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
             );
         } catch (error) {
             // The server's own message names the cause: no cluster connected, no workloads in this namespace, ...
-            const hint = error && error.code === "TOPOLOGY_HAS_NO_WORKLOADS" ? " Choose another namespace." : "";
+            const hint = error?.code === "TOPOLOGY_HAS_NO_WORKLOADS" ? " Choose another namespace." : "";
             setSimulationStatus(parts, `Could not simulate: ${error.message || "request failed"}.${hint}`, true);
         } finally {
             simulationInFlight = false;
@@ -945,7 +951,9 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         if (!parts || !parts.select || !parts.run) return;
         parts.run.addEventListener("click", runSimulation);
         parts.select.addEventListener("change", runSimulation);
-        const start = () => loadSimulationNamespaces().catch((err) => console.warn("Failed to start the cluster simulation:", err));
+        const start = () => {
+            loadSimulationNamespaces().catch((err) => console.warn("Failed to start the cluster simulation:", err));
+        };
         // The card sits under Show details; reading every namespace of the cluster waits until it is opened,
         // so it does not slow the page's own first load.
         const details = parts.select.closest("details");

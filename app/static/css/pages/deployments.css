@@ -794,6 +794,9 @@
 .plan-rule strong { color: var(--c2-text-main); }
 .plan-rule--ok { border-color: color-mix(in srgb, var(--c2-accent-success) 50%, transparent); }
 .plan-rule--danger { border-color: var(--c2-accent-danger); color: #b91c1c; }
+/* a fieldset used as a button group: no browser frame of its own */
+.c2-fieldset { min-width: 0; margin: 0; border: 0; padding: 0; }
+
 /* ---- Experiments tab: how much was run ---- */
 .exp-scale {
     display: grid;
@@ -828,9 +831,8 @@
 .exp-scale__label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--c2-text-muted); }
 @media (max-width: 760px) {
     .exp-scale { grid-template-columns: repeat(2, 1fr); }
-    .exp-scale__item:first-child { grid-column: 1 / -1; }
     .exp-scale__item { border-left: 0; border-top: 1px solid var(--c2-border-light); }
-    .exp-scale__item:first-child { border-top: 0; }
+    .exp-scale__item:first-child { grid-column: 1 / -1; border-top: 0; }
 }
 
 /* ---- Experiments tab: the player (experiment list, before -> action -> after) ---- */

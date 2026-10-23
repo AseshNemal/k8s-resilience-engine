@@ -204,7 +204,11 @@ window.DeploymentsIntentWidget = (function () {
     // One chip per node: how many of the service's pods run there, ready and not.
     function nodeChips(pods) {
         const byNode = {};
-        pods.forEach((p) => (byNode[shortNode(p.node)] = byNode[shortNode(p.node)] || []).push(p));
+        pods.forEach((p) => {
+            const node = shortNode(p.node);
+            byNode[node] = byNode[node] || [];
+            byNode[node].push(p);
+        });
         return Object.keys(byNode).sort((a, b) => a.localeCompare(b)).map((node) => {
             const ok = byNode[node].filter((p) => p.ready).length;
             const waiting = byNode[node].length - ok;

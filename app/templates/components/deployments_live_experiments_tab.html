@@ -17,14 +17,14 @@
 
         <div class="xp__stage">
             <div class="xp__controls">
-                <div class="xp__config" role="group" aria-label="Placement config" data-role="xp-config">
+                <fieldset class="xp__config c2-fieldset" aria-label="Placement config" data-role="xp-config">
                     <button type="button" class="xp__toggle is-active" data-config="A-no-rule" aria-pressed="true">No rule</button>
                     <button type="button" class="xp__toggle" data-config="B-spread" aria-pressed="false">Spread rule</button>
-                </div>
-                <div class="xp__runs" role="group" aria-label="Run" data-role="xp-runs"></div>
+                </fieldset>
+                <fieldset class="xp__runs c2-fieldset" aria-label="Run" data-role="xp-runs"></fieldset>
                 <button type="button" class="xp__play" data-role="xp-play">▶ Play all</button>
             </div>
-            <h4 class="xp__title" data-role="xp-title"></h4>
+            <h4 class="xp__title" data-role="xp-title">Loading the experiments…</h4>
             <div class="xp__scene">
                 <div class="xp__snap" data-role="xp-before"></div>
                 <div class="xp__action" data-role="xp-action"></div>
@@ -56,14 +56,14 @@
             <div>
                 <h4 class="show-details__title">Which runs are shown</h4>
                 <p class="live-exp-headline" data-role="live-exp-headline" hidden></p>
-                <div class="workload-switch" role="group" aria-label="Which experiment results to show" data-role="live-exp-workload">
+                <fieldset class="workload-switch c2-fieldset" aria-label="Which experiment results to show" data-role="live-exp-workload">
                     <button type="button" class="workload-switch__btn" data-workload="standin" aria-pressed="false">
                         Stand-in pods <span class="workload-switch__sub">controlled test · 80 runs</span>
                     </button>
                     <button type="button" class="workload-switch__btn is-active" data-workload="bookinfo" aria-pressed="true">
                         Bookinfo <span class="workload-switch__sub">real application · 80 runs</span>
                     </button>
-                </div>
+                </fieldset>
             </div>
             <div>
                 <span class="status-badge status-badge--success">Live cluster observations</span>

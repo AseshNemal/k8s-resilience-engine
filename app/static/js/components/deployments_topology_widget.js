@@ -130,7 +130,8 @@ window.DeploymentsTopologyWidget = (function () {
         const byNode = {};
         services.forEach((svc) => (svc.pods || []).forEach((pod) => {
             const key = pod.node && known.has(pod.node) ? pod.node : PENDING;
-            (byNode[key] = byNode[key] || []).push({ pod, service: svc.name });
+            byNode[key] = byNode[key] || [];
+            byNode[key].push({ pod, service: svc.name });
         }));
         const nodes = [...data.nodes].sort((a, b) => a.name.localeCompare(b.name));
         if (byNode[PENDING]) nodes.push({ name: PENDING });
