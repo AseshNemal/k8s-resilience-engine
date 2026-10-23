@@ -311,6 +311,7 @@ def evaluate_recommendation(
     *,
     scheduling_evidence: SchedulingEvidence,
     combination_budget: int = DEFAULT_EVALUATION_BUDGET,
+    ranking_weights: RankingWeights | None = None,
 ) -> LiveRecommendation:
     """The pipeline over a workflow and a topology that are already in hand.
 
@@ -318,7 +319,9 @@ def evaluate_recommendation(
     ranking, pairs) with the fetching taken out, so the same code serves the live route and an offline
     evaluation of captured or controlled artifacts. It reads no cluster and changes neither input. What the
     result may be used for is decided by ``provenance.source`` alone: only the live route passes
-    ``LIVE_EVIDENCE_SOURCE``, and an approval is refused for any other source.
+    ``LIVE_EVIDENCE_SOURCE``, and an approval is refused for any other source. ``ranking_weights`` overrides
+    the experimental default weights of ``ranking.py`` (used by the offline lab for sensitivity checks);
+    ``None`` keeps the defaults.
     """
     workflow_id = workflow.workflow_id
     chosen_by = "requested"
@@ -399,7 +402,7 @@ def evaluate_recommendation(
     feasibility.update(combos.feasibility)
     candidate_details.update(combos.details)
 
-    weights = RankingWeights()
+    weights = ranking_weights or RankingWeights()
     ranked = rank_candidates(evaluated, weights)
     candidates: list[RecommendationCandidate] = []
     for entry in ranked:
