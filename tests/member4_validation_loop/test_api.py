@@ -27,7 +27,8 @@ def env():
 
 
 @pytest.fixture
-def client(repo, worker, env):
+def client(repo, worker, env, monkeypatch):
+    monkeypatch.setenv("RESILIENCE_ALLOW_CLUSTER_WRITES", "1")           # what the extension's compose file does
     app.dependency_overrides[get_loop_runtime] = lambda: (repo, worker)
     app.dependency_overrides[get_environment_factory] = lambda: (lambda kind, source="FROZEN": env)
     app.dependency_overrides[get_application_active] = lambda: (lambda: False)
@@ -186,3 +187,42 @@ def test_apply_is_not_blocked_by_a_run_on_the_disposable_cluster(client, repo, w
     answer = client.post("/api/recommendations/some-id/apply", json={"appliedBy": "x"})
 
     assert answer.json().get("detail", {}).get("code") != "VALIDATION_RUN_ACTIVE"
+
+
+# --- the deployment must have armed writes --------------------------------------------------------------------------------------
+
+def test_a_run_and_a_recovery_do_not_start_unless_the_deployment_armed_writes(client, monkeypatch):
+    plan = client.post(f"{BASE}/plan", json=PLAN).json()
+    monkeypatch.delenv("RESILIENCE_ALLOW_CLUSTER_WRITES")
+
+    run = client.post(f"{BASE}/runs", json={"plan": PLAN, "planDigest": plan["planDigest"]})
+    recover = client.post(f"{BASE}/runs/anything/recover")
+
+    assert run.status_code == recover.status_code == 403 and run.json()["detail"]["code"] == "CLUSTER_WRITES_NOT_ENABLED"
+    assert client.post(f"{BASE}/plan", json=PLAN).status_code == 200            # planning and reading still work
+
+
+def test_the_in_flight_rule_covers_applying_and_an_unfinished_rollout(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api import validation_loop as module
+
+    def active_for(change):
+        class Repo:
+            def __init__(self, db): ...
+            def latest(self): return change
+
+        class Session:
+            def __init__(self, engine): ...
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        monkeypatch.setattr(module, "AppliedChangeRepository", Repo)
+        monkeypatch.setattr(module, "Session", Session)
+        monkeypatch.setattr(module, "get_engine", lambda url: None)
+        return module.get_application_active()()
+
+    assert active_for(None) is False
+    assert active_for(SimpleNamespace(status="APPLYING", rollout=None)) is True
+    assert active_for(SimpleNamespace(status="RESET", rollout={"state": "rolling-out"})) is True
+    assert active_for(SimpleNamespace(status="APPLIED", rollout={"state": "completed"})) is False

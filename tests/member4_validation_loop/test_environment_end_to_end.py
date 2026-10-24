@@ -36,7 +36,7 @@ def environment(world, **options):
     config = ClusterConfig(DISPOSABLE, "resilience-validation", "resilience-validation", world.kubeconfig, False, world.recovery_dir)
     return ClusterProofEnvironment(config, loader=loader, runner=world.docker, transport=world.api.transport,
                                    probe_transport=world.probe_transport, sleep=world.clock.sleep, clock=world.clock,
-                                   executor_options=dict(failure_window_s=20.0), **options)
+                                   executor_options=dict(failure_window_s=20.0), **{"writes_enabled": True, **options})
 
 
 def service(repo, world, **options):
@@ -149,3 +149,26 @@ def test_a_run_interrupted_by_a_restart_is_recovered_with_the_real_recoverer_and
     assert run["status"] == "INTERRUPTED" and run["recovery"]["complete"] is True
     assert world.docker.containers[victim]["running"] is True and pending_records(world.recovery_dir) == []
     assert len([c for c in world.docker.calls if c[1] == "kill"]) == kills_before            # recovery killed nothing
+
+
+def test_a_deployment_that_did_not_arm_writes_refuses_every_write_and_stops_no_node(repo, tmp_path):
+    world = FakeWorld(tmp_path)
+    svc = service(repo, world, writes_enabled=False)
+    plan = svc.plan(request())
+
+    started = svc.approve(request(), ApprovalInput(plan.digest))
+    svc._worker.join(30)
+    view = svc.view(started["runKey"], research=True)
+
+    assert view["result"]["winner"] is None and not any(c[1] == "kill" for c in world.docker.calls)
+    assert world.api.requests and not any(r.method == "PATCH" for r in world.api.requests)
+
+
+def test_the_workflow_check_reports_how_many_requests_passed_and_why_one_did_not_without_the_pages_words(repo, tmp_path):
+    world = FakeWorld(tmp_path, broken=("reviews",))
+    svc = service(repo, world)
+
+    answer = svc.probe_test(PROBE)
+
+    assert answer["survives"] is False and answer["passed"] == 0 and answer["samples"] == 3
+    assert answer["reasons"] and not any("Sorry" in r or "Book" in r or "unavailable" in r for r in answer["reasons"])

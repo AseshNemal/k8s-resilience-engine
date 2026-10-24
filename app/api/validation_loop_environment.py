@@ -17,6 +17,7 @@ Docker is reached only through the restricted proxy (``DockerEngineRunner``); th
 binary. A runner that is not the proxy's marks every record it produces as a test double.
 """
 
+import os
 import re
 import time
 from collections.abc import Callable
@@ -76,6 +77,15 @@ class ProbeFactory:
 
     def __call__(self) -> WorkflowProbe:
         return WorkflowProbe(self.spec, self._fetch, clock=self._clock)
+
+
+def _generic(reason: str) -> str:
+    """A failed sample's reason without the page's own words: the status and the kind of mismatch, never the text that matched."""
+    if reason.startswith("page reports a failure"):
+        return "the page contains text that marks a failure"
+    if reason.startswith("required text missing"):
+        return "the page does not contain the required text"
+    return reason
 
 
 def probe_spec(definition: ProbeDefinition, workflow_id: str, *, min_samples: int = 5) -> ProbeSpec:
@@ -138,13 +148,16 @@ class ClusterProofEnvironment:
                  runner: Runner | None = None, transport: httpx.BaseTransport | None = None,
                  probe_transport: httpx.BaseTransport | None = None, sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic, executor_options: dict[str, Any] | None = None,
-                 recovery_timeout_s: float = 300.0, poll_s: float = 2.0, workflow_basis: str = "FROZEN") -> None:
+                 recovery_timeout_s: float = 300.0, poll_s: float = 2.0, workflow_basis: str = "FROZEN",
+                 writes_enabled: bool | None = None) -> None:
         self.config, self.kind = config, config.kind
         self.runner: Runner = runner or DockerEngineRunner()
         self._transport, self._probe_transport = transport, probe_transport
         self.sleep, self._clock, self._executor_options = sleep, clock, dict(executor_options or {})
         self.recovery_timeout_s, self.poll_s = recovery_timeout_s, poll_s
         self._loader = loader or connected_loader(workflow_basis)
+        # Whether this deployment armed writes (RESILIENCE_ALLOW_CLUSTER_WRITES=1). The executor refuses every write while it is False.
+        self.writes_enabled = (os.environ.get("RESILIENCE_ALLOW_CLUSTER_WRITES") == "1") if writes_enabled is None else writes_enabled
         self._injector: KindWorkerFaultInjector | None = None
         self._injector_run: str | None = None
 
@@ -194,7 +207,7 @@ class ClusterProofEnvironment:
             samples.append(workflow_probe.sample())
             self.sleep(0.5)
         passed = sum(1 for s in samples if s.ok)
-        reasons = sorted({s.reason for s in samples if s.reason})
+        reasons = sorted({_generic(s.reason) for s in samples if s.reason})
         return {"samples": len(samples), "passed": passed, "survives": passed == len(samples), "reasons": reasons,
                 "evidenceClass": REAL if self._probe_transport is None else DOUBLE}
 
@@ -222,7 +235,7 @@ class ClusterProofEnvironment:
             options = dict(self._executor_options)
             if probe is not None:
                 options["probe_factory"] = ProbeFactory(probe_spec(probe, "validation-loop"), self._probe_transport, self._clock)
-            return KubernetesValidationExecutor(gateway, injector, designation, research_override=research, writes_enabled=True,
+            return KubernetesValidationExecutor(gateway, injector, designation, research_override=research, writes_enabled=self.writes_enabled,
                                                 sleep=self.sleep, clock=self._clock, on_restore_points=on_restore_points, **options)
         return factory
 

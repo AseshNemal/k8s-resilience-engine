@@ -147,13 +147,19 @@ def _disposable_not_evaluated(workflow_id: str, namespace: str, gateway) -> Load
 
 
 def get_application_active() -> Callable[[], bool]:
-    """Whether a change is being written to the connected cluster right now (Apply or Reset in progress)."""
+    """Whether a change is being written to the connected cluster, or its pods are still rolling out, right now.
+
+    Either tier, Apply or Reset: the latest stored change is the one the cluster is in, whatever tier made it. A change that is still
+    ``APPLYING``, or whose rollout has not completed (``rolling-out``), is in flight, and a test run must not start on top of it.
+    """
 
     def active() -> bool:
         engine = get_engine(get_settings().database_url)
         with Session(engine) as db:
             last = AppliedChangeRepository(db).latest()
-            return last is not None and last.status in ("APPLYING",)
+            if last is None:
+                return False
+            return last.status == "APPLYING" or (last.rollout or {}).get("state") == "rolling-out"
 
     return active
 
@@ -162,6 +168,22 @@ def build_service(kind: str, workflow_source: str, runtime: tuple[LoopRepository
                   factory: Callable[[str, str], ProofEnvironment], active: Callable[[], bool]) -> ValidationLoopService:
     repository, worker = runtime
     return ValidationLoopService(factory(kind, workflow_source), repository, worker, application_active=active)
+
+
+CLUSTER_WRITES_ENV = "RESILIENCE_ALLOW_CLUSTER_WRITES"
+
+
+def require_cluster_writes_armed() -> None:
+    """A run stops nodes and patches Deployments, so it needs the same deliberate arming as Apply and Reset.
+
+    Read from the backend's own environment (the extension's compose file sets it), never from a request. Without it nothing that
+    writes starts: not a run, not a recovery. The digest in a run request ties an approval to the plan that was reviewed; it is not
+    a credential, and this tool has no login, so this deployment-level switch is what keeps a stray request from writing.
+    """
+    if os.environ.get(CLUSTER_WRITES_ENV) != "1":
+        raise HTTPException(status_code=403, detail={
+            "code": "CLUSTER_WRITES_NOT_ENABLED",
+            "message": "This deployment has not armed changes to the cluster, so a test run cannot start. Planning and reading still work."})
 
 
 def require_no_validation_run(runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime)) -> None:
@@ -239,7 +261,11 @@ def plan(body: PlanBody, runtime: tuple[LoopRepository, LoopWorker] = Depends(ge
 def probe_test(body: ProbeTestBody, runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime),
                factory: Callable[[str, str], ProofEnvironment] = Depends(get_environment_factory),
                active: Callable[[], bool] = Depends(get_application_active)) -> dict:
-    """Three GET requests to the workflow's entry point, to see that the check passes on the cluster as it is. Changes nothing."""
+    """Three GET requests to the workflow's entry point, to see that the check passes on the cluster as it is. Changes nothing.
+
+    The address must be this computer's loopback on a port an application is normally published on (see ``allowed_probe_port``); the
+    answer says how many requests passed and why one did not, never the page itself.
+    """
     try:
         return _service(body.target_kind, "FROZEN", runtime, factory, active).probe_test(_probe(body.probe))      # type: ignore[arg-type]
     except ValueError as error:
@@ -247,7 +273,7 @@ def probe_test(body: ProbeTestBody, runtime: tuple[LoopRepository, LoopWorker] =
 
 
 @router.post("/runs")
-def start_run(body: RunBody, runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime),
+def start_run(body: RunBody, _armed: None = Depends(require_cluster_writes_armed), runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime),
               factory: Callable[[str, str], ProofEnvironment] = Depends(get_environment_factory),
               active: Callable[[], bool] = Depends(get_application_active)) -> dict:
     """ONE approval for the whole bounded run: the digest of the plan the person reviewed, plus the acknowledgements it asks for.
@@ -297,7 +323,7 @@ def abort(run_key: str, runtime: tuple[LoopRepository, LoopWorker] = Depends(get
 
 
 @router.post("/runs/{run_key}/recover")
-def recover(run_key: str, runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime),
+def recover(run_key: str, _armed: None = Depends(require_cluster_writes_armed), runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime),
             factory: Callable[[str, str], ProofEnvironment] = Depends(get_environment_factory),
             active: Callable[[], bool] = Depends(get_application_active)) -> dict:
     """Retry restoring a run that needs a person: start its workers, put back its Deployments. Never stops a node, never resumes."""

@@ -41,3 +41,27 @@ def test_the_gateway_can_come_from_the_backends_environment(monkeypatch):
     fetch(spec())
 
     assert seen[0].startswith("http://host.docker.internal:18080")
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:18080/p", "http://localhost/p", "http://127.0.0.1:8080/p", "http://127.0.0.1:30080/p",
+                                 "https://localhost/p", "http://127.0.0.1:32767/p"])
+def test_the_ports_an_application_is_normally_published_on_are_allowed(url):
+    assert LoopbackHttpFetch(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="ok")), host_gateway="h")(spec(url)).status == 200
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:22/", "http://127.0.0.1:5432/", "http://127.0.0.1:2375/info", "http://127.0.0.1:6443/",
+                                 "http://localhost:3306/", "http://127.0.0.1:29999/", "http://127.0.0.1:32768/", "http://127.0.0.1:99999/"])
+def test_other_ports_on_this_computer_cannot_be_probed(url):
+    def never(request):
+        raise AssertionError("a request was made")
+
+    with pytest.raises(ValueError):
+        LoopbackHttpFetch(transport=httpx.MockTransport(never), host_gateway="h")(spec(url))
+
+
+def test_more_ports_can_be_allowed_by_the_backends_own_configuration(monkeypatch):
+    from app.integrations.probe.http_fetch import allowed_probe_port
+
+    assert allowed_probe_port(9000) is False
+    monkeypatch.setenv("RESILIENCE_PROBE_PORTS", "9000, 9001")
+    assert allowed_probe_port(9000) is True and allowed_probe_port(9001) is True and allowed_probe_port(9002) is False

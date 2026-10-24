@@ -29,10 +29,29 @@ class Fetched:
     error: str | None
 
 
+# Ports an application is normally published on from a local cluster: the web defaults, the common development ports, the port the
+# validation cluster maps its NodePort to, and the NodePort range. Anything else on this machine (a database, ssh, the Docker API) is not
+# reachable through a probe. More can be allowed with RESILIENCE_PROBE_PORTS (comma-separated), set on the backend, never by a request.
+DEFAULT_PORTS = frozenset({80, 443, 3000, 8000, 8080, 18080})
+NODE_PORTS = range(30000, 32768)
+
+
+def allowed_probe_port(port: int | None, scheme: str = "http", extra: str | None = None) -> bool:
+    chosen = port or (443 if scheme == "https" else 80)
+    configured = {int(p) for p in (extra if extra is not None else os.environ.get("RESILIENCE_PROBE_PORTS", "")).split(",") if p.strip().isdigit()}
+    return chosen in DEFAULT_PORTS or chosen in NODE_PORTS or chosen in configured
+
+
 def require_loopback(url: str) -> str:
     parts = urlsplit(url or "")
     if parts.scheme not in ("http", "https") or (parts.hostname or "").lower() not in LOOPBACK_HOSTS:
         raise ValueError(f"a probe only reaches this machine's loopback address, not {url!r}")
+    try:
+        port = parts.port
+    except ValueError:
+        raise ValueError(f"{url!r} has an invalid port") from None
+    if not allowed_probe_port(port, parts.scheme):
+        raise ValueError(f"a probe only reaches the ports an application is published on, not {port}")
     return url
 
 
