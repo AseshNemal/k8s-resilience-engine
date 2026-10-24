@@ -17,6 +17,12 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.validation_loop_common import (  # noqa: F401  (re-exported for the other modules and the tests)
+    CLUSTER_WRITES_ENV,
+    _first_kubeconfig,
+    _validation_dir,
+    require_cluster_writes_armed,
+)
 from app.api.validation_loop_environment import ClusterProofEnvironment, disposable_environment, docker_desktop_environment
 from app.core.config import get_settings
 from app.core.database import get_engine
@@ -25,7 +31,6 @@ from app.engine.recommendation_evaluation_validation.validation.models import Va
 from app.engine.recommendation_evaluation_validation.validation_loop.environment import (
     DISPOSABLE,
     DOCKER_DESKTOP,
-    LoadedTarget,
     ProbeDefinition,
     ProofEnvironment,
 )
@@ -96,15 +101,6 @@ def get_loop_runtime() -> tuple[LoopRepository, LoopWorker]:
     return _RUNTIMES[url]
 
 
-def _first_kubeconfig() -> str:
-    return next((p for p in (os.environ.get("KUBECONFIG") or "").split(os.pathsep) if p), "~/.kube/config")
-
-
-def _validation_dir() -> Path:
-    configured = os.environ.get("RESILIENCE_VALIDATION_DIR")
-    return Path(configured) if configured else (Path("/data/validation") if Path("/data").is_dir() else Path("./data/validation"))
-
-
 class _UnpreparedDisposable:
     """The disposable cluster has no credentials yet. Every read says so, coded; nothing is guessed or substituted."""
 
@@ -131,19 +127,10 @@ def get_environment_factory() -> Callable[[str, str], ProofEnvironment]:
             kubeconfig = Path(os.environ.get("RESILIENCE_VALIDATION_KUBECONFIG") or _validation_dir() / "kubeconfig")
             if not kubeconfig.is_file():
                 return _UnpreparedDisposable()      # type: ignore[return-value]
-            environment = disposable_environment(str(kubeconfig), recovery, workflow_basis=workflow_source)
-            environment._loader = _disposable_not_evaluated    # see _disposable_not_evaluated
-            return environment
+            return disposable_environment(str(kubeconfig), recovery, workflow_basis=workflow_source)
         raise HTTPException(status_code=422, detail={"code": "UNKNOWN_TARGET", "message": f"{kind!r} is not a target."})
 
     return build
-
-
-def _disposable_not_evaluated(workflow_id: str, namespace: str, gateway) -> LoadedTarget:
-    """A disposable target is evaluated on ITS OWN topology, never on the connected cluster's. That evaluation is not built yet, and
-    the connected cluster's recommendation must not stand in for it, so the target refuses."""
-    raise unavailable("VALIDATION_TARGET_EVALUATION_UNAVAILABLE", "The recommendation for the disposable cluster is computed on that "
-                      "cluster's own topology. That is not available yet, so the disposable cluster cannot be proven on.", "validation")
 
 
 def get_application_active() -> Callable[[], bool]:
@@ -168,22 +155,6 @@ def build_service(kind: str, workflow_source: str, runtime: tuple[LoopRepository
                   factory: Callable[[str, str], ProofEnvironment], active: Callable[[], bool]) -> ValidationLoopService:
     repository, worker = runtime
     return ValidationLoopService(factory(kind, workflow_source), repository, worker, application_active=active)
-
-
-CLUSTER_WRITES_ENV = "RESILIENCE_ALLOW_CLUSTER_WRITES"
-
-
-def require_cluster_writes_armed() -> None:
-    """A run stops nodes and patches Deployments, so it needs the same deliberate arming as Apply and Reset.
-
-    Read from the backend's own environment (the extension's compose file sets it), never from a request. Without it nothing that
-    writes starts: not a run, not a recovery. The digest in a run request ties an approval to the plan that was reviewed; it is not
-    a credential, and this tool has no login, so this deployment-level switch is what keeps a stray request from writing.
-    """
-    if os.environ.get(CLUSTER_WRITES_ENV) != "1":
-        raise HTTPException(status_code=403, detail={
-            "code": "CLUSTER_WRITES_NOT_ENABLED",
-            "message": "This deployment has not armed changes to the cluster, so a test run cannot start. Planning and reading still work."})
 
 
 def require_no_validation_run(runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime)) -> None:
@@ -351,3 +322,9 @@ def proof(namespace: str, workflow_id: str = Query(..., alias="workflowId"),
           runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime)) -> dict:
     """For the Approve step: was a change with this exact YAML proven, on which cluster, and at what evidence level. Reads the database only."""
     return proof_from_history(runtime[0], namespace=namespace, workflow_id=workflow_id, candidate_sha256=candidate_sha256)
+
+
+# The disposable test cluster: assessment, preview of the copy, and creating it. See validation_loop_disposable.py.
+from app.api.validation_loop_disposable import router as disposable_router  # noqa: E402  (imports this module's helpers, so it comes last)
+
+router.include_router(disposable_router, prefix="/disposable")

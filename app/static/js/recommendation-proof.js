@@ -130,7 +130,7 @@
         const state = {
             phase: "loading", targets: null, blockingRun: null, plan: null, run: null, probeTest: null, message: null, alert: false,
             acknowledged: new Set(), desktopAcknowledged: false, confirmAbort: false, busy: false,
-            lastOkAt: null, failing: false, backoff: 1,
+            lastOkAt: null, failing: false, backoff: 1, assessment: null,
         };
         let issued = 0;
         let shown = 0;
@@ -266,6 +266,22 @@
                 state.probeTest = result.ok ? result.payload : { error: errorMessage(result, "The check could not be run.") };
             } catch (_error) {
                 state.probeTest = { error: "The backend cannot be reached." };
+            }
+            state.busy = false;
+            draw();
+        }
+
+        /** Can this computer hold a disposable test cluster? Reads Docker's memory through the proxy; creates nothing. */
+        async function checkMachine() {
+            if (state.busy) return;
+            state.busy = true;
+            state.assessment = { pending: true };
+            draw();
+            try {
+                const result = await request("GET", "/disposable/assessment");
+                state.assessment = result.ok ? result.payload : { error: errorMessage(result, "The check could not be run.") };
+            } catch (_error) {
+                state.assessment = { error: "The backend cannot be reached." };
             }
             state.busy = false;
             draw();
@@ -408,6 +424,7 @@
             }
             if (!(state.targets || []).length) targets.append(make(doc, "p", "Clusters could not be listed yet.", "prf-hint"));
             container.append(targets);
+            if ((state.targets || []).some((t) => t.kind === "DISPOSABLE" && !t.available)) container.append(drawPrepare());
 
             const modes = make(doc, "fieldset", undefined, "prf-group");
             modes.append(make(doc, "legend", "How thorough", "prf-group__legend"));
@@ -450,6 +467,29 @@
             const actions = make(doc, "div", undefined, "approval-actions");
             actions.append(button("Review the plan", "primary-button", reviewPlan, state.busy || !!state.blockingRun || !(state.targets || []).some((t) => t.available), "btn-prf-plan"));
             container.append(actions);
+        }
+
+        function drawPrepare() {
+            const details = make(doc, "details", undefined, "prf-prepare");
+            details.append(make(doc, "summary", "Why is there no test cluster, and can this computer hold one?"));
+            details.append(make(doc, "p", "A test cluster is a separate kind cluster created on this computer. Checking only reads Docker's memory; nothing is created.", "prf-hint"));
+            const row = make(doc, "div", undefined, "prf-row");
+            row.append(button("Check this computer", "secondary-button", checkMachine, state.busy, "btn-prf-assess"));
+            details.append(row);
+            const a = state.assessment;
+            if (a && a.pending) details.append(make(doc, "p", "Checking…", "prf-hint", { role: "status" }));
+            else if (a && a.error) details.append(make(doc, "p", a.error, "approval-note prf-message prf-message--alert", { role: "alert" }));
+            else if (a) {
+                const box = make(doc, "div", undefined, `prf-assess prf-assess--${a.canCreate ? "ok" : "no"}`, { role: "status" });
+                box.append(make(doc, "strong", a.canCreate ? "Enough memory for a test cluster." : `Not enough to create one yet (${a.verdict}).`));
+                (a.reasons || []).forEach((r) => box.append(make(doc, "p", r, "prf-hint")));
+                const steps = make(doc, "ul", undefined, "prf-advice");
+                (a.advice || []).forEach((line) => steps.append(make(doc, "li", line)));
+                if ((a.advice || []).length) box.append(make(doc, "p", "What to change:", "prf-hint"), steps);
+                if (a.canCreate) box.append(make(doc, "p", "The cluster is created on this computer with kind, using the steps in docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md. It is not created from this page.", "prf-hint"));
+                details.append(box);
+            }
+            return details;
         }
 
         function drawProbeResult() {
@@ -713,7 +753,7 @@
         }
 
         return {
-            start, reviewPlan, startRun, abortRun, recoverRun, testProbe, poll, destroy, draw, again,
+            start, reviewPlan, startRun, abortRun, recoverRun, testProbe, checkMachine, poll, destroy, draw, again,
             form, state: () => state, current: () => state.run,
             reset() { shown = 0; state.run = null; state.plan = null; state.phase = "loading"; unwatch(); return start(); },
         };

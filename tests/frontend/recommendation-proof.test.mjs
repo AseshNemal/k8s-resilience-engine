@@ -441,6 +441,60 @@ test("the research table appears only when the server sent research detail", asy
     assert.ok(detailed.root.querySelector(".prf-research").textContent.includes("L2_PROBE"));
 });
 
+// ---- the disposable cluster: why it is not there, and whether this computer could hold one ----------------------------------------------
+
+test("an unavailable test cluster explains itself and offers a check that only reads", async () => {
+    const t = open();
+    await begin(t);
+
+    assert.ok(t.text().includes("Why is there no test cluster"));
+    assert.ok(button(t, "btn-prf-assess"));
+    const before = t.network.calls.length;
+    await press(t, "btn-prf-assess");
+    assert.equal(t.network.calls.length, before + 1);
+    assert.deepEqual(plain([t.network.calls.at(-1).method, t.network.calls.at(-1).url]), ["GET", `${BASE}/disposable/assessment`]);
+});
+
+test("a machine that cannot hold the cluster is told what to change, and no cluster is offered", async () => {
+    const t = open();
+    await begin(t);
+    await press(t, "btn-prf-assess");
+    t.network.respond("GET", `${BASE}/disposable/assessment`, 200, { verdict: "INSUFFICIENT", canCreate: false, reasons: ["the nodes alone need 1.9 GiB"],
+        advice: ["Raise Docker Desktop's memory to at least 4.4 GiB (Settings → Resources); it is 3.8 GiB now."] });
+    await flush();
+
+    assert.ok(t.text().includes("Not enough to create one yet (INSUFFICIENT)") && t.text().includes("Raise Docker Desktop's memory"));
+    assert.ok(!t.text().includes("is created on this computer with kind"));
+    assert.equal(t.network.calls.filter((c) => c.method === "POST").length, 0);
+});
+
+test("even with enough memory the page says the cluster is made on the computer, not from the page", async () => {
+    const t = open();
+    await begin(t);
+    await press(t, "btn-prf-assess");
+    t.network.respond("GET", `${BASE}/disposable/assessment`, 200, { verdict: "SUFFICIENT", canCreate: true, reasons: [], advice: [] });
+    await flush();
+
+    assert.ok(t.text().includes("Enough memory for a test cluster") && t.text().includes("It is not created from this page"));
+});
+
+test("a failed check is said, not guessed", async () => {
+    const t = open();
+    await begin(t);
+    await press(t, "btn-prf-assess");
+    t.network.fail("GET", `${BASE}/disposable/assessment`);
+    await flush();
+
+    assert.ok(t.text().includes("The backend cannot be reached"));
+});
+
+test("when the test cluster is available the explanation is not shown", async () => {
+    const t = open();
+    await begin(t, { run: null }, { targets: TARGET_LIST.targets.map((x) => ({ ...x, available: true })), blockingRun: null });
+
+    assert.ok(!t.text().includes("Why is there no test cluster"));
+});
+
 // ---- the pure parts and the markup --------------------------------------------------------------------------------------------
 
 test("the plan body: Full always carries a baseline, an empty address sends no probe, and the lines of a text box become a list", () => {

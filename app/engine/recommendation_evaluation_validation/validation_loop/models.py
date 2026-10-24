@@ -50,6 +50,10 @@ TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.INTERRUPTED, R
 
 BASELINE, CANDIDATE = "baseline", "candidate"      # the two kinds of experiment
 
+# The evidence source of a recommendation computed on a validation TARGET. It is never the live source, so ``has_verified_provenance`` refuses it:
+# nothing computed on a test cluster can be approved, for that cluster or any other.
+VALIDATION_TARGET_SOURCE = "validation-target"
+
 # Evidence levels: what the pass decision rested on. L1 is the Kubernetes readiness alone; L2 adds an HTTP probe that judged the page.
 L1_READINESS, L2_PROBE = "L1_READINESS", "L2_PROBE"
 

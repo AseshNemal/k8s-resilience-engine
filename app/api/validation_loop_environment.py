@@ -17,6 +17,7 @@ Docker is reached only through the restricted proxy (``DockerEngineRunner``); th
 binary. A runner that is not the proxy's marks every record it produces as a test double.
 """
 
+import dataclasses
 import os
 import re
 import time
@@ -31,9 +32,12 @@ from app.engine.deployment_topology_modeling.discovery import discover
 from app.engine.failure_impact_prediction.runtime_provider import get_runtime_component_inputs
 from app.engine.recommendation_evaluation_validation.declared_workflow import get_declared_workflow
 from app.engine.recommendation_evaluation_validation.live_pipeline import (
+    EvidenceProvenance,
     build_declared_recommendation,
     build_live_recommendation,
+    evaluate_recommendation,
 )
+from app.engine.recommendation_evaluation_validation.live_scheduling_evidence import enrich_scheduling_facts, live_scheduling_evidence
 from app.engine.recommendation_evaluation_validation.validation.cluster_identity import DisposableClusterDesignation
 from app.engine.recommendation_evaluation_validation.validation.kubernetes_executor import KubernetesValidationExecutor
 from app.engine.recommendation_evaluation_validation.validation.models import Authorization
@@ -45,6 +49,8 @@ from app.engine.recommendation_evaluation_validation.validation_loop.environment
     ProbeDefinition,
     TargetIdentity,
 )
+from app.engine.recommendation_evaluation_validation.validation_loop.intent_adapter import as_analysis, attach_declared_intent
+from app.engine.recommendation_evaluation_validation.validation_loop.models import VALIDATION_TARGET_SOURCE
 from app.engine.recommendation_evaluation_validation.validation_loop.fault_readiness import FaultReadiness, assess_workers
 from app.engine.recommendation_evaluation_validation.validation_loop.grant import GrantAuthority, RunGrant
 from app.integrations.docker.engine import DockerEngineRunner
@@ -103,6 +109,33 @@ def connected_loader(workflow_basis: str) -> Callable[[str, str, KubernetesTestC
             workflow = get_runtime_component_inputs(workflow_id, namespace).workflow
             live = build_live_recommendation(workflow_id, None, namespace)
         return LoadedTarget(workflow, workflow_basis, live, gateway.read_graph(namespace))
+    return load
+
+
+def target_loader(workflow_basis: str) -> Callable[[str, str, KubernetesTestClusterGateway], LoadedTarget]:
+    """Evaluate the recommendation on the TARGET cluster's own topology, for a cluster the backend is not connected to.
+
+    The recommendation is never carried over from another cluster: the topology is read from the target (Component 2's ``discover`` over the
+    target's source), the declared intent comes from the target's own Deployments (Member 4's origin-tagged fallback, until Component 2 offers a
+    source-taking analysis), node taints are read from the target, and Component 3 sizes the failure through ``predict_failure_impact``. The result
+    is labelled ``VALIDATION_TARGET_SOURCE``, which the approval gate refuses, so nothing computed here can be approved for any cluster.
+    """
+    def load(workflow_id: str, namespace: str, gateway: KubernetesTestClusterGateway) -> LoadedTarget:
+        if workflow_basis == "DECLARED":
+            workflow = get_declared_workflow(workflow_id).graph
+        else:
+            workflow = get_runtime_component_inputs(workflow_id, namespace).workflow
+        graph = gateway.read_graph(namespace)
+        base = f"/apis/apps/v1/namespaces/{namespace}/deployments"
+        observed, intent_report = attach_declared_intent(graph, gateway.list_raw("deployments", base), gateway.list_raw("nodes", "/api/v1/nodes"))
+        deployment, facts = enrich_scheduling_facts(graph, namespace, reader=lambda namespace: as_analysis(observed))
+        evidence = live_scheduling_evidence(deployment, source=gateway.source)
+        live = evaluate_recommendation(
+            workflow, deployment, EvidenceProvenance(VALIDATION_TARGET_SOURCE, namespace, None, "VALIDATION_TARGET", None), None,
+            scheduling_evidence=evidence)
+        live = dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": {**facts, "intentAdapter": intent_report}})
+        return LoadedTarget(workflow, workflow_basis, live, deployment,
+                            [f"Computed on the test cluster's own topology. Declared intent came from its Deployments ({intent_report['origin']})."])
     return load
 
 
@@ -256,6 +289,7 @@ def docker_desktop_environment(kubeconfig_path: str, recovery_dir: str, **option
                                    **options)
 
 
-def disposable_environment(kubeconfig_path: str, recovery_dir: str, **options: Any) -> ClusterProofEnvironment:
+def disposable_environment(kubeconfig_path: str, recovery_dir: str, *, workflow_basis: str = "FROZEN", **options: Any) -> ClusterProofEnvironment:
+    options.setdefault("loader", target_loader(workflow_basis))
     return ClusterProofEnvironment(ClusterConfig(DISPOSABLE, "resilience-validation", "resilience-validation", kubeconfig_path, False,
-                                                 recovery_dir), **options)
+                                                 recovery_dir), workflow_basis=workflow_basis, **options)

@@ -160,6 +160,16 @@ def _refuse_ambient(path: str) -> str:
     return real
 
 
+# The only kinds a copy of an application may create, and where. A Secret is not among them, on purpose.
+CREATE_PATHS = {
+    "Deployment": "/apis/apps/v1/namespaces/{ns}/deployments",
+    "Service": "/api/v1/namespaces/{ns}/services",
+    "ConfigMap": "/api/v1/namespaces/{ns}/configmaps",
+    "ServiceAccount": "/api/v1/namespaces/{ns}/serviceaccounts",
+}
+CREATE_FORBIDDEN_NAMESPACES = ("kube-system", "kube-public", "kube-node-lease", "default")
+
+
 class _WriteClient(rest.RestClient):
     """The only client that can PATCH. The product's ``RestClient`` stays read-only."""
 
@@ -296,6 +306,17 @@ class KubernetesTestClusterGateway:
                 pod_anti_affinity=deepcopy((pod_spec.get("affinity") or {}).get("podAntiAffinity")) or None,
                 uid=meta.get("uid"))
         return found
+
+    @property
+    def source(self) -> KubernetesApiSource:
+        """The read-only API source this gateway reads through (Component 2's discovery takes it, and so does the node-taint read)."""
+        return self._source
+
+    def list_raw(self, resource: str, path: str) -> list[dict[str, Any]]:
+        """The raw objects at a list path. Never used for Secrets: the callers name the kinds, and a Secret is not among them."""
+        if resource == "secrets":
+            raise ForbiddenError("get", "secrets")
+        return self._items(resource, path)
 
     def read_all_pods(self) -> list[dict[str, Any]]:
         """Every pod of the cluster, reduced to what a disruption check needs: where it runs, whether it is Ready, what owns it.
@@ -437,3 +458,44 @@ class KubernetesTestClusterGateway:
         }
         self._patch(snapshot.namespace, snapshot.name,
                     {"spec": {"replicas": snapshot.replicas, "template": {"spec": pod_spec}}})
+
+    # -- creating a copy of an application on a disposable cluster -----------------------------------------------------------------------
+
+    def ensure_namespace(self, name: str) -> bool:
+        """Create the namespace of the copy. True when it was created, False when it already existed."""
+        self._require_writes()
+        if name in CREATE_FORBIDDEN_NAMESPACES:
+            raise ForbiddenError("create", "namespaces")
+        return self._create("/api/v1/namespaces", {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": name,
+                                                   "labels": {"resilience-validation/test-namespace": "true"}}}, "namespaces")
+
+    def create_object(self, document: dict[str, Any], *, namespace: str) -> bool:
+        """Create one object of the copy. Only Deployments, Services, ConfigMaps and ServiceAccounts, only in ``namespace``, never a Secret.
+
+        True when it was created, False when an object of that name already existed (nothing is overwritten).
+        """
+        self._require_writes()
+        kind = document.get("kind")
+        template = CREATE_PATHS.get(kind)
+        meta = document.get("metadata") or {}
+        if template is None or meta.get("namespace") != namespace or not meta.get("name") or namespace in CREATE_FORBIDDEN_NAMESPACES:
+            raise ForbiddenError("create", str(kind))
+        return self._create(template.format(ns=quote(namespace, safe="")), document, str(kind).lower() + "s")
+
+    def _create(self, path: str, body: dict[str, Any], what: str) -> bool:
+        http = self._client()
+        try:
+            http.post_json(path, body)
+            return True
+        except rest.HttpStatusError as error:
+            if error.status == 409:
+                return False
+            if error.status == 401:
+                raise AuthFailedError("the cluster rejected the credential") from None
+            if error.status == 403:
+                raise ForbiddenError("create", what) from None
+            raise ApiFailedError(error.status) from None
+        except rest.TransportFailure as error:
+            raise ConnectionFailedError(error.name) from None
+        finally:
+            http.close()
