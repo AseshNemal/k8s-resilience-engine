@@ -65,6 +65,8 @@
         </label>
     </div>
     <p class="rec-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
+    {# The comparison across all workflows (recommendation-portfolio.js): hidden until there are at least two workflows to weigh. #}
+    <section class="rec-portfolio" data-role="rec-portfolio" aria-live="polite" hidden></section>
     <details class="rec-evidence-details" data-role="rec-evidence-details">
         <summary data-role="rec-evidence-summary">Evidence</summary>
         <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
@@ -340,6 +342,7 @@
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-context.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-portfolio.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-operation.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-proof.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/recommendations.js') }}" defer></script>

@@ -40,6 +40,12 @@
     const evidenceList = document.querySelector('[data-role="rec-evidence"]');
     const contextModule = window.ResilienceRecommendationContext;
     let controller = null;
+    // The "across all workflows" comparison (recommendation-portfolio.js). It is an analysis only: choosing a fix there hands over to the
+    // ordinary review of ONE workflow below, which is where approval, proof and apply stay exactly as they were.
+    const portfolioModule = window.ResilienceRecommendationPortfolio;
+    const portfolioRoot = document.querySelector('[data-role="rec-portfolio"]');
+    let portfolioPanel = null;
+    let preferredChange = null;                               // {service, type} chosen in that comparison; shown first when its workflow is reviewed
 
     // ---- Simple / Research view, the steps and where the person is ---------------------------------------------------
     const flowRoot = document.querySelector('[data-role="rec-flow"]');
@@ -52,6 +58,43 @@
     let storedApplication = null;                             // the application the server holds, as the panel last reported
     let pinnedStep = null;                                    // a step the person opened; null while the page follows the work
     let shownStep = 1;
+    const PAGE_STATE_KEY = "resilience.recommendations.page.v1";
+    let restoredPage = false;
+    let chosenTab = null;
+
+    function pageScope(v) {
+        return JSON.stringify([v.cluster.identity, v.cluster.fingerprint, v.namespace, v.workflowKind, v.workflowId, v.failedNode]);
+    }
+
+    function rememberPage() {
+        if (!lastView || lastView.status !== "ready") return;
+        try {
+            window.localStorage.setItem(PAGE_STATE_KEY, JSON.stringify({
+                scope: pageScope(lastView), step: pinnedStep || shownStep,
+                tab: tabChosen ? chosenTab : null, preferredChange,
+                scrollY: Math.max(0, window.scrollY || 0),
+            }));
+        } catch (_error) { /* The page still works when storage is blocked. */ }
+    }
+
+    function restorePage(v) {
+        if (restoredPage || v.status !== "ready") return;
+        restoredPage = true;
+        try {
+            const saved = JSON.parse(window.localStorage.getItem(PAGE_STATE_KEY) || "null");
+            if (!saved || saved.scope !== pageScope(v)) return;
+            if (Number.isInteger(saved.step) && saved.step >= 1 && saved.step <= 5) pinnedStep = saved.step;
+            if (["failures", "ranking", "placement", "raw"].includes(saved.tab)) {
+                tabChosen = true;
+                selectTab(saved.tab, false);
+            }
+            const change = saved.preferredChange;
+            if (change && typeof change.service === "string" && typeof change.type === "string") preferredChange = change;
+            if (Number.isFinite(saved.scrollY) && saved.scrollY >= 0 && window.requestAnimationFrame && window.scrollTo) {
+                window.requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
+            }
+        } catch (_error) { /* Ignore outdated or malformed page state. */ }
+    }
 
     function storedView() {
         try {
@@ -101,6 +144,7 @@
     function openStep(number) {
         pinnedStep = number;
         updateStepper();
+        rememberPage();
         const heading = document.getElementById(`rec-step-${number}`);
         if (heading && heading.focus) {
             heading.setAttribute("tabindex", "-1");
@@ -137,6 +181,7 @@
     const workbench = document.querySelector('[data-role="rec-workbench"]');
 
     function selectTab(name, focus) {
+        chosenTab = name;
         if (!workbench || !workbench.querySelectorAll || !name) return;
         for (const tab of Array.from(workbench.querySelectorAll('[role="tab"]'))) {
             const on = tab.getAttribute("data-tab") === name;
@@ -153,6 +198,7 @@
             if (!tab) return;
             tabChosen = true;
             selectTab(tab.getAttribute("data-tab"), false);
+            rememberPage();
         });
         workbench.addEventListener("keydown", (event) => {
             if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
@@ -163,6 +209,7 @@
             if (!next) return;
             tabChosen = true;
             selectTab(next.getAttribute("data-tab"), true);
+            rememberPage();
             event.preventDefault();
         });
     }
@@ -783,6 +830,54 @@
         return note;
     }
 
+    const PORTFOLIO_HINT = {
+        frozen: "Pick a fix below, or choose one workflow above.",
+        declared: "Pick a fix below, or choose one workflow above. Declared workflows are for research and are never picked for you.",
+    };
+
+    /** Which workflows the comparison across all of them covers, or null when it has nothing to add (fewer than two usable). */
+    function portfolioSource(v) {
+        return portfolioModule && portfolioPanel && v.namespace ? portfolioModule.pickSource(v.workflows) : null;
+    }
+
+    function updatePortfolio(v) {
+        if (!portfolioPanel) return;
+        const source = portfolioSource(v);
+        if (!source) return portfolioPanel.clear();
+        if (v.status === "loading" && !v.workflows.length) return;     // nothing is known yet: keep what is on screen
+        portfolioPanel.load(source, v.namespace, v.failedNode);
+    }
+
+    /** The person chose a fix in the comparison and a workflow to review it under: the ordinary review of that workflow takes over. */
+    function reviewFromPortfolio(choice) {
+        const option = ((lastView && lastView.workflows) || []).find((w) => w.workflowId === choice.workflowId && w.declared === (choice.source === "declared"));
+        if (!option || !controller) return;
+        preferredChange = { service: choice.service, type: choice.type };
+        followTheWork();
+        controller.selectWorkflow(option.value);
+    }
+
+    /**
+     * The candidate the person chose in the comparison, when this workflow has it and it can be put forward; otherwise null and why.
+     * Choosing never changes what the server ranked: the top-ranked change stays named, and approving another one needs the written
+     * justification the server already requires.
+     */
+    function chosenFromComparison(detail, report) {
+        if (!preferredChange) return { recommendation: null, note: null };
+        const wording = `${view.strategyName(preferredChange.type)} on ${preferredChange.service}`;
+        const wanted = detail.candidates.find((c) => c.service === preferredChange.service && c.type === preferredChange.type);
+        const recommendation = wanted && wanted.feasible ? report.recommendations.find((r) => r.id === wanted.id) || null : null;
+        if (!recommendation) {
+            return { recommendation: null, note: `The change you chose (${wording}) is not an option for this workflow, so this workflow's own top-ranked change is shown.` };
+        }
+        return {
+            recommendation,
+            note: wanted.id === report.selectedRecommendationId
+                ? `You chose ${wording} from the all-workflows comparison. It is also the top-ranked change for this workflow.`
+                : `You chose ${wording} from the all-workflows comparison. For this workflow another change ranks first, so approving this one needs a written justification.`,
+        };
+    }
+
     function renderContext(v) {
         // A table assessed for another workflow or application is not shown beside this one.
         if (failuresResult && (v.status === "loading" || (failuresFor && failuresFor !== failuresKey()))) {
@@ -818,9 +913,10 @@
         });
         const hintLine = document.querySelector('[data-role="rec-hint"]');
         if (hintLine) {
-            hintLine.textContent = hint ? hint.text : "";
+            hintLine.textContent = hint ? (portfolioSource(v) && hint.field === "workflow" ? PORTFOLIO_HINT[portfolioSource(v)] : hint.text) : "";
             hintLine.hidden = !hint;
         }
+        updatePortfolio(v);
         view.renderEvidenceChecklist(evidenceList, v.evidence);
         const summary = view.evidenceSummary(v.evidence);
         const evidenceSummaryLine = document.querySelector('[data-role="rec-evidence-summary"]');
@@ -876,7 +972,10 @@
 
         // Only a candidate the engine selected is put to approval. Without a selection nothing is approvable, even though
         // the first candidate is still shown below (its placement and why it was not selected).
-        const shown = view.selectedCandidate(report);
+        const chosen = chosenFromComparison(detail, report);
+        const shown = chosen.recommendation || view.selectedCandidate(report);
+        // Everything below that says "the selected change" must say the person's choice, so the report it reads names it as selected.
+        const shownReport = chosen.recommendation ? { ...report, selectedRecommendationId: chosen.recommendation.id } : report;
         currentRecommendation = report.selectedRecommendationId ? shown : null;
         const selected = currentRecommendation && detail.candidates.find((c) => c.id === currentRecommendation.id);
         currentApproval = selected ? selected.approval : { ready: false, reason: "No candidate is selected." };
@@ -889,12 +988,21 @@
         const context = {
             baselineBlastRadius: detail.evidence.blastRadiusBefore,
             validation: null,
-            yaml: detail.yaml && detail.yaml.available && detail.yaml.applicable ? detail.yaml.text : null,   // the engine's own proposal text, only when it is for live evidence
+            yaml: chosen.recommendation
+                ? (selected && selected.yamlProposal && selected.yamlProposal.status === "GENERATED" && selected.yamlProposal.applicable ? selected.yamlProposal.yaml : null)
+                : (detail.yaml && detail.yaml.available && detail.yaml.applicable ? detail.yaml.text : null),   // the engine's own proposal text, only when it is for live evidence
             currentDeployment: detail.currentDeployment,
             simulatedDeployment: selected ? selected.simulatedDeployment : null,   // only a selected, feasible candidate has one
         };
         view.renderImpactSummary(region.querySelector('[data-role="rec-impact"]'), detail);
-        view.renderOutcome(region.querySelector('[data-role="rec-outcome"]'), detail.outcome);
+        const outcomeBox = region.querySelector('[data-role="rec-outcome"]');
+        view.renderOutcome(outcomeBox, detail.outcome);
+        if (chosen.note && outcomeBox && outcomeBox.append) {
+            const note = document.createElement("p");
+            note.className = "ui-note rec-chosen-note";
+            note.textContent = chosen.note;
+            outcomeBox.append(note);
+        }
         view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
             selected || null, v.cluster && v.cluster.identity ? v.cluster.identity : "");
         view.renderSelectedImprovement(region.querySelector('[data-role="rec-selected"]'), selected || null);
@@ -906,7 +1014,7 @@
             if (!c.feasible && c.approval.reason) reasons[c.id] = c.approval.reason;
         });
         // A declared workflow's cards do not repeat the notice that production approval is unavailable: it is said once, above the steps.
-        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context, {
+        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), shownReport, context, {
             descriptions, reasons,
             hero: currentRecommendation ? { problem: view.problemStatement(detail), validationText: "Checking whether it was proven on a test cluster…" } : null,
         });
@@ -923,7 +1031,7 @@
         view.renderYaml(tabPart("rec-yaml"), context.yaml);
         const raw = tabPart("rec-raw-json");
         if (raw) raw.textContent = JSON.stringify(detail, null, 2);
-        showMetrics(view.summarise(report, context));
+        showMetrics(view.summarise(shownReport, context));
         updateLastRefreshed(lastRefreshed);
         // The engine's own statement about validation stays one hover away from the short line.
         const validationNote = region.querySelector('[data-role="rec-validation-note"]');
@@ -996,6 +1104,7 @@
 
     function render(v) {
         lastView = v;
+        restorePage(v);
         renderContext(v);
         renderCase(v);
         stepFacts.chosen = !!(v.namespace && v.workflowId);
@@ -1080,10 +1189,30 @@
         });
     }
 
+    if (portfolioModule && portfolioRoot) {
+        portfolioPanel = portfolioModule.createPortfolioPanel({
+            root: portfolioRoot, document, strategyName: view.strategyName, onReview: reviewFromPortfolio,
+            // One full evaluation per workflow and per node runs on the server, so this is allowed longer than a single recommendation.
+            fetchJson: (url) => fetchJson(url, { timeout: 120000 }),
+        });
+    }
+
     controller = contextModule.createController({
         // Discovery and the failure-impact prediction run server-side, so the default 8 s is too short.
         fetchJson: (url) => fetchJson(url, { timeout: 45000 }),
         clusterIdentity,
+        onClusterChange: () => {
+            preferredChange = null;
+            if (portfolioPanel) portfolioPanel.clear();
+            followTheWork();
+            if (operationPanel) operationPanel.clusterChanged();
+            if (proofPanel) proofPanel.reset();
+        },
+        storage: {
+            getItem: (key) => window.localStorage.getItem(key),
+            setItem: (key, value) => window.localStorage.setItem(key, value),
+            removeItem: (key) => window.localStorage.removeItem(key),
+        },
         onUpdate: render,
     });
 
@@ -1093,21 +1222,19 @@
 
     // Changing what the page is about starts the steps over: the page follows the work again.
     if (reloadButton) reloadButton.addEventListener("click", () => { followTheWork(); controller.reload(); });
-    if (namespaceSelect) namespaceSelect.addEventListener("change", () => { followTheWork(); controller.selectNamespace(namespaceSelect.value); });
-    if (workflowSelect) workflowSelect.addEventListener("change", () => { followTheWork(); controller.selectWorkflow(workflowSelect.value); });
+    // Choosing by hand ends a choice made in the comparison: the change is no longer carried over to whatever is picked next.
+    if (namespaceSelect) namespaceSelect.addEventListener("change", () => { preferredChange = null; followTheWork(); controller.selectNamespace(namespaceSelect.value); });
+    if (workflowSelect) workflowSelect.addEventListener("change", () => { preferredChange = null; followTheWork(); controller.selectWorkflow(workflowSelect.value); });
     if (nodeSelect) nodeSelect.addEventListener("change", () => { followTheWork(); controller.selectFailedNode(nodeSelect.value); });
     if (failuresButton) failuresButton.addEventListener("click", loadFailures);
-    // Choices belong to one cluster: when the connection changes, nothing chosen before is kept.
-    window.addEventListener("resilience-cluster-changed", () => {
-        followTheWork();
-        controller.clusterChanged();
-        if (operationPanel) operationPanel.clusterChanged();
-        if (proofPanel) proofPanel.reset();
-    });
+    // Notifications include routine status checks. Only a verified cluster change clears this page.
+    window.addEventListener("resilience-cluster-changed", () => controller.connectionChanged());
     window.addEventListener("pagehide", () => {
+        rememberPage();
         if (operationPanel) operationPanel.destroy();
         if (proofPanel) proofPanel.destroy();
     });
+    document.addEventListener("visibilitychange", () => { if (document.hidden) rememberPage(); });
 
     document.addEventListener("DOMContentLoaded", () => {
         controller.start();

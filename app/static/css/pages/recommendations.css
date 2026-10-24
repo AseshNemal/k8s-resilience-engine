@@ -674,3 +674,36 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 
 /* A heading the script focuses after a step is opened is a landing point for screen readers, not a control: it gets no ring. */
 .rec-panel__title[tabindex="-1"]:focus, .rec-panel__title[tabindex="-1"]:focus-visible { outline: none; }
+
+/* ---- Across all workflows: the comparison that comes before choosing one workflow (drawn by recommendation-portfolio.js) ---- */
+.rec-portfolio { margin: var(--space-md) 0; padding: var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface-soft); display: grid; gap: var(--space-sm); min-width: 0; }
+.rec-portfolio[hidden], .rec-portfolio [hidden] { display: none !important; }
+.rec-portfolio__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); justify-content: space-between; }
+.rec-portfolio__heading { margin: 0; font-size: 15px; font-weight: 700; }
+.rec-portfolio__sub, .rec-portfolio__note, .rec-portfolio__muted { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.rec-portfolio__warn { margin: 0; font-size: 13px; padding: var(--space-xs, 6px) var(--space-sm); border-left: 3px solid var(--color-warning); }
+.rec-portfolio__lead { margin: 0; font-size: 14px; font-weight: 600; }
+.rec-portfolio__lead--all { color: var(--color-success); }
+.rec-portfolio__list { display: grid; gap: var(--space-sm); }
+.rec-portfolio__card { display: grid; gap: 6px; padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-small); background: var(--color-surface); min-width: 0; }
+.rec-portfolio__card[data-lead="true"] { border-color: var(--color-primary); }
+.rec-portfolio__card-head { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: baseline; justify-content: space-between; }
+.rec-portfolio__title { font-size: 14px; overflow-wrap: anywhere; }
+.rec-portfolio__verdict { font-size: 12px; color: var(--color-text-muted); }
+.rec-portfolio__verdict--all { color: var(--color-success); font-weight: 600; }
+.rec-portfolio__line { display: flex; flex-wrap: wrap; gap: 6px var(--space-sm); align-items: baseline; font-size: 13px; }
+.rec-portfolio__label { flex: 0 0 8.5em; color: var(--color-text-muted); }
+.rec-portfolio__line > :not(.rec-portfolio__label) { flex: 1 1 12em; min-width: 0; }
+.rec-portfolio__chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
+.rec-portfolio__chip { padding: 1px 8px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 12px; font-family: var(--font-mono); }
+.rec-portfolio__chip--ok { border-color: var(--color-success); }
+.rec-portfolio__chip--warn { border-color: var(--color-warning); }
+.rec-portfolio__actions { display: flex; gap: var(--space-sm); }
+.rec-portfolio__reviews { display: grid; gap: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--color-border); }
+.rec-portfolio__review { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: center; font-size: 13px; }
+.rec-portfolio__review-name { flex: 1 1 14em; overflow-wrap: anywhere; }
+.rec-portfolio__select { max-width: 220px; }
+.rec-portfolio__more summary { cursor: pointer; font-size: 13px; }
+.rec-portfolio__other { margin: 4px 0 0; font-size: 12px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.rec-chosen-note { margin: var(--space-sm) 0 0; }
+@media (max-width: 640px) { .rec-portfolio__label { flex-basis: 100%; } }

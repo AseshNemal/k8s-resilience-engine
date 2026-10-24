@@ -6,9 +6,9 @@ import { test } from "node:test";
 import vm from "node:vm";
 
 const read = (path) => readFileSync(new URL(`../../app/static/js/${path}`, import.meta.url), "utf8");
-const SCRIPTS = ["api.js", "connection-state.js", "recommendation-render.js", "recommendation-context.js", "recommendation-operation.js", "components/recommendations.js"].map((p) => [p, read(p)]);
+const SCRIPTS = ["api.js", "connection-state.js", "recommendation-render.js", "recommendation-context.js", "recommendation-portfolio.js", "recommendation-operation.js", "components/recommendations.js"].map((p) => [p, read(p)]);
 
-function makeEnvironment(routes) {
+function makeEnvironment(routes, storage) {
     const registry = new Map();
     const element = (key) => {
         if (registry.has(key)) return registry.get(key);
@@ -64,7 +64,7 @@ function makeEnvironment(routes) {
     };
 
     const windowListeners = {};
-    const window = { document, addEventListener: (type, fn) => { windowListeners[type] = fn; } };
+    const window = { document, localStorage: storage, addEventListener: (type, fn) => { windowListeners[type] = fn; } };
     const ui = {
         formatCodeLabel: (code) => String(code).split("_").map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(" "),
         initJsonPanel: (panel, data) => { if (panel) panel.jsonShown = data; },
@@ -119,8 +119,8 @@ const DETAIL = "GET /api/recommendations/live/detail?workflow_id=checkout&namesp
 const PROOF = "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout";
 const BASE = { "GET /_extension/cluster": { status: 200, body: { context: "docker-desktop" } }, "GET /api/recommendations/context": { status: 200, body: contextOf() } };
 
-async function openPage(routes) {
-    const env = makeEnvironment({ ...BASE, ...routes });
+async function openPage(routes, storage) {
+    const env = makeEnvironment({ ...BASE, ...routes }, storage);
     await env.listeners.DOMContentLoaded();
     await new Promise((resolve) => setTimeout(resolve, 0));   // let the approval lookup that follows a render finish
     return env;
@@ -202,8 +202,10 @@ test("with several workflows a dropdown choice, not a typed ID, starts the recom
         "GET /api/recommendations/context?namespace=shop": { status: 200, body: two },
         "GET /api/recommendations/context?namespace=shop&workflow_id=checkout": { status: 200, body: chosen },
         [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} },
+        "GET /api/recommendations/portfolio/detail?source=frozen&namespace=shop": { status: 200, body: { portfolio: { workflows: [], notEvaluated: [], note: "" }, candidates: [] } },
     });
-    assert.equal(env.element('[data-role="rec-hint"]').textContent, "Choose a workflow to continue.", "the choice that is waiting is said under step 1");
+    assert.equal(env.element('[data-role="rec-hint"]').textContent, "Pick a fix below, or choose one workflow above.", "the choice that is waiting is said under step 1");
+    assert.ok(calls_include(env, "/portfolio/detail?source=frozen&namespace=shop"), "two frozen workflows are compared without being asked");
     assert.equal(env.element('[data-role="rec-workflow-select"]').attributes["data-attention"], "true");
     assert.equal(env.region.children.length, 0, "and the page does not repeat it in a block of its own");
     assert.ok(!calls_include(env, "/live/detail"));
@@ -722,6 +724,34 @@ const captionOf = (env, number) => text(env.element('[data-role="rec-stepper"]')
 const READY_ROUTES = (extra = {}) => ({ [DETAIL]: { status: 200, body: { ...detailOf([cand()], "rec-live"), baselineImpact: IMPACT } },
     "GET /api/recommendations/rec-live/approval": { status: 404, body: {} }, [PROOF]: { status: 200, body: { state: "NOT_RUN" } }, ...extra });
 
+test("returning to Docker with the same cluster preserves the open step and sends no writes", async () => {
+    const env = await openPage(READY_ROUTES({
+        "GET /api/recommendations/context?namespace=shop&workflow_id=checkout": BASE["GET /api/recommendations/context"],
+    }));
+    stepButton(env, 3).listeners.click();
+    const detailReads = env.calls.filter(([, url]) => url.includes("/live/detail")).length;
+    await env.windowListeners["resilience-cluster-changed"]();
+    assert.equal(flow(env).attributes["data-step"], "3");
+    assert.equal(env.calls.filter(([, url]) => url.includes("/live/detail")).length, detailReads);
+    assert.deepEqual(posts(env), []);
+});
+
+test("a recreated Recommendations page restores its open step and choices from fresh server evidence", async () => {
+    const data = new Map();
+    const storage = { getItem: (k) => data.get(k) || null, setItem: (k, v) => data.set(k, v), removeItem: (k) => data.delete(k) };
+    const routes = READY_ROUTES({
+        "GET /api/recommendations/context?namespace=shop&workflow_id=checkout": BASE["GET /api/recommendations/context"],
+    });
+    const first = await openPage(routes, storage);
+    stepButton(first, 3).listeners.click();
+    first.windowListeners.pagehide();
+    const second = await openPage(routes, storage);
+    assert.equal(flow(second).attributes["data-step"], "3");
+    assert.equal(second.element('[data-role="rec-workflow-select"]').value, "checkout");
+    assert.ok(calls_include(second, "/live/detail"));
+    assert.deepEqual(posts(second), []);
+});
+
 test("a ready recommendation opens at the impact step, one step is on screen, and the stepper can open the others", async () => {
     const env = await openPage(READY_ROUTES());
 
@@ -861,4 +891,101 @@ test("nothing from an earlier recommendation is left in the research tabs when t
     assert.equal(env.element('[data-role="rec-raw-json"]').textContent, "Nothing loaded yet.");
     assert.ok(text(env.element('[data-role="rec-candidate-table-body"]')).includes("No candidates to rank."));
     assert.equal(env.element('[data-metric="rec-feasible-count"]').textContent, "0");
+});
+
+
+// ---- across all workflows: a fix is chosen in the comparison, then reviewed under ONE workflow ----------------------------------------------------
+
+const second = { ...declaredWf, workflowId: "browse" };
+const twoDeclared = () => contextOf({ workflows: [], workflowId: null, workflowChoice: "none", ready: false, declaredWorkflows: [declaredWf, second],
+    evidence: [ev("cluster", "available"), ev("application", "available"), ev("topology", "available"), ev("workflow", "missing"), ev("failureImpact", "missing")] });
+const PORTFOLIO = "GET /api/recommendations/portfolio/detail?source=declared&namespace=shop";
+const portfolioCandidate = (service = "payment", type = "TOPOLOGY_SPREAD") => ({
+    id: `rec-all-workflows-${service}`, type, service, feasible: true, selected: true, ranking: { rank: 1 }, cost: { resource: "LOW" }, feasibility: { explanation: null },
+    workflows: { protected: ["checkout"], exposed: ["browse"], exposedAt: { browse: ["w2"] } },
+    coverage: { worstCaseBefore: 75, worstCaseAfter: 25, protectsEveryWorkflow: false },
+    parts: [{ candidateId: `rec-all-workflows-${service}`, service, type, protects: ["checkout"] }],
+});
+const portfolioBody = (candidate = portfolioCandidate()) => ({
+    portfolio: { workflows: [{ workflowId: "checkout", criticality: 0.9 }, { workflowId: "browse", criticality: 0.3 }], notEvaluated: [], note: "Approval is for one workflow." },
+    candidates: [candidate],
+});
+const findAll = (node, predicate, out = []) => { if (predicate(node)) out.push(node); (node.children || []).forEach((child) => findAll(child, predicate, out)); return out; };
+
+async function openComparison(extraRoutes = {}) {
+    return openPage({
+        "GET /api/recommendations/context": { status: 200, body: twoDeclared() },
+        "GET /api/recommendations/context?namespace=shop": { status: 200, body: twoDeclared() },
+        [PORTFOLIO]: { status: 200, body: portfolioBody() },
+        [D_DETAIL]: { status: 200, body: declaredBody(declaredCandidate()) },
+        "GET /api/recommendations/declared/rec-live/approval": { status: 404, body: {} }, ...extraRoutes });
+}
+
+async function reviewFor(env, workflowId) {
+    const root = env.element('[data-role="rec-portfolio"]');
+    findAll(root, (n) => n.tag === "button" && n.textContent === "Use this fix")[0].listeners.click();
+    const select = findAll(root, (n) => n.tag === "select")[0];
+    select.value = workflowId;
+    findAll(root, (n) => n.tag === "button" && n.textContent === "Review")[0].listeners.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+test("with two usable workflows the comparison across all of them is asked for, once, and nothing is chosen for the person", async () => {
+    const env = await openComparison();
+
+    assert.equal(env.calls.filter(([, url]) => url === PORTFOLIO.slice(4)).length, 1);
+    assert.equal(env.element('[data-role="rec-portfolio"]').hidden, false);
+    assert.ok(text(env.element('[data-role="rec-portfolio"]')).includes("Across all workflows"));
+    assert.ok(!calls_include(env, "/declared/detail"), "no workflow review starts until the person chooses a fix and a workflow");
+    assert.ok(env.element('[data-role="rec-hint"]').textContent.startsWith("Pick a fix below"));
+    assert.ok(env.calls.every(([method]) => method === "GET"), "the comparison only reads");
+});
+
+test("with one workflow there is no comparison to show and none is asked for", async () => {
+    const env = await openDeclared();
+
+    assert.ok(!calls_include(env, "/portfolio/detail"));
+});
+
+test("choosing a fix and a workflow reviews that fix under that workflow, through the ordinary declared route", async () => {
+    const env = await openComparison();
+
+    await reviewFor(env, "checkout");
+
+    assert.ok(calls_include(env, "/declared/detail?workflow_id=checkout&namespace=shop"));
+    assert.equal(env.element('[data-role="source-badge"]').textContent, "Declared workflow · research approval only");
+    assert.ok(text(env.element('[data-role="rec-outcome"]')).includes("You chose Topology spread on payment from the all-workflows comparison"));
+    assert.ok(env.calls.every(([method]) => method === "GET"), "choosing a fix applies and approves nothing");
+});
+
+test("a chosen change this workflow does not offer is said so, and its own top-ranked change is shown", async () => {
+    const env = await openComparison({ [PORTFOLIO]: { status: 200, body: portfolioBody(portfolioCandidate("cache")) } });
+
+    await reviewFor(env, "checkout");
+
+    assert.ok(text(env.element('[data-role="rec-outcome"]')).includes("The change you chose (Topology spread on cache) is not an option for this workflow"));
+});
+
+test("a change that ranks below the workflow's own top one says approving it needs a written justification", async () => {
+    const top = declaredCandidate({ id: "rec-top", service: "web", selected: true });
+    const chosen = declaredCandidate({ id: "rec-payment", service: "payment", selected: false, score: 0.5, approval: { ready: false, reason: "declared", requiresJustification: true, declared: true } });
+    const body = { ...declaredBody(top), candidates: [top, chosen], report: reportOf([top, chosen], "rec-top") };
+    const env = await openComparison({ [D_DETAIL]: { status: 200, body }, "GET /api/recommendations/declared/rec-payment/approval": { status: 404, body: {} } });
+
+    await reviewFor(env, "checkout");
+
+    assert.ok(text(env.element('[data-role="rec-outcome"]')).includes("another change ranks first, so approving this one needs a written justification"));
+});
+
+test("choosing a workflow by hand drops the fix chosen in the comparison", async () => {
+    const env = await openComparison({ "GET /api/recommendations/context?namespace=shop&workflow_id=": { status: 200, body: twoDeclared() } });
+    await reviewFor(env, "checkout");
+
+    const select = env.element('[data-role="rec-workflow-select"]');
+    select.value = "declared:checkout";
+    await select.listeners.change();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.ok(!text(env.element('[data-role="rec-outcome"]')).includes("from the all-workflows comparison"));
 });

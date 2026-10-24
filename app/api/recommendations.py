@@ -38,6 +38,11 @@ from app.engine.recommendation_evaluation_validation.live_pipeline import (
     build_live_failures,
     build_live_recommendation,
 )
+from app.engine.recommendation_evaluation_validation.portfolio_pipeline import (
+    build_declared_portfolio,
+    build_frozen_portfolio,
+    describe_portfolio,
+)
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 from app.shared.evidence_errors import EvidenceError, unavailable
 from app.integrations.kubernetes.client import NotConnectedError
@@ -357,6 +362,35 @@ def read_declared_recommendation_detail(
         shown["outcome"] = {"state": "DECLARED_NOT_APPROVABLE", "message": DECLARED_OUTCOME}
     shown["declared"] = {**(live.evidence.get("declaredWorkflow") or {}), "approvable": False, "limits": NOT_OBSERVED,
                          "notApprovableBecause": DECLARED_NOT_APPROVABLE}
+    shown["schedulingFacts"] = live.evidence.get("schedulingFacts")
+    return shown
+
+
+@router.get(
+    "/portfolio/detail",
+    responses={409: {"description": "Required evidence is not available"}},
+)
+def read_portfolio_detail(
+    response: Response,
+    source: str = Query("frozen", pattern="^(frozen|declared)$",
+                        description="Which workflows: every approved frozen one, or every declared one. They are never mixed."),
+    failed_node: str | None = Query(None, description="Worker to protect against; default: the one whose loss would hurt most"),
+    namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+) -> dict:
+    """The recommendation for ALL workflows at once, weighted by criticality. Read-only; approval is shut for every candidate.
+
+    It has its own route and its own evidence source, so the approval, apply and validation routes (which take one named workflow and
+    re-evaluate it themselves) can never be reached with it. A person picks a candidate here, then reviews it for one workflow.
+    """
+    build = build_declared_portfolio if source == "declared" else build_frozen_portfolio
+    try:
+        live = build(namespace, failed_node)
+    except ValueError as error:
+        raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
+    response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
+    response.headers["X-Evidence-Approvable"] = "false"
+    response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
+    shown = describe_portfolio(live)
     shown["schedulingFacts"] = live.evidence.get("schedulingFacts")
     return shown
 
