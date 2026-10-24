@@ -110,9 +110,14 @@ An unsettled rollout gives `status: "INCONCLUSIVE"`, reason `ROLLOUT_NOT_SETTLED
 summary = `{placementRunId, candidateKey, label, level, status, preliminary, observedScore, observedRisk, riskReduced, lowRisk, createdAt, finishedAt, comparabilityKey}`; `limit` ≤ 100.
 
 ### GET `/tested?<shared fields>` (feeds the right-hand panel)
-`{"scope": {…}, "rows": [{"candidateKey": "…", "label": "…", "highestLevel": "PLACEMENT_OBSERVED", "observedScoreWorst": 0.667, "observedRiskWorst": 0.333,
-"runs": 3, "agreement": "2/3", "lastRunAt": "…", "preliminary": true, "comparable": true}], "excluded": [{"placementRunId": "…", "reason": "different weights"}]}`
-`agreement` = runs whose observed placement matched the prediction / completed runs.
+`{"scope": {…}, "rows": [{"candidateKey": "…", "label": "…", "yamlSha256": "…", "highestLevel": "PLACEMENT_OBSERVED", "observedScoreWorst": 0.667, "observedRiskWorst": 0.333,
+"runs": 3, "agreement": "2/3", "lastRunAt": "…", "preliminary": true,
+"placementRunId": "…", "runIds": ["…", "…", "…"], "comparable": true, "notComparableReason": null}], "excluded": [{"placementRunId": "…", "reason": "different weights"}]}`
+- `agreement` = runs whose observed placement matched the prediction / completed runs.
+- `placementRunId` = the run the row stands for: the candidate's **worst observed** completed run (the run its worst score/risk come from). Compare (`/compare?ids=`) takes these ids.
+  `runIds` = all its completed runs, newest first (for a "runs" list). `yamlSha256` lets the UI plan a check without calling `/evaluate` first.
+- `comparable: false` carries a plain-words `notComparableReason` (for example "measured with different weights"); it is `null` when comparable. Only rows under the scope's
+  `comparabilityKey` are comparable with each other.
 
 ### GET `/compare?ids=a,b,c` (2 to 3 runs)
 `{"comparabilityKey": "…", "baseline": {…Result}, "columns": [{"placementRunId": "…", "label": "…", "level": "…", "preliminary": true, "score": 0.667, "risk": 0.333, "riskReduced": 0.333, "lowRisk": {…}, "matrix": {…}}]}`; `409 NOT_COMPARABLE` when keys differ.
