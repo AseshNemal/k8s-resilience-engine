@@ -100,6 +100,12 @@ def test_display_components_load_before_the_page_script():
     assert page.index("js/recommendation-render.js") < page.index("components/recommendations.js")
 
 
+def test_the_topology_comparison_loads_before_the_page_script_and_has_somewhere_to_draw():
+    page = recommendations_page()
+    assert page.index("js/recommendation-topology.js") < page.index("components/recommendations.js")
+    assert 'data-role="rec-topology"' in page and 'data-role="rec-topology-box"' in page
+
+
 def test_the_page_never_offers_a_simulated_placement_of_its_own():
     page = recommendations_page()
     script = (SCRIPTS / "recommendations.js").read_text(encoding="utf-8")

@@ -1101,6 +1101,13 @@
 
         // The research tabs.
         view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
+        // The whole topology now and after the selected change, from the same two graphs; only drawn when there is one to compare.
+        const topologyBox = region.querySelector('[data-role="rec-topology-box"]');
+        if (topologyBox && window.ResilienceTopologyCompare) {
+            const model = window.ResilienceTopologyCompare.render(region.querySelector('[data-role="rec-topology"]'),
+                context.currentDeployment, context.simulatedDeployment, { failedNode: (detail.evidence && detail.evidence.failedNode) || v.failedNode || null });
+            topologyBox.hidden = !model;
+        }
         view.renderRankingTable(tabPart("rec-candidate-table-body"), report);
         view.renderCandidateDetails(tabPart("rec-detail-list"), detail);
         view.renderValidation(tabPart("rec-validation"), context.validation);

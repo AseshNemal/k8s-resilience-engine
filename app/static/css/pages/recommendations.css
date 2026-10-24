@@ -779,3 +779,43 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .apply-test__report summary { cursor: pointer; font-weight: 600; }
 .apply-test > button { margin: 12px 12px 0 0; }
 .rec-operation[data-managed-run="true"] { display: none !important; }
+
+/* ---- Before / after topology (drawn by recommendation-topology.js) ---- */
+.rec-topo { margin-bottom: var(--space-lg); }
+.rec-topo__summary { margin: 0 0 var(--space-md); font-size: 13px; color: var(--color-text-muted); }
+.rec-topo__grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-lg); }
+.rec-topo__grid > .rec-topo__panel:only-child { grid-column: 1 / -1; }
+.rec-topo__title { font-size: 12px; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-sm); }
+.rec-topo__body { position: relative; display: grid; grid-template-columns: minmax(120px, 0.7fr) 1.6fr; gap: 64px;
+    padding: var(--space-md); background: var(--color-surface-soft); border: 1px solid var(--color-border); border-radius: var(--radius-medium); }
+.rec-topo__services, .rec-topo__nodes { position: relative; z-index: 1; display: flex; flex-direction: column; gap: var(--space-sm); }
+.rec-topo__label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+.rec-topo__links { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: visible; }
+.rec-topo__link { fill: none; stroke-width: 1.5; opacity: 0.55; stroke: var(--topo-colour, var(--color-text-muted)); }
+.rec-topo__service { display: flex; align-items: center; gap: var(--space-sm); padding: 8px 10px; background: var(--color-surface);
+    border: 1px solid var(--color-border); border-radius: var(--radius-small); font-size: 13px; }
+.rec-topo__service-name { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rec-topo__count { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); }
+.rec-topo__swatch { width: 8px; height: 18px; border-radius: 3px; background: var(--topo-colour); flex: none; }
+.rec-topo__node { padding: 10px 12px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-small); }
+.rec-topo__node[data-failed="true"] { border-color: var(--color-danger); }
+.rec-topo__node-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); margin-bottom: 8px; }
+.rec-topo__node-name { font-weight: 600; font-size: 13px; }
+.rec-topo__badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--color-surface-soft); border: 1px solid var(--color-border); color: var(--color-text-muted); }
+.rec-topo__badge--failed { color: var(--color-danger); border-color: var(--color-danger); }
+.rec-topo__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rec-topo__empty { font-size: 12px; color: var(--color-text-muted); }
+.rec-topo__chip { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; color: #fff; background: var(--topo-colour); border: 2px solid transparent; }
+.rec-topo__chip[data-ready="false"] { background: transparent; color: var(--topo-colour); border: 2px dashed var(--topo-colour); }
+.rec-topo__chip[data-state="moves"], .rec-topo__chip[data-state="added"] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--topo-colour) 35%, transparent); }
+.rec-topo__chip[data-state="removed"] { opacity: 0.5; }
+.rec-topo__node[data-failed="true"] .rec-topo__chip { text-decoration: line-through; opacity: 0.6; }
+.rec-topo__legend { margin: var(--space-sm) 0 0; font-size: 12px; color: var(--color-text-muted); }
+[data-colour="0"] { --topo-colour: #2f6fd0; } [data-colour="1"] { --topo-colour: #2f9e63; } [data-colour="2"] { --topo-colour: #c27a2c; }
+[data-colour="3"] { --topo-colour: #8b3fc0; } [data-colour="4"] { --topo-colour: #d0447a; } [data-colour="5"] { --topo-colour: #0e8fa3; }
+[data-colour="6"] { --topo-colour: #7a8a1c; } [data-colour="7"] { --topo-colour: #6b6f80; }
+@media (max-width: 900px) {
+    .rec-topo__grid { grid-template-columns: 1fr; }
+    .rec-topo__body { grid-template-columns: 1fr; gap: var(--space-md); }
+    .rec-topo__links { display: none; }
+}
