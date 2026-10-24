@@ -38,7 +38,7 @@
         "approved-unlabelled": "Access exists from an earlier setup",
         absent: "Access not set up yet",
         partial: "Access partly removed; setting up restores it",
-        drifted: "Access needs updating; setting up resets it to the current read-only set",
+        drifted: "Access needs updating; connect to review this version's cluster permissions",
         "over-granted": "Another binding gives it extra access; remove that first",
     };
 

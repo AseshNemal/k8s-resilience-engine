@@ -158,6 +158,11 @@ class ValidationPlan:
         if not has_verified_provenance(approval):
             if not (allow_declared_workflow and has_research_provenance(approval)):
                 raise ValidationRefusedError("APPROVAL_UNVERIFIED", "The approval has no verified link to live evidence.")
+        if (live.evidence or {}).get("workflowScope") == "all" or (
+            ((approval.evaluation_snapshot or {}).get("provenance") or {}).get("workflowScope") == "all"
+        ):
+            raise ValidationRefusedError("ALL_WORKFLOWS_PROOF_UNAVAILABLE", "This single-workflow validation runner cannot "
+                                         "prove a change for the entire workflow set.")
         if target.environment != TEST_ENVIRONMENT:
             raise ValidationRefusedError("TARGET_NOT_TEST_ENVIRONMENT", f"{target.name!r} is a {target.environment!r} "
                                          f"environment; a validation run only writes to and breaks a test environment.")

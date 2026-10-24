@@ -77,6 +77,8 @@ FORMULA_VERSION = "1"
 WEIGHTS_STATUS = "experimental defaults; not optimized or proven"
 DEFAULT_TOLERANCE = 1e-6
 SINGLE_WORKFLOW = "single-workflow"
+# Several workflows evaluated together: each workflow's outcome weighted by its criticality (``portfolio.py``).
+CRITICALITY_WEIGHTED = "portfolio-criticality-weighted"
 # Ordinal cost labels. A candidate type adds real cost only when it adds replicas (spread adds none).
 RESOURCE_FRACTION = MappingProxyType({"LOW": 0.0, "MEDIUM": 0.5, "HIGH": 1.0})
 # How restrictive a strategy is, for breaking a tie between candidates that score the same, cost the same and move the

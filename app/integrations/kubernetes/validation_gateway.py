@@ -32,6 +32,7 @@ import httpx
 from app.integrations.kubernetes import rest
 from app.integrations.kubernetes.client import (
     ApiFailedError,
+    ClusterAccessError,
     AuthFailedError,
     ConnectionFailedError,
     ForbiddenError,
@@ -160,6 +161,16 @@ def _refuse_ambient(path: str) -> str:
     return real
 
 
+# The only kinds a copy of an application may create, and where. A Secret is not among them, on purpose.
+CREATE_PATHS = {
+    "Deployment": "/apis/apps/v1/namespaces/{ns}/deployments",
+    "Service": "/api/v1/namespaces/{ns}/services",
+    "ConfigMap": "/api/v1/namespaces/{ns}/configmaps",
+    "ServiceAccount": "/api/v1/namespaces/{ns}/serviceaccounts",
+}
+CREATE_FORBIDDEN_NAMESPACES = ("kube-system", "kube-public", "kube-node-lease", "default")
+
+
 class _WriteClient(rest.RestClient):
     """The only client that can PATCH. The product's ``RestClient`` stays read-only."""
 
@@ -254,6 +265,49 @@ class KubernetesTestClusterGateway:
 
     # -- reads -------------------------------------------------------------------------------------------------------
 
+    def read_resource_usage(self, namespace: str) -> dict:
+        """Measured usage, never resource requests or allocatable capacity. Missing metrics stay missing."""
+        from datetime import datetime, timezone
+        result = {"capturedAt": datetime.now(timezone.utc).isoformat(), "nodes": None, "pods": None, "errors": []}
+        for kind, path in (("nodes", "/apis/metrics.k8s.io/v1beta1/nodes"),
+                           ("pods", f"/apis/metrics.k8s.io/v1beta1/namespaces/{quote(namespace, safe='')}/pods")):
+            try:
+                body = self._get(path, kind + " metrics")
+                result[kind] = [{"name": row.get("metadata", {}).get("name"), "timestamp": row.get("timestamp"),
+                    "window": row.get("window"), "usage": row.get("usage"),
+                    "containers": [{"name": c.get("name"), "usage": c.get("usage")} for c in row.get("containers", [])]}
+                    for row in body["items"]]
+            except (ClusterAccessError, KeyError, TypeError):
+                result["errors"].append({"code": "RESOURCE_METRICS_UNAVAILABLE", "resource": kind,
+                    "message": "Measured CPU/memory usage could not be read from metrics.k8s.io. Requests are not usage."})
+        result["source"] = "metrics.k8s.io"
+        if result["nodes"] is None or result["pods"] is None:
+            nodes, pods = [], []
+            try:
+                for name in self.identity().node_names:
+                    summary = self._get(f"/api/v1/nodes/{quote(name, safe='')}/proxy/stats/summary", "node resource statistics")
+                    def usage(entry):
+                        cpu, memory = entry.get("cpu") or {}, entry.get("memory") or {}
+                        return {"cpu": None if cpu.get("usageNanoCores") is None else str(cpu["usageNanoCores"]) + "n",
+                                "memory": memory.get("workingSetBytes")}
+                    node = summary.get("node") or {}
+                    nodes.append({"name": name, "timestamp": (node.get("cpu") or {}).get("time"), "usage": usage(node)})
+                    for pod in summary.get("pods") or []:
+                        ref = pod.get("podRef") or {}
+                        if ref.get("namespace") == namespace:
+                            pods.append({"name": ref.get("name"), "timestamp": (pod.get("cpu") or {}).get("time"),
+                                "containers": [{"name": c.get("name"), "usage": usage(c)} for c in pod.get("containers", [])]})
+                if nodes:
+                    result.update(nodes=nodes, pods=pods, source="kubelet-summary")
+            except (ClusterAccessError, KeyError, TypeError):
+                result["errors"].append({"code": "KUBELET_METRICS_UNAVAILABLE", "message": "The kubelet resource statistics could not be read either."})
+        result["available"] = bool(result["nodes"]) and bool(result["pods"]) and all(
+            (n.get("usage") or {}).get("cpu") is not None and (n.get("usage") or {}).get("memory") is not None
+            for n in result["nodes"]) and all(p.get("containers") and all(
+                (c.get("usage") or {}).get("cpu") is not None and (c.get("usage") or {}).get("memory") is not None
+                for c in p["containers"]) for p in result["pods"])
+        return result
+
     def identity(self) -> ObservedIdentity:
         connection = rest.load_connection([self._path])
         context = rest.read_kubeconfig_file(self._path).get("current-context")
@@ -296,6 +350,33 @@ class KubernetesTestClusterGateway:
                 pod_anti_affinity=deepcopy((pod_spec.get("affinity") or {}).get("podAntiAffinity")) or None,
                 uid=meta.get("uid"))
         return found
+
+    @property
+    def source(self) -> KubernetesApiSource:
+        """The read-only API source this gateway reads through (Component 2's discovery takes it, and so does the node-taint read)."""
+        return self._source
+
+    def list_raw(self, resource: str, path: str) -> list[dict[str, Any]]:
+        """The raw objects at a list path. Never used for Secrets: the callers name the kinds, and a Secret is not among them."""
+        if resource == "secrets":
+            raise ForbiddenError("get", "secrets")
+        return self._items(resource, path)
+
+    def read_all_pods(self) -> list[dict[str, Any]]:
+        """Every pod of the cluster, reduced to what a disruption check needs: where it runs, whether it is Ready, what owns it.
+
+        Read only. ``ready`` is None when the pod carries no readiness condition (unknown is never reported as ready).
+        """
+        pods = []
+        for item in self._items("pods", "/api/v1/pods"):
+            meta, spec, status = _meta(item), item.get("spec") or {}, item.get("status") or {}
+            ready = next((c.get("status") == "True" for c in status.get("conditions") or [] if c.get("type") == "Ready"), None)
+            owners = meta.get("ownerReferences") or []
+            controller = next((o for o in owners if o.get("controller")), owners[0] if owners else {})
+            pods.append({"namespace": meta.get("namespace"), "name": meta.get("name"), "node": spec.get("nodeName"),
+                         "phase": status.get("phase"), "ready": ready, "ownerKind": controller.get("kind"),
+                         "ownerName": controller.get("name")})
+        return pods
 
     def rollout_complete(self, namespace: str, names: Sequence[str]) -> bool:
         return all(rollout.missing is False and (rollout.observed_generation or 0) >= (rollout.generation or 0)
@@ -421,3 +502,44 @@ class KubernetesTestClusterGateway:
         }
         self._patch(snapshot.namespace, snapshot.name,
                     {"spec": {"replicas": snapshot.replicas, "template": {"spec": pod_spec}}})
+
+    # -- creating a copy of an application on a disposable cluster -----------------------------------------------------------------------
+
+    def ensure_namespace(self, name: str) -> bool:
+        """Create the namespace of the copy. True when it was created, False when it already existed."""
+        self._require_writes()
+        if name in CREATE_FORBIDDEN_NAMESPACES:
+            raise ForbiddenError("create", "namespaces")
+        return self._create("/api/v1/namespaces", {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": name,
+                                                   "labels": {"resilience-validation/test-namespace": "true"}}}, "namespaces")
+
+    def create_object(self, document: dict[str, Any], *, namespace: str) -> bool:
+        """Create one object of the copy. Only Deployments, Services, ConfigMaps and ServiceAccounts, only in ``namespace``, never a Secret.
+
+        True when it was created, False when an object of that name already existed (nothing is overwritten).
+        """
+        self._require_writes()
+        kind = document.get("kind")
+        template = CREATE_PATHS.get(kind)
+        meta = document.get("metadata") or {}
+        if template is None or meta.get("namespace") != namespace or not meta.get("name") or namespace in CREATE_FORBIDDEN_NAMESPACES:
+            raise ForbiddenError("create", str(kind))
+        return self._create(template.format(ns=quote(namespace, safe="")), document, str(kind).lower() + "s")
+
+    def _create(self, path: str, body: dict[str, Any], what: str) -> bool:
+        http = self._client()
+        try:
+            http.post_json(path, body)
+            return True
+        except rest.HttpStatusError as error:
+            if error.status == 409:
+                return False
+            if error.status == 401:
+                raise AuthFailedError("the cluster rejected the credential") from None
+            if error.status == 403:
+                raise ForbiddenError("create", what) from None
+            raise ApiFailedError(error.status) from None
+        except rest.TransportFailure as error:
+            raise ConnectionFailedError(error.name) from None
+        finally:
+            http.close()

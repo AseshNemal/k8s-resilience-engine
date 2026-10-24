@@ -245,3 +245,32 @@
         word-break: break-word;
     }
 }
+
+
+/* ---- Research summary: status strip, current risk, applied-change banner, results, evidence ---- */
+.overview-applied { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border: 1px solid var(--dd-warning, var(--color-border)); border-left-width: 4px; border-radius: var(--radius-medium); font-size: 13px; }
+.overview-applied[hidden] { display: none; }
+.overview-applied__link { margin-left: auto; }
+.overview-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-md); }
+.overview-chip { display: grid; gap: 4px; padding: var(--space-md); border: 1px solid var(--color-border); border-top-width: 3px; border-radius: var(--radius-large); background: var(--color-surface); color: inherit; text-decoration: none; min-width: 0; }
+.overview-chip:hover { border-color: var(--color-primary); }
+.overview-chip__top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-muted); }
+.overview-chip__label { font-weight: 600; color: var(--color-text); font-size: 14px; }
+.overview-chip__detail { font-size: 12px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.overview-chip[data-state="available"] { border-top-color: var(--dd-success, var(--color-success)); }
+.overview-chip[data-state="missing"] { border-top-color: var(--dd-danger, var(--color-danger)); }
+.overview-chip[data-state="incomplete"], .overview-chip[data-state="pending"] { border-top-color: var(--dd-warning, var(--color-warning)); }
+.overview-risk { display: grid; gap: 4px; }
+.overview-risk__label { font-size: 12px; color: var(--color-text-muted); }
+.overview-risk__headline { font-size: 22px; font-weight: 500; line-height: 1.3; }
+.overview-risk__sub { margin: 0; font-size: 13px; color: var(--color-text-muted); }
+.overview-risk[data-state="available"][data-lost="true"] { border-left: 4px solid var(--dd-danger, var(--color-danger)); }
+.overview-risk[data-state="available"][data-lost="false"] { border-left: 4px solid var(--dd-success, var(--color-success)); }
+.overview-results table, .overview-evidence table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.overview-results th, .overview-results td, .overview-evidence th, .overview-evidence td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--color-border); overflow-wrap: anywhere; }
+.overview-badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: 6px; }
+.overview-badge[data-state="passed"], .overview-badge[data-state="available"] { color: var(--color-success); }
+.overview-badge[data-state="gaps"], .overview-badge[data-state="incomplete"], .overview-badge[data-state="pending"] { color: var(--color-warning); }
+.overview-badge[data-state="failed"], .overview-badge[data-state="missing"] { color: var(--color-danger); }
+@media (max-width: 900px) { .overview-status { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .overview-status { grid-template-columns: minmax(0, 1fr); } }

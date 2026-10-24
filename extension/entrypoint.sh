@@ -18,7 +18,7 @@ prepare() {  # prepare DIR: make DIR private to the app user (chmod first, then 
     fi
 }
 
-# SQLite and the stored read-only kubeconfig (created by the app, mode 0700) live on /data.
+# SQLite and the stored kubeconfig (created by the app, mode 0700) live on /data.
 prepare /data
 
 # The socket directory is provided by Docker Desktop. uvicorn makes the socket file itself

@@ -66,6 +66,25 @@ def test_every_proposal_the_generator_produces_passes_the_check(case_name, count
 
 # --- only a Deployment's placement fields may be written -----------------------------------------------------------
 
+@pytest.mark.parametrize("policy", ["Ignore", "unexpected", None])
+def test_spread_policy_cannot_count_untolerated_nodes(policy):
+    text, deployments = generated("concentrated-replicas")
+    changed = mutate(text, lambda docs: docs[0]["spec"]["template"]["spec"]["topologySpreadConstraints"][0].update(nodeTaintsPolicy=policy))
+    refused("PROPOSAL_NOT_ALLOWED", changed, deployments)
+
+
+def test_an_earlier_saved_proposal_without_a_taints_policy_remains_readable():
+    text, deployments = generated("concentrated-replicas")
+    earlier = mutate(text, lambda docs: docs[0]["spec"]["template"]["spec"]["topologySpreadConstraints"][0].pop("nodeTaintsPolicy"))
+    assert check(earlier, deployments)
+
+
+@pytest.mark.parametrize("keys", [["app"], [], ["pod-template-hash", "app"], None])
+def test_only_the_deployment_revision_can_be_used_to_group_spread_pods(keys):
+    text, deployments = generated("concentrated-replicas")
+    changed = mutate(text, lambda docs: docs[0]["spec"]["template"]["spec"]["topologySpreadConstraints"][0].update(matchLabelKeys=keys))
+    refused("PROPOSAL_NOT_ALLOWED", changed, deployments)
+
 def test_a_document_that_is_not_a_deployment_is_refused():
     text, deployments = generated("concentrated-replicas")
     refused("PROPOSAL_NOT_ALLOWED", mutate(text, lambda docs: docs[0].update(kind="Service")), deployments)

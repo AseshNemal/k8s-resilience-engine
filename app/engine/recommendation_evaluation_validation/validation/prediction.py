@@ -26,22 +26,29 @@ def predicted_placement(graph: DeploymentGraph, services: list[str]) -> dict[str
             for s in graph.services if s.name in wanted}
 
 
-def predict_outcome(workflow: WorkflowGraph, live: LiveRecommendation, recommendation_id: str) -> PredictedOutcome:
+def predict_outcome(workflow: WorkflowGraph, live: LiveRecommendation, recommendation_id: str, *,
+                    failed_node: str | None = None) -> PredictedOutcome:
     """Component 3's before/after prediction for the candidate, on the current and the virtual topology.
 
     Both predictions go through Component 3's public ``predict_failure_impact``; nothing is recomputed here. Raises
     ``ValidationRefusedError`` when the evaluation does not hold a simulated placement for the candidate (an
     infeasible or unverified one has none).
+
+    ``failed_node`` asks for the prediction of a different worker than the one the evaluation was assessed against. The
+    simulated placement does not depend on which node fails, so the same virtual change is predicted once per worker; the
+    node has to be a node of the current topology.
     """
     detail = ((live.details or {}).get("candidates") or {}).get(recommendation_id)
     if not isinstance(detail, dict):
         raise ValidationRefusedError("PREDICTION_UNAVAILABLE", f"{recommendation_id} is not in the evaluation.")
-    failed_node = (live.evidence or {}).get("failedNode")
+    failed_node = failed_node or (live.evidence or {}).get("failedNode")
     fingerprint = proposal_fingerprint(live, recommendation_id)
     if not failed_node or fingerprint is None:
         raise ValidationRefusedError("PREDICTION_UNAVAILABLE", "The evaluation records no failed node or proposal plan.")
     current = _graph((live.details or {}).get("currentDeployment"), "the current topology")
     simulated = _graph(detail.get("simulatedDeployment"), "a simulated placement for this candidate")
+    if failed_node not in {node.name for node in current.nodes}:
+        raise ValidationRefusedError("PREDICTION_UNAVAILABLE", f"{failed_node!r} is not a node of the current topology.")
     services = list(detail.get("services") or [detail.get("service")])
     return PredictedOutcome(
         recommendation_id=recommendation_id, workflow_id=workflow.workflow_id, failed_node=failed_node,

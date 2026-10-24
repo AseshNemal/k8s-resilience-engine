@@ -4,7 +4,7 @@ What is produced. One strategic-merge patch of the backing Deployment per change
 feasibility check verified and nothing else:
 
 * TOPOLOGY_SPREAD: ``topologySpreadConstraints`` on ``kubernetes.io/hostname``, ``maxSkew`` as modelled,
-  ``whenUnsatisfiable: DoNotSchedule``, selecting the Deployment's own pod labels;
+  ``whenUnsatisfiable: DoNotSchedule`` and ``nodeTaintsPolicy: Honor``, selecting the Deployment's own pod labels;
 * POD_ANTI_AFFINITY: a required ``podAntiAffinity`` term on ``kubernetes.io/hostname`` selecting the Deployment's own
   pods. Kubernetes treats that list as atomic, so a patch REPLACES it: a Deployment that already has required terms is
   refused instead of having them silently dropped;
@@ -153,6 +153,12 @@ def _graph(live: LiveRecommendation) -> DeploymentGraph | None:
 
 def _spread_constraint(service: ServicePlacement) -> dict[str, Any]:
     return {"maxSkew": DEFAULT_MAX_SKEW, "topologyKey": HOSTNAME, "whenUnsatisfiable": "DoNotSchedule",
+            # The default Ignore counts an untolerated control-plane node as an empty domain.
+            # Honor matches feasibility's eligible-node set and avoids blocking worker rollouts.
+            "nodeTaintsPolicy": "Honor",
+            # Count this Deployment revision separately from old rollout pods. Otherwise
+            # terminating old replicas can allow the new replicas to co-locate.
+            "matchLabelKeys": ["pod-template-hash"],
             "labelSelector": {"matchLabels": dict(sorted(service.declared_intent.selector.items()))}}
 
 
