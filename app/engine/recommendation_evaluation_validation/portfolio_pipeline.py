@@ -16,11 +16,13 @@ The result carries ``PORTFOLIO_ANALYSIS_SOURCE``. No approval, apply or validati
 named workflow, after this analysis shows which candidate protects the most.
 """
 import dataclasses
+import hashlib
+import json
 from typing import Any
 
 from app.engine.failure_impact_prediction.runtime_provider import get_runtime_component_inputs
 from app.engine.recommendation_evaluation_validation import live_pipeline
-from app.engine.recommendation_evaluation_validation.approval import LiveRecommendation
+from app.engine.recommendation_evaluation_validation.approval import DECLARED_WORKFLOW_SOURCE, LIVE_EVIDENCE_SOURCE, LiveRecommendation
 from app.engine.recommendation_evaluation_validation.combinations import DEFAULT_EVALUATION_BUDGET
 from app.engine.recommendation_evaluation_validation.declared_workflow import (
     DeclaredWorkflowError,
@@ -43,6 +45,7 @@ from app.engine.recommendation_evaluation_validation.portfolio import (
 )
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.deployment import DeploymentGraph
+from app.shared.schemas.workflow import WorkflowGraph
 
 PORTFOLIO_NOT_APPROVABLE = "PORTFOLIO_NOT_APPROVABLE"
 
@@ -91,8 +94,42 @@ def _evaluate(workflows: list[dict[str, Any]], not_evaluated: list[dict[str, Any
                                    scheduling_evidence=scheduling_evidence_for(deployment), combination_budget=combination_budget)
     extra = {**extra, "workflowExposure": _exposure(portfolio, deployment, live)}
     described = [{key: value for key, value in item.items() if key != "graph"} for item in workflows]
-    return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts, "workflows": described,
+    definitions = sorted(({**item, "graph": item["graph"].model_dump(mode="json")} for item in workflows),
+                         key=lambda item: item["workflowId"])
+    digest = hashlib.sha256(json.dumps(definitions, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return dataclasses.replace(live, details={**live.details, "portfolioWorkflows": [item["graph"].model_dump(mode="json") for item in workflows]},
+                              evidence={**live.evidence, "schedulingFacts": facts, "workflows": described,
+                                               "workflowSetDigest": digest,
                                                "workflowsNotEvaluated": not_evaluated, **extra})
+
+
+def build_portfolio_recommendation(namespace: str = "default", failed_node: str | None = None, *,
+                                   declared: bool = False) -> LiveRecommendation:
+    """An approval-capable evaluation of the complete workflow set, using each source's existing approval tier.
+
+    The analysis-only builders remain available. This path requires complete evidence for every workflow and binds
+    the whole set of definitions and freezes into the proposal fingerprint; one combination stays one proposal.
+    """
+    live = (build_declared_portfolio if declared else build_frozen_portfolio)(namespace, failed_node)
+    if live.evidence.get("workflowsNotEvaluated"):
+        raise EvidenceError("PORTFOLIO_EVIDENCE_INCOMPLETE", "Some workflows could not be evaluated. Complete their evidence "
+                            "before approving a change for all workflows.", http_status=409, component=COMPONENT,
+                            details={"workflows": live.evidence["workflowsNotEvaluated"]})
+    evidence = {**live.evidence, "source": DECLARED_WORKFLOW_SOURCE if declared else LIVE_EVIDENCE_SOURCE,
+                "workflowScope": "all"}
+    if declared:
+        evidence["declaredWorkflow"] = {**evidence["declaration"], "workflowId": live.report.workflow_id}
+    return dataclasses.replace(live, evidence=evidence)
+
+
+def build_portfolio_failures(namespace: str = "default", *, declared: bool = False) -> dict[str, Any]:
+    """Assess each worker separately over one freshly loaded, complete workflow and topology snapshot."""
+    live = build_portfolio_recommendation(namespace, declared=declared)
+    workflow = WorkflowPortfolio(tuple(WorkflowGraph.model_validate(w) for w in live.details["portfolioWorkflows"]))
+    deployment = DeploymentGraph.model_validate(live.details["currentDeployment"])
+    return live_pipeline.failure_overview(workflow, deployment,
+        EvidenceProvenance(live.evidence["source"], namespace, live.evidence["topologyCapturedAt"], live.evidence["topologyStatus"], None),
+        scheduling_evidence=scheduling_evidence_for(deployment))
 
 
 def build_frozen_portfolio(namespace: str = "default", failed_node: str | None = None, *,
@@ -187,24 +224,26 @@ def _coverage(candidate: dict[str, Any]) -> dict[str, Any] | None:
 def describe_portfolio(live: LiveRecommendation) -> dict[str, Any]:
     """The portfolio evaluation as the page shows it: the single-workflow description, with approval shut and the workflows named."""
     detail = describe_live_recommendation(live)
+    analysis_only = live.evidence.get("source") == PORTFOLIO_ANALYSIS_SOURCE
     for candidate in detail["candidates"]:
-        candidate["approval"] = {"ready": False, "reason": NOT_APPROVABLE, "requiresJustification": False, "portfolio": True}
+        if analysis_only:
+            candidate["approval"] = {"ready": False, "reason": NOT_APPROVABLE, "requiresJustification": False, "portfolio": True}
         candidate["workflows"] = _workflows_of(live, candidate["id"])
         candidate["coverage"] = _coverage(candidate)
         proposal = candidate.get("yamlProposal") or {}
-        if proposal.get("status") == "GENERATED":
+        if analysis_only and proposal.get("status") == "GENERATED":
             proposal["applicable"], proposal["reason"] = False, NOT_APPROVABLE
     by_id = {c["id"]: c for c in detail["candidates"]}
     for candidate in detail["candidates"]:
         candidate["parts"] = _parts(live, candidate, by_id)
-    if detail["candidates"]:
+    if analysis_only and detail["candidates"]:
         detail["outcome"] = {"state": PORTFOLIO_NOT_APPROVABLE, "message": NOT_APPROVABLE}
-    if detail["yaml"].get("available"):
+    if analysis_only and detail["yaml"].get("available"):
         detail["yaml"].update(applicable=False, reason=NOT_APPROVABLE)
     detail["portfolio"] = {
         "workflows": [{"workflowId": w["workflowId"], "criticality": w["criticality"]} for w in live.evidence.get("workflows", [])],
         "notEvaluated": live.evidence.get("workflowsNotEvaluated", []),
         "basis": live.evidence.get("workflowBasis"),
-        "note": NOT_APPROVABLE,
+        "note": NOT_APPROVABLE if analysis_only else "All workflows are evaluated together. A combined fix is approved and applied as one proposal.",
     }
     return detail

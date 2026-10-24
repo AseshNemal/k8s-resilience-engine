@@ -186,7 +186,9 @@
             );
             identity.append(element(doc, "span", undefined, "candidate-card__icon", { "data-kind": String(candidate.type || "").toLowerCase(), "aria-hidden": "true" }), name);
             const chips = element(doc, "div", undefined, "candidate-card__chips");
-            if (selected) chips.append(chipOf(doc, "Recommended", "info"));
+            const recommended = options && options.engineSelectedId !== undefined ? candidate.id === options.engineSelectedId : selected;
+            if (recommended) chips.append(chipOf(doc, "Recommended", "info"));
+            if (selected && options && options.onSelect) chips.append(chipOf(doc, "Selected", "success"));
             chips.append(chipOf(doc, candidate.feasible ? "Feasible" : "Not feasible", candidate.feasible ? "success" : "danger"));
             if (rank !== null) chips.append(chipOf(doc, `Rank ${rank}`, "muted", "rec-research-only"));
             const header = element(doc, "div", undefined, "candidate-card__header");
@@ -233,8 +235,28 @@
                 }
                 card.append(more);
             }
+            if (options && options.onSelect && options.canSelect(candidate.id)) {
+                const choose = element(doc, "button", selected ? "Selected fix" : "Select this fix", "secondary-button", {
+                    type: "button", "data-select-candidate": candidate.id, "aria-pressed": String(selected),
+                });
+                choose.addEventListener("click", () => options.onSelect(candidate.id));
+                card.append(choose);
+            }
             return card;
         });
+        if (options && options.dashboard) {
+            const visible = cards.filter((_card, index) => ranked[index].selected || (ranked[index].candidate.feasible && index < 4));
+            const remaining = cards.filter((card) => !visible.includes(card));
+            const grid = element(doc, "div", undefined, "rec-candidate-comparison");
+            grid.append(...visible);
+            if (!visible.length) grid.append(...cards.slice(0, 1));
+            if (remaining.length && visible.length) {
+                const more = element(doc, "details", undefined, "rec-others");
+                more.append(element(doc, "summary", `Other options (${remaining.length})`), ...remaining);
+                container.replaceChildren(grid, more);
+            } else container.replaceChildren(grid);
+            return;
+        }
         // The lead card, then the rest. Many alternatives sit behind one disclosure so the page stays a short answer, not a catalogue.
         const lead = cards.filter((card) => /candidate-card--lead/.test(card.className));
         const rest = cards.filter((card) => !/candidate-card--lead/.test(card.className));
@@ -676,6 +698,20 @@
         );
         container.append(heading);
         if (candidate.recommendedChange) container.append(element(doc, "p", candidate.recommendedChange, "rec-selected__change", { title: candidate.recommendedChange }));
+        if (Array.isArray(candidate.parts) && candidate.parts.length > 1) {
+            const changes = element(doc, "ul", undefined, "rec-selected__parts");
+            candidate.parts.forEach((part) => changes.append(element(doc, "li", `${strategyName(part.type)} on ${part.service}`)));
+            container.append(changes);
+        }
+        if (candidate.workflows) {
+            const protectedIds = candidate.workflows.protected || [];
+            const exposed = candidate.workflows.exposed;
+            const benefit = candidate.coverage?.protectsEveryWorkflow
+                ? "Predicted to protect every workflow against the loss of any one worker."
+                : `Predicted to protect: ${protectedIds.length ? protectedIds.join(", ") : "no additional workflow against every worker failure"}.`;
+            container.append(element(doc, "p", `Why this helps: ${benefit} Protection is checked against every worker's failure.`, "rec-selected__why"));
+            if (Array.isArray(exposed) && exposed.length) container.append(element(doc, "p", `Still exposed: ${exposed.join(", ")}.`, "ui-note"));
+        }
         const predicted = candidate.predicted || {};
         container.append(gauge(doc, predicted.blastRadiusBefore, predicted.blastRadiusAfter), element(doc, "p", "Predicted, not observed.", "ui-note"));
     }

@@ -6,9 +6,9 @@ import { test } from "node:test";
 import vm from "node:vm";
 
 const read = (path) => readFileSync(new URL(`../../app/static/js/${path}`, import.meta.url), "utf8");
-const SCRIPTS = ["api.js", "connection-state.js", "recommendation-render.js", "recommendation-context.js", "recommendation-portfolio.js", "recommendation-operation.js", "components/recommendations.js"].map((p) => [p, read(p)]);
+const SCRIPTS = ["api.js", "connection-state.js", "recommendation-render.js", "recommendation-context.js", "recommendation-portfolio.js", "recommendation-operation.js", "recommendation-apply-test.js", "components/recommendations.js"].map((p) => [p, read(p)]);
 
-function makeEnvironment(routes, storage) {
+function makeEnvironment(routes, storage, allWorkflows = false) {
     const registry = new Map();
     const element = (key) => {
         if (registry.has(key)) return registry.get(key);
@@ -31,11 +31,13 @@ function makeEnvironment(routes, storage) {
     template.content = { cloneNode: () => ({ fragment: true }) };
     // The applied-change panel's skeleton. (Its own lifecycle is tested against a tree-faithful DOM in recommendation-operation.test.mjs.)
     element('[data-role="operation-template"]').content = { cloneNode: () => ({ fragment: true }) };
-    routes = { "GET /api/recommendations/applications/current": { status: 200, body: { application: null, tier: null } }, ...routes };
+    routes = { "GET /api/recommendations/applications/current": { status: 200, body: { application: null, tier: null } },
+        "GET /api/recommendations/apply-tests/history?limit=20&offset=0": { status: 200, body: { runs: [], hasMore: false } },
+        "GET /api/recommendations/apply-tests/current": { status: 200, body: { run: null } }, ...routes };
 
     const listeners = {};
     const document = {
-        querySelector: (selector) => element(selector),
+        querySelector: (selector) => allWorkflows && selector === '[data-role="rec-workflow-select"]' ? null : element(selector),
         getElementById: (id) => element(`#${id}`),
         createElement: (tag) => ({
             tag, children: [], attributes: {}, className: "", textContent: "", style: {}, listeners: {},
@@ -119,8 +121,8 @@ const DETAIL = "GET /api/recommendations/live/detail?workflow_id=checkout&namesp
 const PROOF = "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout";
 const BASE = { "GET /_extension/cluster": { status: 200, body: { context: "docker-desktop" } }, "GET /api/recommendations/context": { status: 200, body: contextOf() } };
 
-async function openPage(routes, storage) {
-    const env = makeEnvironment({ ...BASE, ...routes }, storage);
+async function openPage(routes, storage, allWorkflows = false) {
+    const env = makeEnvironment({ ...BASE, ...routes }, storage, allWorkflows);
     await env.listeners.DOMContentLoaded();
     await new Promise((resolve) => setTimeout(resolve, 0));   // let the approval lookup that follows a render finish
     return env;
@@ -156,6 +158,18 @@ test("Bookinfo-style evidence with no feasible change: no approval, the reasons 
 });
 
 function calls_include(env, fragment) { return env.calls.some(([, url]) => url.includes(fragment)); }
+
+test("incomplete placement shows its own next action instead of an unrelated workflow-freeze instruction", async () => {
+    const env = await openPage({ "GET /api/recommendations/context": { status: 200, body: contextOf({
+        ready: false,
+        evidence: [ev("cluster", "available"), ev("application", "available"),
+            ev("topology", "incomplete", { detail: "Placement is not fully resolved for: payment.", nextAction: "Inspect the pending pods in Deployment topology." }),
+            ev("workflow", "missing", { nextAction: "Freeze the workflow graph." })],
+        nextActions: ["Freeze the workflow graph."],
+    }) } });
+    assert.match(text(env.region), /Inspect the pending pods/);
+    assert.ok(!text(env.region).includes("Next: Freeze"));
+});
 
 test("no candidate at all says it is not a finding that the system is resilient", async () => {
     const message = "The evidence is complete, but the engine generated no candidate change. This is not a finding that the application is resilient.";
@@ -723,6 +737,103 @@ const stepButton = (env, number) => env.element('[data-role="rec-stepper"]').chi
 const captionOf = (env, number) => text(env.element('[data-role="rec-stepper"]').children[number - 1]);
 const READY_ROUTES = (extra = {}) => ({ [DETAIL]: { status: 200, body: { ...detailOf([cand()], "rec-live"), baselineImpact: IMPACT } },
     "GET /api/recommendations/rec-live/approval": { status: 404, body: {} }, [PROOF]: { status: 200, body: { state: "NOT_RUN" } }, ...extra });
+
+test("without a workflow dropdown a candidate goes straight to Apply and tests with no approval form", async () => {
+    const pair = cand({ id: "pair", type: "COMBINATION", service: "db+cache" });
+    const other = cand({ id: "other", service: "cache", selected: false, score: 0.8,
+        yamlProposal: { status: "GENERATED", fingerprint: "a".repeat(64), sha256: "b".repeat(64) } });
+    const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
+    const env = await openPage({
+        [aggregate]: { status: 200, body: detailOf([pair, other], "pair") },
+        "GET /api/recommendations/pair/approval": { status: 404, body: {} },
+        "GET /api/recommendations/other/approval": { status: 404, body: {} },
+        "POST /api/recommendations/apply-tests": {
+            status: 202, body: { runId: "run-1", status: "RUNNING", events: [] } },
+    }, undefined, true);
+    assert.ok(env.calls.some(([m, u]) => `${m} ${u}` === aggregate));
+    assert.ok(!calls_include(env, "validation-loop/proof"), "a single-workflow proof never stands in for the whole set");
+    const choices = allNodes(env.element('[data-role="rec-candidate-list"]')).filter((n) => n.attributes?.["data-select-candidate"]);
+    assert.deepEqual(choices.map((n) => n.attributes["data-select-candidate"]), ["pair", "other"]);
+    choices[1].listeners.click();
+    await settle();
+    assert.ok(text(env.element('[data-role="rec-selected"]')).includes("cache"));
+    assert.ok(!calls_include(env, "workflow_id=checkout"));
+    assert.equal(byId(env, "btn-request-approval"), undefined);
+    assert.equal(byId(env, "research-ack-by"), undefined);
+    await byId(env, "btn-apply-and-test").listeners.click();
+    assert.equal(posts(env).length, 1);
+    assert.equal(posts(env)[0][1], "/api/recommendations/apply-tests");
+    assert.equal(posts(env)[0][2].candidateId, "other");
+    assert.ok(!calls_include(env, "/approval"));
+});
+
+test("Apply start errors stay beside the button instead of disappearing above the selection", async () => {
+    const selected = cand({ yamlProposal: { fingerprint: "a".repeat(64), sha256: "b".repeat(64) } });
+    const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
+    const env = await openPage({
+        [aggregate]: { status: 200, body: detailOf([selected], selected.id) },
+        "POST /api/recommendations/apply-tests": { status: 403, body: { detail: { message: "Cluster writes are disabled" } } },
+    }, undefined, true);
+    await byId(env, "btn-apply-and-test").listeners.click();
+    assert.match(text(env.element('[data-role="approval-state-container"]')), /Cluster writes are disabled/);
+    assert.equal(byId(env, "btn-apply-and-test").textContent, "Retry Apply");
+});
+
+test("the right sidebar selects a candidate without applying it", async () => {
+    const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
+    const env = await openPage({ [aggregate]: { status: 200, body: detailOf([
+        cand({ id: "first" }), cand({ id: "other", service: "cache", selected: false, score: 0.8 })], "first") } }, undefined, true);
+    const sidebar = env.element('[data-role="rec-results-sidebar"]');
+    const choose = allNodes(sidebar).find((n) => n.textContent === "Select candidate");
+    assert.ok(choose);
+    choose.listeners.click();
+    assert.match(text(env.element('[data-role="rec-selected"]')), /cache/);
+    assert.equal(posts(env).length, 0);
+});
+
+test("the blocked Apply control offers an explicit Reset and explains check scope as information", async () => {
+    let restored = false;
+    const previous = () => ({ runId: "previous-run", candidateId: "previous", namespace: "shop", declared: false,
+        status: "COMPLETED_WITH_GAPS", canReset: !restored, events: [], application: { status: restored ? "RESET" : "APPLIED" } });
+    const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
+    const candidate = cand({ yamlProposal: { fingerprint: "a".repeat(64), sha256: "b".repeat(64) } });
+    const other = cand({ id: "other", service: "cache", selected: false, score: 0.8, yamlProposal: candidate.yamlProposal });
+    const env = await openPage({ [aggregate]: { status: 200, body: detailOf([candidate, other], candidate.id) },
+        "GET /api/recommendations/context?namespace=shop": { status: 200, body: contextOf() },
+        "GET /api/recommendations/apply-tests/current": () => ({ status: 200, body: { run: previous() } }),
+        "GET /api/recommendations/apply-tests/previous-run": () => ({ status: 200, body: previous() }),
+        "GET /api/recommendations/previous/application": { status: 200, body: {} },
+        "POST /api/recommendations/previous/reset": () => { restored = true; return { status: 200, body: {} }; },
+    }, undefined, true);
+    assert.equal(env.element('[data-role="rec-validation-callout"]').attributes["data-state"], "information");
+    allNodes(env.element('[data-role="rec-candidate-list"]')).find((node) => node.attributes?.["data-select-candidate"] === "other").listeners.click();
+    assert.equal(byId(env, "btn-apply-and-test").disabled, true);
+    assert.equal(posts(env).length, 0, "no restoration is automatic");
+    await byId(env, "btn-reset-previous-test").listeners.click();
+    await settle();
+    assert.equal(posts(env).length, 1);
+    assert.equal(posts(env)[0][1], "/api/recommendations/previous/reset");
+    assert.equal(byId(env, "btn-apply-and-test").disabled, false);
+    assert.match(text(env.element('[data-role="rec-selected"]')), /cache/, "the selected next candidate survives Reset and is freshly evaluated");
+});
+
+test("a late approval response for the previous candidate cannot replace the current candidate's controls", async () => {
+    let release;
+    const pending = new Promise((resolve) => { release = resolve; });
+    const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
+    const env = await openPage({
+        [aggregate]: { status: 200, body: detailOf([cand({ id: "a" }), cand({ id: "b", selected: false, score: 0.8 })], "a") },
+        "GET /api/recommendations/a/approval": { status: 200, body: pending },
+        "GET /api/recommendations/b/approval": { status: 404, body: {} },
+    }, undefined, true);
+    const choice = allNodes(env.element('[data-role="rec-candidate-list"]')).find((n) => n.attributes?.["data-select-candidate"] === "b");
+    choice.listeners.click();
+    await settle();
+    release({ status: "APPROVED", recommendationId: "a", decidedBy: "old-person" });
+    await settle();
+    assert.ok(!text(env.element('[data-role="approval-state-container"]')).includes("old-person"));
+    assert.ok(byId(env, "btn-apply-and-test"));
+});
 
 test("returning to Docker with the same cluster preserves the open step and sends no writes", async () => {
     const env = await openPage(READY_ROUTES({

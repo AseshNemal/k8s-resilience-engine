@@ -206,6 +206,8 @@ def test_the_in_flight_rule_covers_applying_and_an_unfinished_rollout(monkeypatc
     from types import SimpleNamespace
 
     from app.api import validation_loop as module
+    from app.engine.recommendation_evaluation_validation.apply_test.repository import RunRepository
+    monkeypatch.setattr(RunRepository, "active", lambda _: None)
 
     def active_for(change):
         class Repo:

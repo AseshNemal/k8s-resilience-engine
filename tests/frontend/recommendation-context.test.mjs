@@ -11,6 +11,29 @@ const window = {};
 vm.runInNewContext(source, { window, URLSearchParams, Array, Object, JSON, Promise, String, Number, Error, Boolean });
 const C = window.ResilienceRecommendationContext;
 
+test("all-workflows mode needs no workflow choice and requests one aggregate evaluation", async () => {
+    const body = context({ workflows: [workflow("a"), workflow("b")], workflowId: null, workflowChoice: "choose", ready: false });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/live/detail": detailBody() });
+    env.allWorkflows = true;
+    const c = C.createController(env);
+    const v = await c.start();
+    assert.equal(v.status, "ready");
+    assert.equal(v.workflowId, "all-workflows");
+    assert.equal(c.selection().allWorkflows, true);
+    assert.match(calls.at(-1), /all_workflows=true/);
+});
+
+test("all-workflows mode keeps declared evidence in the research tier and never mixes it with frozen workflows", async () => {
+    const body = context({ workflows: [], declaredWorkflows: [{ workflowId: "declared-a", services: ["a"], applicable: true }],
+        workflowId: null, workflowChoice: "none", ready: false });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/declared/detail": detailBody() });
+    env.allWorkflows = true;
+    const v = await C.createController(env).start();
+    assert.equal(v.workflowKind, "declared");
+    assert.match(calls.at(-1), /\/declared\/detail\?.*all_workflows=true/);
+    assert.ok(!v.evidence.some((e) => e.id === "workflow"), "a missing frozen workflow is not an error for a ready research evaluation");
+});
+
 function selectionStore() {
     const data = new Map();
     return { getItem: (k) => data.get(k) || null, setItem: (k, v) => data.set(k, v), removeItem: (k) => data.delete(k) };

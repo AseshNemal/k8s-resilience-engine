@@ -9,12 +9,13 @@
 {% endblock %}
 
 {% block content %}
-<div class="rec-flow" data-role="rec-flow" data-view="simple" data-step="1" data-ready="false">
+<div class="rec-layout">
+<div class="rec-flow" data-role="rec-flow" data-view="simple" data-all-workflows="true" data-step="1" data-ready="false">
 
 <div class="page-header rec-header">
     <h2 class="page-header__title">Recommendations</h2>
     <p class="page-header__subtitle">
-        Compare fixes for a failing node, prove one, then approve it.
+        Select a fix. Apply starts the changes, checks, analysis and full report.
     </p>
     <div class="page-header__meta">
         <span class="component-owner rec-research-only">Owner: <strong>Member 4</strong></span>
@@ -47,17 +48,13 @@
 
 <section class="card rec-panel rec-context" aria-labelledby="rec-step-1" data-role="rec-context" data-step-panel="1">
     <header class="rec-panel__head">
-        <h3 class="rec-panel__title" id="rec-step-1">Choose what to protect</h3>
+        <h3 class="rec-panel__title" id="rec-step-1">Protect your application</h3>
         <p class="rec-panel__sub" data-role="rec-cluster" role="status" aria-live="polite">Looking for the connected cluster…</p>
     </header>
-    <div class="rec-inputs" role="group" aria-label="Application, workflow and failure">
+    <div class="rec-inputs" role="group" aria-label="Application and failure">
         <label class="rec-inputs__field" for="rec-namespace-select">
             <span>Application (namespace)</span>
             <select class="rec-inputs__input" id="rec-namespace-select" data-role="rec-namespace-select" disabled></select>
-        </label>
-        <label class="rec-inputs__field" for="rec-workflow-select">
-            <span>Workflow</span>
-            <select class="rec-inputs__input" id="rec-workflow-select" data-role="rec-workflow-select" disabled></select>
         </label>
         <label class="rec-inputs__field" for="rec-node-select">
             <span>Failure to protect against</span>
@@ -65,25 +62,25 @@
         </label>
     </div>
     <p class="rec-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
-    {# The comparison across all workflows (recommendation-portfolio.js): hidden until there are at least two workflows to weigh. #}
-    <section class="rec-portfolio" data-role="rec-portfolio" aria-live="polite" hidden></section>
+    <p class="ui-note">All available workflows are evaluated together. A combined fix is one proposal.</p>
     <details class="rec-evidence-details" data-role="rec-evidence-details">
         <summary data-role="rec-evidence-summary">Evidence</summary>
         <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
     </details>
     <footer class="rec-panel__foot">
         <button type="button" class="primary-button rec-inputs__action" data-role="reload-button">Check for recommendations</button>
-        <button type="button" class="secondary-button" data-role="rec-step1-next" data-go="2" hidden>Show the impact</button>
     </footer>
 </section>
 
 <section class="rec-operation card rec-panel" data-role="rec-operation" aria-label="Applied change" hidden></section>
+<section class="card rec-panel apply-test" data-role="rec-apply-test" aria-label="Apply and test run" aria-live="polite" hidden></section>
 
 <section class="card rec-panel rec-proof" data-role="rec-proof" data-step-panel="4" aria-labelledby="rec-step-4" aria-busy="false" hidden></section>
 
 <div data-role="page-region">
     {{ loading_state("Asking for the current live recommendation…") }}
 </div>
+<section class="card rec-panel test-history" data-role="rec-test-history" aria-label="Saved candidate tests"></section>
 
 {# Research view: the detail that the steps leave out, one tab at a time. Static, so it works before a recommendation exists. #}
 <section class="card rec-workbench rec-research-only" data-role="rec-workbench" aria-label="Research data">
@@ -163,6 +160,8 @@
     </div>
 </section>
 
+</div>
+<aside class="card rec-results-sidebar" data-role="rec-results-sidebar" aria-label="Candidate test results"></aside>
 </div>
 
 <template data-role="operation-template">
@@ -244,7 +243,7 @@
 
     <section class="card rec-panel rec-step--candidates" data-step-panel="3" aria-labelledby="rec-step-3">
         <header class="rec-panel__head">
-            <h3 class="rec-panel__title" id="rec-step-3">Compare fixes</h3>
+            <h3 class="rec-panel__title" id="rec-step-3">Compare candidate improvements</h3>
             <p class="rec-panel__sub">Predictions from a simulation, not measurements.</p>
         </header>
         <div data-role="rec-outcome"></div>
@@ -261,8 +260,8 @@
 
     <section class="card rec-panel rec-step--approve" data-step-panel="5" aria-labelledby="rec-step-5">
         <header class="rec-panel__head">
-            <h3 class="rec-panel__title" id="rec-step-5">Review and approve</h3>
-            <p class="rec-panel__sub">A decision on this exact change.</p>
+            <h3 class="rec-panel__title" id="rec-step-5">Apply and test</h3>
+            <p class="rec-panel__sub">Workflow checks, resource usage and risk analysis.</p>
         </header>
         {# The extension build patches this exact opening tag to add its own note, so it must stay as written (tests/test_page_contracts.py). #}
         <div class="card" id="approval-section">
@@ -273,7 +272,7 @@
         </div>
         <div class="rec-approve">
             <div class="rec-approve__selected">
-                <div class="op-subtitle">What you are approving</div>
+                <div class="op-subtitle">What you are applying</div>
                 <div class="rec-selected" data-role="rec-selected"></div>
             </div>
             <div class="rec-approve__actions">
@@ -286,11 +285,12 @@
             </div>
         </div>
         <details class="rec-more">
-            <summary>What happens after approval</summary>
+            <summary>What happens after Apply</summary>
             <ol class="rec-plan__steps">
-                <li>Approve this proposal.</li>
-                <li>A named person applies it.</li>
-                <li>The rollout is watched and the impact recalculated.</li>
+                <li>Apply changes the selected Deployments and stores their previous state.</li>
+                <li>Wait for the new pods to finish rolling out.</li>
+                <li>Run configured workflow checks, measure resource usage and recalculate risk.</li>
+                <li>Show the full report, including failures and unavailable evidence.</li>
                 <li>Reset restores the previous state.</li>
             </ol>
         </details>
@@ -344,6 +344,7 @@
 <script src="{{ url_for('static', path='/js/recommendation-context.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-portfolio.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-operation.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-apply-test.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-proof.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/recommendations.js') }}" defer></script>
 {% endblock %}

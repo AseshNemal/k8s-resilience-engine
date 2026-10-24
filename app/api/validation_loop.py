@@ -142,6 +142,9 @@ def get_application_active() -> Callable[[], bool]:
 
     def active() -> bool:
         engine = get_engine(get_settings().database_url)
+        from app.engine.recommendation_evaluation_validation.apply_test.repository import RunRepository
+        if RunRepository(engine).active():
+            return True
         with Session(engine) as db:
             last = AppliedChangeRepository(db).latest()
             if last is None:

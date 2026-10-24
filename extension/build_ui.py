@@ -65,12 +65,6 @@ CLUSTER_PANEL = """<section class="cluster-panel" data-role="cluster-panel" data
 </section>
 """
 
-# Recommendations: say plainly what approving does, before anyone is asked to approve.
-APPROVAL_NOTE = (
-    '<p class="approval-note">Approving or rejecting only records your decision. '
-    "Nothing is applied to your cluster.</p>"
-)
-
 CONNECT_MAIN = """<main class="page" id="main-content">
 <div class="connect">
     <section class="card" aria-labelledby="connect-title">
@@ -194,7 +188,9 @@ def _static_paths(html: str, key: str, title: str) -> str:
         marker = '<div class="card" id="approval-section">'
         if marker not in html:
             raise SystemExit("Could not find the approval section.")
-        html = html.replace(marker, marker + "\n        " + APPROVAL_NOTE, 1)
+        note = ('<p class="approval-note">Apply changes the selected Deployments, then starts rollout checks, workflow tests, '
+                'resource measurements and risk analysis. Reset restores the saved configuration.</p>')
+        html = html.replace(marker, marker + "\n        " + note, 1)
     return html
 
 

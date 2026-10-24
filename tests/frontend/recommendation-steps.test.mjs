@@ -291,12 +291,12 @@ test("the prediction-not-observation statement stays in the plain view", () => {
     assert.ok(pageTemplate.includes('data-role="rec-validation-note"') && !inResearchOnly("rec-validation-note"));
 });
 
-test("approval and apply stay two separate actions: no single button approves and applies", () => {
-    assert.ok(!/Approve and Implement|Approve and Apply/i.test(templateHtml));
-    assert.ok(pageTemplate.includes("What happens after approval") && pageTemplate.includes("A named person applies it."));
+test("the page explains the explicit Apply and test action", () => {
+    assert.ok(!/<button\b[^>]*>[^<]*(?:Approve and Implement|Approve and Apply)/i.test(templateHtml));
+    assert.ok(pageTemplate.includes("What happens after Apply") && pageTemplate.includes("Run configured workflow checks"));
     // The extension build adds the one-sentence statement inside the approval card; it must still say that approving applies nothing.
     const build = readFileSync(new URL("../../extension/build_ui.py", import.meta.url), "utf8");
-    assert.ok(build.includes("Approving or rejecting only records your decision.") && build.includes("Nothing is applied to your cluster."));
+    assert.ok(build.includes("Apply changes the selected Deployments") && build.includes("Reset restores the saved configuration."));
 });
 
 test("the approval gate keeps the exact opening tag the extension build patches, once, inside the fifth step", () => {

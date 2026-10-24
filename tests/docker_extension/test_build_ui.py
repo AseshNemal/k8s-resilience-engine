@@ -86,10 +86,11 @@ def test_overview_puts_the_cluster_connection_first(built):
     assert 'data-role="connect-file"' not in page
 
 
-def test_recommendations_say_what_approval_does_before_asking_for_it(built):
+def test_recommendations_say_that_apply_starts_changes_and_tests(built):
     page = html(built, "recommendations.html")
     gate = page[page.index('id="approval-section"'):]
-    assert gate.index("Nothing is applied to your cluster") < gate.index("approval-state-container")
+    assert gate.index("Apply changes the selected Deployments") < gate.index("approval-state-container")
+    assert "then starts rollout checks, workflow tests" in gate
     assert "does NOT apply the change automatically" in page      # the app's own dialog text is untouched
 
 
@@ -248,13 +249,14 @@ def test_the_failure_impact_page_still_exposes_the_box_the_suggestions_attach_to
     assert 'data-role="namespace"' in html(built, "failure-impacts.html")
 
 
-def test_the_recommendations_page_chooses_its_application_and_workflow_from_what_the_cluster_and_workflows_say(built):
-    # It no longer asks for a namespace or a workflow ID to be typed: the application, the approved frozen workflow and
-    # the failure come from dropdowns the page fills from the backend's evidence context, so namespaces.js has no box
-    # to decorate here and reads nothing for this page.
+def test_the_recommendations_page_evaluates_all_workflows_without_a_workflow_dropdown(built):
+    # The application and failure come from discovery. Workflows are evaluated together behind the scenes;
+    # namespaces.js has no typed namespace box to decorate here.
     page = html(built, "recommendations.html")
-    for role in ("rec-namespace-select", "rec-workflow-select", "rec-node-select", "rec-evidence", "rec-cluster"):
+    for role in ("rec-namespace-select", "rec-node-select", "rec-evidence", "rec-cluster"):
         assert f'data-role="{role}"' in page, role
+    assert 'data-role="rec-workflow-select"' not in page
+    assert 'data-all-workflows="true"' in page
     for gone in ('data-role="workflow-id"', 'data-role="namespace"', 'data-role="failed-node"'):
         assert gone not in page, f"{gone} is a typed technical input the page no longer asks for"
     # the controller loads before the page script that uses it

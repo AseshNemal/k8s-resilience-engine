@@ -46,6 +46,11 @@ def test_script_selectors_exist_in_the_template(page):
     markup = template_path.read_text(encoding="utf-8") + "".join(p.read_text(encoding="utf-8") for p in SHARED_PARTIALS)
     roles, ids = referenced(script_path.read_text(encoding="utf-8"))
 
+    if page == "recommendations":
+        # Null-guarded compatibility hooks for the earlier single-workflow page. The current template deliberately
+        # omits them; its all-workflows path is exercised by the frontend integration tests.
+        roles -= {"rec-workflow-select", "rec-portfolio", "rec-step1-next"}
+
     missing_roles = sorted(r for r in roles if r not in markup)
     missing_ids = sorted(i for i in ids if i not in markup)
 
@@ -63,6 +68,13 @@ def recommendations_page() -> str:
     response = client.get("/components/recommendations")
     assert response.status_code == 200
     return response.text
+
+
+def test_recommendations_has_no_workflow_choice_or_portfolio_handoff():
+    markup = recommendations_page()
+    assert 'data-all-workflows="true"' in markup
+    assert 'data-role="rec-workflow-select"' not in markup
+    assert 'data-role="rec-portfolio"' not in markup
 
 
 @pytest.mark.parametrize("marker", [

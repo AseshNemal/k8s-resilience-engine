@@ -61,6 +61,19 @@ const report = (...candidates) => ({
 
 const options = () => ({ document: makeDocument() });
 
+test("one selection button chooses a whole combination and blocked candidates cannot be selected", () => {
+    const doc = makeDocument();
+    const root = doc.container();
+    const picked = [];
+    view.renderCandidateCards(root, report(candidate({ id: "pair", type: "COMBINATION", service: "db+cache" }), candidate({ id: "blocked", feasible: false })),
+        { baselineBlastRadius: 100 }, { document: doc, canSelect: (id) => id === "pair", onSelect: (id) => picked.push(id) });
+    const buttons = find(root, (n) => n.attributes["data-select-candidate"]);
+    assert.equal(buttons.length, 1);
+    buttons[0].listeners.click();
+    assert.deepEqual(picked, ["pair"]);
+    assert.equal(find(root, (n) => n.tag === "select").length, 0);
+});
+
 // ---- ranking --------------------------------------------------------------------------------------------------------
 
 test("feasible candidates are ranked by score, infeasible ones are listed after and unranked", () => {

@@ -53,11 +53,12 @@
         return query ? `${CONTEXT_URL}?${query}` : CONTEXT_URL;
     }
 
-    function detailUrl(workflowId, namespace, failedNode, declared) {
+    function detailUrl(workflowId, namespace, failedNode, declared, allWorkflows) {
         const params = new URLSearchParams();
         params.set("workflow_id", workflowId);
         params.set("namespace", namespace);
         if (failedNode) params.set("failed_node", failedNode);
+        if (allWorkflows) params.set("all_workflows", "true");
         return `${declared === true ? DECLARED_DETAIL_URL : DETAIL_URL}?${params.toString()}`;
     }
 
@@ -167,7 +168,10 @@
 
         function view() {
             const ctx = s.ctx;
-            const evidence = ctx ? ctx.evidence.map((e) => (e.id === "failureImpact" && (s.detail || s.error) ? failureImpactItem(s.detail, s.error) : e)) : [];
+            const evidence = ctx ? ctx.evidence
+                .filter((e) => !(env.allWorkflows && s.status === "ready" &&
+                    (s.workflowKind === "declared" ? e.id === "workflow" : e.id === "declaredWorkflow")))
+                .map((e) => (e.id === "failureImpact" && (s.detail || s.error) ? failureImpactItem(s.detail, s.error) : e)) : [];
             return {
                 status: s.status,
                 cluster: { identity: s.identity || "", fingerprint: s.fingerprint },
@@ -176,6 +180,7 @@
                 workflows: ctx ? [...ctx.workflows.map(workflowOption), ...ctx.declaredWorkflows.map(declaredOption)] : [],
                 workflowId: s.workflowId, workflowChoice: ctx ? ctx.workflowChoice : "",
                 workflowKind: s.workflowKind,
+                allWorkflows: env.allWorkflows === true,
                 workflowValue: s.workflowKind === "declared" ? DECLARED_PREFIX + s.workflowId : s.workflowId,
                 failedNodes: nodesOf(s.detail), failedNode: s.failedNode,
                 evidence,
@@ -205,7 +210,7 @@
             s.detail = null; s.error = null;
             publish();
             try {
-                const detail = await env.fetchJson(detailUrl(s.workflowId, s.namespace, s.failedNode, s.workflowKind === "declared"));
+                const detail = await env.fetchJson(detailUrl(s.workflowId, s.namespace, s.failedNode, s.workflowKind === "declared", env.allWorkflows));
                 if (!current(generation)) return;               // an older request: never shown
                 s.detail = detail;
                 s.status = "ready";
@@ -245,7 +250,7 @@
             let ctx;
             try {
                 // A declared choice is not a frozen workflow, so it is never sent to the context as one.
-                ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, s.workflowKind === "declared" ? "" : s.workflowId)));
+                ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, env.allWorkflows || s.workflowKind === "declared" ? "" : s.workflowId)));
             } catch (error) {
                 if (!current(generation)) return view();
                 s.ctx = null; s.error = error; s.status = "blocked";
@@ -264,6 +269,20 @@
             s.fingerprint = ctx.cluster.fingerprint;
             s.ctx = ctx;
             s.namespace = ctx.namespace || "";
+            if (env.allWorkflows) {
+                // Prefer observed frozen evidence; declarations stay in their separately named research tier.
+                const frozen = ctx.workflows.some((w) => w.applicable);
+                const declared = !frozen && ctx.declaredWorkflows.some((w) => w.applicable);
+                s.workflowId = frozen || declared ? "all-workflows" : "";
+                s.workflowKind = declared ? "declared" : "frozen";
+                if (!s.namespace || !s.workflowId) {
+                    s.status = ctx.namespaceChoice === "ambiguous" ? "needs-input" : "blocked";
+                    publish();
+                    return view();
+                }
+                await loadDetail(generation);
+                return view();
+            }
             if (s.workflowKind === "declared") {
                 // Kept only while that declared workflow still exists and applies here; otherwise the choice is dropped, not guessed.
                 const kept = ctx.declaredWorkflows.some((d) => d.workflowId === s.workflowId && d.applicable);
@@ -301,7 +320,7 @@
             // a context name can stay the same while its cluster is replaced.
             if (identity === s.identity && s.ctx && s.fingerprint) {
                 try {
-                    const ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, s.workflowKind === "declared" ? "" : s.workflowId)));
+                    const ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, env.allWorkflows || s.workflowKind === "declared" ? "" : s.workflowId)));
                     if (!current(generation)) return false;
                     changed = ctx.cluster.fingerprint !== s.fingerprint;
                     if (ctx.cluster.fingerprint === s.fingerprint && s.status === "ready") return false;
@@ -331,7 +350,8 @@
             clusterChanged() { reset(); return start(); },
             connectionChanged,
             // The inputs an approval request must send, because the server recomputes the recommendation from them.
-            selection() { return { workflowId: s.workflowId, namespace: s.namespace, failedNode: s.failedNode, workflowKind: s.workflowKind }; },
+            selection() { return { workflowId: s.workflowId, namespace: s.namespace, failedNode: s.failedNode, workflowKind: s.workflowKind,
+                                  ...(env.allWorkflows ? { allWorkflows: true } : {}) }; },
             view,
         };
     }

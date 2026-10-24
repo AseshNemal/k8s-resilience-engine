@@ -32,6 +32,7 @@ import httpx
 from app.integrations.kubernetes import rest
 from app.integrations.kubernetes.client import (
     ApiFailedError,
+    ClusterAccessError,
     AuthFailedError,
     ConnectionFailedError,
     ForbiddenError,
@@ -263,6 +264,49 @@ class KubernetesTestClusterGateway:
         return self._source.list_objects(resource, path)
 
     # -- reads -------------------------------------------------------------------------------------------------------
+
+    def read_resource_usage(self, namespace: str) -> dict:
+        """Measured usage, never resource requests or allocatable capacity. Missing metrics stay missing."""
+        from datetime import datetime, timezone
+        result = {"capturedAt": datetime.now(timezone.utc).isoformat(), "nodes": None, "pods": None, "errors": []}
+        for kind, path in (("nodes", "/apis/metrics.k8s.io/v1beta1/nodes"),
+                           ("pods", f"/apis/metrics.k8s.io/v1beta1/namespaces/{quote(namespace, safe='')}/pods")):
+            try:
+                body = self._get(path, kind + " metrics")
+                result[kind] = [{"name": row.get("metadata", {}).get("name"), "timestamp": row.get("timestamp"),
+                    "window": row.get("window"), "usage": row.get("usage"),
+                    "containers": [{"name": c.get("name"), "usage": c.get("usage")} for c in row.get("containers", [])]}
+                    for row in body["items"]]
+            except (ClusterAccessError, KeyError, TypeError):
+                result["errors"].append({"code": "RESOURCE_METRICS_UNAVAILABLE", "resource": kind,
+                    "message": "Measured CPU/memory usage could not be read from metrics.k8s.io. Requests are not usage."})
+        result["source"] = "metrics.k8s.io"
+        if result["nodes"] is None or result["pods"] is None:
+            nodes, pods = [], []
+            try:
+                for name in self.identity().node_names:
+                    summary = self._get(f"/api/v1/nodes/{quote(name, safe='')}/proxy/stats/summary", "node resource statistics")
+                    def usage(entry):
+                        cpu, memory = entry.get("cpu") or {}, entry.get("memory") or {}
+                        return {"cpu": None if cpu.get("usageNanoCores") is None else str(cpu["usageNanoCores"]) + "n",
+                                "memory": memory.get("workingSetBytes")}
+                    node = summary.get("node") or {}
+                    nodes.append({"name": name, "timestamp": (node.get("cpu") or {}).get("time"), "usage": usage(node)})
+                    for pod in summary.get("pods") or []:
+                        ref = pod.get("podRef") or {}
+                        if ref.get("namespace") == namespace:
+                            pods.append({"name": ref.get("name"), "timestamp": (pod.get("cpu") or {}).get("time"),
+                                "containers": [{"name": c.get("name"), "usage": usage(c)} for c in pod.get("containers", [])]})
+                if nodes:
+                    result.update(nodes=nodes, pods=pods, source="kubelet-summary")
+            except (ClusterAccessError, KeyError, TypeError):
+                result["errors"].append({"code": "KUBELET_METRICS_UNAVAILABLE", "message": "The kubelet resource statistics could not be read either."})
+        result["available"] = bool(result["nodes"]) and bool(result["pods"]) and all(
+            (n.get("usage") or {}).get("cpu") is not None and (n.get("usage") or {}).get("memory") is not None
+            for n in result["nodes"]) and all(p.get("containers") and all(
+                (c.get("usage") or {}).get("cpu") is not None and (c.get("usage") or {}).get("memory") is not None
+                for c in p["containers"]) for p in result["pods"])
+        return result
 
     def identity(self) -> ObservedIdentity:
         connection = rest.load_connection([self._path])
