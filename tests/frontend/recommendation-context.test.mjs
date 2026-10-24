@@ -10,6 +10,68 @@ const source = readFileSync(new URL("../../app/static/js/recommendation-context.
 const window = {};
 vm.runInNewContext(source, { window, URLSearchParams, Array, Object, JSON, Promise, String, Number, Error, Boolean });
 const C = window.ResilienceRecommendationContext;
+
+function selectionStore() {
+    const data = new Map();
+    return { getItem: (k) => data.get(k) || null, setItem: (k, v) => data.set(k, v), removeItem: (k) => data.delete(k) };
+}
+
+test("routine cluster notifications do not publish or reload a ready recommendation", async () => {
+    const { env, calls, updates } = makeEnv({ "/api/recommendations/context": context(), "/api/recommendations/live/detail": detailBody() });
+    const c = C.createController(env);
+    await c.start();
+    const count = updates.length;
+    const reads = calls.filter((u) => u.includes("/detail")).length;
+    assert.equal(await c.connectionChanged(), false);
+    assert.equal(await c.connectionChanged(), false);
+    assert.equal(updates.length, count, "no loading render clears the page");
+    assert.equal(calls.filter((u) => u.includes("/detail")).length, reads);
+});
+
+test("a reload restores choices but fetches fresh evidence, and a replaced cluster drops them", async () => {
+    const storage = selectionStore();
+    const routes = { "/api/recommendations/context": context(), "/api/recommendations/live/detail": detailBody() };
+    const first = makeEnv(routes);
+    first.env.storage = storage;
+    const c = C.createController(first.env);
+    await c.start();
+    await c.selectFailedNode("w2");
+    const second = makeEnv(routes);
+    second.env.storage = storage;
+    const restored = await C.createController(second.env).start();
+    assert.equal(restored.failedNode, "w2");
+    assert.match(second.calls.at(-1), /failed_node=w2/);
+    assert.equal(second.calls.length, 2, "selection storage never replaces live reads");
+
+    const replaced = makeEnv({ ...routes, "/api/recommendations/context": context({ cluster: { state: "available", fingerprint: "cluster-B" } }) });
+    replaced.env.storage = storage;
+    const newCluster = await C.createController(replaced.env).start();
+    assert.equal(newCluster.failedNode, "");
+    assert.ok(replaced.calls.filter((u) => u.includes("/detail")).every((u) => !u.includes("failed_node=w2")));
+});
+
+test("same context name with a new cluster fingerprint reloads without old choices", async () => {
+    let body = context();
+    const { env, calls } = makeEnv({ "/api/recommendations/context": () => body, "/api/recommendations/live/detail": detailBody() });
+    const c = C.createController(env);
+    await c.start();
+    await c.selectFailedNode("w2");
+    body = context({ cluster: { state: "available", fingerprint: "cluster-B" } });
+    assert.equal(await c.connectionChanged(), true);
+    assert.equal(c.view().failedNode, "");
+    assert.ok(!calls.at(-1).includes("failed_node=w2"));
+});
+
+test("bad or blocked selection storage does not prevent live loading", async () => {
+    for (const storage of [
+        { getItem: () => "{broken", setItem() {} },
+        { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } },
+    ]) {
+        const { env } = makeEnv({ "/api/recommendations/context": context(), "/api/recommendations/live/detail": detailBody() });
+        env.storage = storage;
+        assert.equal((await C.createController(env).start()).status, "ready");
+    }
+});
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const workflow = (id, extra = {}) => ({ workflowId: id, freezeId: "f1", frozenAt: "2026-10-20T10:00:00Z", services: ["a", "b"], applicable: true, reason: null, ...extra });
