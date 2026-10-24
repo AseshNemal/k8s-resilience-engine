@@ -48,6 +48,8 @@ def test_the_selected_candidate_becomes_a_minimal_deployment_patch():
     assert set(doc["spec"]) == {"template"} and set(doc["spec"]["template"]) == {"spec"}
     assert doc["spec"]["template"]["spec"] == {"topologySpreadConstraints": [{
         "maxSkew": 1, "topologyKey": HOSTNAME, "whenUnsatisfiable": "DoNotSchedule",
+        "nodeTaintsPolicy": "Honor",
+        "matchLabelKeys": ["pod-template-hash"],
         "labelSelector": {"matchLabels": {"app": "reviews"}}}]}
 
 

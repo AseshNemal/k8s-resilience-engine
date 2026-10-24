@@ -95,42 +95,109 @@ test("a service name from the API stays text", () => {
 // ---- the stepper -----------------------------------------------------------------------------------------------------------
 
 const states = (facts) => plain(view.computeSteps(facts)).map((step) => step.state);
+const READY = { chosen: true, status: "ready", selected: true, applied: false };
 
 test("nothing chosen: the first step is current and the rest wait", () => {
-    assert.deepEqual(states({ chosen: false, status: "loading", selected: false, applied: false }), ["current", "todo", "todo", "todo"]);
+    assert.deepEqual(states({ chosen: false, status: "loading", selected: false, applied: false }), ["current", "waiting", "waiting", "waiting", "waiting"]);
 });
 
 test("while the recommendation is being asked for, the second step is current", () => {
-    assert.deepEqual(states({ chosen: true, status: "loading-recommendation" }), ["done", "current", "todo", "todo"]);
+    assert.deepEqual(states({ chosen: true, status: "loading-recommendation" }), ["done", "current", "waiting", "waiting", "waiting"]);
 });
 
 test("missing evidence blocks the second step and nothing after it is marked done", () => {
-    assert.deepEqual(states({ chosen: true, status: "missing-evidence", selected: true, applied: true }), ["done", "blocked", "todo", "todo"]);
+    assert.deepEqual(states({ chosen: true, status: "missing-evidence", selected: true, applied: true }), ["done", "blocked", "waiting", "waiting", "waiting"]);
 });
 
 test("a recommendation with no selected candidate blocks the third step", () => {
-    assert.deepEqual(states({ chosen: true, status: "ready", selected: false }), ["done", "done", "blocked", "todo"]);
+    assert.deepEqual(states({ chosen: true, status: "ready", selected: false }), ["done", "done", "blocked", "waiting", "waiting"]);
 });
 
-test("a selected candidate leaves the last step as the one to do, and an applied change completes it", () => {
-    assert.deepEqual(states({ chosen: true, status: "ready", selected: true, applied: false }), ["done", "done", "done", "current"]);
-    assert.deepEqual(states({ chosen: true, status: "ready", selected: true, applied: true }), ["done", "done", "done", "done"]);
+test("a selected candidate makes proving the step to do, and the approval waits for it", () => {
+    assert.deepEqual(states({ ...READY, proof: "none" }), ["done", "done", "done", "current", "waiting"]);
 });
 
-test("the stepper names the state in words as well as marks, and marks only the current step for assistive technology", () => {
+test("the approval is never done or the step to do while step 4 is unproven, even if a change was applied earlier", () => {
+    assert.deepEqual(states({ ...READY, applied: true }), ["done", "done", "done", "current", "waiting"]);
+    assert.deepEqual(states({ ...READY, applied: true, proof: "failed" }), ["done", "done", "done", "blocked", "waiting"]);
+});
+
+test("a proof the server says covers this change completes step 4 and makes the approval the one to do; applying completes it", () => {
+    assert.deepEqual(states({ ...READY, proof: "passed" }), ["done", "done", "done", "done", "current"]);
+    assert.deepEqual(states({ ...READY, proof: "passed", proven: true }), ["done", "done", "done", "done", "current"]);
+    assert.deepEqual(states({ ...READY, proof: "passed", applied: true }), ["done", "done", "done", "done", "done"]);
+});
+
+test("a proof of a different change does not count for this one, and the server's answer wins over the run's", () => {
+    assert.deepEqual(states({ ...READY, proof: "passed", proven: false }), ["done", "done", "done", "current", "waiting"]);
+    assert.deepEqual(states({ ...READY, proof: "none", proven: true }), ["done", "done", "done", "done", "current"]);
+});
+
+test("while a proof is running it is the current step and the approval waits; a failed or attention-needing proof is flagged", () => {
+    assert.deepEqual(states({ ...READY, proof: "running" }), ["done", "done", "done", "current", "waiting"]);
+    assert.deepEqual(states({ ...READY, proof: "failed" }), ["done", "done", "done", "blocked", "waiting"]);
+    assert.deepEqual(states({ ...READY, proof: "attention" }), ["done", "done", "done", "blocked", "waiting"]);
+});
+
+test("a decision recorded before the change was proven is an earlier approval: kept and shown, but not done and not validation", () => {
+    for (const approval of ["PENDING_APPROVAL", "APPROVED", "REJECTED"]) {
+        assert.deepEqual(states({ ...READY, approval }), ["done", "done", "done", "current", "recorded"], approval);
+    }
+    assert.deepEqual(states({ ...READY, approval: "APPROVED", applied: true }), ["done", "done", "done", "current", "recorded"], "applied is not validated");
+    assert.deepEqual(states({ ...READY, approval: "APPROVED", proof: "passed" }), ["done", "done", "done", "done", "current"], "once proven it is the step to do again");
+    assert.deepEqual(states({ ...READY, approval: "none" }), ["done", "done", "done", "current", "waiting"]);
+});
+
+test("a proof is never shown before there is a candidate to prove", () => {
+    assert.deepEqual(states({ chosen: true, status: "ready", selected: false, proof: "passed" }), ["done", "done", "blocked", "waiting", "waiting"]);
+});
+
+test("every step says whether it can be opened: the approval can be, before it is proven, once there is a candidate", () => {
+    const open = (facts) => plain(view.computeSteps(facts)).map((step) => step.available);
+    assert.deepEqual(open({ chosen: false }), [true, false, false, false, false]);
+    assert.deepEqual(open({ chosen: true, status: "loading" }), [true, true, false, false, false]);
+    assert.deepEqual(open({ chosen: true, status: "missing-evidence" }), [true, true, false, false, false]);
+    assert.deepEqual(open({ ...READY, selected: false }), [true, true, true, false, false]);
+    assert.deepEqual(open({ ...READY, proof: "none" }), [true, true, true, true, true]);
+});
+
+test("each step says in words where it stands", () => {
+    const captions = (facts) => plain(view.computeSteps(facts)).map((step) => step.caption);
+    assert.deepEqual(captions({ ...READY }), ["Done", "Done", "Done", "Not run yet", "After step 4"]);
+    assert.deepEqual(captions({ ...READY, proof: "running" }), ["Done", "Done", "Done", "Running", "After step 4"]);
+    assert.deepEqual(captions({ ...READY, proof: "passed" }), ["Done", "Done", "Done", "Done", "Ready"]);
+    assert.deepEqual(captions({ ...READY, approval: "APPROVED" }), ["Done", "Done", "Done", "Not run yet", "Earlier approval"]);
+    assert.deepEqual(captions({ ...READY, proof: "passed", approval: "APPROVED" }), ["Done", "Done", "Done", "Done", "Apply next"]);
+    assert.equal(captions({ ...READY, proof: "failed" })[3], "Needs attention");
+});
+
+test("the stepper is five buttons that name the state in words and marks, say which step is on screen, and open only what can be opened", () => {
     const o = options(); const c = o.document.container();
+    const opened = [];
 
-    view.renderStepper(c, view.computeSteps({ chosen: true, status: "ready", selected: false }), o);
+    view.renderStepper(c, view.computeSteps({ chosen: true, status: "ready", selected: false }), { ...o, viewing: 2, onSelect: (n) => opened.push(n) });
 
     const items = find(c, (n) => n.tag === "li");
-    assert.equal(items.length, 4);
-    assert.deepEqual(items.map((n) => n.attributes["data-state"]), ["done", "done", "blocked", "todo"]);
-    assert.equal(items.filter((n) => n.attributes["aria-current"] === "step").length, 0, "no step is current while one needs attention");
-    assert.ok(text(items[2]).includes("Needs attention") && text(items[0]).includes("Done") && text(items[3]).includes("Not yet"));
-    assert.ok(text(items[0]).includes("✓") && text(items[2]).includes("!") && text(items[3]).includes("4"));
+    assert.equal(items.length, 5);
+    assert.deepEqual(items.map((n) => n.attributes["data-state"]), ["done", "done", "blocked", "waiting", "waiting"]);
+    const buttons = find(c, (n) => n.tag === "button");
+    assert.equal(buttons.length, 5);
+    assert.deepEqual(buttons.filter((n) => n.attributes["aria-current"] === "step").map((n) => n.attributes["data-step"]), ["2"], "only the step on screen is current for assistive technology");
+    assert.deepEqual(buttons.map((n) => !!n.disabled), [false, false, false, true, true]);
+    assert.ok(text(items[2]).includes("Needs attention") && text(items[0]).includes("Done") && text(items[3]).includes("Waiting"));
+    assert.ok(text(items[0]).includes("✓") && text(items[2]).includes("!") && text(items[3]).includes("4") && text(items[4]).includes("5"));
+    buttons[2].listeners.click();
+    assert.deepEqual(opened, [3]);
+});
 
-    view.renderStepper(c, view.computeSteps({ chosen: false }), o);
-    assert.equal(find(c, (n) => n.attributes["aria-current"] === "step").length, 1);
+test("an earlier approval has its own mark and word, so it cannot be mistaken for a finished step", () => {
+    const o = options(); const c = o.document.container();
+
+    view.renderStepper(c, view.computeSteps({ ...READY, approval: "APPROVED" }), { ...o, viewing: 5 });
+
+    const last = find(c, (n) => n.tag === "li")[4];
+    assert.equal(last.attributes["data-state"], "recorded");
+    assert.ok(text(last).includes("◷") && text(last).includes("Earlier approval") && !text(last).includes("✓"));
 });
 
 test("the evidence summary counts what is available and asks for attention when something is missing", () => {
@@ -142,22 +209,57 @@ test("the evidence summary counts what is available and asks for attention when 
 
 // ---- candidate cards in the plain view ---------------------------------------------------------------------------------
 
-test("a candidate card says what it changes and why it cannot be put forward; confidence and score are research-only", () => {
+test("a candidate card shows strategy, target, feasibility, the predicted improvement and the cost up front, and keeps the longer text behind Details", () => {
     const o = options(); const c = o.document.container();
     const feasible = { id: "a", type: "TOPOLOGY_SPREAD", service: "payment", feasible: true, predictedBlastRadius: 0, riskReduction: 100, resourceCost: "LOW", confidence: 0.9, score: 0.8 };
-    const blocked = { ...feasible, id: "b", type: "REPLICA_INCREASE", feasible: false };
+    const blocked = { ...feasible, id: "b", type: "REPLICA_INCREASE", feasible: false, predictedBlastRadius: 100, riskReduction: 0 };
 
     view.renderCandidateCards(c, { recommendations: [feasible, blocked], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, {
         ...o, descriptions: { a: "Add a spread constraint." }, reasons: { b: "Not enough worker nodes." },
     });
 
-    assert.ok(text(c).includes("Add a spread constraint.") && text(c).includes("Not enough worker nodes."));
+    const cardsDrawn = find(c, (n) => /\bcandidate-card\b/.test(n.className));
+    assert.equal(cardsDrawn.length, 2);
+    const [first, second] = cardsDrawn.map((n) => text(n));
+    for (const expected of ["Topology spread", "on payment", "Recommended", "Feasible", "−100 pp", "Low cost"]) assert.ok(first.includes(expected), expected);
+    for (const expected of ["Replica increase", "Not feasible", "No change"]) assert.ok(second.includes(expected), expected);
+    const details = find(c, (n) => n.tag === "details");
+    assert.equal(details.length, 2, "each card has one disclosure");
+    assert.ok(text(details[0]).includes("Add a spread constraint.") && text(details[1]).includes("Not enough worker nodes."));
+    assert.ok(text(details[1]).startsWith("Why not feasible"), "the disclosure of a blocked card says what it holds");
     const research = find(c, (n) => /rec-research-only/.test(n.className));
-    assert.equal(research.length, 4, "confidence and score on each of the two cards");
-    assert.ok(research.every((n) => /Confidence|Score/.test(text(n))));
-    const costStats = find(c, (n) => n.children.length === 2 && text(n).startsWith("Resource Cost"));
-    assert.equal(costStats.length, 2, "the cost is on each card");
-    assert.ok(costStats.every((n) => !/rec-research-only/.test(n.className)), "the cost stays in the plain view");
+    assert.equal(research.length, 5, "rank, confidence and score on the ranked card; confidence and score on the other");
+    assert.ok(research.every((n) => /Rank|Confidence|Score/.test(text(n))));
+});
+
+test("the lead card carries the problem, the validation status and nothing more is repeated elsewhere", () => {
+    const o = options(); const c = o.document.container();
+    const one = { id: "a", type: "TOPOLOGY_SPREAD", service: "payment", feasible: true, predictedBlastRadius: 0, riskReduction: 100, resourceCost: "LOW", confidence: 0.9, score: 0.8 };
+    const two = { ...one, id: "b", type: "REPLICA_INCREASE" };
+
+    view.renderCandidateCards(c, { recommendations: [one, two], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 },
+        { ...o, hero: { problem: "If w1 fails, the workflow does not survive.", validationText: "Not proven on a test cluster." } });
+
+    const lead = find(c, (n) => /candidate-card--lead/.test(n.className));
+    assert.equal(lead.length, 1, "only the selected card leads");
+    assert.ok(text(lead[0]).includes("If w1 fails, the workflow does not survive.") && text(lead[0]).includes("Not proven on a test cluster."));
+    assert.equal(find(c, (n) => /candidate-card__validation-text/.test(n.className)).length, 1, "the status can be updated when the server answers");
+    const others = find(c, (n) => /\bcandidate-card\b/.test(n.className) && !/lead/.test(n.className));
+    assert.ok(!text(others[0]).includes("Problem") && !text(others[0]).includes("Validation"));
+});
+
+test("the gauge draws now and predicted, prints both figures, and does not colour a prediction of no gain as a gain", () => {
+    const o = options();
+    const gain = view.gauge(o.document, 100, 0);
+    const none = view.gauge(o.document, 100, 100);
+    const rows = (g) => find(g, (n) => /gauge__fill/.test(n.className)).map((n) => n.className);
+
+    assert.ok(text(gain).includes("Now") && text(gain).includes("Predicted") && text(gain).includes("100%") && text(gain).includes("0%"));
+    assert.deepEqual(rows(gain), ["gauge__fill gauge__fill--now", "gauge__fill gauge__fill--after"]);
+    assert.deepEqual(rows(none), ["gauge__fill gauge__fill--now", "gauge__fill gauge__fill--now"], "no gain is not drawn green");
+    assert.equal(find(gain, (n) => /gauge__fill--after/.test(n.className))[0].style.width, "0%");
+    assert.match(gain.attributes["aria-label"], /100% now, 0% predicted/);
+    assert.match(view.gauge(o.document, null, 30).attributes["aria-label"], /baseline not supplied, 30% predicted/, "a missing baseline is said, not drawn");
 });
 
 // ---- the template: every block belongs to a view ------------------------------------------------------------------------
@@ -168,16 +270,17 @@ const inResearchOnly = (role) => researchOnly.some((block) => block.includes(`da
 
 test("every block drawn for a recommendation is a step or is marked research-only, so none is shown by accident in either view", () => {
     const sections = [...pageTemplate.matchAll(/<section class="([^"]*)"/g)].map((m) => m[1]);
-    assert.ok(sections.length >= 4);
-    for (const classes of sections) assert.ok(/\brec-step\b|\brec-research-only\b/.test(classes), classes);
+    assert.equal(sections.length, 3, "the impact, the comparison and the approval; the proof panel is its own, outside the re-rendered region");
+    for (const classes of sections) assert.ok(/\brec-panel\b|\brec-research-only\b/.test(classes), classes);
+    for (const marker of [...pageTemplate.matchAll(/data-step-panel="(\d)"/g)].map((m) => m[1])) assert.ok(["2", "3", "4", "5"].includes(marker), marker);
 });
 
 test("the plain view keeps the steps' own parts and the research view alone keeps the ranking, the reasons and the raw data", () => {
-    for (const role of ["rec-impact", "rec-candidate-list", "rec-outcome", "rec-proposal-summary", "approval-state-container", "approval-actions", "rec-placement-current"]) {
+    for (const role of ["rec-impact", "rec-candidate-list", "rec-outcome", "rec-proposal-summary", "approval-state-container", "approval-actions"]) {
         assert.ok(pageTemplate.includes(`data-role="${role}"`), role);
         assert.ok(!inResearchOnly(role), `${role} must be visible in the plain view`);
     }
-    for (const role of ["rec-detail-list", "rec-candidate-table-body", "rec-validation", "rec-yaml", "rec-failures"]) {
+    for (const role of ["rec-detail-list", "rec-candidate-table-body", "rec-validation", "rec-yaml", "rec-failures", "rec-placement-current", "rec-raw-json"]) {
         assert.ok(inResearchOnly(role), `${role} belongs to the research view`);
     }
 });
@@ -188,16 +291,19 @@ test("the prediction-not-observation statement stays in the plain view", () => {
     assert.ok(pageTemplate.includes('data-role="rec-validation-note"') && !inResearchOnly("rec-validation-note"));
 });
 
-test("approval and apply stay two separate actions: no single button approves and applies", () => {
-    assert.ok(!/Approve and Implement|Approve and Apply/i.test(templateHtml));
-    assert.ok(pageTemplate.includes("Approving changes nothing on the cluster."));
+test("the page explains the explicit Apply and test action", () => {
+    assert.ok(!/<button\b[^>]*>[^<]*(?:Approve and Implement|Approve and Apply)/i.test(templateHtml));
+    assert.ok(pageTemplate.includes("What happens after Apply") && pageTemplate.includes("Run configured workflow checks"));
+    // The extension build adds the one-sentence statement inside the approval card; it must still say that approving applies nothing.
+    const build = readFileSync(new URL("../../extension/build_ui.py", import.meta.url), "utf8");
+    assert.ok(build.includes("Apply changes the selected Deployments") && build.includes("Reset restores the saved configuration."));
 });
 
-test("the approval gate keeps the exact opening tag the extension build patches, once, inside the fourth step", () => {
+test("the approval gate keeps the exact opening tag the extension build patches, once, inside the fifth step", () => {
     const marker = '<div class="card" id="approval-section">';
     assert.equal(templateHtml.split(marker).length - 1, 1);
-    const step = pageTemplate.slice(pageTemplate.indexOf('aria-labelledby="rec-step-4"'));
-    assert.ok(step.indexOf(marker) > step.indexOf('id="rec-step-4"'), "the marker sits under the step's heading");
+    const step = pageTemplate.slice(pageTemplate.indexOf('aria-labelledby="rec-step-5"'));
+    assert.ok(step.indexOf(marker) > step.indexOf('id="rec-step-5"'), "the marker sits under the step's heading");
 });
 
 // ---- the services table, the selected improvement and the card marks ------------------------------------------------------------
@@ -250,8 +356,8 @@ test("the selected improvement says what it changes and what is predicted, as a 
     view.renderSelectedImprovement(c, chosen, o);
 
     const shown = text(c);
-    assert.ok(shown.includes("Topology Spread for payment") && shown.includes("topologySpreadConstraint"));
-    assert.ok(shown.includes("100%") && shown.includes("0%") && shown.includes("Low"));
+    assert.ok(shown.includes("Topology spread") && shown.includes("on payment") && shown.includes("topologySpreadConstraint"));
+    assert.ok(shown.includes("100%") && shown.includes("0%") && shown.includes("Low cost"));
     assert.ok(shown.includes("Predicted, not observed."));
     assert.equal(find(c, (n) => n.attributes["data-kind"] === "topology_spread").length, 1);
 });
@@ -262,22 +368,22 @@ test("with nothing selected the approval step says so instead of showing an impr
     view.renderSelectedImprovement(c, null, o);
 
     assert.ok(text(c).includes("Nothing to approve"));
-    assert.equal(find(c, (n) => /rec-selected__outcome/.test(n.className)).length, 0);
+    assert.equal(find(c, (n) => /\bgauge\b/.test(n.className)).length, 0);
 });
 
-test("only the selected candidate carries the check, and every card carries an icon for its strategy", () => {
+test("only the selected candidate is marked Recommended, and every card carries an icon for its strategy", () => {
     const o = options(); const c = o.document.container();
     const one = { id: "a", type: "TOPOLOGY_SPREAD", service: "payment", feasible: true, predictedBlastRadius: 0, riskReduction: 100, resourceCost: "LOW", confidence: 0.9, score: 0.8 };
     const two = { ...one, id: "b", type: "POD_ANTI_AFFINITY", feasible: false };
 
     view.renderCandidateCards(c, { recommendations: [one, two], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, o);
 
-    assert.equal(find(c, (n) => /candidate-card__check/.test(n.className)).length, 1);
+    assert.equal(find(c, (n) => n.textContent === "Recommended").length, 1);
     assert.deepEqual(find(c, (n) => /candidate-card__icon/.test(n.className)).map((n) => n.attributes["data-kind"]).sort(), ["pod_anti_affinity", "topology_spread"]);
 });
 
 test("step 1 holds the one action, and the step 4 parts and the proposal's facts are all in the plain view", () => {
-    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-operation"'));
+    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-proof"'));
     assert.ok(step1.includes('data-role="reload-button"'), "the reload action lives in step 1");
     assert.ok(!templateHtml.slice(0, templateHtml.indexOf('<ol class="rec-stepper"')).includes('data-role="reload-button"'), "and no longer in the header");
     for (const role of ["rec-selected", "approval-state-container", "approval-actions", "rec-proposal-summary", "rec-validation-note"]) {
@@ -326,7 +432,7 @@ test("an option that cannot be used is not something to choose, and nothing is h
 });
 
 test("the hint line and the highlight exist in step 1 and the highlight is not carried by colour alone", () => {
-    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-operation"'));
+    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-proof"'));
     assert.ok(step1.includes('data-role="rec-hint"') && step1.includes('id="rec-next-hint"') && step1.includes('role="status"'));
     const css = readFileSync(new URL("../../app/static/css/pages/recommendations.css", import.meta.url), "utf8");
     assert.match(css, /\.rec-inputs__input\[data-attention="true"\]\s*\{[^}]*border-color[^}]*box-shadow/, "a border and a ring");
@@ -334,28 +440,158 @@ test("the hint line and the highlight exist in step 1 and the highlight is not c
 
 // ---- less text -----------------------------------------------------------------------------------------------------------------
 
-test("a card's long description and reason keep their full text as a tooltip, since the plain view clamps them", () => {
+test("a card's long description and reason are behind its disclosure in full, not clamped or truncated", () => {
     const o = options(); const c = o.document.container();
     const long = "Add one replica to the Deployment together with a topologySpreadConstraint on kubernetes.io/hostname, so the added replica runs elsewhere.";
     const one = { id: "a", type: "REPLICA_INCREASE", service: "payment", feasible: false, predictedBlastRadius: 100, riskReduction: 0, resourceCost: "MEDIUM", confidence: 0.9, score: 0 };
 
     view.renderCandidateCards(c, { recommendations: [one], selectedRecommendationId: null }, { baselineBlastRadius: 100 }, { ...o, descriptions: { a: long }, reasons: { a: "Not enough worker nodes for a safe spread." } });
 
-    assert.equal(find(c, (n) => /candidate-card__description/.test(n.className))[0].attributes.title, long);
-    assert.equal(find(c, (n) => /candidate-card__reason/.test(n.className))[0].attributes.title, "Not enough worker nodes for a safe spread.");
+    const details = find(c, (n) => n.tag === "details")[0];
+    assert.equal(find(details, (n) => /candidate-card__description/.test(n.className))[0].textContent, long);
+    assert.equal(find(details, (n) => /candidate-card__reason/.test(n.className))[0].textContent, "Not enough worker nodes for a safe spread.");
+    assert.equal(find(c, (n) => /candidate-card__description|candidate-card__reason/.test(n.className) && n.tag === "p").length, 2);
 });
 
-test("the plain view clamps long card text, hides the repeated outcome sentence and keeps the proposal's facts one click away", () => {
+test("the plain view hides the repeated outcome sentence, shows no evidence list unless it needs a look, and keeps the proposal's facts one click away", () => {
     const css = readFileSync(new URL("../../app/static/css/pages/recommendations.css", import.meta.url), "utf8");
-    assert.match(css, /\.candidate-card__description[^{]*\{[^}]*-webkit-line-clamp:\s*2/);
-    assert.match(css, /data-view="research"\][^{]*candidate-card__description[^{]*\{[^}]*overflow:\s*visible/, "the research view shows it all");
     assert.match(css, /data-view="simple"\][^{]*rec-outcome\[data-state="ready"\][^{]*\{[^}]*display:\s*none/);
-    assert.match(pageTemplate, /<details class="rec-proposal-details">\s*<summary>Proposal details<\/summary>\s*<div class="rec-proposal" data-role="rec-proposal-summary">/);
+    assert.match(css, /data-view="simple"\][^{]*rec-evidence-details:not\(\[data-attention="true"\]\)[^{]*\{[^}]*display:\s*none/);
+    assert.match(pageTemplate, /<details class="rec-more rec-proposal-details">\s*<summary>Proposal details<\/summary>\s*<div class="rec-proposal" data-role="rec-proposal-summary">/);
+});
+
+test("only one step is drawn at a time, and the declared steps are the template's own", () => {
+    const css = readFileSync(new URL("../../app/static/css/pages/recommendations.css", import.meta.url), "utf8");
+    assert.match(css, /\.rec-flow \[data-step-panel\]\s*\{\s*display:\s*none/);
+    for (const n of [1, 2, 3, 4, 5]) assert.ok(css.includes(`.rec-flow[data-step="${n}"] [data-step-panel="${n}"]`), `step ${n}`);
+    for (const n of [1, 2, 3, 4, 5]) assert.ok(templateHtml.includes(`data-step-panel="${n}"`), `a panel for step ${n}`);
 });
 
 test("the header and the steps carry one short sentence each, not paragraphs", () => {
     const header = templateHtml.slice(templateHtml.indexOf('class="page-header__subtitle"'), templateHtml.indexOf("</p>", templateHtml.indexOf('class="page-header__subtitle"')));
-    assert.ok(header.replace(/\s+/g, " ").length < 160, header);
-    for (const sub of [...templateHtml.matchAll(/class="rec-step__sub">([^<]*)</g)].map((m) => m[1])) assert.ok(sub.length < 60, sub);
+    assert.ok(header.replace(/\\s+/g, " ").length < 160, header);
+    for (const sub of [...templateHtml.matchAll(/class="rec-panel__sub"[^>]*>([^<]*)</g)].map((m) => m[1])) assert.ok(sub.length < 60, sub);
     assert.ok(!templateHtml.includes("When there is only one choice it is used for you"), "step 1's explanation is gone");
+});
+
+// ---- the plain view's short answer --------------------------------------------------------------------------------------------
+
+test("with many alternatives only the lead card is open; the rest sit behind one disclosure that counts them", () => {
+    const o = options(); const c = o.document.container();
+    const make = (id, type) => ({ id, type, service: "payment", feasible: true, predictedBlastRadius: 0, riskReduction: 100, resourceCost: "LOW", confidence: 0.9, score: 0.8 });
+    const many = ["a", "b", "c", "d"].map((id) => make(id, "REPLICA_INCREASE"));
+
+    view.renderCandidateCards(c, { recommendations: many, selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, { ...o, hero: { problem: "p", validationText: "v" } });
+
+    assert.equal(c.children.length, 2, "the lead card and one disclosure");
+    assert.ok(/candidate-card--lead/.test(c.children[0].className));
+    assert.equal(c.children[1].tag, "details");
+    assert.ok(text(c.children[1]).startsWith("Other options (3)"));
+    assert.equal(find(c.children[1], (n) => /\bcandidate-card\b/.test(n.className)).length, 3);
+});
+
+test("with two alternatives or fewer, and with no lead card, every card is simply listed", () => {
+    const o = options();
+    const make = (id) => ({ id, type: "REPLICA_INCREASE", service: "payment", feasible: true, predictedBlastRadius: 0, riskReduction: 100, resourceCost: "LOW", confidence: 0.9, score: 0.8 });
+    const few = o.document.container();
+    view.renderCandidateCards(few, { recommendations: [make("a"), make("b"), make("c")], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, { ...o, hero: { problem: "p", validationText: "v" } });
+    assert.equal(few.children.length, 3);
+    const none = o.document.container();
+    view.renderCandidateCards(none, { recommendations: ["a", "b", "c", "d"].map(make), selectedRecommendationId: null }, { baselineBlastRadius: 100 }, o);
+    assert.equal(none.children.length, 4, "with nothing recommended there is no lead to put the others behind");
+});
+
+test("a prediction of no gain is worded as no change, and is not drawn in the colour of a gain", () => {
+    const o = options(); const c = o.document.container();
+    const same = { id: "a", type: "REPLICA_INCREASE", service: "payment", feasible: true, predictedBlastRadius: 100, riskReduction: 0, resourceCost: "MEDIUM", confidence: 0.9, score: 0.1 };
+
+    view.renderCandidateCards(c, { recommendations: [same], selectedRecommendationId: null }, { baselineBlastRadius: 100 }, o);
+
+    const delta = find(c, (n) => /candidate-card__delta/.test(n.className))[0];
+    assert.equal(delta.textContent, "No change");
+    assert.match(delta.className, /candidate-card__delta--none/);
+});
+
+test("the problem is stated from the engine's own impact, and not at all when the engine reported none", () => {
+    assert.equal(view.problemStatement(detail()), "If w1 fails, the workflow does not survive.");
+    assert.equal(view.problemStatement(detail({ baselineImpact: { blastRadius: 0, failedServices: [], failedWorkflows: [] } })), "If w1 fails, the workflow survives.");
+    assert.equal(view.problemStatement(detail({ baselineImpact: null })), null);
+    assert.equal(view.problemStatement(null), null);
+});
+
+test("strategy and cost are written in sentence case, and a cost the engine did not report is said to be unreported", () => {
+    assert.equal(view.strategyName("POD_ANTI_AFFINITY"), "Pod anti affinity");
+    assert.equal(view.strategyName(null), "—");
+    assert.equal(view.costLabel("MEDIUM"), "Medium cost");
+    assert.equal(view.costLabel(null), "Cost not reported");
+    assert.equal(view.costLabel(""), "Cost not reported");
+});
+
+test("the impact step is a verdict, the bar, the services that go with the node and nothing else; the four figures and the table are the research reading", () => {
+    const o = options(); const c = o.document.container();
+
+    view.renderImpactSummary(c, withRoles(), o);
+
+    const research = find(c, (n) => /rec-research-only/.test(n.className));
+    assert.equal(research.length, 1, "only the four figures");
+    assert.ok(text(research[0]).includes("Workflow survival") && text(research[0]).includes("Failed node"));
+    const bar = find(c, (n) => /\bgauge\b/.test(n.className));
+    assert.equal(bar.length, 1);
+    assert.ok(text(bar[0]).includes("Lost") && text(bar[0]).includes("100%"));
+    assert.ok(text(c).includes("Predicted from the live topology, not measured."));
+    const table = find(c, (n) => n.tag === "details");
+    assert.equal(table.length, 1, "the services table is one click away");
+    assert.ok(text(table[0]).startsWith("Services in this workflow"));
+});
+
+// ---- when risk cannot tell candidates apart: what changes, what is guaranteed, and the order of a tie -------------------------------
+
+const pod = (name, node) => ({ name, node, ready: true });
+const deployment = (productpage) => ({ services: [{ name: "productpage", pods: productpage }, { name: "ratings", pods: [pod("r1", "w1"), pod("r2", "w2")] }] });
+
+test("what a candidate changes is read from the two deployments: pods added, pods recreated, and the nodes the changed service spans", () => {
+    const current = deployment([pod("p1", "w2")]);
+    const effects = plain(view.candidateEffects({ type: "REPLICA_INCREASE", podsToRecreate: [], simulatedDeployment: deployment([pod("p1", "w2"), pod("p2", "w1")]) }, current));
+
+    assert.deepEqual(effects, { added: 1, moved: 0, services: ["productpage"], span: 2, firm: false });
+    assert.equal(view.candidateEffects({ type: "X", simulatedDeployment: null }, current), null, "no simulated deployment, nothing is claimed");
+    assert.equal(plain(view.candidateEffects({ type: "POD_ANTI_AFFINITY", podsToRecreate: ["p1"], simulatedDeployment: deployment([pod("p1", "w1")]) }, current)).firm, true);
+});
+
+test("candidates tied on score are ordered by cost, then by pods added; a higher score still wins", () => {
+    const base = { type: "T", service: "s", feasible: true, predictedBlastRadius: 0, riskReduction: 100, confidence: 1 };
+    const report = { selectedRecommendationId: "a", recommendations: [
+        { ...base, id: "high", resourceCost: "HIGH", score: 0.5 }, { ...base, id: "med2", resourceCost: "MEDIUM", score: 0.5 },
+        { ...base, id: "med1", resourceCost: "MEDIUM", score: 0.5 }, { ...base, id: "best", resourceCost: "HIGH", score: 0.9 }] };
+
+    const order = (effects) => plain(view.rankCandidates(report, effects).map((r) => r.candidate.id));
+
+    assert.deepEqual(order({ med2: { added: 2 }, med1: { added: 1 }, high: { added: 1 } }), ["best", "med1", "med2", "high"]);
+    assert.deepEqual(order(undefined), ["best", "med2", "med1", "high"], "without effects, equal cost keeps the engine's order");
+});
+
+test("a card says what it changes and guarantees, and starts as predicted, not tested", () => {
+    const o = options(); const c = o.document.container();
+    const candidate = { id: "a", type: "REPLICA_INCREASE_ANTI_AFFINITY", service: "productpage", feasible: true, predictedBlastRadius: 0, riskReduction: 100, resourceCost: "MEDIUM", confidence: 1, score: 0.8 };
+
+    view.renderCandidateCards(c, { recommendations: [candidate], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 },
+        { ...o, effects: { a: { added: 1, moved: 0, services: ["productpage"], span: 2, firm: true } } });
+
+    const shown = text(c);
+    for (const expected of ["+1 pod added", "Firm: required anti-affinity", "1 node failure (changed services on 2 nodes)", "Predicted 0%, not tested"]) assert.ok(shown.includes(expected), expected);
+    const evidence = find(c, (n) => n.attributes["data-evidence-for"] === "a");
+    assert.equal(evidence.length, 1);
+    assert.equal(evidence[0].attributes["data-predicted"], "0", "the page can complete the line from saved tests");
+});
+
+test("when feasible fixes tie on predicted risk the page says so and how they are ordered; no note without a tie", () => {
+    const o = options();
+    const mk = (id, risk) => ({ id, type: "T", service: "s", feasible: true, predictedBlastRadius: risk, riskReduction: 100 - risk, resourceCost: "LOW", confidence: 1, score: 0.5 });
+    const tied = o.document.container(), apart = o.document.container();
+
+    view.renderCandidateCards(tied, { recommendations: [mk("a", 0), mk("b", 0), mk("c", 50)], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, { ...o, dashboard: true });
+    view.renderCandidateCards(apart, { recommendations: [mk("a", 0), mk("b", 50)], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, { ...o, dashboard: true });
+
+    assert.match(text(tied), /2 fixes tie on predicted risk \(0%\).*score, then cost, then pods added/);
+    assert.ok(!text(apart).includes("tie on predicted risk"));
 });

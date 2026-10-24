@@ -74,6 +74,7 @@ def test_the_default_kubeconfig_fails_the_credentials_check(tmp_path, monkeypatc
     (home / ".kube").mkdir(parents=True)
     ambient = write_kubeconfig(home / ".kube" / "config")
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))              # Windows' expanduser reads this, not HOME
 
     assert by_name(run_preflight(None, ambient, facts=lambda: ROOMY))["credentials"].status == FAIL
 

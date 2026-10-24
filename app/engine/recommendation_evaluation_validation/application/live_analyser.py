@@ -85,6 +85,10 @@ class _Analyser:
             "cluster": change.cluster, "recommendationId": change.recommendation_id,
             "baselineTopologySnapshotId": evidence.get("topologySnapshotId"),
         }
+        if evidence.get("workflowScope") == "all":
+            basis.update(workflowScope="all", workflowSetDigest=evidence["workflowSetDigest"],
+                         workflows=evidence["workflows"], rankingBasis=evidence["ranking"]["basis"],
+                         metric="Criticality-weighted share of all workflows lost under the assessed worker-node failure.")
         before_graph = live.details.get("currentDeployment")
         baseline = {
             "kind": "prediction-from-live-topology",
@@ -104,6 +108,20 @@ class _Analyser:
         return {"basis": basis, "baseline": baseline, "predicted": predicted}
 
     def recalculate(self, basis: dict[str, Any]) -> dict[str, Any]:
+        if basis.get("workflowScope") == "all":
+            from app.engine.recommendation_evaluation_validation.portfolio_pipeline import build_portfolio_recommendation
+
+            live = build_portfolio_recommendation(basis["namespace"], basis["failedNode"], declared=self.tier == "research")
+            if live.evidence["workflowSetDigest"] != basis.get("workflowSetDigest") or (
+                self.tier == "research" and declaration_digest(live.evidence) != basis.get("declarationDigest")
+            ):
+                raise AnalysisUnavailable("WORKFLOW_CHANGED", "The workflow definitions changed after Apply, so the same "
+                                          "all-workflows comparison cannot be made.")
+            return {"kind": OBSERVED_KIND, **live.details["baselineImpact"],
+                    "topologyCapturedAt": live.evidence["topologyCapturedAt"],
+                    "topologyStatus": live.evidence["topologyStatus"],
+                    "topologySnapshotId": live.evidence["topologySnapshotId"], "recalculatedAt": _now(),
+                    "placement": _summary(live.details["currentDeployment"], list(basis.get("targetServices") or []))}
         workflow, deployment, provenance = self._load(basis)
         failed_node = basis["failedNode"]
         try:

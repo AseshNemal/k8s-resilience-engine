@@ -2,6 +2,7 @@ import os
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import Field
 
 from app.engine.recommendation_evaluation_validation.approval import (
     ApprovalModel,
@@ -27,6 +28,8 @@ from app.engine.recommendation_evaluation_validation.application import (
 from app.engine.recommendation_evaluation_validation.validation.experiment_repository import ExperimentRepository
 from app.engine.recommendation_evaluation_validation.application.analysis import ChangeAnalyser
 from app.engine.recommendation_evaluation_validation.application.live_analyser import ProductionAnalyser, ResearchAnalyser
+from app.engine.recommendation_evaluation_validation.apply_test.service import ApplyTestService
+from app.engine.recommendation_evaluation_validation.apply_test.repository import RunRepository
 from app.engine.recommendation_evaluation_validation.approval.research import declaration_digest
 from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
@@ -37,6 +40,13 @@ from app.engine.recommendation_evaluation_validation.live_pipeline import (
     build_declared_recommendation,
     build_live_failures,
     build_live_recommendation,
+)
+from app.engine.recommendation_evaluation_validation.portfolio_pipeline import (
+    build_declared_portfolio,
+    build_frozen_portfolio,
+    build_portfolio_recommendation,
+    build_portfolio_failures,
+    describe_portfolio,
 )
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 from app.shared.evidence_errors import EvidenceError, unavailable
@@ -53,6 +63,7 @@ from app.shared.schemas.approval import (
     ApprovalResponse,
 )
 from app.shared.schemas.base import APIModel
+from app.api.validation_loop import require_no_validation_run, router as validation_loop_router
 
 
 class ResearchApprovalRequest(APIModel):
@@ -73,6 +84,15 @@ class ApplyRequest(APIModel):
     """Who is applying an approved change to the connected cluster. Member 4's own body; no shared schema changes."""
 
     applied_by: str
+
+
+class ApplyTestRequest(APIModel):
+    candidate_id: str = Field(min_length=1, max_length=240)
+    namespace: str = Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+    declared: bool
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    yaml_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class ResetRequest(APIModel):
@@ -105,6 +125,7 @@ def get_recommendation_provider(
     failed_node: str | None = Query(None, description="Worker to protect against; default: the one whose loss "
                                                        "would hurt most"),
     namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+    all_workflows: bool = Query(False, description="Evaluate all frozen workflows together, with no workflow selection"),
 ) -> Callable[[], LiveRecommendation]:
     """Supplies the function that produces the recommendation (and live evidence) an approval is bound to.
 
@@ -116,7 +137,7 @@ def get_recommendation_provider(
     """
 
     def provide() -> LiveRecommendation:
-        if not workflow_id:
+        if not workflow_id and all_workflows is not True:
             raise unavailable(
                 "RECOMMENDATION_EVIDENCE_UNAVAILABLE",
                 "Name the frozen workflow to recommend for (workflow_id). No recommendation has been generated "
@@ -124,6 +145,8 @@ def get_recommendation_provider(
                 "recommendation",
             )
         try:
+            if all_workflows is True:
+                return build_portfolio_recommendation(namespace, failed_node)
             return build_live_recommendation(workflow_id, failed_node, namespace)
         except ValueError as error:  # a blank identifier
             raise EvidenceError(
@@ -145,14 +168,17 @@ def get_declared_provider(
     workflow_id: str | None = Query(None, description="Declared workflow to evaluate (required)"),
     failed_node: str | None = Query(None, description="Worker to protect against; default: the one whose loss would hurt most"),
     namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+    all_workflows: bool = Query(False, description="Evaluate all declared workflows together for research approval"),
 ) -> Callable[[], LiveRecommendation]:
     """Supplies the evaluation of a DECLARED workflow on the live topology. It has no approval, apply or validation path."""
 
     def provide() -> LiveRecommendation:
-        if not workflow_id:
+        if not workflow_id and all_workflows is not True:
             raise unavailable("RECOMMENDATION_EVIDENCE_UNAVAILABLE", "Name the declared workflow to evaluate (workflow_id).",
                               "recommendation")
         try:
+            if all_workflows is True:
+                return build_portfolio_recommendation(namespace, failed_node, declared=True)
             return build_declared_recommendation(workflow_id, failed_node, namespace)
         except ValueError as error:
             raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422,
@@ -174,6 +200,8 @@ def get_declared_evaluator() -> Callable[[ApprovalModel], LiveRecommendation]:
             raise PreconditionError("This approval request does not record the workflow and namespace it was computed for, so it "
                                     "cannot be re-evaluated; reject it and request a new approval.")
         try:
+            if provenance.get("workflowScope") == "all":
+                return build_portfolio_recommendation(namespace, provenance.get("failedNode"), declared=True)
             return build_declared_recommendation(workflow_id, provenance.get("failedNode"), namespace)
         except ValueError as error:
             raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
@@ -197,6 +225,8 @@ def get_current_evaluator() -> Callable[[ApprovalModel], LiveRecommendation]:
                 "This approval request does not record the workflow and namespace it was computed for, so it "
                 "cannot be re-evaluated; reject it and request a new approval from a current recommendation.")
         try:
+            if provenance.get("workflowScope") == "all":
+                return build_portfolio_recommendation(namespace, provenance.get("failedNode"))
             return build_live_recommendation(workflow_id, provenance.get("failedNode"), namespace)
         except ValueError as error:
             raise EvidenceError(
@@ -275,6 +305,50 @@ def get_research_application_evaluator(
     return checked
 
 
+def get_apply_test_service(db: Session = Depends(get_db),
+                           gateway: Callable[[], ApplyGateway] = Depends(get_cluster_applier)) -> ApplyTestService:
+    def application(session, declared):
+        return (get_research_application_service(session, gateway, ResearchAnalyser()) if declared
+                else get_application_service(session, gateway, ProductionAnalyser()))
+    return ApplyTestService(db.get_bind(), gateway, build_portfolio_recommendation, application,
+                            writes_enabled=cluster_writes_enabled())
+
+
+@router.post("/apply-tests", status_code=202)
+def start_apply_test(request: ApplyTestRequest,
+                     _no_validation_run: None = Depends(require_no_validation_run),
+                     service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
+    """The explicit Apply action is the consent. It starts a background run; there is no separate approval form."""
+    return service.start(**request.model_dump())
+
+
+@router.get("/apply-tests/current")
+def current_apply_test(service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
+    return {"run": service.read()}
+
+
+@router.get("/apply-tests/history")
+def apply_test_history(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+                       service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
+    """Saved test summaries; reading history never applies or resets a change."""
+    return service.history(limit=limit, offset=offset)
+
+
+@router.get("/apply-tests/{run_id}")
+def read_apply_test(run_id: str, service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
+    run = service.read(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Apply and test run not found")
+    return run
+
+
+@router.get("/apply-tests/{run_id}/report")
+def apply_test_report(run_id: str, response: Response, service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
+    run = read_apply_test(run_id, service)
+    response.headers["Content-Disposition"] = 'attachment; filename="apply-and-test-report.json"'
+    return run
+
+
 def _to_response(approval) -> ApprovalResponse:
     return ApprovalResponse(
         id=approval.id,
@@ -341,7 +415,7 @@ def read_declared_recommendation_detail(
     response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
     response.headers["X-Evidence-Approvable"] = "false"
     response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
-    shown = describe_live_recommendation(live)
+    shown = describe_portfolio(live) if live.evidence.get("workflowScope") == "all" else describe_live_recommendation(live)
     for candidate in shown["candidates"]:
         eligible = bool(candidate["approval"]["ready"])      # the engine's own verdict on feasibility and ranking, before the override
         candidate["approval"] = {"ready": False, "reason": DECLARED_NOT_APPROVABLE, "requiresJustification": False,
@@ -356,6 +430,35 @@ def read_declared_recommendation_detail(
         shown["outcome"] = {"state": "DECLARED_NOT_APPROVABLE", "message": DECLARED_OUTCOME}
     shown["declared"] = {**(live.evidence.get("declaredWorkflow") or {}), "approvable": False, "limits": NOT_OBSERVED,
                          "notApprovableBecause": DECLARED_NOT_APPROVABLE}
+    shown["schedulingFacts"] = live.evidence.get("schedulingFacts")
+    return shown
+
+
+@router.get(
+    "/portfolio/detail",
+    responses={409: {"description": "Required evidence is not available"}},
+)
+def read_portfolio_detail(
+    response: Response,
+    source: str = Query("frozen", pattern="^(frozen|declared)$",
+                        description="Which workflows: every approved frozen one, or every declared one. They are never mixed."),
+    failed_node: str | None = Query(None, description="Worker to protect against; default: the one whose loss would hurt most"),
+    namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+) -> dict:
+    """The recommendation for ALL workflows at once, weighted by criticality. Read-only; approval is shut for every candidate.
+
+    It has its own route and its own evidence source, so the approval, apply and validation routes (which take one named workflow and
+    re-evaluate it themselves) can never be reached with it. A person picks a candidate here, then reviews it for one workflow.
+    """
+    build = build_declared_portfolio if source == "declared" else build_frozen_portfolio
+    try:
+        live = build(namespace, failed_node)
+    except ValueError as error:
+        raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
+    response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
+    response.headers["X-Evidence-Approvable"] = "false"
+    response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
+    shown = describe_portfolio(live)
     shown["schedulingFacts"] = live.evidence.get("schedulingFacts")
     return shown
 
@@ -455,12 +558,13 @@ def read_live_failures(
     response: Response,
     workflow_id: str | None = Query(None, description="Frozen workflow to assess (required)"),
     namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+    all_workflows: bool = Query(False),
 ) -> dict:
     """Every worker node assessed as the failure, each with its own selected candidate (read-only; nothing is applied)."""
-    if not workflow_id:
+    if not workflow_id and all_workflows is not True:
         raise unavailable("RECOMMENDATION_EVIDENCE_UNAVAILABLE", "Name the frozen workflow to assess (workflow_id).", "recommendation")
     try:
-        overview = build_live_failures(workflow_id, namespace)
+        overview = build_portfolio_failures(namespace) if all_workflows is True else build_live_failures(workflow_id, namespace)
     except ValueError as error:
         raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
     response.headers["X-Evidence-Source"] = overview["source"]
@@ -472,12 +576,13 @@ def read_declared_failures(
     response: Response,
     workflow_id: str | None = Query(None, description="Declared workflow to assess (required)"),
     namespace: str = Query("default", description="Kubernetes namespace collected by Component 2"),
+    all_workflows: bool = Query(False),
 ) -> dict:
     """The same overview for a DECLARED workflow. Labelled declared-workflow; nothing here is approvable."""
-    if not workflow_id:
+    if not workflow_id and all_workflows is not True:
         raise unavailable("RECOMMENDATION_EVIDENCE_UNAVAILABLE", "Name the declared workflow to assess (workflow_id).", "recommendation")
     try:
-        overview = build_declared_failures(workflow_id, namespace)
+        overview = build_portfolio_failures(namespace, declared=True) if all_workflows is True else build_declared_failures(workflow_id, namespace)
     except ValueError as error:
         raise EvidenceError("INVALID_RECOMMENDATION_REQUEST", str(error), http_status=422, component="recommendation") from error
     response.headers["X-Evidence-Source"] = overview["source"]
@@ -514,7 +619,7 @@ def read_live_recommendation_detail(
     live = provider()
     response.headers["X-Evidence-Source"] = str(live.evidence.get("source", ""))
     response.headers["X-Topology-Captured-At"] = str(live.evidence.get("topologyCapturedAt", ""))
-    return describe_live_recommendation(live)
+    return describe_portfolio(live) if live.evidence.get("workflowScope") == "all" else describe_live_recommendation(live)
 
 
 @router.get(
@@ -629,6 +734,8 @@ def reject_recommendation(
 
 
 def _applied(service: ApplicationService, recommendation_id: str, action: Callable[[], object]) -> dict:
+    if RunRepository(service.repository.session.get_bind()).active():
+        raise ApplicationRefused("APPLY_TEST_ACTIVE", "An Apply and test run is using this cluster. Wait for it to finish before Apply or Reset.")
     try:
         action()
     except PreconditionError as error:
@@ -672,6 +779,7 @@ def get_application(recommendation_id: str, service: ApplicationService = Depend
 def apply_recommendation(
     recommendation_id: str,
     request: ApplyRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_application_service),
     evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_current_evaluator),
 ) -> dict:
@@ -682,6 +790,7 @@ def apply_recommendation(
 def reset_recommendation(
     recommendation_id: str,
     request: ResetRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_application_service),
 ) -> dict:
     return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
@@ -709,6 +818,7 @@ def get_research_application(recommendation_id: str,
 def apply_research_recommendation(
     recommendation_id: str,
     request: ApplyRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_research_application_service),
     evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_research_application_evaluator),
 ) -> dict:
@@ -719,6 +829,11 @@ def apply_research_recommendation(
 def reset_research_recommendation(
     recommendation_id: str,
     request: ResetRequest,
+    _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_research_application_service),
 ) -> dict:
     return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+
+
+# The fault-injection validation loop ("Prove it"). Included last so that none of the `/{recommendation_id}/...` routes above can shadow it.
+router.include_router(validation_loop_router, prefix="/validation-loop")

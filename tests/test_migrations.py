@@ -9,7 +9,7 @@ from sqlalchemy import inspect
 from app.core.database import get_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "f4b91c2d7e03"
+HEAD_REVISION = "b71d8ea210c4"
 
 
 def _alembic_config() -> Config:
@@ -57,6 +57,7 @@ def test_first_setup_migrates_fresh_database_to_head(sqlite_url: str) -> None:
     assert columns == {"id", "recommendation_id", "proposal_version", "status", "recommendation_snapshot", "yaml_snapshot", "evaluation_snapshot", "requested_at", "requested_by", "decided_at", "decided_by", "decision_note"}
 
     assert inspect(engine).has_table("validation_runs")
+    assert inspect(engine).has_table("apply_test_runs")
 
     # Member 4: rollout tracking on an applied change, and the post-change analyses (additive, nullable where they extend a table).
     assert "rollout" in {col["name"] for col in inspect(engine).get_columns("applied_changes")}

@@ -65,12 +65,6 @@ CLUSTER_PANEL = """<section class="cluster-panel" data-role="cluster-panel" data
 </section>
 """
 
-# Recommendations: say plainly what approving does, before anyone is asked to approve.
-APPROVAL_NOTE = (
-    '<p class="approval-note">Approving or rejecting only records your decision. '
-    "Nothing is applied to your cluster.</p>"
-)
-
 CONNECT_MAIN = """<main class="page" id="main-content">
 <div class="connect">
     <section class="card" aria-labelledby="connect-title">
@@ -85,7 +79,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <dl class="connect__details" data-role="connect-details" hidden>
             <dt>Cluster API</dt><dd data-role="connect-server"></dd>
             <dt>Credential</dt><dd data-role="connect-credential"></dd>
-            <dt>Access</dt><dd>Full access (read and write) to the connected cluster</dd>
+            <dt>Access</dt><dd>Approved for full access (read and write). Reads were checked when you connected; writes are checked when a change is applied.</dd>
             <dt>Renewal</dt><dd data-role="connect-expiry"></dd>
         </dl>
     </section>
@@ -194,7 +188,9 @@ def _static_paths(html: str, key: str, title: str) -> str:
         marker = '<div class="card" id="approval-section">'
         if marker not in html:
             raise SystemExit("Could not find the approval section.")
-        html = html.replace(marker, marker + "\n        " + APPROVAL_NOTE, 1)
+        note = ('<p class="approval-note">Apply changes the selected Deployments, then starts rollout checks, workflow tests, '
+                'resource measurements and risk analysis. Reset restores the saved configuration.</p>')
+        html = html.replace(marker, marker + "\n        " + note, 1)
     return html
 
 
@@ -211,7 +207,9 @@ def _drop_tags(html: str, tag_pattern: str, needle: str) -> str:
 
 def _connect_page(index_html: str) -> str:
     html = _drop_tags(index_html, r"<link[^>]*>", "dashboard.css")
-    html = _drop_tags(html, r"<script[^>]*></script>", "dashboard.js")
+    html = _drop_tags(html, r"<link[^>]*>", "pages/recommendations.css")
+    for script in ("dashboard.js", "overview-summary.js", "recommendation-topology.js", "recommendation-apply-test.js"):
+        html = _drop_tags(html, r"<script[^>]*></script>", script)
     html = re.sub(r"sidebar__link\s+is-active", "sidebar__link ", html)
     html = html.replace('class="sidebar__link" data-role="connect-link"', 'class="sidebar__link is-active" data-role="connect-link"')
     html = html.replace('<body data-page="overview">', '<body data-page="connect">', 1)

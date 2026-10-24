@@ -130,8 +130,9 @@ def test_the_bookinfo_example_is_a_valid_declaration_and_matches_the_projects_ow
     from tests.support.member4_harness import bookinfo_workflow
 
     example = Path(__file__).resolve().parents[2] / "experiments" / "member4_real_validation" / "declared-workflow.bookinfo.example.json"
-    (declared,) = load_declared_workflows(example)
-    reference = bookinfo_workflow()
+    declared_all = load_declared_workflows(example)
+    declared, reference = declared_all[0], bookinfo_workflow()
 
     assert declared.graph.model_dump() == reference.model_dump()
-    assert declared.declared_by.startswith("REPLACE")          # a person must put their own name to it
+    assert [w.graph.workflow_id for w in declared_all] == ["productpage-view", "book-rating-view", "book-details-lookup"]
+    assert all(w.declared_by.startswith("REPLACE") for w in declared_all)      # a person must put their own name to each

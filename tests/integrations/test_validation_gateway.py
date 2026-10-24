@@ -5,6 +5,7 @@ opens a network connection, reads the developer's kubeconfig, or writes to a clu
 """
 
 import ast
+import os
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,7 @@ def test_the_default_kubeconfig_is_never_borrowed(tmp_path, monkeypatch):
     (home / ".kube").mkdir(parents=True)
     ambient = Path(write_kubeconfig(home / ".kube" / "config"))
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))              # Windows' expanduser reads this, not HOME
 
     with pytest.raises(AmbientCredentialsError):
         KubernetesTestClusterGateway(str(ambient), topology_reader=discover)
@@ -59,7 +61,7 @@ def test_the_default_kubeconfig_is_never_borrowed(tmp_path, monkeypatch):
 
 def test_a_file_named_in_the_kubeconfig_variable_is_not_borrowed_either(tmp_path, monkeypatch):
     shared = write_kubeconfig(tmp_path / "shared")
-    monkeypatch.setenv("KUBECONFIG", f"{tmp_path / 'other'}:{shared}")
+    monkeypatch.setenv("KUBECONFIG", os.pathsep.join([str(tmp_path / "other"), shared]))
 
     with pytest.raises(AmbientCredentialsError):
         KubernetesTestClusterGateway(shared, topology_reader=discover)

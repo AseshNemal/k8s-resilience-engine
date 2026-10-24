@@ -12,6 +12,27 @@
         {"source": "productpage", "target": "reviews"},
         {"source": "reviews", "target": "ratings"}
       ]
+    },
+    {
+      "workflowId": "book-rating-view",
+      "criticality": 0.6,
+      "declaredBy": "REPLACE with the name of the person declaring this",
+      "note": "Example only: a reader who comes for the star ratings. Here the rating is the point of the visit, so ratings is mandatory, unlike in productpage-view where the page still renders without it. Criticality is the declarer's statement, not a measurement.",
+      "mandatoryServices": ["productpage", "reviews", "ratings"],
+      "edges": [
+        {"source": "productpage", "target": "reviews"},
+        {"source": "reviews", "target": "ratings"}
+      ]
+    },
+    {
+      "workflowId": "book-details-lookup",
+      "criticality": 0.4,
+      "declaredBy": "REPLACE with the name of the person declaring this",
+      "note": "Example only: a reader who only wants the book's details (publisher, ISBN). It needs the product page and the details service and nothing else. Criticality is the declarer's statement, not a measurement.",
+      "mandatoryServices": ["productpage", "details"],
+      "edges": [
+        {"source": "productpage", "target": "details"}
+      ]
     }
   ]
 }

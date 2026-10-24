@@ -46,6 +46,15 @@ from app.integrations.kind.recovery import (
 STOP_ACTION = "STOP_KIND_WORKER_CONTAINER"
 REFUSED_CLUSTERS = frozenset({"desktop", "docker-desktop"})
 CLUSTER_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+# The kind cluster behind Docker Desktop's Kubernetes. Never a target by default; reachable only through _research_authorized.
+RESEARCH_KIND_CLUSTER = "desktop"
+
+
+def _research_authorized(authorization: Any, cluster_uid: str | None) -> bool:
+    """True only for an authorization that names a reason and the UID of the cluster actually connected (``cluster_uid``)."""
+    return (authorization is not None and bool((getattr(authorization, "confirmed_by", "") or "").strip())
+            and bool((getattr(authorization, "reason", "") or "").strip()) and bool((cluster_uid or "").strip())
+            and getattr(authorization, "cluster_uid", None) == cluster_uid)
 
 
 class FaultKind(str, Enum):
@@ -64,9 +73,13 @@ class KindWorkerFaultInjector:
               "restored with docker start <container>")
 
     def __init__(self, kind_cluster: str, workers: Sequence[str], recovery_dir: str | Path, *,
-                 runner: Runner = subprocess_runner) -> None:
+                 runner: Runner = subprocess_runner, research_authorization: Any = None,
+                 research_cluster_uid: str | None = None) -> None:
         cluster = (kind_cluster or "").strip().lower()
-        if not CLUSTER_NAME.match(cluster) or cluster in REFUSED_CLUSTERS:
+        if cluster in REFUSED_CLUSTERS and cluster == RESEARCH_KIND_CLUSTER and _research_authorized(
+                research_authorization, research_cluster_uid):
+            pass        # the normal research cluster, by an explicit authorization for that exact cluster only
+        elif not CLUSTER_NAME.match(cluster) or cluster in REFUSED_CLUSTERS:
             raise FaultRefused("CLUSTER_REFUSED", f"{kind_cluster!r} cannot be a validation cluster; the Docker Desktop cluster "
                                f"and an unnamed one are never stopped")
         allowed = re.compile(rf"^{re.escape(cluster)}-worker[0-9]*$")
@@ -79,8 +92,10 @@ class KindWorkerFaultInjector:
 
     @property
     def evidence_class(self) -> str:
-        """REAL_CLUSTER only when commands really go to docker. Any other runner is a test double."""
-        return "REAL_CLUSTER" if self._runner is subprocess_runner else "TEST_DOUBLE"
+        """REAL_CLUSTER only when commands really go to docker (directly, or through the restricted Engine API proxy that says so).
+        Any other runner is a test double."""
+        real = self._runner is subprocess_runner or getattr(self._runner, "evidence_class", None) == "REAL_CLUSTER"
+        return "REAL_CLUSTER" if real else "TEST_DOUBLE"
 
     # -- authorization -------------------------------------------------------------------------------------------------
 

@@ -80,7 +80,11 @@ def _check_spread(constraints: Any, live: LiveDeployment, where: str) -> None:
             f"would rewrite it, which is a different change from the one that was verified.")
     for constraint in constraints:
         constraint = _mapping(constraint, where)
-        _only(constraint, {"maxSkew", "topologyKey", "whenUnsatisfiable", "labelSelector"}, where)
+        _only(constraint, {"maxSkew", "topologyKey", "whenUnsatisfiable", "labelSelector", "nodeTaintsPolicy", "matchLabelKeys"}, where)
+        if "matchLabelKeys" in constraint and constraint["matchLabelKeys"] != ["pod-template-hash"]:
+            raise _not_allowed(where, "matchLabelKeys may only isolate the Deployment's pod-template-hash revision")
+        if "nodeTaintsPolicy" in constraint and constraint["nodeTaintsPolicy"] != "Honor":
+            raise _not_allowed(where, "nodeTaintsPolicy must be Honor so untolerated nodes are excluded from spread domains")
         if constraint.get("topologyKey") != HOSTNAME:
             raise _not_allowed(where, f"may only spread over {HOSTNAME}")
         if constraint.get("whenUnsatisfiable") != "DoNotSchedule":

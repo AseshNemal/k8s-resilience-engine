@@ -72,6 +72,17 @@ class DockerCli:
         except (ValueError, KeyError, IndexError, TypeError):
             return None
 
+    def restart_policy(self, name: str) -> str | None:
+        """The container's Docker restart policy name ("no", "on-failure", "always", "unless-stopped"), or None when unreadable."""
+        result = self.run("inspect", name)
+        if result.returncode != 0:
+            return None
+        try:
+            policy = json.loads(result.stdout)[0]["HostConfig"]["RestartPolicy"]["Name"]
+        except (ValueError, KeyError, IndexError, TypeError):
+            return None
+        return policy or "no"
+
     def is_kind_worker_of(self, name: str, cluster: str) -> tuple[dict[str, Any] | None, str | None]:
         """(inspection, None) when ``name`` is a worker of kind cluster ``cluster``; otherwise (inspection or None, why not)."""
         info = self.inspect(name)

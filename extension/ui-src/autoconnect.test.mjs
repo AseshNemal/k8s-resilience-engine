@@ -592,6 +592,19 @@ test("a connection added by hand does not make any listed cluster look connected
     assert.equal(A.clusterBadge(found("docker-desktop"), status).kind, "not-connected");
 });
 
+test("an old connected credential does not hide access repair or extra grants", () => {
+    for (const connected of [true, false]) {
+        const status = { connected, managed: true, context: "docker-desktop", state: "ok",
+            approved: { context: "docker-desktop", disconnectedByUser: false } };
+        const outdated = A.clusterBadge(found("docker-desktop", { authorization: "drifted" }), status);
+        assert.equal(outdated.kind, "attention");
+        assert.equal(outdated.connectable, true, "the user can explicitly repair the old role");
+        const extra = A.clusterBadge(found("docker-desktop", { authorization: "over-granted" }), status);
+        assert.equal(extra.kind, "attention");
+        assert.equal(extra.connectable, false, "repair must not silently remove another binding");
+    }
+});
+
 test("an approved cluster that the extension is reconnecting by itself says so", () => {
     const status = { connected: false, approved: { context: "docker-desktop", disconnectedByUser: false } };
     const badge = A.clusterBadge(found("docker-desktop", { authorization: "approved" }), status);

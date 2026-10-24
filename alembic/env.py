@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.core.config import get_settings  # noqa: E402
 from app.core.database import ensure_sqlite_directory, is_sqlite_url  # noqa: E402
 from app.shared.persistence.models import Base  # noqa: E402
+from app.engine.recommendation_evaluation_validation.apply_test import repository as _apply_test_models  # noqa: E402,F401
 
 config = context.config
 

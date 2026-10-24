@@ -108,6 +108,12 @@ def proposal_fingerprint(live: LiveRecommendation, recommendation_id: str) -> st
         "placement": sorted(placement.items()), "podsToRecreate": sorted(recreate),
         "blastBefore": round(float(before), 2), "blastAfter": round(float(after), 2),
     }
+    if evidence.get("workflowScope") == "all":
+        digest = evidence.get("workflowSetDigest")
+        if not isinstance(digest, str) or len(digest) != 64:
+            return None
+        payload["workflowScope"] = "all"
+        payload["workflowSetDigest"] = digest
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

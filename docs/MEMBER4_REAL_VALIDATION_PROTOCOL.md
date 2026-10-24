@@ -25,6 +25,7 @@ a single worker-node failure, and how accurately can we predict the improvement?
 | Measured-baseline support (`FAIL_BASELINE`) with a probe per failure episode | Built; tested on doubles |
 | Composition, preflight, resource assessment, kind config (`experiments/member4_real_validation/`) | Built; the assessment and preflight were run read-only on the developer's machine. **The cluster has not been created** |
 | A one-command experiment runner | Not built, deliberately: running is a person's step after the gates (see the runbook) |
+| The fault-injection validation loop (`validation_loop/`, "Prove it" step): modes, one run approval, durable kill budget, background run, recovery, restricted Docker proxy, disruption guard, UI | Built; tested on in-memory doubles end to end (`tests/member4_validation_loop/`). **Never run against a real cluster; no real node stopped by it** |
 | Comparison baselines (replica-count-only, deployment-only, dependency-only) | **Not implemented**; defined in section 4 |
 | Any measured result | **None** |
 
