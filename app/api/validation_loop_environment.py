@@ -201,7 +201,8 @@ class ClusterProofEnvironment:
                                             connected_cluster=self.config.connected_cluster, transport=self._transport)
 
     def writing_gateway(self) -> KubernetesTestClusterGateway:
-        return self._gateway(writes=True)
+        """Able to write only when this deployment armed writes (RESILIENCE_ALLOW_CLUSTER_WRITES=1); otherwise every write is refused."""
+        return self._gateway(writes=self.writes_enabled)
 
     def identity(self) -> TargetIdentity:
         observed = self._gateway(writes=False).identity()
@@ -260,7 +261,7 @@ class ClusterProofEnvironment:
         research = authority.research_authorization(grant.cluster_uid) if self.kind == DOCKER_DESKTOP else None
 
         def factory(candidate_id: str | None) -> KubernetesValidationExecutor:
-            gateway = self._gateway(writes=True)
+            gateway = self._gateway(writes=self.writes_enabled)
             identity = gateway.identity()
             designation = DisposableClusterDesignation(name=self.config.name, api_server=identity.api_server or "",
                                                        cluster_uid=grant.cluster_uid, namespace=grant.namespace,

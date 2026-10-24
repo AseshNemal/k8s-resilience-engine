@@ -87,6 +87,14 @@ package); `discovery.py` uses the same selector resolver, so Bookinfo-style nami
 repository's manifests, or else the cluster's own Deployments (`service.py`, `_declared_target`): the manifest
 last applied with kubectl (`kubectl.kubernetes.io/last-applied-configuration`), else the live spec.
 
+The fault-injection validation loop (`app/engine/recommendation_evaluation_validation/validation_loop/`, routes
+`/api/recommendations/validation-loop/*`, the "Prove it on a test cluster" step of the Recommendations page) exists on
+`feat/fault-injection-validation`: one nameless run approval (a digest of the reviewed plan), Smoke / Quick / Full modes, a durable kill budget,
+a background run whose state is in the database, recovery after a restart that only restores and reverts (never resumes or repeats a kill),
+and Docker reached only through the `docker-proxy` service (`app/integrations/docker/`). Docker Desktop is blocked unless a run carries an
+explicit acknowledgement plus a `ResearchClusterAuthorization` for its exact UID; runs need `RESILIENCE_ALLOW_CLUSTER_WRITES=1`. It has only run
+against in-memory doubles: no real node has been stopped by it, and the product does not create the disposable kind cluster.
+
 ## Real data only
 
 - **Real data only at runtime.** No route, page, dashboard, prediction, recommendation, approval or
