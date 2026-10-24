@@ -383,7 +383,7 @@ test("only the selected candidate is marked Recommended, and every card carries 
 });
 
 test("step 1 holds the one action, and the step 4 parts and the proposal's facts are all in the plain view", () => {
-    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-operation"'));
+    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-proof"'));
     assert.ok(step1.includes('data-role="reload-button"'), "the reload action lives in step 1");
     assert.ok(!templateHtml.slice(0, templateHtml.indexOf('<ol class="rec-stepper"')).includes('data-role="reload-button"'), "and no longer in the header");
     for (const role of ["rec-selected", "approval-state-container", "approval-actions", "rec-proposal-summary", "rec-validation-note"]) {
@@ -432,7 +432,7 @@ test("an option that cannot be used is not something to choose, and nothing is h
 });
 
 test("the hint line and the highlight exist in step 1 and the highlight is not carried by colour alone", () => {
-    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-operation"'));
+    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-proof"'));
     assert.ok(step1.includes('data-role="rec-hint"') && step1.includes('id="rec-next-hint"') && step1.includes('role="status"'));
     const css = readFileSync(new URL("../../app/static/css/pages/recommendations.css", import.meta.url), "utf8");
     assert.match(css, /\.rec-inputs__input\[data-attention="true"\]\s*\{[^}]*border-color[^}]*box-shadow/, "a border and a ring");

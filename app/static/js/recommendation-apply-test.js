@@ -240,7 +240,9 @@
 
         draw();
         return { start: poll, apply, reset: resetChanges,
-            state: () => ({ run, busy: busy(), error, resetting: resetting || awaitingReset || run?.application?.status === "RESETTING" }),
+            // Active means Apply was clicked for this candidate and the change is still on the cluster (running, finished but not reset, or being restored).
+            state: () => ({ run, busy: busy(), error, resetting: resetting || awaitingReset || run?.application?.status === "RESETTING",
+                active: !!run?.candidateId && (!!run.canReset || !TERMINAL.has(run.status) || ["RESETTING", "RESET_FAILED"].includes(run.application?.status)) }),
             destroy() { destroyed = true; clearTimeout(timer); },
             clusterChanged() { epoch += 1; run = null; pending = false; error = null; startError = null; awaitingReset = false; expectedRequest = null; clearTimeout(timer); draw(); return poll(); } };
     }
@@ -348,18 +350,20 @@
             TESTS_FAILED: ["Checks failed", "failed"], FAILED: ["Run stopped", "failed"], INTERRUPTED: ["Interrupted", "gaps"], RUNNING: ["Running", "running"], QUEUED: ["Queued", "running"] };
         function update(state) {
             const scrollTop = root.scrollTop;
-            const { candidates = [], history = [], namespace, selectedId, historyLoaded, error, hasMore } = state;
+            const { candidates = [], history = [], namespace, selectedId, activeId, activeRun, historyLoaded, error, hasMore } = state;
             const saved = history.filter((row) => !namespace || row.namespace === namespace);
             const latest = new Map();
             saved.forEach((row, index) => { if (!latest.has(row.candidateId)) latest.set(row.candidateId, { row, index }); });
             const entries = new Map(candidates.map((candidate) => [candidate.id, candidate]));
             for (const row of saved) if (!entries.has(row.candidateId)) entries.set(row.candidateId, { id: row.candidateId, ...row.candidate, historical: true });
-            root.replaceChildren(make("h3", "Candidate results"), make("p", "Latest saved functional test per candidate. Risk remains a model prediction.", "rec-results-sidebar__hint"));
+            const percent = (value) => Number.isFinite(value) ? `${value}%` : "Unavailable";
+            root.replaceChildren(make("h3", "Candidate results"), make("p", "Select a fix to see its data. Active marks the change applied to the cluster. Risk remains a model prediction.", "rec-results-sidebar__hint"));
             if (namespace) root.append(make("p", namespace, "rec-results-sidebar__scope"));
             if (error) root.append(make("p", "Saved results could not be refreshed. Open Test history to retry.", "ui-note"));
             if (!entries.size) root.append(make("p", historyLoaded ? "No candidates or saved tests yet." : "Reading candidates and saved tests…", "ui-note"));
             const list = make("div", undefined, "rec-results-sidebar__list");
             const ordered = [...entries.values()].sort((a, b) => {
+                if ((a.id === activeId) !== (b.id === activeId)) return a.id === activeId ? -1 : 1;   // the applied change stays on top
                 const aRank = latest.get(a.id)?.index, bRank = latest.get(b.id)?.index;
                 if (aRank === undefined) return bRank === undefined ? 0 : 1;
                 return bRank === undefined ? -1 : aRank - bRank;
@@ -367,13 +371,41 @@
             for (const candidate of ordered) {
                 const savedRun = latest.get(candidate.id)?.row;
                 const card = make("article", undefined, "rec-result-item");
-                card.setAttribute("data-selected", String(candidate.id === selectedId));
+                const isActive = !!activeId && candidate.id === activeId;
+                const isSelected = candidate.id === selectedId;
+                card.setAttribute("data-selected", String(isSelected));
+                card.setAttribute("data-active", String(isActive));
                 const title = candidate.type ? env.strategyName(candidate.type) : candidate.id;
                 card.append(make("h4", title));
+                if (isActive || isSelected) {
+                    const tags = make("p", undefined, "rec-result-item__tags");
+                    if (isActive) tags.append(make("span", "Active", "rec-result-item__tag rec-result-item__tag--active"));
+                    if (isSelected) tags.append(make("span", "Selected", "rec-result-item__tag"));
+                    card.append(tags);
+                }
                 if (candidate.service) card.append(make("p", `on ${candidate.service}`, "rec-result-item__target"));
                 const status = savedRun ? savedRun.riskTargetMet === false ? ["Risk target not met", "failed"] : statuses[savedRun.status] || [savedRun.status, "unknown"]
                     : [error ? "Results unavailable" : !historyLoaded ? "Reading results…" : hasMore ? "Older results not loaded" : "Not tested", "unknown"];
                 const badge = make("span", status[0], "rec-result-item__badge"); badge.setAttribute("data-state", status[1]); card.append(badge);
+                if (isActive && activeRun) {
+                    // The applied change: where the run stands and what it measured so far, from the run itself.
+                    const report = activeRun.report || {};
+                    const data = make("dl", undefined, "rec-result-item__data");
+                    const row = (name, value) => { data.append(make("dt", name), make("dd", value)); };
+                    row("Run", outcomeLabel(activeRun));
+                    if (activeRun.current?.message) row("Now", activeRun.current.message);
+                    row("Model risk before / predicted / after", `${percent(report.baselineRisk?.blastRadius)} / ${percent(report.predictedRisk)} / ${percent(report.riskAnalysis?.observed?.blastRadius)}`);
+                    if (report.before?.workflows?.rows) row("Readiness before → after", `${report.before.workflows.rows.filter((r) => r.readiness === "READY").length}/${report.before.workflows.rows.length} → ${report.after?.workflows?.rows ? `${report.after.workflows.rows.filter((r) => r.readiness === "READY").length}/${report.after.workflows.rows.length}` : "Not collected"}`);
+                    card.append(data);
+                } else if (isSelected && candidate.predicted) {
+                    // A selected candidate that is not applied: what the simulation predicts, never a measurement.
+                    const data = make("dl", undefined, "rec-result-item__data");
+                    const row = (name, value) => { data.append(make("dt", name), make("dd", value)); };
+                    row("Predicted risk now → after", `${percent(candidate.predicted.blastRadiusBefore)} → ${percent(candidate.predicted.blastRadiusAfter)}`);
+                    if (candidate.cost?.resource) row("Cost", candidate.cost.resource);
+                    if (candidate.recommendedChange) row("Change", candidate.recommendedChange);
+                    card.append(data, make("p", "Prediction from the simulation, not a measurement.", "rec-result-item__meta"));
+                }
                 if (savedRun) {
                     if (candidate.yamlProposal?.sha256 && candidate.yamlProposal.sha256 !== savedRun.yamlSha256) card.append(make("p", "Earlier proposal", "rec-result-item__meta"));
                     const checks = savedRun.afterWorkflows?.rows;

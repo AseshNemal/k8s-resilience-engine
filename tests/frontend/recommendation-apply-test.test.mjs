@@ -203,3 +203,50 @@ test("sidebar risk mismatch takes precedence over a completed run label", () => 
     assert.match(text(root), /Risk target not met/);
     assert.ok(!text(root).includes("Checks passed"));
 });
+
+// ---- Active is only a change that was applied; Selected is only what is being looked at -------------------------------------------
+
+test("a run is active only while its change is on the cluster: running, or finished and not yet reset", async () => {
+    const check = async (run) => { const env = setup(() => response({ run })); await env.panel.start(); return env.panel.state().active; };
+    assert.equal(await check(running), true, "running");
+    assert.equal(await check({ ...complete, canReset: true }), true, "finished, not reset");
+    assert.equal(await check({ ...complete, application: { status: "RESET" } }), false, "restored");
+    assert.equal(await check({ ...complete, status: "FAILED" }), false, "stopped before anything stayed applied");
+    assert.equal(setup(() => response({ run: null })).panel.state().active, false, "nothing started");
+});
+
+test("the sidebar pins the applied candidate on top as Active, with its run data, and selecting another does not move it", () => {
+    const window = {}, root = node("aside");
+    vm.runInNewContext(source, { window, setTimeout: () => 1, clearTimeout() {} });
+    const sidebar = window.ResilienceApplyTest.createCandidateResultsSidebar({ root, document: { createElement: node }, strategyName: (type) => type, onSelect() {}, onReport() {} });
+    const candidates = [
+        { id: "other", type: "REPLICA_INCREASE", service: "db", approval: { ready: true }, predicted: { blastRadiusBefore: 100, blastRadiusAfter: 0 }, cost: { resource: "LOW" } },
+        { id: "applied", type: "COMBINATION", service: "db+cache", approval: { ready: true }, predicted: { blastRadiusBefore: 100, blastRadiusAfter: 0 } },
+    ];
+    const activeRun = { ...complete, candidateId: "applied", report: { ...complete.report, baselineRisk: { blastRadius: 100 }, predictedRisk: 0, riskAnalysis: { observed: { blastRadius: 50 } } } };
+
+    sidebar.update({ namespace: "shop", selectedId: "other", activeId: "applied", activeRun, candidates, history: [], historyLoaded: true });
+
+    const cards = walk(root).filter((n) => n.tag === "article");
+    assert.match(text(cards[0]), /COMBINATION/, "the applied change is first, although another candidate is selected");
+    assert.equal(cards[0].attributes["data-active"], "true");
+    assert.match(text(cards[0]), /Active/);
+    assert.match(text(cards[0]), /100% \/ 0% \/ 50%/, "its run data: before / predicted / after rollout");
+    assert.equal(cards[1].attributes["data-active"], "false");
+    assert.ok(!/Active/.test(text(cards[1])), "a candidate that was only selected is never called Active");
+    assert.match(text(cards[1]), /Selected/);
+    assert.match(text(cards[1]), /100% → 0%/, "the selected candidate shows its predicted data");
+    assert.match(text(cards[1]), /not a measurement/);
+});
+
+test("with nothing applied, no candidate is called Active; the selected one shows its data", () => {
+    const window = {}, root = node("aside");
+    vm.runInNewContext(source, { window, setTimeout: () => 1, clearTimeout() {} });
+    const sidebar = window.ResilienceApplyTest.createCandidateResultsSidebar({ root, document: { createElement: node }, strategyName: (type) => type, onSelect() {} });
+    sidebar.update({ namespace: "shop", selectedId: "a", candidates: [{ id: "a", type: "SPREAD", service: "web", approval: { ready: true },
+        predicted: { blastRadiusBefore: 80, blastRadiusAfter: 20 } }], history: [], historyLoaded: true });
+    const card = walk(root).find((n) => n.tag === "article");
+    assert.ok(!/Active/.test(text(card)) && card.attributes["data-active"] === "false");
+    assert.match(text(card), /Selected/);
+    assert.match(text(card), /80% → 20%/);
+});

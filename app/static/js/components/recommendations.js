@@ -1277,8 +1277,62 @@
         anchor.click(); window.URL.revokeObjectURL(url);
     }
 
+    // The page shows the data of the SELECTED candidate. The live run panel is shown only while the selected candidate is the one the
+    // latest run belongs to; any other selection shows that candidate's latest saved run, or its prediction when it was never tested.
+    const selectedDataRoot = document.querySelector('[data-role="rec-selected-data"]');
+    let selectedViewer = null;
+    let selectedViewerRun = null;
+
+    function dropSelectedViewer() {
+        if (selectedViewer) selectedViewer.destroy();
+        selectedViewer = null;
+        selectedViewerRun = null;
+    }
+
+    function updateSelectedData() {
+        if (!selectedDataRoot || !applyTestRoot || !applyTestPanel) return;
+        const part = (role) => selectedDataRoot.querySelector(`[data-role="${role}"]`);
+        const chosen = lastView?.status === "ready" ? currentRecommendation?.id : null;
+        const live = applyTestPanel.state().run;
+        const showLive = !chosen || !!(live && live.candidateId === chosen);
+        applyTestRoot.setAttribute("data-shows", showLive ? "live" : "other");
+        selectedDataRoot.hidden = showLive;
+        if (showLive) { dropSelectedViewer(); return; }
+        const candidate = lastView.detail?.candidates?.find((item) => item.id === chosen);
+        const body = part("rec-selected-data-body");
+        part("rec-selected-data-title").textContent = candidate
+            ? `${view.strategyName(candidate.type)}${candidate.service ? ` on ${candidate.service}` : ""}` : "Selected candidate data";
+        const saved = (sidebarHistory.history || []).find((row) => row.candidateId === chosen && (!lastView.namespace || row.namespace === lastView.namespace));
+        if (saved) {
+            part("rec-selected-data-note").textContent = "Selected candidate: its latest saved test. Nothing is applied by selecting.";
+            if (selectedViewerRun !== saved.runId) {
+                dropSelectedViewer();
+                selectedViewerRun = saved.runId;
+                body.replaceChildren();
+                selectedViewer = window.ResilienceApplyTest.createPanel({ root: body, document, fetchImpl: (url, init) => fetch(url, init),
+                    runId: saved.runId, readOnly: true, download: downloadRunReport });
+                selectedViewer.start();
+            }
+            return;
+        }
+        dropSelectedViewer();
+        const predicted = candidate?.predicted;
+        part("rec-selected-data-note").textContent = sidebarHistory.historyLoaded === false ? "Reading saved results…"
+            : sidebarHistory.hasMore ? "No saved test among the results loaded so far."
+            : "Not tested yet. Apply runs this change and its checks.";
+        body.replaceChildren();
+        if (predicted) {
+            const line = document.createElement("p");
+            line.textContent = `Predicted model risk: ${predicted.blastRadiusBefore}% now → ${predicted.blastRadiusAfter}% after the change. A prediction from the simulation, not a measurement.`;
+            body.append(line);
+        }
+    }
+
     function updateCandidateResults() {
+        updateSelectedData();
+        const applied = applyTestPanel?.state();
         resultsSidebar?.update({ ...sidebarHistory, namespace: lastView?.namespace,
+            activeId: applied?.active ? applied.run.candidateId : null, activeRun: applied?.active ? applied.run : null,
             selectedId: lastView?.status === "ready" ? currentRecommendation?.id : null,
             candidates: lastView?.status === "ready" ? lastView.detail?.candidates || [] : [] });
     }
@@ -1289,8 +1343,7 @@
         if (!candidate || !(isDeclared() ? candidate.researchApproval?.available : candidate.approval?.ready)) return;
         preferredChange = { id: candidate.id, service: candidate.service, type: candidate.type };
         showDetail(v);
-        rememberPage();
-        try { document.getElementById("approval-section")?.scrollIntoView?.({ block: "start", behavior: "smooth" }); } catch (_error) { /* Optional presentation. */ }
+        rememberPage();                                       // selecting only changes what is shown; the sidebar follows and the page stays where it is
     }
 
     const resultsSidebarRoot = document.querySelector('[data-role="rec-results-sidebar"]');
@@ -1314,6 +1367,7 @@
                 const run = applyTestPanel?.state().run;
                 if (operationRoot) operationRoot.setAttribute("data-managed-run", String(!!run));
                 if (currentRecommendation) renderApplyAction();
+                updateCandidateResults();
                 const stamp = run ? `${run.runId}:${run.status}` : "";
                 if (stamp !== historyStamp) { historyStamp = stamp; testHistoryPanel?.refresh(); }
             },
@@ -1384,6 +1438,7 @@
         if (operationPanel) operationPanel.destroy();
         if (proofPanel) proofPanel.destroy();
         if (applyTestPanel) applyTestPanel.destroy();
+        dropSelectedViewer();
         if (testHistoryPanel) testHistoryPanel.destroy();
     });
     document.addEventListener("visibilitychange", () => { if (document.hidden) rememberPage(); });

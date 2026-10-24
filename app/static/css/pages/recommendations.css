@@ -138,6 +138,13 @@ html:has(.rec-layout), body:has(.rec-layout) { overflow-x: clip; overflow-y: vis
 .rec-results-sidebar__list { display: grid; gap: 12px; margin-top: 16px; }
 .rec-result-item { padding: 14px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-medium); }
 .rec-result-item[data-selected="true"] { border-color: var(--color-primary); border-left-width: 3px; }
+.rec-result-item[data-active="true"] { border-color: var(--dd-success); border-left-width: 3px; background: var(--dd-success-soft); }
+.rec-result-item__tags { display: flex; gap: 6px; margin: 6px 0 0; }
+.rec-result-item__tag { font-size: 11px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--color-primary); border-radius: 999px; color: var(--color-primary); }
+.rec-result-item__tag--active { border-color: var(--dd-success); color: var(--dd-success); }
+.rec-result-item__data { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 8px 0 0; font-size: 12px; }
+.rec-result-item__data dt { color: var(--color-text-muted); margin-top: 6px; }
+.rec-result-item__data dd { margin: 0; overflow-wrap: anywhere; }
 .rec-result-item h4 { font-size: 14px; margin: 0; overflow-wrap: anywhere; }
 .rec-result-item__target { font-size: 12px; color: var(--color-text-muted); margin: 4px 0 10px; }
 .rec-result-item__badge { display: inline-block; font-size: 12px; font-weight: 600; border: 1px solid var(--color-border); padding: 3px 8px; border-radius: 6px; margin: 8px 0; }
@@ -748,6 +755,7 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .rec-flow[data-all-workflows="true"][data-view="simple"] [data-step-panel="2"] { display: none; }
 .rec-flow[data-all-workflows="true"][data-view="research"] [data-step-panel="2"] { display: block; }
 .apply-test { scroll-margin-top: 1rem; }
+.apply-test[data-shows="other"] { display: none; }
 .rec-candidate-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 .rec-candidate-comparison .candidate-card { display: flex; flex-direction: column; margin: 0; min-width: 0; }
 .rec-candidate-comparison .candidate-card__header { flex-wrap: wrap; gap: 10px; }

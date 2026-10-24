@@ -72,14 +72,20 @@
     </footer>
 </section>
 
-<section class="rec-operation card rec-panel" data-role="rec-operation" aria-label="Applied change" hidden></section>
-<section class="card rec-panel apply-test" data-role="rec-apply-test" aria-label="Apply and test run" aria-live="polite" hidden></section>
 
 <section class="card rec-panel rec-proof" data-role="rec-proof" data-step-panel="4" aria-labelledby="rec-step-4" aria-busy="false" hidden></section>
 
 <div data-role="page-region">
     {{ loading_state("Asking for the current live recommendation…") }}
 </div>
+{# The run and the applied change follow the comparison and the approval: choose a fix first, then watch what applying it did. #}
+<section class="rec-operation card rec-panel" data-role="rec-operation" aria-label="Applied change" hidden></section>
+<section class="card rec-panel apply-test" data-role="rec-apply-test" aria-label="Apply and test run" aria-live="polite" hidden></section>
+<section class="card rec-panel apply-test" data-role="rec-selected-data" aria-label="Selected candidate data" hidden>
+    <h3 data-role="rec-selected-data-title">Selected candidate data</h3>
+    <p class="ui-note" data-role="rec-selected-data-note"></p>
+    <div data-role="rec-selected-data-body"></div>
+</section>
 <section class="card rec-panel test-history" data-role="rec-test-history" aria-label="Saved candidate tests"></section>
 
 {# Research view: the detail that the steps leave out, one tab at a time. Static, so it works before a recommendation exists. #}
