@@ -1075,13 +1075,15 @@
         // Each card says what it changes and, when it cannot be put forward, the engine's own reason.
         const descriptions = {};
         const reasons = {};
+        const effects = {};                           // what each candidate changes, read from the observed and the simulated deployment
+        detail.candidates.forEach((c) => { const e = view.candidateEffects(c, detail.currentDeployment); if (e) effects[c.id] = e; });
         detail.candidates.forEach((c) => {
             if (c.recommendedChange) descriptions[c.id] = c.recommendedChange;
             if (!c.feasible && c.approval.reason) reasons[c.id] = c.approval.reason;
         });
         // A declared workflow's cards do not repeat the notice that production approval is unavailable: it is said once, above the steps.
         view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), shownReport, context, {
-            descriptions, reasons,
+            descriptions, reasons, effects,
             ...(allWorkflows ? {
                 dashboard: true,
                 engineSelectedId: report.selectedRecommendationId,
@@ -1328,7 +1330,26 @@
         }
     }
 
+    // Each card says whether its prediction was ever tested: the latest saved test of that candidate, or "not tested".
+    function updateCardEvidence() {
+        if (!region || !region.querySelectorAll || !window.ResilienceApplyTest) return;
+        const latest = new Map();
+        for (const row of sidebarHistory.history || []) {
+            if (lastView?.namespace && row.namespace !== lastView.namespace) continue;
+            if (!latest.has(row.candidateId)) latest.set(row.candidateId, row);
+        }
+        for (const node of Array.from(region.querySelectorAll("[data-evidence-for]"))) {
+            const predicted = `Predicted ${node.getAttribute("data-predicted")}%`;
+            const row = latest.get(node.getAttribute("data-evidence-for"));
+            node.textContent = row ? `${predicted} · latest test: ${window.ResilienceApplyTest.resultLabel(row)[0].toLowerCase()}`
+                : sidebarHistory.historyLoaded === false ? `${predicted} · reading saved tests…`
+                : sidebarHistory.hasMore ? `${predicted} · no saved test among those loaded`
+                : `${predicted}, not tested`;
+        }
+    }
+
     function updateCandidateResults() {
+        updateCardEvidence();
         updateSelectedData();
         const applied = applyTestPanel?.state();
         resultsSidebar?.update({ ...sidebarHistory, namespace: lastView?.namespace,

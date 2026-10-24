@@ -79,14 +79,26 @@
 
     // ---- ranking and summary -------------------------------------------------------------------------------
 
-    /** Feasible candidates by descending reported score, then infeasible ones unranked. Ties keep engine order. */
-    function rankCandidates(report) {
+    const COST_ORDER = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+    const SCORE_TIE = 1e-9;
+
+    /**
+     * Feasible candidates by descending reported score, then infeasible ones unranked. Candidates tied on score are ordered by
+     * resource cost (cheaper first), then by pods added (``effects[id].added``, fewer first), then by the engine's order. The score is
+     * never changed; this only decides what a tie looks like on the page.
+     */
+    function rankCandidates(report, effects) {
         const candidates = (report && report.recommendations) || [];
         const selectedId = report ? report.selectedRecommendationId : null;
         const indexed = candidates.map((candidate, index) => ({ candidate, index }));
+        const costOf = (item) => (item.candidate.resourceCost in COST_ORDER ? COST_ORDER[item.candidate.resourceCost] : 3);
+        const addedOf = (item) => { const e = effects && effects[item.candidate.id]; return e && Number.isFinite(e.added) ? e.added : Infinity; };
         const feasible = indexed
             .filter((item) => item.candidate.feasible)
-            .sort((a, b) => b.candidate.score - a.candidate.score || a.index - b.index);
+            .sort((a, b) => {
+                const gap = b.candidate.score - a.candidate.score;
+                return (Math.abs(gap) > SCORE_TIE ? gap : 0) || costOf(a) - costOf(b) || (addedOf(a) === addedOf(b) ? 0 : addedOf(a) - addedOf(b)) || a.index - b.index;
+            });
         const infeasible = indexed.filter((item) => !item.candidate.feasible);
         return [
             ...feasible.map((item, position) => ({ candidate: item.candidate, rank: position + 1, selected: item.candidate.id === selectedId })),
@@ -149,6 +161,63 @@
         return wrapper;
     }
 
+    // Required anti-affinity leaves a replica Pending rather than let it share a node; a hostname spread tolerates a skew of one.
+    const FIRM_TYPES = new Set(["POD_ANTI_AFFINITY", "REPLICA_INCREASE_ANTI_AFFINITY"]);
+
+    /**
+     * What one candidate changes, read from the observed deployment and the candidate's simulated one: pods added, pods recreated, the
+     * services whose pods differ, and the fewest nodes any changed service spans afterwards. null when either deployment is missing.
+     */
+    function candidateEffects(candidate, current) {
+        const after = candidate && candidate.simulatedDeployment;
+        if (!after || !current || !Array.isArray(after.services) || !Array.isArray(current.services)) return null;
+        const before = new Map(current.services.map((service) => [service.name, service]));
+        const nodesOf = (pods) => [...new Set((pods || []).map((pod) => pod.node).filter(Boolean))].sort();
+        let added = 0;
+        const changed = [];
+        for (const service of after.services) {
+            const old = before.get(service.name);
+            const pods = service.pods || [];
+            const oldPods = old ? old.pods || [] : [];
+            added += Math.max(0, pods.length - oldPods.length);
+            if (pods.length !== oldPods.length || nodesOf(pods).join(",") !== nodesOf(oldPods).join(",")) changed.push(service);
+        }
+        return {
+            added,
+            moved: Array.isArray(candidate.podsToRecreate) ? candidate.podsToRecreate.length : 0,
+            services: changed.map((service) => service.name),
+            span: changed.length ? Math.min(...changed.map((service) => nodesOf(service.pods).length)) : null,
+            firm: FIRM_TYPES.has(candidate.type),
+        };
+    }
+
+    function effectFacts(doc, effect) {
+        const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+        const pods = [effect.added ? `+${plural(effect.added, "pod")} added` : "no pods added"];
+        if (effect.moved) pods.push(`${effect.moved} recreated`);
+        const out = [fact(doc, "Pods changed", pods.join(", ")),
+            fact(doc, "Guarantee", effect.firm ? "Firm: required anti-affinity" : "Best effort: spread, skew of one")];
+        if (effect.span !== null) {
+            out.push(fact(doc, "Headroom", effect.span >= 2
+                ? `${plural(effect.span - 1, "node failure")} (changed services on ${effect.span} nodes)`
+                : "None: a changed service is on one node"));
+        }
+        return out;
+    }
+
+    /** A line when several feasible candidates predict the same risk: the percentage cannot tell them apart, so say what does. */
+    function tieNote(doc, ranked) {
+        const groups = new Map();
+        for (const { candidate } of ranked) {
+            if (!candidate.feasible) continue;
+            groups.set(candidate.predictedBlastRadius, (groups.get(candidate.predictedBlastRadius) || 0) + 1);
+        }
+        let tied = null;
+        for (const [risk, count] of groups) if (count >= 2 && (!tied || count > tied.count)) tied = { risk, count };
+        if (!tied) return null;
+        return element(doc, "p", `${tied.count} fixes tie on predicted risk (${tied.risk}%): the percentage cannot tell them apart. They are ordered by score, then cost, then pods added.`, "ui-note rec-tie-note");
+    }
+
     function chipOf(doc, text, variant, className) {
         return element(doc, "span", text, `status-badge status-badge--${variant}${className ? ` ${className}` : ""}`);
     }
@@ -163,7 +232,7 @@
      */
     function renderCandidateCards(container, report, context, options) {
         const doc = documentOf(options);
-        const ranked = rankCandidates(report);
+        const ranked = rankCandidates(report, options && options.effects);
         if (!ranked.length) {
             container.replaceChildren(
                 missingState(doc, "No recommendation candidates", "The recommendation engine produced no candidates for this evidence.")
@@ -213,7 +282,12 @@
             facts.append(fact(doc, "Cost", costLabel(candidate.resourceCost)));
             facts.append(fact(doc, "Confidence", ratioPercent(candidate.confidence), "rec-research-only"));
             facts.append(fact(doc, "Score", ratioPercent(candidate.score), "rec-research-only"));
+            const changes = options && options.effects && options.effects[candidate.id];
+            if (changes) facts.append(...effectFacts(doc, changes));
             card.append(facts);
+            // Predicted until a saved test says otherwise; the page fills in the tested result when it has one.
+            card.append(element(doc, "p", `Predicted ${candidate.predictedBlastRadius}%, not tested`, "candidate-card__evidence",
+                { "data-evidence-for": String(candidate.id), "data-predicted": String(candidate.predictedBlastRadius) }));
 
             if (lead && options.hero.validationText !== undefined) {
                 const validation = element(doc, "p", undefined, "candidate-card__validation");
@@ -250,11 +324,12 @@
             const grid = element(doc, "div", undefined, "rec-candidate-comparison");
             grid.append(...visible);
             if (!visible.length) grid.append(...cards.slice(0, 1));
+            const tie = tieNote(doc, ranked);
             if (remaining.length && visible.length) {
                 const more = element(doc, "details", undefined, "rec-others");
                 more.append(element(doc, "summary", `Other options (${remaining.length})`), ...remaining);
-                container.replaceChildren(grid, more);
-            } else container.replaceChildren(grid);
+                container.replaceChildren(...(tie ? [tie] : []), grid, more);
+            } else container.replaceChildren(...(tie ? [tie] : []), grid);
             return;
         }
         // The lead card, then the rest. Many alternatives sit behind one disclosure so the page stays a short answer, not a catalogue.
@@ -838,6 +913,7 @@
         renderProposalSummary,
         renderFailures,
         rankCandidates,
+        candidateEffects,
         selectedCandidate,
         summarise,
         renderCandidateCards,

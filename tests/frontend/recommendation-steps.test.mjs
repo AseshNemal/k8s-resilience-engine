@@ -543,3 +543,55 @@ test("the impact step is a verdict, the bar, the services that go with the node 
     assert.equal(table.length, 1, "the services table is one click away");
     assert.ok(text(table[0]).startsWith("Services in this workflow"));
 });
+
+// ---- when risk cannot tell candidates apart: what changes, what is guaranteed, and the order of a tie -------------------------------
+
+const pod = (name, node) => ({ name, node, ready: true });
+const deployment = (productpage) => ({ services: [{ name: "productpage", pods: productpage }, { name: "ratings", pods: [pod("r1", "w1"), pod("r2", "w2")] }] });
+
+test("what a candidate changes is read from the two deployments: pods added, pods recreated, and the nodes the changed service spans", () => {
+    const current = deployment([pod("p1", "w2")]);
+    const effects = plain(view.candidateEffects({ type: "REPLICA_INCREASE", podsToRecreate: [], simulatedDeployment: deployment([pod("p1", "w2"), pod("p2", "w1")]) }, current));
+
+    assert.deepEqual(effects, { added: 1, moved: 0, services: ["productpage"], span: 2, firm: false });
+    assert.equal(view.candidateEffects({ type: "X", simulatedDeployment: null }, current), null, "no simulated deployment, nothing is claimed");
+    assert.equal(plain(view.candidateEffects({ type: "POD_ANTI_AFFINITY", podsToRecreate: ["p1"], simulatedDeployment: deployment([pod("p1", "w1")]) }, current)).firm, true);
+});
+
+test("candidates tied on score are ordered by cost, then by pods added; a higher score still wins", () => {
+    const base = { type: "T", service: "s", feasible: true, predictedBlastRadius: 0, riskReduction: 100, confidence: 1 };
+    const report = { selectedRecommendationId: "a", recommendations: [
+        { ...base, id: "high", resourceCost: "HIGH", score: 0.5 }, { ...base, id: "med2", resourceCost: "MEDIUM", score: 0.5 },
+        { ...base, id: "med1", resourceCost: "MEDIUM", score: 0.5 }, { ...base, id: "best", resourceCost: "HIGH", score: 0.9 }] };
+
+    const order = (effects) => plain(view.rankCandidates(report, effects).map((r) => r.candidate.id));
+
+    assert.deepEqual(order({ med2: { added: 2 }, med1: { added: 1 }, high: { added: 1 } }), ["best", "med1", "med2", "high"]);
+    assert.deepEqual(order(undefined), ["best", "med2", "med1", "high"], "without effects, equal cost keeps the engine's order");
+});
+
+test("a card says what it changes and guarantees, and starts as predicted, not tested", () => {
+    const o = options(); const c = o.document.container();
+    const candidate = { id: "a", type: "REPLICA_INCREASE_ANTI_AFFINITY", service: "productpage", feasible: true, predictedBlastRadius: 0, riskReduction: 100, resourceCost: "MEDIUM", confidence: 1, score: 0.8 };
+
+    view.renderCandidateCards(c, { recommendations: [candidate], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 },
+        { ...o, effects: { a: { added: 1, moved: 0, services: ["productpage"], span: 2, firm: true } } });
+
+    const shown = text(c);
+    for (const expected of ["+1 pod added", "Firm: required anti-affinity", "1 node failure (changed services on 2 nodes)", "Predicted 0%, not tested"]) assert.ok(shown.includes(expected), expected);
+    const evidence = find(c, (n) => n.attributes["data-evidence-for"] === "a");
+    assert.equal(evidence.length, 1);
+    assert.equal(evidence[0].attributes["data-predicted"], "0", "the page can complete the line from saved tests");
+});
+
+test("when feasible fixes tie on predicted risk the page says so and how they are ordered; no note without a tie", () => {
+    const o = options();
+    const mk = (id, risk) => ({ id, type: "T", service: "s", feasible: true, predictedBlastRadius: risk, riskReduction: 100 - risk, resourceCost: "LOW", confidence: 1, score: 0.5 });
+    const tied = o.document.container(), apart = o.document.container();
+
+    view.renderCandidateCards(tied, { recommendations: [mk("a", 0), mk("b", 0), mk("c", 50)], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, { ...o, dashboard: true });
+    view.renderCandidateCards(apart, { recommendations: [mk("a", 0), mk("b", 50)], selectedRecommendationId: "a" }, { baselineBlastRadius: 100 }, { ...o, dashboard: true });
+
+    assert.match(text(tied), /2 fixes tie on predicted risk \(0%\).*score, then cost, then pods added/);
+    assert.ok(!text(apart).includes("tie on predicted risk"));
+});

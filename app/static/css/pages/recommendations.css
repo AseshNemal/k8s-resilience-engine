@@ -827,3 +827,6 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
     .rec-topo__body { grid-template-columns: 1fr; gap: var(--space-md); }
     .rec-topo__links { display: none; }
 }
+
+.candidate-card__evidence { margin: var(--space-xs) 0 0; font-size: 12px; color: var(--color-text-muted); }
+.rec-tie-note { margin: 0 0 var(--space-sm); }

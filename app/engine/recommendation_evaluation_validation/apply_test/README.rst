@@ -35,6 +35,12 @@ that setting is absent. Both accept a top-level workflowChecks map::
       }
     }
 
+A worked example for the Bookinfo in the researcher's own k8s-bookinfo repository is
+experiments/member4_real_validation/workflow-checks.bookinfo.example.json. Its strings are the product page's
+own. The Service is cluster-internal, so a check needs a host port, for example
+``kubectl port-forward -n bookinfo svc/productpage 18080:9080``. The checks only count while that port-forward runs.
+With reviews-v1 only, no check can prove ratings works, because the page never shows stars; the example says so.
+
 These values must describe the actual application. The product does not infer
 URLs or successful response text from workflow names. The existing loopback
 probe integration enforces permitted hosts and ports, no redirects, and the

@@ -1,0 +1,25 @@
+{
+  "workflowChecks": {
+    "productpage-view": {
+      "note": "Example for the Bookinfo in k8s-bookinfo, reached through `kubectl port-forward -n bookinfo svc/productpage 18080:9080`. The strings are the page's own, from src/productpage/templates/productpage.html. Replace them if your application differs.",
+      "url": "http://localhost:18080/productpage",
+      "expectedStatus": 200,
+      "mustContain": ["Book Details", "Book Reviews"],
+      "mustNotContain": ["Error fetching product details", "Error fetching product reviews"]
+    },
+    "book-rating-view": {
+      "note": "Honest limit: with reviews-v1 only (no ratings call) the page never shows stars, so this check cannot prove ratings works; it proves the reviews section renders without a ratings error. With reviews-v2 or v3, add the star marker 'id=\"glyphicon glyphicon-star\"' to mustContain.",
+      "url": "http://localhost:18080/productpage",
+      "expectedStatus": 200,
+      "mustContain": ["Book Reviews"],
+      "mustNotContain": ["Error fetching product reviews", "Ratings service is currently unavailable", "product ratings are currently unavailable"]
+    },
+    "book-details-lookup": {
+      "note": "Needs the product page and the details service: the details table (ISBN-10, Publisher) is rendered only when details answered.",
+      "url": "http://localhost:18080/productpage",
+      "expectedStatus": 200,
+      "mustContain": ["Book Details", "ISBN-10", "Publisher"],
+      "mustNotContain": ["Error fetching product details"]
+    }
+  }
+}

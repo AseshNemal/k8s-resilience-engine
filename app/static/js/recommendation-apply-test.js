@@ -343,11 +343,13 @@
             },
             destroy() { closed = true; viewer?.destroy(); } };
     }
+    const RESULT_STATUSES = { COMPLETED: ["Checks passed", "passed"], COMPLETED_WITH_GAPS: ["Missing checks", "gaps"],
+        TESTS_FAILED: ["Checks failed", "failed"], FAILED: ["Run stopped", "failed"], INTERRUPTED: ["Interrupted", "gaps"], RUNNING: ["Running", "running"], QUEUED: ["Queued", "running"] };
+    /** [label, state] of a saved run. A missed risk target takes precedence over a completed run: functional checks never hide it. */
+    const resultLabel = (row) => row.riskTargetMet === false ? ["Risk target not met", "failed"] : RESULT_STATUSES[row.status] || [row.status, "unknown"];
     function createCandidateResultsSidebar(env) {
         const { root, document } = env;
         const make = (tag, text, cls) => { const node = document.createElement(tag); if (text !== undefined && text !== null) node.textContent = String(text); if (cls) node.className = cls; return node; };
-        const statuses = { COMPLETED: ["Checks passed", "passed"], COMPLETED_WITH_GAPS: ["Missing checks", "gaps"],
-            TESTS_FAILED: ["Checks failed", "failed"], FAILED: ["Run stopped", "failed"], INTERRUPTED: ["Interrupted", "gaps"], RUNNING: ["Running", "running"], QUEUED: ["Queued", "running"] };
         function update(state) {
             const scrollTop = root.scrollTop;
             const { candidates = [], history = [], namespace, selectedId, activeId, activeRun, historyLoaded, error, hasMore } = state;
@@ -384,7 +386,7 @@
                     card.append(tags);
                 }
                 if (candidate.service) card.append(make("p", `on ${candidate.service}`, "rec-result-item__target"));
-                const status = savedRun ? savedRun.riskTargetMet === false ? ["Risk target not met", "failed"] : statuses[savedRun.status] || [savedRun.status, "unknown"]
+                const status = savedRun ? resultLabel(savedRun)
                     : [error ? "Results unavailable" : !historyLoaded ? "Reading results…" : hasMore ? "Older results not loaded" : "Not tested", "unknown"];
                 const badge = make("span", status[0], "rec-result-item__badge"); badge.setAttribute("data-state", status[1]); card.append(badge);
                 if (isActive && activeRun) {
@@ -429,5 +431,5 @@
         }
         return { update };
     }
-    window.ResilienceApplyTest = { createPanel, createHistoryPanel, createCandidateResultsSidebar };
+    window.ResilienceApplyTest = { createPanel, createHistoryPanel, createCandidateResultsSidebar, resultLabel };
 })();
