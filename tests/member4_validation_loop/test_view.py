@@ -131,3 +131,51 @@ def test_another_run_may_start_only_after_a_finished_run_whose_recovery_is_compl
     assert build_view(run("COMPLETED"), [], [], now=NOW)["canStartAnother"] is True
     assert build_view(run("RUNNING"), [], [], now=NOW)["canStartAnother"] is False
     assert build_view(run("INTERRUPTED", recovery={"complete": False}), [], [], now=NOW)["canStartAnother"] is False
+
+
+# --- the figures behind the richer run page ------------------------------------------------------------------------------
+
+def checked(worker, ok, total, status="PASS", **outcome):
+    return experiment(worker, status, probe={"windows": {"failure": {"samples": total, "successes": ok}}}, **outcome)
+
+
+def test_a_cell_reports_how_many_of_the_workflow_checks_passed_while_the_worker_was_down():
+    view = build_view(run(), [checked("w1", 4, 4), experiment("w2", "RUNNING")], [], now=NOW, worker_alive=True)
+
+    cells = view["matrix"]["rows"][0]["cells"]
+    assert cells[0]["checks"] == {"passed": 4, "total": 4} and cells[1]["checks"] is None
+
+
+def test_checks_are_summed_over_the_repeats_of_one_cell():
+    plan = {**PLAN, "mode": {**PLAN["mode"], "repeats": 2}}
+    first, second = checked("w1", 5, 6), checked("w1", 6, 6)
+    second["repeat"] = 2
+
+    view = build_view(run(plan=plan), [first, second], [], now=NOW)
+
+    assert view["matrix"]["rows"][0]["cells"][0]["checks"] == {"passed": 11, "total": 12}
+
+
+def test_the_guard_and_the_prediction_are_read_from_the_record_never_assumed():
+    none = build_view(run(), [], [], now=NOW)["safety"]
+    agree = build_view(run(), [checked("w1", 3, 3, modelAgrees=True)], [], now=NOW)["safety"]
+    wrong = build_view(run(), [checked("w1", 3, 3, modelAgrees=True), checked("w2", 3, 3, modelAgrees=False)], [], now=NOW)["safety"]
+    refused = build_view(run(), [experiment("w1", "INCONCLUSIVE", reasons=["Blocked before the kill: ESSENTIAL_WORKLOAD: coredns"])], [], now=NOW)["safety"]
+
+    assert (none["criticalCheck"], none["predictionCheck"]) == ("pending", "pending")
+    assert (agree["criticalCheck"], agree["predictionCheck"]) == ("passed", "matches")
+    assert wrong["predictionCheck"] == "mismatch" and refused["criticalCheck"] == "blocked"
+
+
+def test_timing_comes_from_the_stored_timestamps_and_stops_when_the_run_ends():
+    live = build_view(run(), [], [], now=NOW)["timing"]
+    ended = build_view(run("COMPLETED", finishedAt=(NOW - timedelta(seconds=10)).isoformat()), [], [], now=NOW)["timing"]
+
+    assert live["elapsedS"] == 30.0 and ended["elapsedS"] == 20.0
+    assert build_view(run(startedAt=None, heartbeatAt=None), [], [], now=NOW)["timing"] == {"elapsedS": None, "startedAgoS": None}
+
+
+def test_whether_a_baseline_was_part_of_the_run_is_in_the_view():
+    plan = {**PLAN, "mode": {**PLAN["mode"], "measureBaseline": True}}
+
+    assert build_view(run(plan=plan), [], [], now=NOW)["baselineMeasured"] is True and build_view(run(), [], [], now=NOW)["baselineMeasured"] is False

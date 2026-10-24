@@ -178,6 +178,7 @@ export class Document {
         this.visibilityState = "visible";
     }
     createElement(tag) { const el = new Element(tag, this); if (el.tag === "template") el.content = new Fragment(this); return el; }
+    createElementNS(_namespace, tag) { return this.createElement(tag); }
     createTextNode(text) { return new TextNode(text); }
     querySelector(selector) { return this.documentElement.querySelector(selector); }
     querySelectorAll(selector) { return this.documentElement.querySelectorAll(selector); }

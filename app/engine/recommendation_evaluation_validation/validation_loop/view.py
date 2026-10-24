@@ -54,6 +54,19 @@ def _cell_status(repeats: list[dict[str, Any]]) -> str:
     return "PENDING"
 
 
+def _checks(experiments: list[dict[str, Any]]) -> dict[str, int] | None:
+    """How many of the workflow check's requests passed while the worker was down, over the finished repeats of one cell. None without a check."""
+    passed = total = 0
+    seen = False
+    for e in experiments:
+        window = (((e.get("outcome") or {}).get("probe") or {}).get("windows") or {}).get("failure")
+        if window:
+            seen = True
+            passed += int(window.get("successes") or 0)
+            total += int(window.get("samples") or 0)
+    return {"passed": passed, "total": total} if seen else None
+
+
 def _matrix(plan: dict[str, Any], experiments: list[dict[str, Any]]) -> dict[str, Any]:
     mode = plan.get("mode") or {}
     workers, repeats = list(mode.get("workers") or []), int(mode.get("repeats") or 1)
@@ -64,7 +77,7 @@ def _matrix(plan: dict[str, Any], experiments: list[dict[str, Any]]) -> dict[str
             found = {e["repeat"]: e for e in experiments if e["kind"] == "candidate" and e["candidateId"] == candidate["id"]
                      and e["worker"] == worker}
             reps = [{"repeat": n, "status": found[n]["status"] if n in found else "PENDING"} for n in range(1, repeats + 1)]
-            cells.append({"worker": worker, "repeats": reps, "status": _cell_status(reps)})
+            cells.append({"worker": worker, "repeats": reps, "status": _cell_status(reps), "checks": _checks(list(found.values()))})
         rows.append({"candidateId": candidate["id"], "strategy": candidate.get("strategy"), "service": candidate.get("service"),
                      "cells": cells, "status": _cell_status([r for c in cells for r in c["repeats"]])})
     return {"workers": workers, "repeatsPerCell": repeats, "rows": rows}
@@ -96,7 +109,14 @@ def _safety(run: dict[str, Any], experiments: list[dict[str, Any]]) -> dict[str,
     reverted = [c.get("reverted") for c in candidates if c.get("reverted") is not None]
     deployments_ok = bool(reverted) and all(v is True for v in reverted)
     recovery = run.get("recovery")
+    finished = [e for e in experiments if e["kind"] == "candidate" and e["status"] in FINISHED]
+    judged = [(e["outcome"] or {}).get("modelAgrees") for e in finished if (e["outcome"] or {}).get("modelAgrees") is not None]
+    blocked = any(str(r).startswith("Blocked before the kill") for e in experiments for r in ((e["outcome"] or {}).get("reasons") or []))
     body: dict[str, Any] = {
+        # What the run's own guard found before each stop, and whether the model agreed with what was observed. Both are read from
+        # the record: "passed" means no stop was refused by the guard, not that nothing could go wrong.
+        "criticalCheck": "blocked" if blocked else ("passed" if experiments else "pending"),
+        "predictionCheck": "pending" if not judged else ("mismatch" if any(v is False for v in judged) else "matches"),
         "workersRestored": "confirmed" if workers_ok else ("none-stopped" if not recoveries else "not-confirmed"),
         "deploymentsRestored": "confirmed" if deployments_ok else ("none-changed" if not candidates else "not-confirmed"),
         "recovery": recovery,
@@ -161,6 +181,15 @@ def _result(run: dict[str, Any], experiments: list[dict[str, Any]]) -> dict[str,
             "improvement": improvement, "modelMismatches": mismatches, "probeFindings": probe_findings}
 
 
+def _timing(run: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """Seconds since the run started, and its length once it has ended. From the stored timestamps only."""
+    started, finished = _parse(run.get("startedAt")), _parse(run.get("finishedAt"))
+    if started is None:
+        return {"elapsedS": None, "startedAgoS": None}
+    end = finished or now
+    return {"elapsedS": max(0.0, round((end - started).total_seconds(), 1)), "startedAgoS": max(0.0, round((now - started).total_seconds(), 1))}
+
+
 def build_view(run: dict[str, Any], experiments: list[dict[str, Any]], durations: list[float], *, now: datetime | None = None,
                worker_alive: bool | None = None, research: bool = False) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
@@ -189,7 +218,9 @@ def build_view(run: dict[str, Any], experiments: list[dict[str, Any]], durations
                   "label": "Abort requested — recovering worker" if status == "ABORTING" else None},
         "safety": _safety(run, experiments), "result": _result(run, experiments), "stopReason": run.get("stopReason"),
         "estimate": observed_estimate(durations, remaining) if status in RUNNING_STATES else None,
-        "startedAt": run.get("startedAt"), "finishedAt": run.get("finishedAt"),
+        "startedAt": run.get("startedAt"), "finishedAt": run.get("finishedAt"), "timing": _timing(run, now),
+        "baselineMeasured": bool(mode.get("measureBaseline")),
+        "evidenceLevel": "L2_PROBE" if plan.get("probe") else "L1_READINESS",
         "canStartAnother": status in ("COMPLETED", "INTERRUPTED", "FAILED") and not (run.get("recovery") and not run["recovery"].get("complete")),
     }
     if research:

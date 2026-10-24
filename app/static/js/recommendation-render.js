@@ -596,7 +596,7 @@
 
     // ---- where the person is in the flow ------------------------------------------------------------------------------
 
-    const STEP_LABELS = ["Select application and workflow", "Analyse failure impact", "Compare candidate improvements", "Prove it on a test cluster", "Review and approve proposal"];
+    const STEP_LABELS = ["Select", "Impact", "Compare", "Prove it", "Approve"];
     const STEP_STATE_TEXT = { done: "Done", current: "Now", blocked: "Needs attention", todo: "Not yet" };
 
     /**

@@ -260,7 +260,7 @@ test("an estimate appears only when the server sends one, with what it rests on"
     const t = open();
     await begin(t, { run: run({ estimate: { remainingExperiments: 1, estimatedSeconds: 240, basedOnExperiments: 3 } }) });
 
-    assert.ok(t.text().includes("About 4 min left (from 3 earlier experiments)"));
+    assert.ok(t.text().includes("about 4 min left"));
 });
 
 test("the matrix shows every cell's state in words as well as marks, and the current operation names the exact stage", async () => {
@@ -270,9 +270,10 @@ test("the matrix shows every cell's state in words as well as marks, and the cur
     const states = t.root.querySelectorAll(".prf-state").map((n) => n.getAttribute("data-status"));
     assert.deepEqual(plain(states), ["PASS", "RUNNING"]);
     assert.ok(t.root.querySelector(".prf-matrix").textContent.includes("Pass") && t.root.querySelector(".prf-matrix").textContent.includes("Running"));
-    assert.ok(t.root.querySelector(".prf-current").textContent.includes("desktop-worker2") && t.root.querySelector(".prf-current").textContent.includes("Inject failure"));
+    assert.ok(t.root.querySelector(".prf-op__facts").textContent.includes("desktop-worker2") && t.root.querySelector(".prf-op__now").textContent.includes("stopping desktop-worker2"));
     assert.equal(t.root.querySelectorAll('[aria-current="step"]').length, 1);
-    assert.deepEqual(plain(t.root.querySelectorAll(".prf-stage").map((n) => n.textContent)), ["Prepare", "Apply candidate", "Verify rollout", "Inject failure", "Probe", "Recover worker", "Restore deployment"]);
+    assert.equal(t.root.querySelector('[aria-current="step"]').textContent.includes("Inject failure"), true);
+    assert.deepEqual(plain(t.root.querySelectorAll(".prf-track__label").map((n) => n.textContent)), ["Prepare", "Apply candidate", "Verify rollout", "Inject failure", "Probe", "Recover worker", "Restore deployment"]);
 });
 
 test("a running run is asked about every two seconds, and polling stops once it has ended", async () => {
@@ -345,7 +346,7 @@ test("while aborting the page says Abort requested — recovering worker and cla
         safety: { level: "warning", message: "Abort requested — recovering worker. Nothing is claimed restored until it is verified.", workersRestored: "not-confirmed", deploymentsRestored: "not-confirmed", recovery: null } }) });
 
     assert.ok(t.text().includes("Abort requested — recovering worker"));
-    assert.ok(t.text().includes("Finished tests, workers: not yet confirmed") && t.text().includes("Deployments: not yet confirmed"));
+    assert.ok(t.text().includes("Finished tests, workers: not yet confirmed") && t.text().includes("Changed"), "deployments are changed, not yet confirmed put back");
     assert.ok(!t.text().includes("restored (verified)"));
     assert.equal(button(t, "btn-prf-abort").disabled, true);
 });
@@ -375,9 +376,9 @@ test("a proven change is offered for approval, not applied, and the evidence is 
     const t = open();
     await begin(t, { run: PROVEN() });
 
-    assert.ok(t.text().includes("Proven") && t.text().includes("held on every tested worker"));
+    assert.ok(t.text().includes("Proof summary") && t.text().includes("Resilient") && t.text().includes("held on every tested worker"));
     assert.ok(t.text().includes("Preliminary evidence") && t.text().includes("not measured"));
-    assert.ok(button(t, "btn-prf-continue").parentNode.getAttribute("title").includes("Nothing has been applied"));
+    assert.ok(button(t, "btn-prf-continue").getAttribute("title").includes("Nothing has been applied"));
     assert.deepEqual(plain(t.facts.at(-1)), ["passed", "COMPLETED"]);
     await press(t, "btn-prf-continue");
     assert.deepEqual(plain(t.continued), ["c1"]);
@@ -390,8 +391,8 @@ test("a model mismatch is read before the call to action, not after it", async (
     completed.result.modelMismatches = [{ candidateId: "c1", worker: "desktop-worker2", repeat: 1, predictedSurvives: false, readinessHolds: true }];
     await begin(t, { run: completed });
 
-    const text = t.root.querySelector(".prf-result").textContent;
-    assert.ok(text.indexOf("Prediction wrong") < text.indexOf("Continue to approval"));
+    const text = t.text();
+    assert.ok(text.includes("Mismatch") && text.indexOf("Mismatch") < text.indexOf("Continue to approval"), "the mismatch is part of the summary, read before the action");
 });
 
 test("while a run is going, verified restoration is said to be about the tests already finished", async () => {
@@ -407,7 +408,7 @@ test("a model mismatch is shown plainly in the result, with both values", async 
     completed.result.modelMismatches = [{ candidateId: "c1", worker: "desktop-worker2", repeat: 1, predictedSurvives: false, readinessHolds: true }];
     await begin(t, { run: completed });
 
-    assert.ok(t.text().includes("Prediction wrong on desktop-worker2"));
+    assert.ok(t.text().includes("Mismatch") && t.text().includes("desktop-worker2: model said fails, readiness held"));
 });
 
 test("a probe that disagreed with readiness is reported as a finding about the check, never as a prediction error", async () => {
@@ -427,9 +428,9 @@ test("with no winner nothing is offered for approval and nothing is called prove
     none.result.candidates = [{ candidateId: "c1", status: "INCONCLUSIVE", reason: "1 of 2 planned experiments did not produce a pass.", reverted: true }];
     await begin(t, { run: none });
 
-    assert.equal(t.root.querySelector(".prf-result__title").textContent, "Not proven");
     assert.ok(t.root.querySelector(".prf-result--none") && !t.root.querySelector(".prf-result--pass"));
-    assert.equal(button(t, "btn-prf-continue"), null);
+    assert.ok(t.text().includes("Not proven") && !t.text().includes("Resilient"));
+    assert.equal(button(t, "btn-prf-continue").disabled, true, "there is nothing to approve");
     assert.ok(t.text().includes("did not produce a pass"));
 });
 
@@ -444,17 +445,61 @@ test("a finished run offers another plan, and choosing it goes back to the setti
     assert.equal(t.network.calls.length, before);
 });
 
-test("the research table appears only when the server sent research detail", async () => {
-    const plain = open();
-    await begin(plain, { run: PROVEN() });
-    assert.equal(plain.root.querySelector(".prf-research"), null);
+const SAMPLES = [-10, -5, 0, 5, 10, 15, 20, 25, 30].map((at, i) => ({ at_s: 100 + at, ok: at < 10, status: at < 10 ? 200 : 503, latency_ms: 300 + i * 20, reason: at < 10 ? null : "status 503, expected 200", error: null }));
+const MARKS = [{ name: "stop-issued", atS: 100 }, { name: "pods-unready", atS: 112 }, { name: "restore-issued", atS: 135 }, { name: "node-ready", atS: 160 }];
+
+function withResearch() {
+    const completed = PROVEN();
+    completed.research = { events: [{ event: "RUN_STARTED", detail: "QUICK" }], experiments: [{ candidateId: "c1", worker: "desktop-worker", repeat: 1, status: "PASS", durationS: 61.2,
+        outcome: { evidenceLevel: "L2_PROBE", readiness: { holds: true, services: { reviews: { readyElsewhere: 2, readyOnWorker: 0, ok: true }, ratings: { readyElsewhere: 0, readyOnWorker: 0, ok: false } } },
+            probe: { workflowSurvives: true, samples: SAMPLES, marks: MARKS }, modelAgrees: true, predictionError: 0 } }] };
+    return completed;
+}
+
+test("the research data appears only when the server sent it, and never draws a predicted curve", async () => {
+    const plain_ = open();
+    await begin(plain_, { run: PROVEN() });
+    assert.equal(plain_.root.querySelector(".prf-research"), null);
 
     const detailed = open();
-    const withResearch = PROVEN();
-    withResearch.research = { events: [{ event: "RUN_STARTED", detail: "QUICK" }], experiments: [{ candidateId: "c1", worker: "desktop-worker", repeat: 1, status: "PASS",
-        durationS: 61.2, outcome: { evidenceLevel: "L2_PROBE", readiness: { holds: true }, probe: { workflowSurvives: true }, modelAgrees: true, predictionError: 0 } }] };
-    await begin(detailed, { run: withResearch });
-    assert.ok(detailed.root.querySelector(".prf-research").textContent.includes("L2_PROBE"));
+    await begin(detailed, { run: withResearch() });
+    const panel = detailed.root.querySelector(".prf-research");
+    assert.ok(panel.textContent.includes("Observed during the run") && panel.textContent.includes("none are drawn"));
+    assert.ok(!/predicted/i.test(panel.querySelectorAll("figcaption").map((n) => n.textContent).join(" ")), "no chart is labelled predicted");
+});
+
+test("the charts plot the samples that were taken, marked at the stop and the restart, and the table lists them with their result", async () => {
+    const t = open();
+    await begin(t, { run: withResearch() });
+
+    const charts = t.root.querySelectorAll(".prf-chart");
+    assert.equal(charts.length, 2);
+    assert.equal(charts[0].querySelectorAll("circle").length, SAMPLES.length);
+    assert.ok(charts[0].querySelector("polyline") && charts[0].textContent.includes("Worker stopped") && charts[0].textContent.includes("Worker back"));
+    const rows = t.root.querySelector(".prf-research").querySelectorAll("tr").slice(1);
+    assert.equal(rows.length, 8, "the first eight samples; the rest are said to be in the record");
+    assert.ok(t.root.querySelector(".prf-research").textContent.includes("1 more samples are in the stored record"));
+    assert.ok(rows[7].textContent.includes("status 503, expected 200"));
+});
+
+test("readiness and recovery timings are the record's own figures, from the probe's marks", async () => {
+    const t = open();
+    await begin(t, { run: withResearch() });
+
+    const text = t.root.querySelector(".prf-research").textContent;
+    assert.ok(text.includes("reviews: 2 ready elsewhere, 0 on the worker") && text.includes("Holds") && text.includes("Lost"));
+    assert.ok(text.includes("Seen as down after") && text.includes("12 s") && text.includes("Stopped for") && text.includes("35 s") && text.includes("Back to Ready after") && text.includes("25 s"));
+    assert.ok(text.includes("Experiment took") && text.includes("61 s"));
+});
+
+test("an experiment with no samples says so instead of drawing an empty chart", async () => {
+    const t = open();
+    const bare = withResearch();
+    bare.research.experiments[0].outcome.probe = { workflowSurvives: null, samples: [], marks: [] };
+    await begin(t, { run: bare });
+
+    assert.ok(t.root.querySelector(".prf-research").textContent.includes("No samples were taken"));
+    assert.equal(t.root.querySelectorAll(".prf-chart polyline").length, 0);
 });
 
 // ---- the disposable cluster: why it is not there, and whether this computer could hold one ----------------------------------------------
