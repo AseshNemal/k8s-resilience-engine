@@ -95,7 +95,7 @@ test("opening the step only reads: the latest run and the clusters", async () =>
     await begin(t);
 
     assert.deepEqual(t.network.calls.map((c) => c.method), ["GET", "GET"]);
-    assert.ok(t.text().includes("Where to test") && t.text().includes("How thorough") && t.text().includes("How we know the workflow works"));
+    assert.ok(t.text().includes("Where") && t.text().includes("Depth") && t.text().includes("Workflow check"));
 });
 
 test("both clusters are listed, one that cannot be used is disabled with its reason, and Docker Desktop's effect on the person is said", async () => {
@@ -106,8 +106,24 @@ test("both clusters are listed, one that cannot be used is disabled with its rea
     assert.equal(radios.length, 2);
     assert.equal(radios[0].disabled, false);
     assert.equal(radios[1].disabled, true);
-    assert.ok(t.text().includes("has not been prepared"));
-    assert.ok(t.text().includes("Worker nodes of it are stopped on purpose"));
+    assert.ok(radios[1].parentNode.getAttribute("title").includes("has not been prepared"), "the reason is on the option");
+    assert.ok(t.text().includes("workers are stopped on purpose"), "what the chosen cluster means for the person, in one line");
+});
+
+test("a cluster that cannot be used is never shown as chosen, and the reasons are said in one line", async () => {
+    const t = open();
+    await begin(t, { run: null }, { targets: TARGET_LIST.targets.map((x) => ({ ...x, available: false, reason: x.reason || "The cluster's identity could not be read." })), blockingRun: null });
+
+    assert.equal(t.root.querySelectorAll('input[name="prf-target"]').filter((r) => r.checked).length, 0);
+    assert.ok(t.text().includes("Docker Desktop: The cluster's identity could not be read."));
+    assert.equal(button(t, "btn-prf-plan").disabled, true);
+});
+
+test("when only the second cluster is usable it is the one chosen", async () => {
+    const t = open();
+    await begin(t, { run: null }, { targets: [{ ...TARGET_LIST.targets[0], available: false, reason: "no" }, { ...TARGET_LIST.targets[1], available: true }], blockingRun: null });
+
+    assert.equal(t.root.querySelectorAll('input[name="prf-target"]').find((r) => r.checked).value, "DISPOSABLE");
 });
 
 test("the three depths are offered, Quick is chosen, and each says what it runs and whether it is preliminary", async () => {
@@ -117,7 +133,7 @@ test("the three depths are offered, Quick is chosen, and each says what it runs 
     const radios = t.root.querySelectorAll('input[name="prf-mode"]');
     assert.deepEqual(plain(radios.map((r) => r.value)), ["SMOKE", "QUICK", "FULL"]);
     assert.equal(radios.find((r) => r.checked).value, "QUICK");
-    assert.ok(t.text().includes("Preliminary · default") && t.text().includes("Repeatable"));
+    assert.ok(t.text().includes("best change · every worker · once · preliminary evidence"));
 });
 
 test("a running run found at load is shown at once, and no plan form is offered while it is going", async () => {
@@ -154,7 +170,7 @@ test("the plan is drawn from the server's answer, with what stops it and what th
 
     assert.ok(t.text().includes("Stops the run") && t.text().includes("coredns"));
     assert.equal(button(t, "btn-prf-start").disabled, true, "a blocked plan cannot be started");
-    assert.ok(t.text().includes("2 node stops at most") && t.text().includes("every changed Deployment is put back"));
+    assert.ok(t.text().includes("2 at most") && t.text().includes("every change is put back"));
 });
 
 test("with no earlier experiment there is no time estimate, and the page says so instead of promising one", async () => {
@@ -164,7 +180,7 @@ test("with no earlier experiment there is no time estimate, and the page says so
     t.network.respond("POST", `${BASE}/plan`, 200, PLAN);
     await flush();
 
-    assert.ok(t.text().includes("No estimate yet"));
+    assert.ok(!t.text().includes("Time") && !t.text().toLowerCase().includes("estimate"), "no time row and no promise without history");
     assert.ok(!/\d+ ?min/.test(t.text()));
 });
 
@@ -244,7 +260,7 @@ test("an estimate appears only when the server sends one, with what it rests on"
     const t = open();
     await begin(t, { run: run({ estimate: { remainingExperiments: 1, estimatedSeconds: 240, basedOnExperiments: 3 } }) });
 
-    assert.ok(t.text().includes("About 4 min left, from 3 earlier experiments."));
+    assert.ok(t.text().includes("About 4 min left (from 3 earlier experiments)"));
 });
 
 test("the matrix shows every cell's state in words as well as marks, and the current operation names the exact stage", async () => {
@@ -317,7 +333,7 @@ test("abort asks first, says what it will do, and only then sends", async () => 
 
     await press(t, "btn-prf-abort");
     assert.equal(t.network.calls.filter((c) => c.url.endsWith("/abort")).length, 0);
-    assert.ok(t.text().includes("started again") && t.text().includes("put back first"));
+    assert.ok(t.text().includes("restarted") && t.text().includes("reverted first"));
 
     await press(t, "btn-prf-abort-yes");
     assert.equal(t.network.calls.filter((c) => c.url === `${BASE}/runs/loop-1/abort`).length, 1);
@@ -359,9 +375,9 @@ test("a proven change is offered for approval, not applied, and the evidence is 
     const t = open();
     await begin(t, { run: PROVEN() });
 
-    assert.ok(t.text().includes("Proven") && t.text().includes("kept the workflow working"));
+    assert.ok(t.text().includes("Proven") && t.text().includes("held on every tested worker"));
     assert.ok(t.text().includes("Preliminary evidence") && t.text().includes("not measured"));
-    assert.ok(t.text().includes("applies nothing to your cluster"));
+    assert.ok(button(t, "btn-prf-continue").parentNode.getAttribute("title").includes("Nothing has been applied"));
     assert.deepEqual(plain(t.facts.at(-1)), ["passed", "COMPLETED"]);
     await press(t, "btn-prf-continue");
     assert.deepEqual(plain(t.continued), ["c1"]);
@@ -375,7 +391,7 @@ test("a model mismatch is read before the call to action, not after it", async (
     await begin(t, { run: completed });
 
     const text = t.root.querySelector(".prf-result").textContent;
-    assert.ok(text.indexOf("Prediction was wrong") < text.indexOf("Continue to approval"));
+    assert.ok(text.indexOf("Prediction wrong") < text.indexOf("Continue to approval"));
 });
 
 test("while a run is going, verified restoration is said to be about the tests already finished", async () => {
@@ -391,7 +407,7 @@ test("a model mismatch is shown plainly in the result, with both values", async 
     completed.result.modelMismatches = [{ candidateId: "c1", worker: "desktop-worker2", repeat: 1, predictedSurvives: false, readinessHolds: true }];
     await begin(t, { run: completed });
 
-    assert.ok(t.text().includes("Prediction was wrong for desktop-worker2"));
+    assert.ok(t.text().includes("Prediction wrong on desktop-worker2"));
 });
 
 test("a probe that disagreed with readiness is reported as a finding about the check, never as a prediction error", async () => {
@@ -401,7 +417,7 @@ test("a probe that disagreed with readiness is reported as a finding about the c
     await begin(t, { run: completed });
 
     assert.ok(t.text().includes("a finding about the check, not a prediction error"));
-    assert.ok(!t.text().includes("Prediction was wrong"));
+    assert.ok(!t.text().includes("Prediction wrong"));
 });
 
 test("with no winner nothing is offered for approval and nothing is called proven", async () => {
@@ -447,7 +463,7 @@ test("an unavailable test cluster explains itself and offers a check that only r
     const t = open();
     await begin(t);
 
-    assert.ok(t.text().includes("Why is there no test cluster"));
+    assert.ok(t.text().includes("No test cluster? Check this computer"));
     assert.ok(button(t, "btn-prf-assess"));
     const before = t.network.calls.length;
     await press(t, "btn-prf-assess");
@@ -463,8 +479,8 @@ test("a machine that cannot hold the cluster is told what to change, and no clus
         advice: ["Raise Docker Desktop's memory to at least 4.4 GiB (Settings → Resources); it is 3.8 GiB now."] });
     await flush();
 
-    assert.ok(t.text().includes("Not enough to create one yet (INSUFFICIENT)") && t.text().includes("Raise Docker Desktop's memory"));
-    assert.ok(!t.text().includes("is created on this computer with kind"));
+    assert.ok(t.text().includes("Not enough yet (INSUFFICIENT)") && t.text().includes("Raise Docker Desktop's memory"));
+    assert.ok(!t.text().includes("Create it with kind"));
     assert.equal(t.network.calls.filter((c) => c.method === "POST").length, 0);
 });
 
@@ -492,7 +508,7 @@ test("when the test cluster is available the explanation is not shown", async ()
     const t = open();
     await begin(t, { run: null }, { targets: TARGET_LIST.targets.map((x) => ({ ...x, available: true })), blockingRun: null });
 
-    assert.ok(!t.text().includes("Why is there no test cluster"));
+    assert.ok(!t.text().includes("No test cluster? Check this computer"));
 });
 
 // ---- the pure parts and the markup --------------------------------------------------------------------------------------------
@@ -538,4 +554,28 @@ test("every script the page needs is loaded, the proof panel before the page scr
 
 test("no value reaches the page except through textContent: the script never uses innerHTML", () => {
     assert.ok(!/innerHTML|insertAdjacentHTML|document\.write/.test(SCRIPT));
+});
+
+// ---- restraint: the step is for deciding, not for reading ---------------------------------------------------------------------------
+
+test("the setup is short: no sentence of explanation is longer than a line, and options hide until opened", async () => {
+    const t = open();
+    await begin(t);
+
+    const sentences = t.root.querySelectorAll("p").map((n) => n.textContent);
+    assert.ok(sentences.every((x) => x.length <= 80), sentences.filter((x) => x.length > 80).join(" | "));
+    assert.ok(t.text().length < 700, `setup text is ${t.text().length} characters`);
+    assert.ok(t.root.querySelectorAll("details").every((d) => !d.open), "optional parts are closed until the person opens them");
+});
+
+test("the plan is a handful of short lines, with the notes behind a disclosure", async () => {
+    const t = open();
+    await begin(t);
+    await press(t, "btn-prf-plan");
+    t.network.respond("POST", `${BASE}/plan`, 200, PLAN);
+    await flush();
+
+    assert.ok(t.root.querySelectorAll(".prf-summary li").length <= 6);
+    assert.ok(t.text().length < 700, `plan text is ${t.text().length} characters`);
+    assert.ok(t.root.querySelector("details").textContent.includes("Notes") && !t.root.querySelector("details").open);
 });

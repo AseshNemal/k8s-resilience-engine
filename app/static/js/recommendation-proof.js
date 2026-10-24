@@ -23,14 +23,15 @@
     const MAX_BACKOFF = 8;
     const UNKNOWN = "unknown";
 
-    const TARGET_HELP = {
-        DOCKER_DESKTOP: "Your Docker Desktop cluster. Its running application is used as it is. Worker nodes of it are stopped on purpose.",
-        DISPOSABLE: "A separate cluster made for tests. Your own cluster is not touched.",
+    const TARGET_NAME = { DOCKER_DESKTOP: "Docker Desktop", DISPOSABLE: "Test cluster" };
+    const TARGET_CAPTION = {
+        DOCKER_DESKTOP: "Your everyday cluster. Its workers are stopped on purpose.",
+        DISPOSABLE: "A separate cluster. Yours is not touched.",
     };
     const MODES = [
-        { id: "SMOKE", name: "Smoke test", detail: "One change, one worker, once. Checks that testing works at all.", tag: "Preliminary" },
-        { id: "QUICK", name: "Quick validation", detail: "The best change, every worker once.", tag: "Preliminary · default" },
-        { id: "FULL", name: "Full research validation", detail: "The best two changes, every worker, twice, with a measured baseline.", tag: "Repeatable" },
+        { id: "SMOKE", name: "Smoke", detail: "1 change · 1 worker · once", preliminary: true },
+        { id: "QUICK", name: "Quick", detail: "best change · every worker · once", preliminary: true },
+        { id: "FULL", name: "Full", detail: "best 2 changes · every worker · twice · baseline", preliminary: false },
     ];
     const CELL = {
         PASS: { glyph: "✓", text: "Pass", tone: "pass" }, FAIL: { glyph: "✕", text: "Fail", tone: "fail" },
@@ -214,6 +215,11 @@
                 if (targets.ok) {
                     state.targets = targets.payload.targets;
                     state.blockingRun = targets.payload.blockingRun;
+                    // Only a cluster that can be used is ever shown as chosen.
+                    if (!state.targets.some((t) => t.kind === form.targetKind && t.available)) {
+                        const usable = state.targets.find((t) => t.available);
+                        form.targetKind = usable ? usable.kind : "";
+                    }
                 }
                 const run = current.ok && current.payload ? current.payload.run : null;
                 // The latest run is always shown when there is one: a run that finished while the extension was closed is still the answer
@@ -374,24 +380,27 @@
             const label = make(doc, "label", labelText, undefined, { for: id });
             control.id = id;
             wrap.append(label, control);
-            if (hint) wrap.append(make(doc, "p", hint, "prf-hint"));
+            if (hint) wrap.append(make(doc, "p", hint, "prf-caption"));
             return wrap;
         }
 
-        function choice(name, value, labelText, detail, tag, checked, onSelect, disabled) {
-            const wrap = make(doc, "label", undefined, `prf-choice${checked ? " prf-choice--on" : ""}${disabled ? " prf-choice--off" : ""}`);
-            const input = make(doc, "input", undefined, "prf-choice__input", { type: "radio", name, value });
-            input.value = value;
-            input.checked = !!checked;
-            input.disabled = !!disabled;
-            input.addEventListener("change", () => onSelect(value));
-            const body = make(doc, "span", undefined, "prf-choice__body");
-            const head = make(doc, "span", undefined, "prf-choice__head");
-            head.append(make(doc, "span", labelText, "prf-choice__name"));
-            if (tag) head.append(chip(doc, tag, "wait"));
-            body.append(head, make(doc, "span", detail, "prf-choice__detail"));
-            wrap.append(input, body);
-            return wrap;
+        /** A segmented control: one radio group, each option a short label; an option that cannot be used says why in its tooltip. */
+        function segmented(name, label, options, selected, onSelect) {
+            const group = make(doc, "div", undefined, "prf-seg", { role: "radiogroup", "aria-label": label });
+            for (const option of options) {
+                const on = option.value === selected;
+                const node = make(doc, "label", undefined, `prf-seg__option${on ? " prf-seg__option--on" : ""}${option.disabled ? " prf-seg__option--off" : ""}`);
+                if (option.title) node.setAttribute("title", option.title);
+                const input = make(doc, "input", undefined, "prf-seg__input", { type: "radio", name, value: option.value });
+                input.value = option.value;
+                input.checked = on;
+                input.disabled = !!option.disabled;
+                input.addEventListener("change", () => onSelect(option.value));
+                node.append(input, make(doc, "span", option.label, "prf-seg__label"));
+                if (option.note) node.append(make(doc, "span", option.note, "prf-seg__note"));
+                group.append(node);
+            }
+            return group;
         }
 
         function drawHead(container, title, sub) {
@@ -408,31 +417,36 @@
         }
 
         function drawSetup(container) {
-            drawHead(container, "4. Prove it on a test cluster",
-                "Optional. Stops a worker node on purpose and checks the workflow keeps working. Everything is put back afterwards.");
+            drawHead(container, "4. Prove it on a test cluster", "Stop a worker on purpose and check the workflow survives.");
             drawMessage(container);
             if (state.blockingRun) {
-                container.append(make(doc, "p", `A run is already ${String(state.blockingRun.status).toLowerCase().replace(/_/g, " ")}. It has to finish, or be recovered, before another starts.`, "approval-note prf-message prf-message--alert", { role: "alert" }));
+                container.append(make(doc, "p", `A run is already ${String(state.blockingRun.status).toLowerCase().replace(/_/g, " ")}. Finish or recover it first.`,
+                    "approval-note prf-message prf-message--alert", { role: "alert" }));
             }
-            const targets = make(doc, "fieldset", undefined, "prf-group");
-            targets.append(make(doc, "legend", "Where to test", "prf-group__legend"));
-            for (const target of state.targets || []) {
-                const reason = target.available ? null : target.reason || "Not available";
-                const node = choice("prf-target", target.kind, target.label, `${TARGET_HELP[target.kind] || ""}${reason ? ` Not available: ${reason}` : ""}`,
-                    target.available ? null : "Unavailable", form.targetKind === target.kind, (value) => { form.targetKind = value; draw(); }, !target.available);
-                targets.append(node);
-            }
-            if (!(state.targets || []).length) targets.append(make(doc, "p", "Clusters could not be listed yet.", "prf-hint"));
-            container.append(targets);
-            if ((state.targets || []).some((t) => t.kind === "DISPOSABLE" && !t.available)) container.append(drawPrepare());
+            const targets = state.targets || [];
+            const where = make(doc, "div", undefined, "prf-line");
+            where.append(make(doc, "span", "Where", "prf-line__label"));
+            where.append(segmented("prf-target", "Where to test", targets.map((t) => ({
+                value: t.kind, label: TARGET_NAME[t.kind] || t.label, disabled: !t.available, note: t.available ? null : "unavailable",
+                title: t.available ? TARGET_CAPTION[t.kind] : (t.reason || "Not available"),
+            })), form.targetKind, (value) => { form.targetKind = value; draw(); }));
+            container.append(where);
+            const chosen = targets.find((t) => t.kind === form.targetKind);
+            if (!targets.length) container.append(make(doc, "p", "Clusters could not be listed yet.", "prf-caption"));
+            else if (chosen && chosen.available) container.append(make(doc, "p", TARGET_CAPTION[chosen.kind] || "", "prf-caption"));
+            else container.append(make(doc, "p", targets.map((t) => `${TARGET_NAME[t.kind] || t.label}: ${t.reason || "not available"}`).join(" · "), "prf-caption prf-caption--warn"));
+            if (targets.some((t) => t.kind === "DISPOSABLE" && !t.available)) container.append(drawPrepare());
 
-            const modes = make(doc, "fieldset", undefined, "prf-group");
-            modes.append(make(doc, "legend", "How thorough", "prf-group__legend"));
-            for (const mode of MODES) modes.append(choice("prf-mode", mode.id, mode.name, mode.detail, mode.tag, form.mode === mode.id, (value) => { form.mode = value; draw(); }, false));
-            container.append(modes);
+            const depth = make(doc, "div", undefined, "prf-line");
+            depth.append(make(doc, "span", "Depth", "prf-line__label"));
+            depth.append(segmented("prf-mode", "How thorough", MODES.map((m) => ({ value: m.id, label: m.name })), form.mode, (value) => { form.mode = value; draw(); }));
+            container.append(depth);
+            const mode = MODES.find((m) => m.id === form.mode) || MODES[1];
+            container.append(make(doc, "p", `${mode.detail}${mode.preliminary ? " · preliminary evidence" : " · repeatable evidence"}`, "prf-caption"));
 
-            const probe = make(doc, "fieldset", undefined, "prf-group prf-probe");
-            probe.append(make(doc, "legend", "How we know the workflow works", "prf-group__legend"));
+            const probe = make(doc, "details", undefined, "prf-opt");
+            if (form.probe.url.trim()) probe.setAttribute("open", "");
+            probe.append(make(doc, "summary", `Workflow check ${form.probe.url.trim() ? "· set" : "(optional)"}`));
             const url = make(doc, "input", undefined, "form-input", { type: "text", autocomplete: "off", placeholder: "http://127.0.0.1:18080/productpage" });
             url.value = form.probe.url;
             url.addEventListener("input", () => { form.probe.url = url.value; });
@@ -445,15 +459,13 @@
             const notContain = make(doc, "textarea", undefined, "form-input", { rows: "2" });
             notContain.value = form.probe.notContain;
             notContain.addEventListener("input", () => { form.probe.notContain = notContain.value; });
-            probe.append(
-                field("Page address (this computer)", url, "prf-probe-url", "Without one, a change passes on Kubernetes readiness alone, which is weaker evidence."),
-                field("Expected status", status, "prf-probe-status"),
-                field("Page must contain (one per line)", contain, "prf-probe-contain"),
-                field("Page must not contain (one per line)", notContain, "prf-probe-not"));
+            const grid = make(doc, "div", undefined, "prf-fields");
+            grid.append(field("Page address", url, "prf-probe-url"), field("Status", status, "prf-probe-status"),
+                field("Must contain", contain, "prf-probe-contain"), field("Must not contain", notContain, "prf-probe-not"));
             const probeRow = make(doc, "div", undefined, "prf-row");
-            probeRow.append(button("Test the check now", "secondary-button", testProbe, state.busy || !form.probe.url.trim(), "btn-prf-probe"));
+            probeRow.append(button("Test it", "secondary-button", testProbe, state.busy || !form.probe.url.trim(), "btn-prf-probe"));
             if (state.probeTest) probeRow.append(drawProbeResult());
-            probe.append(probeRow);
+            probe.append(grid, probeRow, make(doc, "p", "Without it a change passes on Kubernetes readiness alone.", "prf-caption"));
             container.append(probe);
 
             const baseline = make(doc, "label", undefined, "prf-check");
@@ -461,32 +473,30 @@
             box.checked = form.mode === "FULL" || form.baseline;
             box.disabled = form.mode === "FULL";
             box.addEventListener("change", () => { form.baseline = box.checked; });
-            baseline.append(box, make(doc, "span", form.mode === "FULL" ? "A measured baseline is part of every full validation." : "Also stop each worker once before the change, to measure the improvement."));
+            baseline.append(box, make(doc, "span", form.mode === "FULL" ? "Measured baseline (always on for Full)" : "Measure a baseline first"));
             container.append(baseline);
 
             const actions = make(doc, "div", undefined, "approval-actions");
-            actions.append(button("Review the plan", "primary-button", reviewPlan, state.busy || !!state.blockingRun || !(state.targets || []).some((t) => t.available), "btn-prf-plan"));
+            actions.append(button("Review the plan", "primary-button", reviewPlan, state.busy || !!state.blockingRun || !targets.some((t) => t.available), "btn-prf-plan"));
             container.append(actions);
         }
 
         function drawPrepare() {
-            const details = make(doc, "details", undefined, "prf-prepare");
-            details.append(make(doc, "summary", "Why is there no test cluster, and can this computer hold one?"));
-            details.append(make(doc, "p", "A test cluster is a separate kind cluster created on this computer. Checking only reads Docker's memory; nothing is created.", "prf-hint"));
+            const details = make(doc, "details", undefined, "prf-opt");
+            details.append(make(doc, "summary", "No test cluster? Check this computer"));
             const row = make(doc, "div", undefined, "prf-row");
-            row.append(button("Check this computer", "secondary-button", checkMachine, state.busy, "btn-prf-assess"));
+            row.append(button("Check memory", "secondary-button", checkMachine, state.busy, "btn-prf-assess"));
             details.append(row);
             const a = state.assessment;
-            if (a && a.pending) details.append(make(doc, "p", "Checking…", "prf-hint", { role: "status" }));
+            if (a && a.pending) details.append(make(doc, "p", "Checking…", "prf-caption", { role: "status" }));
             else if (a && a.error) details.append(make(doc, "p", a.error, "approval-note prf-message prf-message--alert", { role: "alert" }));
             else if (a) {
                 const box = make(doc, "div", undefined, `prf-assess prf-assess--${a.canCreate ? "ok" : "no"}`, { role: "status" });
-                box.append(make(doc, "strong", a.canCreate ? "Enough memory for a test cluster." : `Not enough to create one yet (${a.verdict}).`));
-                (a.reasons || []).forEach((r) => box.append(make(doc, "p", r, "prf-hint")));
+                box.append(make(doc, "strong", a.canCreate ? "Enough memory for a test cluster." : `Not enough yet (${a.verdict}).`));
                 const steps = make(doc, "ul", undefined, "prf-advice");
                 (a.advice || []).forEach((line) => steps.append(make(doc, "li", line)));
-                if ((a.advice || []).length) box.append(make(doc, "p", "What to change:", "prf-hint"), steps);
-                if (a.canCreate) box.append(make(doc, "p", "The cluster is created on this computer with kind, using the steps in docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md. It is not created from this page.", "prf-hint"));
+                if ((a.advice || []).length) box.append(steps);
+                if (a.canCreate) box.append(make(doc, "p", "Create it with kind (see the runbook). It is not created from this page.", "prf-caption"));
                 details.append(box);
             }
             return details;
@@ -494,31 +504,30 @@
 
         function drawProbeResult() {
             const test = state.probeTest;
-            if (test.pending) return make(doc, "span", "Checking…", "prf-hint", { role: "status" });
+            if (test.pending) return make(doc, "span", "Checking…", "prf-caption", { role: "status" });
             if (test.error) return chip(doc, test.error, "fail");
             const ok = test.survives === true;
             const node = make(doc, "span", undefined, "prf-probe-result", { role: "status" });
-            node.append(chip(doc, ok ? `Works: ${test.passed} of ${test.samples} requests passed` : `Does not pass: ${test.passed} of ${test.samples} requests passed`, ok ? "pass" : "fail"));
-            if (!ok && (test.reasons || []).length) node.append(make(doc, "span", ` ${test.reasons.join("; ")}`, "prf-hint"));
+            node.append(chip(doc, ok ? `Works · ${test.passed}/${test.samples}` : `Fails · ${test.passed}/${test.samples}`, ok ? "pass" : "fail"));
+            if (!ok && (test.reasons || []).length) node.append(make(doc, "span", ` ${test.reasons.join("; ")}`, "prf-caption"));
             return node;
         }
 
         function drawPlan(container) {
             const plan = state.plan;
-            drawHead(container, "4. Prove it on a test cluster", "Review exactly what this run would do. Approving covers this and nothing else.");
+            drawHead(container, "4. Prove it on a test cluster", "Approving covers exactly this and nothing else.");
             drawMessage(container);
             const mode = plan.mode;
             const summary = make(doc, "ul", undefined, "prf-summary");
             const item = (label, value) => { const li = make(doc, "li"); li.append(make(doc, "span", label, "prf-summary__label"), make(doc, "span", value, "prf-summary__value")); summary.append(li); };
-            item("Cluster", `${plan.target.name} (${plan.target.kind === "DOCKER_DESKTOP" ? "your Docker Desktop cluster" : "disposable test cluster"})`);
-            item("Application", `${plan.namespace} · ${plan.workflowId}`);
-            item("Depth", `${(MODES.find((m) => m.id === mode.mode) || {}).name || mode.mode}${mode.preliminary ? " · preliminary evidence" : ""}`);
-            item("Changes to test", plan.candidates.length ? plan.candidates.map((c) => `${c.strategy} on ${c.service}`).join("; ") : "none can be proven");
-            item("Workers to stop", `${mode.workers.join(", ") || "none"} — ${mode.plannedFailures} node stops at most`);
-            item("Workflow check", plan.probe ? `${plan.probe.url} must answer ${plan.probe.expectedStatus}` : "none: Kubernetes readiness only");
-            item("Afterwards", "Every worker is started again and every changed Deployment is put back.");
-            item("Time", plan.estimate ? `About ${formatSeconds(plan.estimate.estimatedSeconds)}, from ${plan.estimate.basedOnExperiments} earlier experiments on this machine.` : "No estimate yet: no earlier experiment has run on this machine.");
+            item("Cluster", plan.target.kind === "DOCKER_DESKTOP" ? "Docker Desktop (your cluster)" : "Test cluster");
+            item("Depth", `${(MODES.find((m) => m.id === mode.mode) || {}).name || mode.mode}${mode.preliminary ? " · preliminary" : ""}`);
+            item("Changes", plan.candidates.length ? plan.candidates.map((c) => `${c.strategy} on ${c.service}`).join(", ") : "none can be proven");
+            item("Stops", `${mode.plannedFailures} at most · ${mode.workers.join(", ") || "no worker"}`);
+            item("Check", plan.probe ? `${plan.probe.url} → ${plan.probe.expectedStatus}` : "readiness only");
+            if (plan.estimate) item("Time", `about ${formatSeconds(plan.estimate.estimatedSeconds)} (from ${plan.estimate.basedOnExperiments} earlier experiments)`);
             container.append(summary);
+            container.append(make(doc, "p", "Afterwards every worker is started and every change is put back.", "prf-caption"));
 
             const issues = make(doc, "ul", undefined, "prf-issues", { "aria-label": "What stops or affects this run" });
             for (const issue of plan.issues || []) {
@@ -526,13 +535,18 @@
                 li.append(make(doc, "span", issue.blocking ? "Stops the run" : "Note", "prf-issue__tag"), make(doc, "span", issue.message));
                 issues.append(li);
             }
-            for (const note of plan.notes || []) issues.append(make(doc, "li", note, "prf-issue prf-issue--note"));
             if (issues.children && issues.children.length) container.append(issues);
+            if ((plan.notes || []).length) {
+                const notes = make(doc, "details", undefined, "prf-opt");
+                notes.append(make(doc, "summary", "Notes"));
+                plan.notes.forEach((note) => notes.append(make(doc, "p", note, "prf-caption")));
+                container.append(notes);
+            }
 
             const needed = plan.acknowledgementsNeeded || [];
             if (needed.length) {
                 const box = make(doc, "fieldset", undefined, "prf-group");
-                box.append(make(doc, "legend", "These will go down with a worker. Accept each one to continue.", "prf-group__legend"));
+                box.append(make(doc, "legend", "These go down with a worker. Accept each.", "prf-group__legend"));
                 for (const name of needed) {
                     const label = make(doc, "label", undefined, "prf-check");
                     const input = make(doc, "input", undefined, undefined, { type: "checkbox" });
@@ -548,23 +562,20 @@
                 const input = make(doc, "input", undefined, undefined, { type: "checkbox" });
                 input.checked = state.desktopAcknowledged;
                 input.addEventListener("change", () => { state.desktopAcknowledged = input.checked; draw(); });
-                label.append(input, make(doc, "span", "This is my Docker Desktop cluster. Stop its worker nodes on purpose for this run."));
+                label.append(input, make(doc, "span", "Stop my Docker Desktop cluster's workers for this run."));
                 container.append(label);
-            }
-            if (plan.faultReadiness && plan.faultReadiness.smokeOnly) {
-                container.append(make(doc, "p", "Docker may restart a stopped worker by itself here. A failure that does not stay down is refused, never counted.", "prf-hint"));
             }
 
             const actions = make(doc, "div", undefined, "approval-actions");
             actions.append(button("Change settings", "secondary-button", again, state.busy, "btn-prf-back"),
-                button("Start the test run", "primary-button", startRun, state.busy || !canStart(plan, state.acknowledged, state.desktopAcknowledged), "btn-prf-start"));
+                button("Start the run", "primary-button", startRun, state.busy || !canStart(plan, state.acknowledged, state.desktopAcknowledged), "btn-prf-start"));
             container.append(actions);
         }
 
         function drawRun(container) {
             const run = state.run;
             drawHead(container, "4. Prove it on a test cluster", null);
-            if (!run) { container.append(make(doc, "p", "No run recorded yet.", "prf-hint")); return; }
+            if (!run) { container.append(make(doc, "p", "No run recorded yet.", "prf-caption")); return; }
             // Header: status, target, application
             const head = make(doc, "div", undefined, "prf-runhead");
             head.append(chip(doc, run.statusLabel, run.stale ? "warn" : RUN_TONE[run.status] || "wait"),
@@ -588,8 +599,8 @@
             const bar = make(doc, "div", undefined, "prf-progress", { role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(m.progress.total), "aria-valuenow": String(m.progress.done), "aria-label": progressText(m) });
             bar.append(make(doc, "div", undefined, "prf-progress__fill", { style: `width:${m.progress.total ? Math.round((m.progress.done / m.progress.total) * 100) : 0}%` }));
             container.append(bar);
-            container.append(make(doc, "p", progressText(m), "prf-progress__text", { role: "status", "aria-live": "polite" }));
-            if (run.estimate) container.append(make(doc, "p", `About ${formatSeconds(run.estimate.estimatedSeconds)} left, from ${run.estimate.basedOnExperiments} earlier experiments.`, "prf-hint"));
+            container.append(make(doc, "p", progressText(m), "prf-progress__text visually-hidden", { role: "status", "aria-live": "polite" }));
+            if (run.estimate) container.append(make(doc, "p", `About ${formatSeconds(run.estimate.estimatedSeconds)} left (from ${run.estimate.basedOnExperiments} earlier experiments)`, "prf-caption"));
 
             // Current operation and stage timeline
             if (run.current) {
@@ -606,13 +617,15 @@
 
             // Safety and recovery
             const safety = make(doc, "div", undefined, `prf-safety prf-safety--${run.safety.level}`, { role: run.safety.level === "alert" ? "alert" : "status" });
-            safety.append(make(doc, "strong", run.safety.message));
+            // The standing reassurance is not repeated while all is well; a warning or an alert is always said.
+            if (run.safety.level !== "info") safety.append(make(doc, "strong", run.safety.message));
             const bits = [];
             const live = run.status === "RUNNING" || run.status === "ABORTING";
             // While a run is going, "verified" can only speak for the tests already finished: one worker may be down right now.
             if (run.safety.workersRestored !== "none-stopped") bits.push(`${live ? "Finished tests, workers" : "Workers"}: ${run.safety.workersRestored === "confirmed" ? "restored (verified)" : "not yet confirmed"}`);
             if (run.safety.deploymentsRestored !== "none-changed") bits.push(`Deployments: ${run.safety.deploymentsRestored === "confirmed" ? "put back (verified)" : "not yet confirmed"}`);
             if (bits.length) safety.append(make(doc, "div", bits.join(" · "), "prf-safety__detail"));
+            if (!safety.children.length) safety.hidden = true;
             (run.safety.actions || []).forEach((a) => safety.append(make(doc, "code", a, "prf-safety__action")));
             container.append(safety);
 
@@ -620,7 +633,7 @@
             const actions = make(doc, "div", undefined, "approval-actions");
             if (run.status === "RUNNING" || run.status === "ABORTING") {
                 if (state.confirmAbort) {
-                    container.append(make(doc, "p", "Stop this run? The worker being tested is started again and every changed Deployment is put back first.", "approval-note"));
+                    container.append(make(doc, "p", "Stop the run? The current worker is restarted and changes are reverted first.", "approval-note"));
                     actions.append(button("Keep running", "secondary-button", () => { state.confirmAbort = false; draw(); }, state.busy, "btn-prf-keep"),
                         button("Abort run", "danger-button", abortRun, state.busy, "btn-prf-abort-yes"));
                 } else {
@@ -664,7 +677,7 @@
             table.append(body);
             scroll.append(table);
             container.append(scroll);
-            if ((run.baseline || []).length) container.append(make(doc, "p", `Baseline (before any change): ${run.baseline.map((b) => `${b.worker} ${(CELL[b.status] || CELL.PENDING).text.toLowerCase()}`).join(", ")}.`, "prf-hint"));
+            if ((run.baseline || []).length) container.append(make(doc, "p", `Baseline (before any change): ${run.baseline.map((b) => `${b.worker} ${(CELL[b.status] || CELL.PENDING).text.toLowerCase()}`).join(", ")}.`, "prf-caption"));
         }
 
         function drawResult(container, run) {
@@ -672,24 +685,24 @@
             const box = make(doc, "div", undefined, `prf-result prf-result--${result.winner ? "pass" : "none"}`, { role: "status" });
             // A model mismatch or a check that disagreed with readiness is part of the result, and it is read BEFORE the action.
             const findings = () => {
-                (result.modelMismatches || []).forEach((m) => box.append(make(doc, "p", `Prediction was wrong for ${m.worker}: the model said the workflow ${m.predictedSurvives ? "survives" : "fails"}; readiness showed it ${m.readinessHolds ? "does" : "does not"}.`, "prf-mismatch")));
-                (result.probeFindings || []).forEach((m) => box.append(make(doc, "p", `The workflow check and Kubernetes readiness disagreed for ${m.worker}. That is a finding about the check, not a prediction error.`, "prf-hint")));
+                (result.modelMismatches || []).forEach((m) => box.append(make(doc, "p", `Prediction wrong on ${m.worker}: model said ${m.predictedSurvives ? "survives" : "fails"}, readiness ${m.readinessHolds ? "held" : "did not hold"}.`, "prf-mismatch")));
+                (result.probeFindings || []).forEach((m) => box.append(make(doc, "p", `Check and readiness disagreed on ${m.worker}: a finding about the check, not a prediction error.`, "prf-caption")));
             };
             if (result.winner) {
                 const row = (run.matrix.rows.find((r) => r.candidateId === result.winner)) || {};
                 box.append(make(doc, "h4", "Proven", "prf-result__title"),
-                    make(doc, "p", `${row.strategy || result.winner} on ${row.service || "the service"} kept the workflow working when each tested worker was stopped.`));
-                if (run.preliminary) box.append(make(doc, "p", "Preliminary evidence. Run a full validation for repeated, reproducible results.", "prf-hint"));
+                    make(doc, "p", `${row.strategy || result.winner} on ${row.service || "the service"} held on every tested worker.${run.preliminary ? " Preliminary evidence." : ""}`));
                 if (result.improvement) {
-                    box.append(make(doc, "p", `Worst observed blast radius with the change: ${result.improvement.worstObservedBlastRadiusAfter}% (before: ${result.improvement.observedBefore}%). ${result.improvement.basisNote}`));
+                    box.append(make(doc, "p", `Blast radius ${result.improvement.observedBefore}% → ${result.improvement.worstObservedBlastRadiusAfter}% worst case. ${result.improvement.basisNote}`));
                 }
                 findings();
                 const go = make(doc, "div", undefined, "approval-actions");
                 go.append(button("Continue to approval", "primary-button", () => onContinue(result.winner), false, "btn-prf-continue"));
-                box.append(go, make(doc, "p", "Proving a change applies nothing to your cluster. Approving and applying it is the next step.", "prf-hint"));
+                go.setAttribute("title", "Nothing has been applied to your cluster. Approving and applying is the next step.");
+                box.append(go);
             } else {
                 box.append(make(doc, "h4", "Not proven", "prf-result__title"),
-                    make(doc, "p", run.status === "COMPLETED" ? "No tested change kept the workflow working on every worker, so none is selected." : "The run ended before any change was fully proven, so none is selected."));
+                    make(doc, "p", run.status === "COMPLETED" ? "No change held on every worker." : "The run ended before a change was fully proven."));
                 findings();
             }
             const list = make(doc, "ul", undefined, "prf-outcomes");
@@ -737,7 +750,7 @@
             const body = make(doc, "div", undefined, "prf-body");
             if (state.phase === "loading") {
                 drawHead(body, "4. Prove it on a test cluster", null);
-                body.append(make(doc, "p", "Looking for test clusters and any earlier run…", "prf-hint", { role: "status" }));
+                body.append(make(doc, "p", "Looking for test clusters and any earlier run…", "prf-caption", { role: "status" }));
             } else if (state.phase === "plan" && state.plan) drawPlan(body);
             else if ((state.phase === "run" || state.phase === "starting") && (state.run || state.phase === "starting")) {
                 if (state.phase === "starting" && !state.run) { drawHead(body, "4. Prove it on a test cluster", null); drawMessage(body); }

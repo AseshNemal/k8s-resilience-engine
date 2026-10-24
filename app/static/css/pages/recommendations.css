@@ -486,16 +486,6 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .prf-group { margin: 0; padding: var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); display: grid; gap: var(--space-sm); min-width: 0; }
 .prf-group__legend { padding: 0 var(--space-xs); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
 
-.prf-choice { display: flex; gap: var(--space-sm); align-items: flex-start; padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface); cursor: pointer; }
-.prf-choice:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.prf-choice--on { border-color: var(--color-primary); background: var(--color-surface-soft); box-shadow: inset 3px 0 0 var(--color-primary); }
-.prf-choice--off { opacity: 0.65; cursor: not-allowed; }
-.prf-choice__input { margin-top: 3px; flex: none; }
-.prf-choice__body { display: grid; gap: 2px; min-width: 0; }
-.prf-choice__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
-.prf-choice__name { font-weight: 700; font-size: 14px; }
-.prf-choice__detail { font-size: 13px; color: var(--color-text-muted); overflow-wrap: anywhere; }
-
 .prf-check { display: flex; gap: var(--space-sm); align-items: flex-start; font-size: 13px; }
 .prf-check--strong { font-weight: 700; padding: var(--space-sm) var(--space-md); border: 1px solid var(--tint-amber-fg); border-radius: var(--radius-medium); background: var(--tint-amber-bg); color: var(--tint-amber-fg); }
 .prf-check input { margin-top: 3px; flex: none; }
@@ -582,15 +572,34 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .rec-proof .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 
 
-.prf-prepare { border: 1px dashed var(--color-border); border-radius: var(--radius-medium); padding: var(--space-sm) var(--space-md); display: grid; gap: var(--space-sm); }
-.prf-prepare summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .prf-assess { display: grid; gap: var(--space-xs); padding: var(--space-sm) var(--space-md); border-radius: var(--radius-medium); border-left: 4px solid var(--color-border); font-size: 13px; }
 .prf-assess--ok { border-left-color: var(--color-success); background: var(--tint-green-bg); }
 .prf-assess--no { border-left-color: var(--color-warning); background: var(--tint-amber-bg); }
 .prf-assess p { margin: 0; }
 .prf-advice { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 
+/* Compact setup: one line per decision, a segmented control instead of a card per option, details only on demand. */
+.prf-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
+.prf-line__label { width: 56px; flex: none; font-size: 13px; font-weight: 600; color: var(--color-text-muted); }
+.prf-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--color-border); border-radius: var(--radius-medium); overflow: hidden; background: var(--color-surface-soft); max-width: 100%; }
+.prf-seg__option { position: relative; display: inline-flex; align-items: baseline; gap: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; border-right: 1px solid var(--color-border); color: var(--color-text-muted); }
+.prf-seg__option:last-child { border-right: 0; }
+.prf-seg__option:hover { color: var(--color-text); }
+.prf-seg__option--on { background: var(--color-primary); color: #fff; }
+.prf-seg__option--off { opacity: 0.55; cursor: not-allowed; }
+.prf-seg__option:focus-within { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.prf-seg__input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: inherit; }
+.prf-seg__note { font-size: 11px; font-weight: 500; opacity: 0.85; }
+.prf-caption { margin: 0; font-size: 12px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.prf-caption--warn { color: var(--tint-amber-fg); }
+.prf-opt { border-top: 1px solid var(--color-border); padding-top: var(--space-sm); display: grid; gap: var(--space-sm); }
+.prf-opt > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--color-text-muted); }
+.prf-opt[open] > summary { color: var(--color-text); }
+.prf-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-sm) var(--space-md); }
+.prf-fields .form-group { margin: 0; }
+
 @media (max-width: 640px) {
+    .prf-line__label { width: 100%; }
     .prf-summary li { grid-template-columns: 1fr; gap: 2px; }
     .prf-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .prf-group { padding: var(--space-sm); }
