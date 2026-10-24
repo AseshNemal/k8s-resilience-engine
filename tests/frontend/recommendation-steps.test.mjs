@@ -97,24 +97,41 @@ test("a service name from the API stays text", () => {
 const states = (facts) => plain(view.computeSteps(facts)).map((step) => step.state);
 
 test("nothing chosen: the first step is current and the rest wait", () => {
-    assert.deepEqual(states({ chosen: false, status: "loading", selected: false, applied: false }), ["current", "todo", "todo", "todo"]);
+    assert.deepEqual(states({ chosen: false, status: "loading", selected: false, applied: false }), ["current", "todo", "todo", "todo", "todo"]);
 });
 
 test("while the recommendation is being asked for, the second step is current", () => {
-    assert.deepEqual(states({ chosen: true, status: "loading-recommendation" }), ["done", "current", "todo", "todo"]);
+    assert.deepEqual(states({ chosen: true, status: "loading-recommendation" }), ["done", "current", "todo", "todo", "todo"]);
 });
 
 test("missing evidence blocks the second step and nothing after it is marked done", () => {
-    assert.deepEqual(states({ chosen: true, status: "missing-evidence", selected: true, applied: true }), ["done", "blocked", "todo", "todo"]);
+    assert.deepEqual(states({ chosen: true, status: "missing-evidence", selected: true, applied: true }), ["done", "blocked", "todo", "todo", "todo"]);
 });
 
 test("a recommendation with no selected candidate blocks the third step", () => {
-    assert.deepEqual(states({ chosen: true, status: "ready", selected: false }), ["done", "done", "blocked", "todo"]);
+    assert.deepEqual(states({ chosen: true, status: "ready", selected: false }), ["done", "done", "blocked", "todo", "todo"]);
 });
 
 test("a selected candidate leaves the last step as the one to do, and an applied change completes it", () => {
-    assert.deepEqual(states({ chosen: true, status: "ready", selected: true, applied: false }), ["done", "done", "done", "current"]);
-    assert.deepEqual(states({ chosen: true, status: "ready", selected: true, applied: true }), ["done", "done", "done", "done"]);
+    assert.deepEqual(states({ chosen: true, status: "ready", selected: true, applied: false }), ["done", "done", "done", "todo", "current"]);
+    assert.deepEqual(states({ chosen: true, status: "ready", selected: true, applied: true }), ["done", "done", "done", "todo", "done"]);
+});
+
+test("proving is optional: it is Not yet while nothing has run, the approval is still Now, and a passed proof completes it", () => {
+    const base = { chosen: true, status: "ready", selected: true, applied: false };
+    assert.deepEqual(states({ ...base, proof: "none" }), ["done", "done", "done", "todo", "current"]);
+    assert.deepEqual(states({ ...base, proof: "passed" }), ["done", "done", "done", "done", "current"]);
+});
+
+test("while a proof is running it is the current step and the approval waits; a failed or attention-needing proof is flagged", () => {
+    const base = { chosen: true, status: "ready", selected: true, applied: false };
+    assert.deepEqual(states({ ...base, proof: "running" }), ["done", "done", "done", "current", "todo"]);
+    assert.deepEqual(states({ ...base, proof: "failed" }), ["done", "done", "done", "blocked", "current"]);
+    assert.deepEqual(states({ ...base, proof: "attention" }), ["done", "done", "done", "blocked", "current"]);
+});
+
+test("a proof is never shown before there is a candidate to prove", () => {
+    assert.deepEqual(states({ chosen: true, status: "ready", selected: false, proof: "passed" }), ["done", "done", "blocked", "todo", "todo"]);
 });
 
 test("the stepper names the state in words as well as marks, and marks only the current step for assistive technology", () => {
@@ -123,11 +140,11 @@ test("the stepper names the state in words as well as marks, and marks only the 
     view.renderStepper(c, view.computeSteps({ chosen: true, status: "ready", selected: false }), o);
 
     const items = find(c, (n) => n.tag === "li");
-    assert.equal(items.length, 4);
-    assert.deepEqual(items.map((n) => n.attributes["data-state"]), ["done", "done", "blocked", "todo"]);
+    assert.equal(items.length, 5);
+    assert.deepEqual(items.map((n) => n.attributes["data-state"]), ["done", "done", "blocked", "todo", "todo"]);
     assert.equal(items.filter((n) => n.attributes["aria-current"] === "step").length, 0, "no step is current while one needs attention");
     assert.ok(text(items[2]).includes("Needs attention") && text(items[0]).includes("Done") && text(items[3]).includes("Not yet"));
-    assert.ok(text(items[0]).includes("✓") && text(items[2]).includes("!") && text(items[3]).includes("4"));
+    assert.ok(text(items[0]).includes("✓") && text(items[2]).includes("!") && text(items[3]).includes("4") && text(items[4]).includes("5"));
 
     view.renderStepper(c, view.computeSteps({ chosen: false }), o);
     assert.equal(find(c, (n) => n.attributes["aria-current"] === "step").length, 1);
@@ -193,11 +210,11 @@ test("approval and apply stay two separate actions: no single button approves an
     assert.ok(pageTemplate.includes("Approving changes nothing on the cluster."));
 });
 
-test("the approval gate keeps the exact opening tag the extension build patches, once, inside the fourth step", () => {
+test("the approval gate keeps the exact opening tag the extension build patches, once, inside the fifth step", () => {
     const marker = '<div class="card" id="approval-section">';
     assert.equal(templateHtml.split(marker).length - 1, 1);
-    const step = pageTemplate.slice(pageTemplate.indexOf('aria-labelledby="rec-step-4"'));
-    assert.ok(step.indexOf(marker) > step.indexOf('id="rec-step-4"'), "the marker sits under the step's heading");
+    const step = pageTemplate.slice(pageTemplate.indexOf('aria-labelledby="rec-step-5"'));
+    assert.ok(step.indexOf(marker) > step.indexOf('id="rec-step-5"'), "the marker sits under the step's heading");
 });
 
 // ---- the services table, the selected improvement and the card marks ------------------------------------------------------------

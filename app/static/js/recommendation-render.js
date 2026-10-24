@@ -596,24 +596,30 @@
 
     // ---- where the person is in the flow ------------------------------------------------------------------------------
 
-    const STEP_LABELS = ["Select application and workflow", "Analyse failure impact", "Compare candidate improvements", "Review and approve proposal"];
+    const STEP_LABELS = ["Select application and workflow", "Analyse failure impact", "Compare candidate improvements", "Prove it on a test cluster", "Review and approve proposal"];
     const STEP_STATE_TEXT = { done: "Done", current: "Now", blocked: "Needs attention", todo: "Not yet" };
 
     /**
-     * The state of the four steps, from facts the page already has: ``chosen`` (an application and a workflow are chosen),
-     * ``status`` (the controller's), ``selected`` (the engine selected a candidate) and ``applied`` (a change was applied).
-     * A step is never shown as done unless its own evidence exists, and a later step waits for an earlier one.
+     * The state of the five steps, from facts the page already has: ``chosen`` (an application and a workflow are chosen),
+     * ``status`` (the controller's), ``selected`` (the engine selected a candidate), ``proof`` (none, running, passed, failed or
+     * attention: what the test-cluster step last reported) and ``applied`` (a change was applied).
+     * A step is never shown as done unless its own evidence exists, and a later step waits for an earlier one. Proving is optional:
+     * it never holds back the approval, so while nothing has been run it is "Not yet" and the approval is "Now".
      */
     function computeSteps(input) {
         const facts = input || {};
         const loading = facts.status === "loading" || facts.status === "loading-recommendation";
-        const states = ["todo", "todo", "todo", "todo"];
+        const states = ["todo", "todo", "todo", "todo", "todo"];
         states[0] = facts.chosen ? "done" : "current";
         if (facts.chosen) {
             states[1] = loading ? "current" : facts.status === "ready" ? "done" : "blocked";
             if (states[1] === "done") {
                 states[2] = facts.selected ? "done" : "blocked";
-                if (states[2] === "done") states[3] = facts.applied ? "done" : "current";
+                if (states[2] === "done") {
+                    const proof = facts.proof || "none";
+                    states[3] = proof === "passed" ? "done" : proof === "running" ? "current" : proof === "failed" || proof === "attention" ? "blocked" : "todo";
+                    states[4] = facts.applied ? "done" : proof === "running" ? "todo" : "current";
+                }
             }
         }
         return states.map((state, index) => ({ number: index + 1, label: STEP_LABELS[index], state }));

@@ -216,8 +216,9 @@
                     state.blockingRun = targets.payload.blockingRun;
                 }
                 const run = current.ok && current.payload ? current.payload.run : null;
-                const live = run && ["RUNNING", "ABORTING", "NEEDS_MANUAL_RESTORE", "PLANNED"].includes(run.status);
-                state.phase = live ? "run" : "setup";
+                // The latest run is always shown when there is one: a run that finished while the extension was closed is still the answer
+                // the person came back for. "Plan another run" leads to the settings.
+                state.phase = run ? "run" : "setup";
                 if (current.ok) adopt(run, order);
                 else if (!targets.ok) setMessage(errorMessage(targets, "The backend could not be reached."), true);
             } catch (_error) {
@@ -364,6 +365,7 @@
         function choice(name, value, labelText, detail, tag, checked, onSelect, disabled) {
             const wrap = make(doc, "label", undefined, `prf-choice${checked ? " prf-choice--on" : ""}${disabled ? " prf-choice--off" : ""}`);
             const input = make(doc, "input", undefined, "prf-choice__input", { type: "radio", name, value });
+            input.value = value;
             input.checked = !!checked;
             input.disabled = !!disabled;
             input.addEventListener("change", () => onSelect(value));
@@ -566,7 +568,9 @@
             const safety = make(doc, "div", undefined, `prf-safety prf-safety--${run.safety.level}`, { role: run.safety.level === "alert" ? "alert" : "status" });
             safety.append(make(doc, "strong", run.safety.message));
             const bits = [];
-            if (run.safety.workersRestored !== "none-stopped") bits.push(`Workers: ${run.safety.workersRestored === "confirmed" ? "restored (verified)" : "not yet confirmed"}`);
+            const live = run.status === "RUNNING" || run.status === "ABORTING";
+            // While a run is going, "verified" can only speak for the tests already finished: one worker may be down right now.
+            if (run.safety.workersRestored !== "none-stopped") bits.push(`${live ? "Finished tests, workers" : "Workers"}: ${run.safety.workersRestored === "confirmed" ? "restored (verified)" : "not yet confirmed"}`);
             if (run.safety.deploymentsRestored !== "none-changed") bits.push(`Deployments: ${run.safety.deploymentsRestored === "confirmed" ? "put back (verified)" : "not yet confirmed"}`);
             if (bits.length) safety.append(make(doc, "div", bits.join(" · "), "prf-safety__detail"));
             (run.safety.actions || []).forEach((a) => safety.append(make(doc, "code", a, "prf-safety__action")));
@@ -598,7 +602,9 @@
             const headRow = make(doc, "tr");
             headRow.append(make(doc, "th", "Change", undefined, { scope: "col" }));
             matrix.workers.forEach((w) => headRow.append(make(doc, "th", w, undefined, { scope: "col" })));
-            table.append(make(doc, "thead", undefined, undefined)).children[0].append(headRow);
+            const thead = make(doc, "thead");
+            thead.append(headRow);
+            table.append(thead);
             const body = make(doc, "tbody");
             matrix.rows.forEach((row) => {
                 const tr = make(doc, "tr");
@@ -624,6 +630,11 @@
         function drawResult(container, run) {
             const result = run.result;
             const box = make(doc, "div", undefined, `prf-result prf-result--${result.winner ? "pass" : "none"}`, { role: "status" });
+            // A model mismatch or a check that disagreed with readiness is part of the result, and it is read BEFORE the action.
+            const findings = () => {
+                (result.modelMismatches || []).forEach((m) => box.append(make(doc, "p", `Prediction was wrong for ${m.worker}: the model said the workflow ${m.predictedSurvives ? "survives" : "fails"}; readiness showed it ${m.readinessHolds ? "does" : "does not"}.`, "prf-mismatch")));
+                (result.probeFindings || []).forEach((m) => box.append(make(doc, "p", `The workflow check and Kubernetes readiness disagreed for ${m.worker}. That is a finding about the check, not a prediction error.`, "prf-hint")));
+            };
             if (result.winner) {
                 const row = (run.matrix.rows.find((r) => r.candidateId === result.winner)) || {};
                 box.append(make(doc, "h4", "Proven", "prf-result__title"),
@@ -632,15 +643,15 @@
                 if (result.improvement) {
                     box.append(make(doc, "p", `Worst observed blast radius with the change: ${result.improvement.worstObservedBlastRadiusAfter}% (before: ${result.improvement.observedBefore}%). ${result.improvement.basisNote}`));
                 }
+                findings();
                 const go = make(doc, "div", undefined, "approval-actions");
                 go.append(button("Continue to approval", "primary-button", () => onContinue(result.winner), false, "btn-prf-continue"));
                 box.append(go, make(doc, "p", "Proving a change applies nothing to your cluster. Approving and applying it is the next step.", "prf-hint"));
             } else {
                 box.append(make(doc, "h4", "Not proven", "prf-result__title"),
                     make(doc, "p", run.status === "COMPLETED" ? "No tested change kept the workflow working on every worker, so none is selected." : "The run ended before any change was fully proven, so none is selected."));
+                findings();
             }
-            (result.modelMismatches || []).forEach((m) => box.append(make(doc, "p", `Prediction was wrong for ${m.worker}: the model said the workflow ${m.predictedSurvives ? "survives" : "fails"}; readiness showed it ${m.readinessHolds ? "does" : "does not"}.`, "prf-mismatch")));
-            (result.probeFindings || []).forEach((m) => box.append(make(doc, "p", `The workflow check and Kubernetes readiness disagreed for ${m.worker}. That is a finding about the check, not a prediction error.`, "prf-hint")));
             const list = make(doc, "ul", undefined, "prf-outcomes");
             (result.candidates || []).forEach((c) => {
                 const li = make(doc, "li", undefined, "prf-outcome");
@@ -658,7 +669,9 @@
             const table = make(doc, "table", undefined, "data-table");
             const head = make(doc, "tr");
             ["Change", "Worker", "Repeat", "Status", "Evidence", "Readiness", "Probe", "Model agreed", "Error (pts)", "Seconds"].forEach((h) => head.append(make(doc, "th", h, undefined, { scope: "col" })));
-            table.append(make(doc, "thead")).children[0].append(head);
+            const thead = make(doc, "thead");
+            thead.append(head);
+            table.append(thead);
             const body = make(doc, "tbody");
             (run.research.experiments || []).forEach((e) => {
                 const o = e.outcome || {};

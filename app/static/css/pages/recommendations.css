@@ -474,3 +474,116 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 
 .rec-selected__change { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .rec-flow[data-view="research"] .rec-selected__change { display: block; overflow: visible; }
+
+/* ---- "Prove it on a test cluster" (recommendation-proof.js) -------------------------------------------------------------------
+ * Restrained: the shared tokens only, state shown by a mark AND a word (never colour alone), compact spacing, and nothing wider than
+ * its container (the matrix scrolls inside its own box). Works from a narrow Docker Desktop window up. */
+.prf-body { display: grid; gap: var(--space-md); min-width: 0; }
+.prf-hint { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.prf-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+.prf-narrow { max-width: 120px; }
+
+.prf-group { margin: 0; padding: var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); display: grid; gap: var(--space-sm); min-width: 0; }
+.prf-group__legend { padding: 0 var(--space-xs); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+
+.prf-choice { display: flex; gap: var(--space-sm); align-items: flex-start; padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface); cursor: pointer; }
+.prf-choice:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.prf-choice--on { border-color: var(--color-primary); background: var(--color-surface-soft); box-shadow: inset 3px 0 0 var(--color-primary); }
+.prf-choice--off { opacity: 0.65; cursor: not-allowed; }
+.prf-choice__input { margin-top: 3px; flex: none; }
+.prf-choice__body { display: grid; gap: 2px; min-width: 0; }
+.prf-choice__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+.prf-choice__name { font-weight: 700; font-size: 14px; }
+.prf-choice__detail { font-size: 13px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+
+.prf-check { display: flex; gap: var(--space-sm); align-items: flex-start; font-size: 13px; }
+.prf-check--strong { font-weight: 700; padding: var(--space-sm) var(--space-md); border: 1px solid var(--tint-amber-fg); border-radius: var(--radius-medium); background: var(--tint-amber-bg); color: var(--tint-amber-fg); }
+.prf-check input { margin-top: 3px; flex: none; }
+
+.prf-chip { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--color-border); background: var(--color-surface-soft); color: var(--color-text-muted); overflow-wrap: anywhere; }
+.prf-chip--pass { background: var(--tint-green-bg); color: var(--tint-green-fg); border-color: transparent; }
+.prf-chip--fail { background: var(--tint-red-bg); color: var(--tint-red-fg); border-color: transparent; }
+.prf-chip--warn { background: var(--tint-amber-bg); color: var(--tint-amber-fg); border-color: transparent; }
+.prf-chip--run { background: var(--tint-blue-bg); color: var(--tint-blue-fg); border-color: transparent; }
+
+.prf-summary { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); }
+.prf-summary li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: var(--space-sm); font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--color-border); }
+.prf-summary__label { color: var(--color-text-muted); }
+.prf-summary__value { overflow-wrap: anywhere; }
+
+.prf-issues { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); }
+.prf-issue { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: baseline; padding: var(--space-sm) var(--space-md); border-radius: var(--radius-small); font-size: 13px; background: var(--color-surface-soft); border-left: 3px solid var(--color-border); }
+.prf-issue--block { background: var(--tint-red-bg); border-left-color: var(--tint-red-fg); color: var(--tint-red-fg); }
+.prf-issue__tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.prf-message { margin: 0; }
+.prf-message--alert { border-left: 3px solid var(--color-danger); }
+
+.prf-runhead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+.prf-runhead__where { font-size: 13px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+
+.prf-metrics { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-sm); }
+.prf-metric { padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface); }
+.prf-metric dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+.prf-metric dd { margin: 2px 0 0; font-size: 14px; font-weight: 700; }
+
+.prf-progress { height: 8px; border-radius: 4px; background: var(--color-border); overflow: hidden; }
+.prf-progress__fill { height: 100%; background: var(--color-primary); border-radius: 4px; transition: width 0.3s ease; }
+.prf-progress__text { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+
+.prf-current { display: grid; gap: 2px; padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-border); border-left: 4px solid var(--color-primary); border-radius: var(--radius-medium); background: var(--color-surface); }
+.prf-current__title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+.prf-current__what { font-weight: 700; overflow-wrap: anywhere; }
+.prf-current__stage { font-size: 13px; color: var(--tint-blue-fg); font-weight: 600; }
+.prf-current__detail { font-size: 12px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+
+.prf-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.prf-stage { padding: 3px 10px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 12px; color: var(--color-text-muted); background: var(--color-surface-soft); }
+.prf-stage--on { color: var(--color-text); border: 2px solid var(--color-primary); font-weight: 700; background: var(--color-surface); }
+
+.prf-safety { display: grid; gap: var(--space-xs); padding: var(--space-sm) var(--space-md); border-radius: var(--radius-medium); border: 1px solid var(--color-border); border-left-width: 4px; font-size: 13px; background: var(--color-surface-soft); }
+.prf-safety--ok { border-left-color: var(--color-success); }
+.prf-safety--warning { border-left-color: var(--color-warning); background: var(--tint-amber-bg); }
+.prf-safety--alert { border-left-color: var(--color-danger); background: var(--tint-red-bg); color: var(--tint-red-fg); }
+.prf-safety--info { border-left-color: var(--color-info); }
+.prf-safety__detail { font-size: 12px; opacity: 0.9; }
+.prf-safety__action { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+
+.prf-matrix-scroll { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-medium); max-width: 100%; }
+.prf-matrix { border-collapse: collapse; width: 100%; font-size: 13px; }
+.prf-matrix th, .prf-matrix td { padding: 6px 10px; border-bottom: 1px solid var(--color-border); text-align: left; white-space: nowrap; }
+.prf-matrix thead th { background: var(--color-surface-soft); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+.prf-matrix__row { font-weight: 600; white-space: normal; min-width: 150px; }
+.prf-state { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.prf-state__glyph { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; border: 1px solid currentColor; }
+.prf-state--pass { color: var(--tint-green-fg); } .prf-state--pass .prf-state__glyph { background: var(--tint-green-bg); }
+.prf-state--fail { color: var(--tint-red-fg); } .prf-state--fail .prf-state__glyph { background: var(--tint-red-bg); }
+.prf-state--warn { color: var(--tint-amber-fg); } .prf-state--warn .prf-state__glyph { background: var(--tint-amber-bg); }
+.prf-state--run { color: var(--tint-blue-fg); } .prf-state--run .prf-state__glyph { background: var(--tint-blue-bg); }
+.prf-state--wait, .prf-state--skip { color: var(--color-text-muted); }
+.prf-state--skip .prf-state__glyph { border-style: dashed; }
+.prf-reps { display: inline-flex; gap: 3px; margin-left: 8px; }
+.prf-rep { font-size: 11px; }
+.prf-rep--pass { color: var(--tint-green-fg); } .prf-rep--fail { color: var(--tint-red-fg); } .prf-rep--warn { color: var(--tint-amber-fg); }
+.prf-rep--run { color: var(--tint-blue-fg); } .prf-rep--wait, .prf-rep--skip { color: var(--color-text-muted); }
+
+.prf-result { display: grid; gap: var(--space-sm); padding: var(--space-md); border-radius: var(--radius-medium); border: 1px solid var(--color-border); }
+.prf-result--pass { border-color: var(--tint-green-fg); background: var(--tint-green-bg); color: var(--color-text); }
+.prf-result--none { background: var(--color-surface-soft); }
+.prf-result p { margin: 0; font-size: 13px; }
+.prf-result__title { margin: 0; font-size: 15px; }
+.prf-mismatch { padding: 6px 10px; border-left: 3px solid var(--color-warning); background: var(--tint-amber-bg); color: var(--tint-amber-fg); border-radius: var(--radius-small); }
+.prf-outcomes { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.prf-outcome { overflow-wrap: anywhere; }
+.prf-research { border: 1px solid var(--color-border); border-radius: var(--radius-medium); padding: var(--space-sm) var(--space-md); }
+.prf-research summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+
+.rec-proof .approval-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.rec-proof .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+
+@media (max-width: 640px) {
+    .prf-summary li { grid-template-columns: 1fr; gap: 2px; }
+    .prf-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .prf-group { padding: var(--space-sm); }
+}
+@media (prefers-reduced-motion: reduce) { .prf-progress__fill { transition: none; } }

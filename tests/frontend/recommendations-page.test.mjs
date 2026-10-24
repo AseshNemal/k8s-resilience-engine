@@ -128,7 +128,7 @@ async function openPage(routes) {
 test("the connected cluster, the only application and the only workflow are used without typing anything", async () => {
     const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
 
-    assert.deepEqual(env.calls.map((c) => `${c[0]} ${c[1]}`), ["GET /_extension/cluster", "GET /api/recommendations/applications/current", "GET /api/recommendations/context", DETAIL.slice(4).replace(/^/, "GET "), "GET /api/recommendations/rec-live/approval"]);
+    assert.deepEqual(env.calls.map((c) => `${c[0]} ${c[1]}`), ["GET /_extension/cluster", "GET /api/recommendations/applications/current", "GET /api/recommendations/context", DETAIL.slice(4).replace(/^/, "GET "), "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout", "GET /api/recommendations/rec-live/approval"]);
     assert.equal(env.element('[data-role="rec-cluster"]').textContent, "Connected cluster: docker-desktop");
     assert.equal(env.element('[data-role="source-badge"]').textContent, "Live evidence");
     assert.equal(env.element('[data-role="rec-namespace-select"]').value, "shop");
@@ -574,7 +574,7 @@ test("the stepper follows the page and the impact step shows the engine's result
     const env = await openPage({ [DETAIL]: { status: 200, body: { ...detailOf([cand()], "rec-live"), baselineImpact: IMPACT } },
         "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
 
-    assert.deepEqual(stepStates(env), ["done", "done", "done", "current"]);
+    assert.deepEqual(stepStates(env), ["done", "done", "done", "todo", "current"]);
     assert.ok(text(env.element('[data-role="rec-impact"]')).includes("If w1 fails"));
     assert.ok(text(env.element('[data-role="rec-impact"]')).includes("The workflow does not survive"));
     assert.ok(text(env.element('[data-role="rec-validation-note"]')) === "" || env.element('[data-role="rec-validation-note"]').textContent === "");
@@ -586,7 +586,7 @@ test("with missing evidence the stepper stops at the second step and nothing aft
         nextActions: ["Freeze a workflow"] });
     const env = await openPage({ "GET /api/recommendations/context": { status: 200, body: missing } });
 
-    assert.deepEqual(stepStates(env), ["current", "todo", "todo", "todo"], "no workflow is chosen yet, so the first step is the one to do");
+    assert.deepEqual(stepStates(env), ["current", "todo", "todo", "todo", "todo"], "no workflow is chosen yet, so the first step is the one to do");
     assert.equal(env.element('[data-role="rec-evidence-summary"]').textContent, "Evidence: 3 of 5 available");
     assert.equal(env.element('[data-role="rec-evidence-details"]').attributes["data-attention"], "true", "missing evidence is marked on its line, and the card says what to do");
 });
@@ -594,7 +594,7 @@ test("with missing evidence the stepper stops at the second step and nothing aft
 test("a recommendation with nothing selected stops the stepper at the third step and offers nothing to approve", async () => {
     const env = await openPage({ [DETAIL]: { status: 200, body: { ...detailOf([cand({ feasible: false, selected: false, approval: NOT_READY() })], null), baselineImpact: IMPACT } } });
 
-    assert.deepEqual(stepStates(env), ["done", "done", "blocked", "todo"]);
+    assert.deepEqual(stepStates(env), ["done", "done", "blocked", "todo", "todo"]);
 });
 
 test("the view switch changes only the view attribute, remembers the choice when it can, and works when storage is blocked", async () => {

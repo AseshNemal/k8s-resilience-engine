@@ -45,7 +45,7 @@
     const viewButtons = ["simple", "research"].map((name) => [name, document.querySelector(`[data-role="rec-view-${name}"]`)]);
     const VIEW_KEY = "resilience.recommendations.view";
     // Facts the stepper is drawn from. Nothing here is a result: it is only what the page already knows.
-    const stepFacts = { chosen: false, status: "loading", selected: false, applied: false };
+    const stepFacts = { chosen: false, status: "loading", selected: false, applied: false, proof: "none" };
     let appliedFor = null;                                    // the recommendation the stored application belongs to, as the panel last reported
 
     function storedView() {
@@ -382,6 +382,70 @@
         if (applicationBox === box && currentRecommendation && currentRecommendation.id === requestedFor) refreshApplication(box, requestedFor);
     }
 
+    // ---- "Prove it on a test cluster": its own panel, outside the re-rendered region, moved into the slot after every render ----------
+    const proofModule = window.ResilienceRecommendationProof;
+    const proofRoot = document.querySelector('[data-role="rec-proof"]');
+    let proofPanel = null;
+    let lastView = null;                                      // the controller's last view: what the proof step is for
+
+    function proofContext() {
+        const v = lastView || {};
+        return { namespace: v.namespace || null, workflowId: v.workflowId || null, workflowSource: v.workflowKind === "declared" ? "DECLARED" : "FROZEN" };
+    }
+
+    /** Put the panel between the comparison and the approval, or take it out of the page when there is nothing to prove. */
+    function placeProof() {
+        if (!proofRoot) return;
+        const slot = region.querySelector('[data-role="rec-proof-slot"]');
+        if (slot && currentRecommendation) {
+            slot.appendChild(proofRoot);
+            proofRoot.hidden = false;
+        } else {
+            proofRoot.hidden = true;
+        }
+    }
+
+    function proofNoteText(proof) {
+        if (!proof || proof.state === "NOT_RUN") return "Not proven on a test cluster.";
+        const where = proof.target ? `${proof.target.name}` : "a test cluster";
+        const depth = proof.preliminary ? "preliminary evidence" : "full validation";
+        if (proof.state === "PROVEN") {
+            return `Proven on ${where} (${depth}). That result stays with that cluster; applying to yours is checked again against it.`;
+        }
+        if (proof.state === "OTHER_PROVEN") return `A different change was proven on ${where}, not this one.`;
+        return `Tested on ${where}; no change was proven.`;
+    }
+
+    async function refreshProofNote() {
+        const note = region.querySelector('[data-role="rec-validation-note"]');
+        const v = lastView || {};
+        if (!note || !v.namespace || !v.workflowId) return;
+        const sha = v.detail && v.detail.yaml ? v.detail.yaml.sha256 : null;
+        const query = new URLSearchParams({ namespace: v.namespace, workflowId: v.workflowId });
+        if (sha) query.set("candidateSha256", sha);
+        try {
+            const response = await fetch(`/api/recommendations/validation-loop/proof?${query}`);
+            if (!response.ok) return;
+            const proof = await response.json();
+            if (note.isConnected !== false) note.textContent = proofNoteText(proof);
+        } catch (_error) {
+            // the note keeps what it said: nothing is claimed that the server did not report
+        }
+    }
+
+    function proofChanged(fact) {
+        stepFacts.proof = fact;
+        updateStepper();
+        if (fact === "passed" || fact === "failed") refreshProofNote();
+    }
+
+    function continueToApproval() {
+        const gate = document.getElementById("approval-section");
+        if (gate && gate.scrollIntoView) gate.scrollIntoView({ block: "start" });
+        const heading = document.getElementById("rec-step-5");
+        if (heading && heading.focus) { heading.setAttribute("tabindex", "-1"); heading.focus(); }
+    }
+
     // The panel tells the page when the stored application changed, so the Apply box never disagrees with it.
     function operationChanged(status) {
         appliedFor = status && status.application ? status.recommendationId : null;
@@ -701,6 +765,8 @@
         }
         stepFacts.selected = !!currentRecommendation;
         updateStepper();                              // render() drew it before the selection was known
+        placeProof();
+        refreshProofNote();
 
         if (currentRecommendation) {
             const requestedFor = currentRecommendation.id;
@@ -718,6 +784,7 @@
     }
 
     function render(v) {
+        lastView = v;
         renderContext(v);
         stepFacts.chosen = !!(v.namespace && v.workflowId);
         stepFacts.status = v.status;
@@ -753,6 +820,7 @@
         currentRecommendation = null;
         currentApproval = { ready: false, reason: "" };
         currentResearch = null;
+        if (proofRoot) proofRoot.hidden = true;
         if (busy) {
             applyBadge(sourceBadge, { variant: "muted", text: "Loading…" });
             region.replaceChildren();
@@ -801,6 +869,13 @@
         });
     }
 
+    if (proofModule && proofRoot) {
+        proofPanel = proofModule.createProofPanel({
+            root: proofRoot, document, fetchImpl: (url, init) => fetch(url, init), getContext: proofContext, onChange: proofChanged,
+            isResearch: () => !!flowRoot && flowRoot.getAttribute("data-view") === "research", onContinue: continueToApproval,
+        });
+    }
+
     controller = contextModule.createController({
         // Discovery and the failure-impact prediction run server-side, so the default 8 s is too short.
         fetchJson: (url) => fetchJson(url, { timeout: 45000 }),
@@ -821,11 +896,16 @@
     window.addEventListener("resilience-cluster-changed", () => {
         controller.clusterChanged();
         if (operationPanel) operationPanel.clusterChanged();
+        if (proofPanel) proofPanel.reset();
     });
-    window.addEventListener("pagehide", () => { if (operationPanel) operationPanel.destroy(); });
+    window.addEventListener("pagehide", () => {
+        if (operationPanel) operationPanel.destroy();
+        if (proofPanel) proofPanel.destroy();
+    });
 
     document.addEventListener("DOMContentLoaded", () => {
         controller.start();
         if (operationPanel) operationPanel.start();         // finds an applied change again after a reload; never applies anything
+        if (proofPanel) proofPanel.start();                 // finds a test run again after a reload or a restart; never starts one
     });
 })();

@@ -23,7 +23,7 @@ function matcher(selector) {
     const re = /(#[\w-]+)|(\.[\w-]+)|(\[([\w-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\])|([a-zA-Z][\w-]*)/g;
     let found;
     while ((found = re.exec(selector)) !== null) {
-        if (found[1]) parts.push((el) => el.getAttribute("id") === found[1].slice(1));
+        if (found[1]) { const id = found[1].slice(1); parts.push((el) => el.getAttribute("id") === id); }
         else if (found[2]) { const cls = found[2].slice(1); parts.push((el) => el.className.split(/\s+/).includes(cls)); }
         else if (found[3]) {
             const name = found[4];

@@ -63,6 +63,8 @@
 
 <section class="rec-operation card rec-step" data-role="rec-operation" aria-label="Applied change" hidden></section>
 
+<section class="card rec-step rec-proof" data-role="rec-proof" aria-labelledby="rec-step-4" aria-busy="false" hidden></section>
+
 <section class="rec-research-only rec-failures-block">
     <div class="section-header">
         <h3 class="section-header__title">Every single point of failure</h3>
@@ -176,9 +178,12 @@
         </details>
     </section>
 
-    <section class="card rec-step rec-step--approve" aria-labelledby="rec-step-4">
+    {# The "Prove it" panel lives outside this re-rendered region and is moved into this slot after each render. #}
+    <div data-role="rec-proof-slot"></div>
+
+    <section class="card rec-step rec-step--approve" aria-labelledby="rec-step-5">
         <div class="rec-step__head">
-            <h3 class="rec-step__title" id="rec-step-4">4. Review and approve proposal</h3>
+            <h3 class="rec-step__title" id="rec-step-5">5. Review and approve proposal</h3>
             <p class="rec-step__sub">Approving changes nothing on the cluster.</p>
         </div>
         {# The extension build patches this exact opening tag to add its own note, so it must stay as written (tests/test_page_contracts.py). #}
@@ -312,5 +317,6 @@
 <script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-context.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-operation.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-proof.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/recommendations.js') }}" defer></script>
 {% endblock %}
