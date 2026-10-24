@@ -102,6 +102,10 @@
     function clusterBadge(context, status) {
         if (!context.supported) return { kind: "unsupported", text: "Not supported", connectable: false };
         if (context.reachable !== true) return { kind: "unreachable", text: "Not reachable", connectable: false };
+        // A live credential can still have an older role. Connection status must not hide
+        // the helper's current access inspection or disable the explicit repair flow.
+        if (context.authorization === "drifted") return { kind: "attention", text: "Access needs updating · connect to review it", connectable: true };
+        if (context.authorization === "over-granted") return { kind: "attention", text: "Another binding gives it extra access · remove that first", connectable: false };
         if (status && status.connected && status.managed && status.context === context.name) {
             return { kind: "connected", text: "Connected", connectable: false };
         }
@@ -110,8 +114,6 @@
             return { kind: "disconnected", text: "Disconnected by you · connect to approve again", connectable: true };
         }
         if (approved) return { kind: "reconnecting", text: "Approved earlier · reconnecting", connectable: false };
-        if (context.authorization === "drifted") return { kind: "attention", text: "Access changed in the cluster · connect to review it", connectable: true };
-        if (context.authorization === "over-granted") return { kind: "attention", text: "Another binding gives it extra access · remove that first", connectable: false };
         return { kind: "not-connected", text: "Not connected", connectable: true };
     }
 
