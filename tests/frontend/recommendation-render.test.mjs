@@ -121,16 +121,19 @@ test("with no feasible candidate there is no best prediction", () => {
 
 // ---- candidate cards ----------------------------------------------------------------------------------------------------
 
-test("a card shows rank, strategy, target, feasibility, selection and every reported figure", () => {
+test("a card shows strategy, target, feasibility, selection, the predicted improvement and the cost; rank, confidence and score are research-only", () => {
     const o = options(); const c = o.document.container();
 
     view.renderCandidateCards(c, report(candidate()), { baselineBlastRadius: 70 }, o);
 
     const shown = text(c);
-    for (const expected of ["#1", "Topology Spread", "Target: payment", "Feasible", "Selected Recommendation",
-        "70%", "30%", "40 pp", "Low", "85%", "90%"]) {
+    for (const expected of ["Rank 1", "Topology spread", "on payment", "Feasible", "Recommended",
+        "70%", "30%", "−40 pp", "Low cost", "85%", "90%"]) {
         assert.ok(shown.includes(expected), `${expected} missing from: ${shown}`);
     }
+    const research = find(c, (n) => /rec-research-only/.test(n.className)).map((n) => text(n));
+    assert.ok(research.some((t) => t.includes("Rank 1")) && research.some((t) => t.includes("Confidence")) && research.some((t) => t.includes("Score")));
+    assert.ok(!research.some((t) => t.includes("Low cost") || t.includes("Feasible")), "the plain view keeps feasibility and cost");
 });
 
 test("an infeasible candidate says so and has no rank", () => {
@@ -138,8 +141,8 @@ test("an infeasible candidate says so and has no rank", () => {
 
     view.renderCandidateCards(c, report(candidate({ feasible: false })), {}, o);
 
-    assert.ok(text(c).includes("Not Feasible"));
-    assert.ok(!text(c).includes("#1"));
+    assert.ok(text(c).includes("Not feasible"));
+    assert.ok(!text(c).includes("Rank 1"));
 });
 
 test("a missing baseline is stated on the card instead of being shown as a number", () => {
@@ -350,7 +353,7 @@ test("each candidate shows root cause, change, feasibility with its findings, pl
     view.renderCandidateDetails(box, { candidates: [detailCandidate()] }, { document: doc });
 
     const shown = text(box);
-    for (const piece of ["ratings · Topology Spread", "All replicas run on one node.", "Add a topologySpreadConstraint", "Infeasible — single replica",
+    for (const piece of ["ratings · Topology spread", "All replicas run on one node.", "Add a topologySpreadConstraint", "Infeasible — single replica",
         "TOPOLOGY_SPREAD: INFEASIBLE — needs two nodes", "node taints", "ratings: ratings-1 on w1", "100% now → 100% predicted (0 points)",
         "Low — Adds no replicas.; 1 Deployment pod-template edit(s)", "Not ranked (INFEASIBLE).", "single replica note", "Not ready for approval: not feasible"]) {
         assert.ok(shown.includes(piece), `missing: ${piece}`);
@@ -406,7 +409,7 @@ test("each failure shows its own candidate and opens that node without merging r
             selected: { type: "REPLICA_INCREASE_PLUS_2", service: "<img src=x>", predictedBlastRadius: 0, resourceCost: "HIGH" } },
         { failedNode: "worker-b", blastRadiusBefore: 0, singlePointOfFailure: false, candidates: 0, feasible: 0, ranked: 0, selected: null },
     ] }, (node) => opened.push(node), o);
-    for (const expected of ["Separate rankings", "worker-a", "100%", "3 feasible · 3 ranked of 4", "Replica Increase Plus 2", "<img src=x>", "HIGH", "Nothing to fix"]) {
+    for (const expected of ["Separate rankings", "worker-a", "100%", "3 feasible · 3 ranked of 4", "Replica increase plus 2", "<img src=x>", "HIGH", "Nothing to fix"]) {
         assert.ok(text(box).includes(expected), expected);
     }
     const buttons = find(box, n => n.tag === "button");
@@ -437,7 +440,7 @@ test("the proposal summary names the cluster, application, workflow and its prov
 
     const shown = text(box);
     for (const expected of ["Connected cluster", "docker-desktop", "shop", "checkout — declared by asesh, not observed or frozen", "User declaration",
-        "w1 (the node whose loss hurts most)", "Model assumption", "Topology Spread for db", "db", "100% → 0% (100 percentage points)", "Low — 1 Deployment pod-template edit(s)", "Feasible"]) {
+        "w1 (the node whose loss hurts most)", "Model assumption", "Topology spread for db", "db", "100% → 0% (100 percentage points)", "Low — 1 Deployment pod-template edit(s)", "Feasible"]) {
         assert.ok(shown.includes(expected), `${expected} in ${shown}`);
     }
 });

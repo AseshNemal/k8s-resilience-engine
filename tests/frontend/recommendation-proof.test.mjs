@@ -468,6 +468,8 @@ test("the research data appears only when the server sent it, and never draws a 
     assert.ok(!/predicted/i.test(panel.querySelectorAll("figcaption").map((n) => n.textContent).join(" ")), "no chart is labelled predicted");
 });
 
+const openTab = async (t, id) => { t.root.querySelector(`[data-prf-tab="${id}"]`).click(); await flush(); };
+
 test("the charts plot the samples that were taken, marked at the stop and the restart, and the table lists them with their result", async () => {
     const t = open();
     await begin(t, { run: withResearch() });
@@ -476,6 +478,7 @@ test("the charts plot the samples that were taken, marked at the stop and the re
     assert.equal(charts.length, 2);
     assert.equal(charts[0].querySelectorAll("circle").length, SAMPLES.length);
     assert.ok(charts[0].querySelector("polyline") && charts[0].textContent.includes("Worker stopped") && charts[0].textContent.includes("Worker back"));
+    await openTab(t, "samples");
     const rows = t.root.querySelector(".prf-research").querySelectorAll("tr").slice(1);
     assert.equal(rows.length, 8, "the first eight samples; the rest are said to be in the record");
     assert.ok(t.root.querySelector(".prf-research").textContent.includes("1 more samples are in the stored record"));
@@ -486,8 +489,11 @@ test("readiness and recovery timings are the record's own figures, from the prob
     const t = open();
     await begin(t, { run: withResearch() });
 
+    await openTab(t, "readiness");
+    const readiness = t.root.querySelector(".prf-research").textContent;
+    assert.ok(readiness.includes("reviews: 2 ready elsewhere, 0 on the worker") && readiness.includes("Holds") && readiness.includes("Lost"));
+    await openTab(t, "timing");
     const text = t.root.querySelector(".prf-research").textContent;
-    assert.ok(text.includes("reviews: 2 ready elsewhere, 0 on the worker") && text.includes("Holds") && text.includes("Lost"));
     assert.ok(text.includes("Seen as down after") && text.includes("12 s") && text.includes("Stopped for") && text.includes("35 s") && text.includes("Back to Ready after") && text.includes("25 s"));
     assert.ok(text.includes("Experiment took") && text.includes("61 s"));
 });
@@ -623,4 +629,94 @@ test("the plan is a handful of short lines, with the notes behind a disclosure",
     assert.ok(t.root.querySelectorAll(".prf-summary li").length <= 6);
     assert.ok(t.text().length < 700, `plan text is ${t.text().length} characters`);
     assert.ok(t.root.querySelector("details").textContent.includes("Notes") && !t.root.querySelector("details").open);
+});
+
+// ---- the step's own page: a short answer first, the long reading for the research view --------------------------------------------------
+
+test("every state of the step offers a way back to the comparison and on to the approval, and neither is a condition of the other", async () => {
+    const setup = open();
+    await begin(setup);
+    const going = (t) => t.root.querySelectorAll("[data-go]").map((n) => n.getAttribute("data-go"));
+    assert.deepEqual(going(setup), ["3", "5"]);
+
+    const running = open();
+    await begin(running, { run: run() });
+    assert.deepEqual(going(running), ["3", "5"]);
+
+    const done = open();
+    await begin(done, { run: PROVEN() });
+    assert.deepEqual(going(done), ["3", "5"]);
+    assert.ok(done.text().includes("Continue to approval"), "and the proof's own call to action stays");
+});
+
+test("the step has the panel's heading, without a number the stepper already gives", async () => {
+    const t = open();
+    await begin(t);
+
+    const heading = t.root.querySelector("#rec-step-4");
+    assert.equal(heading.textContent, "Prove it on a test cluster");
+    assert.match(heading.className, /rec-panel__title/);
+});
+
+test("the context strip and the four figures are the research reading of a run; the results, the operation and the answer are not", async () => {
+    const t = open();
+    await begin(t, { run: run() });
+
+    const marked = (selector) => t.root.querySelectorAll(selector).every((n) => /rec-research-only/.test(n.className));
+    assert.ok(t.root.querySelectorAll(".prf-strip").length === 1 && marked(".prf-strip"));
+    assert.ok(t.root.querySelectorAll(".prf-figures").length === 1 && marked(".prf-figures"));
+    for (const selector of [".prf-matrix", ".prf-op", ".prf-safety"]) {
+        assert.ok(t.root.querySelectorAll(selector).length >= 1 && t.root.querySelectorAll(selector).every((n) => !/rec-research-only/.test(n.className)), selector);
+    }
+});
+
+test("a finished run opens with its answer, then the call to action, then the results", async () => {
+    const t = open();
+    await begin(t, { run: PROVEN() });
+
+    const shown = t.text();
+    assert.ok(shown.indexOf("Proof summary") < shown.indexOf("Continue to approval"));
+    assert.ok(shown.indexOf("Continue to approval") < shown.indexOf("Results by worker"));
+});
+
+test("a finished run does not show an operation card for nothing, and its safety record stands alone", async () => {
+    const t = open();
+    await begin(t, { run: PROVEN() });
+
+    assert.equal(t.root.querySelectorAll(".prf-op").length, 0);
+    assert.match(t.root.querySelector(".prf-opgrid").className, /prf-opgrid--single/);
+    assert.equal(t.root.querySelectorAll(".prf-safety").length, 1);
+});
+
+test("a running run still shows the operation, with the safety record beside it", async () => {
+    const t = open();
+    await begin(t, { run: run() });
+
+    assert.equal(t.root.querySelectorAll(".prf-op").length, 1);
+    assert.doesNotMatch(t.root.querySelector(".prf-opgrid").className, /single/);
+});
+
+test("the proof summary names the change that passed, not its identifier", async () => {
+    const t = open();
+    await begin(t, { run: PROVEN() });
+
+    const summary = t.root.querySelector(".prf-outcomes").textContent;
+    assert.ok(summary.includes("Passed") && summary.includes("Topology spread on reviews") && !summary.includes("c1"), summary);
+});
+
+test("the observed data is read one tab at a time, charts first, and a tab is only a view: nothing is fetched by opening one", async () => {
+    const t = open();
+    await begin(t, { run: withResearch() });
+    const before = t.network.calls.length;
+
+    const tabs = t.root.querySelectorAll("[data-prf-tab]");
+    assert.deepEqual(tabs.map((n) => n.getAttribute("data-prf-tab")), ["charts", "samples", "readiness", "timing"]);
+    assert.deepEqual(tabs.map((n) => n.getAttribute("aria-selected")), ["true", "false", "false", "false"]);
+    assert.equal(t.root.querySelectorAll(".prf-chart").length, 2);
+    assert.equal(t.root.querySelector(".prf-research").querySelectorAll("table").length, 0, "the samples are not drawn until their tab is open");
+
+    await openTab(t, "samples");
+    assert.equal(t.root.querySelectorAll("[data-prf-tab]").filter((n) => n.getAttribute("aria-selected") === "true")[0].getAttribute("data-prf-tab"), "samples");
+    assert.equal(t.root.querySelectorAll(".prf-chart").length, 0);
+    assert.equal(t.network.calls.length, before);
 });

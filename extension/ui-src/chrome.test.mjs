@@ -35,10 +35,13 @@ test("not connected: says pages show an error instead of data and offers to conn
     assert.equal(info.action, "Connect cluster");
 });
 
-test("connected: full access, names the server, and says pages read the connected cluster", () => {
+test("connected: says what was checked and what was not, names the server, and says pages read the connected cluster", () => {
     const info = describeCluster({ connected: true, server: "host.docker.internal:58227", expiresAt: "2026-10-25T12:00:00Z", expired: false }, NOW);
     assert.equal(info.state, "connected");
-    assert.equal(info.chip, "Connected · full access");
+    assert.equal(info.chip, "Connected", "a connection is not a verified permission");
+    assert.doesNotMatch(info.chip + info.title + info.detail, /full access/i);
+    assert.match(info.detail, /could read what the app needs when it was connected/);
+    assert.match(info.detail, /Permission to change the cluster is not checked until a change is applied/);
     assert.match(info.title, /host\.docker\.internal:58227/);
     assert.match(info.detail, /expires Oct 25, 2026 \(in 7 days\)/);
     assert.match(info.detail, /Overview and Deployment topology show your connected cluster/);
@@ -48,7 +51,7 @@ test("connected: full access, names the server, and says pages read the connecte
 test("connected without an expiry still reads correctly", () => {
     const info = describeCluster({ connected: true, server: "h:1", expiresAt: null, expired: false }, NOW);
     assert.doesNotMatch(info.detail, /expires/);
-    assert.match(info.detail, /^Full access\./);
+    assert.match(info.detail, /^The credential could read/);
 });
 
 const MANAGED_EXPIRED = { connected: true, server: "h:1", expiresAt: "2026-10-10T08:00:00Z", expired: true, managed: true, context: "kind-x" };

@@ -85,7 +85,7 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         <dl class="connect__details" data-role="connect-details" hidden>
             <dt>Cluster API</dt><dd data-role="connect-server"></dd>
             <dt>Credential</dt><dd data-role="connect-credential"></dd>
-            <dt>Access</dt><dd>Full access (read and write) to the connected cluster</dd>
+            <dt>Access</dt><dd>Approved for full access (read and write). Reads were checked when you connected; writes are checked when a change is applied.</dd>
             <dt>Renewal</dt><dd data-role="connect-expiry"></dd>
         </dl>
     </section>

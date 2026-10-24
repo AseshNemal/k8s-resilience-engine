@@ -11,9 +11,11 @@
  * producer yet (baseline blast radius, validation results, simulated placement) is passed as null, and each
  * panel then shows an explicit missing-evidence state. See docs/RECOMMENDATION_LIVE_DATA.md.
  *
- * The page is four steps (select, failure impact, candidates, approve) with a Simple and a Research view of the same page: the
- * view only hides research-only blocks, it never changes what is computed or sent. The stepper shows where the person is from
- * facts this script already holds.
+ * The page is five steps (select, failure impact, compare, prove, approve), shown one at a time, with a Simple and a Research view of
+ * the same page: the view only hides research-only blocks, it never changes what is computed or sent. The stepper shows where the work
+ * stands from facts this script already holds, and a step opens only when the person opens it, except that the page starts at the step
+ * the work is at. Approval is never presented as done or as the step to do until step 4 has passed; a decision recorded earlier is
+ * kept and shown as an earlier approval.
  *
  * Approval gate: an approval is requested for, and recorded against, the live recommendation shown here.
  * The server refuses to approve a record that has no verified link to live evidence.
@@ -21,7 +23,7 @@
 
 (function () {
     const { fetchJson } = window.ResilienceApi;
-    const { formatCodeLabel, initJsonPanel, updateLastRefreshed } = window.ResilienceUi;
+    const { formatCodeLabel, updateLastRefreshed } = window.ResilienceUi;
     const view = window.ResilienceRecommendations;
     const { describeError, renderStateCard, applyBadge } = window.ResilienceConnection;
 
@@ -39,14 +41,17 @@
     const contextModule = window.ResilienceRecommendationContext;
     let controller = null;
 
-    // ---- Simple / Research view and the stepper ----------------------------------------------------------------------
+    // ---- Simple / Research view, the steps and where the person is ---------------------------------------------------
     const flowRoot = document.querySelector('[data-role="rec-flow"]');
     const stepperList = document.querySelector('[data-role="rec-stepper"]');
     const viewButtons = ["simple", "research"].map((name) => [name, document.querySelector(`[data-role="rec-view-${name}"]`)]);
     const VIEW_KEY = "resilience.recommendations.view";
     // Facts the stepper is drawn from. Nothing here is a result: it is only what the page already knows.
-    const stepFacts = { chosen: false, status: "loading", selected: false, applied: false, proof: "none" };
+    const stepFacts = { chosen: false, status: "loading", selected: false, applied: false, proof: "none", proven: null, approval: "none" };
     let appliedFor = null;                                    // the recommendation the stored application belongs to, as the panel last reported
+    let storedApplication = null;                             // the application the server holds, as the panel last reported
+    let pinnedStep = null;                                    // a step the person opened; null while the page follows the work
+    let shownStep = 1;
 
     function storedView() {
         try {
@@ -68,9 +73,107 @@
         }
     }
 
+    /** The step the page opens at while the person has not chosen one: where the work is, not the last step that is open. */
+    function stepAtWork() {
+        if (!stepFacts.chosen) return 1;
+        if (stepFacts.status !== "ready") return 2;           // loading shows its note, a missing piece of evidence shows what it is
+        if (stepFacts.proof === "running" || stepFacts.proof === "attention") return 4;
+        if (stepFacts.applied) return 5;
+        return 2;
+    }
+
     function updateStepper() {
         stepFacts.applied = !!currentRecommendation && appliedFor === currentRecommendation.id;
-        if (stepperList) view.renderStepper(stepperList, view.computeSteps(stepFacts));
+        const steps = view.computeSteps(stepFacts);
+        const pin = pinnedStep && steps[pinnedStep - 1];
+        // A pinned step stays while it can be opened; the applied-change panel can always be reached, even with no recommendation on screen.
+        const open = pin && (pin.available || (pinnedStep === 5 && storedApplication));
+        shownStep = open ? pinnedStep : stepAtWork();
+        if (flowRoot) {
+            flowRoot.setAttribute("data-step", String(shownStep));
+            flowRoot.setAttribute("data-ready", String(!!currentRecommendation));
+        }
+        if (stepperList) view.renderStepper(stepperList, steps, { viewing: shownStep, onSelect: openStep });
+        updateAround();
+    }
+
+    /** The person opens a step. It stays until the work they chose (the application, the workflow, the failure) changes. */
+    function openStep(number) {
+        pinnedStep = number;
+        updateStepper();
+        const heading = document.getElementById(`rec-step-${number}`);
+        if (heading && heading.focus) {
+            heading.setAttribute("tabindex", "-1");
+            heading.focus({ preventScroll: true });
+        }
+        if (stepperList && stepperList.scrollIntoView) stepperList.scrollIntoView({ block: "start" });
+    }
+
+    function followTheWork() {
+        pinnedStep = null;
+    }
+
+    // What is around the step on screen: the Next button of step 1, the applied-change notice, the research tab that fits the step.
+    const appliedNotice = document.querySelector('[data-role="rec-applied-notice"]');
+    const appliedText = document.querySelector('[data-role="rec-applied-text"]');
+    const step1Next = document.querySelector('[data-role="rec-step1-next"]');
+    const STEP_TAB = { 1: "failures", 2: "failures", 3: "ranking", 4: "placement", 5: "raw" };
+    let tabChosen = false;                                    // once the person picks a tab, the page stops choosing one for them
+
+    function updateAround() {
+        if (step1Next) step1Next.hidden = !(stepFacts.status === "ready" && stepFacts.chosen);
+        if (appliedNotice) {
+            const hidden = !storedApplication || shownStep === 5;
+            if (!hidden && appliedText) {
+                appliedText.textContent = `A change is applied to ${storedApplication.namespace}: ${storedApplication.deployments.join(", ")} `
+                    + `(${String(storedApplication.status).replace(/_/g, " ").toLowerCase()}).`;
+            }
+            appliedNotice.hidden = hidden;
+        }
+        if (!tabChosen) selectTab(STEP_TAB[shownStep], false);
+    }
+
+    // ---- Research tabs ---------------------------------------------------------------------------------------------
+    const workbench = document.querySelector('[data-role="rec-workbench"]');
+
+    function selectTab(name, focus) {
+        if (!workbench || !workbench.querySelectorAll || !name) return;
+        for (const tab of Array.from(workbench.querySelectorAll('[role="tab"]'))) {
+            const on = tab.getAttribute("data-tab") === name;
+            tab.setAttribute("aria-selected", String(on));
+            tab.setAttribute("tabindex", on ? "0" : "-1");
+            if (on && focus && tab.focus) tab.focus();
+        }
+        for (const pane of Array.from(workbench.querySelectorAll('[role="tabpanel"]'))) pane.hidden = pane.getAttribute("data-pane") !== name;
+    }
+
+    if (workbench && workbench.addEventListener) {
+        workbench.addEventListener("click", (event) => {
+            const tab = event.target && event.target.closest ? event.target.closest('[role="tab"]') : null;
+            if (!tab) return;
+            tabChosen = true;
+            selectTab(tab.getAttribute("data-tab"), false);
+        });
+        workbench.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+            const tabs = Array.from(workbench.querySelectorAll('[role="tab"]'));
+            const at = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
+            // Arrow keys move along the tabs and stop at the ends, as a tab list does.
+            const next = tabs[Math.max(0, Math.min(tabs.length - 1, at + (event.key === "ArrowRight" ? 1 : -1)))];
+            if (!next) return;
+            tabChosen = true;
+            selectTab(next.getAttribute("data-tab"), true);
+            event.preventDefault();
+        });
+    }
+
+    // Any button that says where it goes (data-go) opens that step: the footers, the case line and the notices.
+    if (flowRoot && flowRoot.addEventListener) {
+        flowRoot.addEventListener("click", (event) => {
+            const target = event.target && event.target.closest ? event.target.closest("[data-go]") : null;
+            const number = target ? Number(target.getAttribute("data-go")) : 0;
+            if (number >= 1 && number <= 5) openStep(number);
+        });
     }
 
     const APPROVAL_BASE = "/api/recommendations";
@@ -91,6 +194,7 @@
         return !!controller && controller.selection().workflowKind === "declared";
     }
 
+    // The research tabs sit outside the re-rendered region, so their metrics are looked up on the page.
     function setMetric(root, name, value) {
         const element = root.querySelector(`[data-metric="${name}"]`);
         if (element) element.textContent = value;
@@ -153,53 +257,85 @@
         return element;
     }
 
+    // What a stored decision is called, in the words of its tier. The tiers are different doors, so their words differ: a research decision is
+    // never worded as the production approval, and the production approval is never worded as research.
+    const DECISION_WORDS = {
+        production: { PENDING_APPROVAL: "Approval requested", APPROVED: "Approved", REJECTED: "Rejected" },
+        research: { PENDING_APPROVAL: "Research approval requested", APPROVED: "Approved for research", REJECTED: "Research approval rejected" },
+    };
+    const TIER_LINE = {
+        production: "Production approval, from live evidence.",
+        research: "Research approval: the workflow was declared, not observed. It counts for validation on a test cluster only.",
+    };
+
+    function note(text, className) {
+        const node = document.createElement("div");
+        node.className = className || "approval-note";
+        node.textContent = text;
+        return node;
+    }
+
+    function shortDate(iso) {
+        const date = iso ? new Date(iso) : null;
+        return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
+    }
+
+    /** "Approved by Sam on 24 Oct 2026": only what the stored record says. */
+    function decisionSummary(approval, words) {
+        const decided = approval.status !== "PENDING_APPROVAL";
+        const who = decided ? approval.decidedBy : approval.requestedBy;
+        const when = shortDate(decided ? approval.decidedAt : approval.requestedAt);
+        return `${words[approval.status] || approval.status}${who ? ` by ${who}` : ""}${when ? ` on ${when}` : ""}.`;
+    }
+
     function renderApprovalState(approval, provenance, message) {
         const stateContainer = region.querySelector('[data-role="approval-state-container"]');
         const actionsContainer = region.querySelector('[data-role="approval-actions"]');
         if (!stateContainer || !actionsContainer) return;
         stateContainer.replaceChildren();
         actionsContainer.replaceChildren();
+        stepFacts.approval = approval ? approval.status : "none";
+        updateStepper();
 
         if (!approval && isDeclared()) {
             renderResearchRequest(stateContainer, actionsContainer);
         } else if (!approval) {
-            stateContainer.append(approvalBadge("No Approval Requested", "muted"));
-            const request = button("Request Approval", "primary-button", "btn-request-approval", requestApproval);
+            stateContainer.append(approvalBadge("No approval requested", "muted"));
+            const request = button("Request approval", "primary-button", "btn-request-approval", requestApproval);
             if (!currentRecommendation.feasible || !currentApproval.ready) {
                 request.disabled = true;
                 request.title = currentApproval.reason || "Recommendation must be feasible";
             }
             actionsContainer.append(request);
         } else {
+            const research = provenance === "research-declared" || isDeclared();
+            const words = DECISION_WORDS[research ? "research" : "production"];
             const variant = { PENDING_APPROVAL: "warning", APPROVED: "success", REJECTED: "danger" }[approval.status] || "muted";
             const stack = document.createElement("div");
             stack.className = "stack-sm";
-            const version = document.createElement("div");
-            version.className = "text-sm text-muted";
-            version.textContent = `Proposal Version: ${approval.proposalVersion}`;
-            stack.append(approvalBadge(approval.status, variant), version);
-            if (provenance === "research-declared") {
-                const research = document.createElement("div");
-                research.className = "approval-note";
-                research.setAttribute("data-role", "research-note");
-                research.textContent = "Research tier: this workflow was declared, not observed. A decision here applies nothing and counts "
-                    + "for research on the research cluster only; results from it are conditional on the declaration.";
-                stack.append(research);
-            }
+            stack.setAttribute("data-role", "approval-record");
+            stack.append(approvalBadge(words[approval.status] || approval.status, variant),
+                note(decisionSummary(approval, words), "text-sm text-muted"));
+            // A decision made before the change was proven is kept and shown, but it is an earlier approval and it is not a validation.
+            const earlier = note(approval.status === "PENDING_APPROVAL"
+                ? "This request was made without a test-cluster validation of this change."
+                : "This decision was recorded without a test-cluster validation of this change, and it does not count as one.");
+            earlier.className = "approval-note approval-history";
+            earlier.hidden = stepFacts.proven !== false;      // shown once the server has said this change is not proven
+            stack.append(earlier);
+            const tier = note(research ? TIER_LINE.research : TIER_LINE.production, "text-sm text-muted");
+            if (provenance === "research-declared") tier.setAttribute("data-role", "research-note");
+            stack.append(tier);
             if (provenance === "unverified") {
-                const warning = document.createElement("div");
-                warning.className = "approval-note";
-                warning.textContent =
-                    "This request has no verifiable link to live cluster evidence. It can be rejected but not approved.";
-                stack.append(warning);
+                stack.append(note("This request has no verifiable link to live cluster evidence. It can be rejected but not approved."));
             }
             if (approval.decisionNote) {
-                const note = document.createElement("div");
-                note.className = "approval-note";
+                const noted = document.createElement("div");
+                noted.className = "approval-note";
                 const label = document.createElement("strong");
                 label.textContent = "Note: ";
-                note.append(label, document.createTextNode(approval.decisionNote));
-                stack.append(note);
+                noted.append(label, document.createTextNode(approval.decisionNote));
+                stack.append(noted);
             }
             stateContainer.append(stack);
             if (approval.status === "APPROVED") renderApplication(stateContainer);
@@ -229,7 +365,7 @@
         if (!offer || !offer.available) {
             const why = document.createElement("div");
             why.className = "approval-note";
-            why.textContent = (offer && offer.reason) || "This candidate cannot be put forward.";
+            why.textContent = (offer && offer.reason) || "This candidate cannot be put forward for research approval.";
             stateContainer.append(why);
             const blocked = button("Request research approval", "primary-button", "btn-request-research", () => {});
             blocked.disabled = true;
@@ -416,39 +552,54 @@
         return `Tested on ${where}; no change was proven.`;
     }
 
-    async function refreshProofNote() {
+    /** The one place the answer to "was this change proven?" is written: the approval step's callout and the lead card's line. */
+    function showProofStatus(proof, text, known) {
+        const state = !known ? "unknown" : proof.state === "PROVEN" ? "proven" : proof.state === "OTHER_PROVEN" ? "other" : proof.state === "NOT_RUN" ? "unverified" : "failed";
         const note = region.querySelector('[data-role="rec-validation-note"]');
+        const callout = region.querySelector('[data-role="rec-validation-callout"]');
+        const go = region.querySelector('[data-role="rec-validation-go"]');
+        const hero = region.querySelector(".candidate-card__validation-text");
+        if (note && note.isConnected !== false) note.textContent = text;
+        if (callout) callout.setAttribute("data-state", state);
+        if (go) go.hidden = state === "proven";
+        if (hero) hero.textContent = text;
+        stepFacts.proven = known ? state === "proven" : null;
+        const earlier = region.querySelector(".approval-history");
+        if (earlier) earlier.hidden = stepFacts.proven !== false;
+        updateStepper();
+    }
+
+    async function refreshProofNote() {
         const v = lastView || {};
-        if (!note || !v.namespace || !v.workflowId) return;
+        if (!v.namespace || !v.workflowId) return;
         const sha = v.detail && v.detail.yaml ? v.detail.yaml.sha256 : null;
         const query = new URLSearchParams({ namespace: v.namespace, workflowId: v.workflowId });
         if (sha) query.set("candidateSha256", sha);
         try {
             const response = await fetch(`/api/recommendations/validation-loop/proof?${query}`);
-            if (!response.ok) return;
+            if (!response.ok) throw new Error("not available");
             const proof = await response.json();
-            if (note.isConnected !== false) note.textContent = proofNoteText(proof);
+            showProofStatus(proof, proofNoteText(proof), true);
         } catch (_error) {
-            // the note keeps what it said: nothing is claimed that the server did not report
+            // Nothing is claimed that the server did not report: the status says it could not be read, and the step stays unproven.
+            showProofStatus(null, "Whether this change was proven could not be read.", false);
         }
     }
 
     function proofChanged(fact) {
         stepFacts.proof = fact;
         updateStepper();
-        if (fact === "passed" || fact === "failed") refreshProofNote();
+        if (fact !== "running") refreshProofNote();
     }
 
     function continueToApproval() {
-        const gate = document.getElementById("approval-section");
-        if (gate && gate.scrollIntoView) gate.scrollIntoView({ block: "start" });
-        const heading = document.getElementById("rec-step-5");
-        if (heading && heading.focus) { heading.setAttribute("tabindex", "-1"); heading.focus(); }
+        openStep(5);
     }
 
     // The panel tells the page when the stored application changed, so the Apply box never disagrees with it.
     function operationChanged(status) {
         appliedFor = status && status.application ? status.recommendationId : null;
+        storedApplication = status && status.application ? status.application : null;
         updateStepper();
         if (applicationBox && status && status.recommendationId === applicationBoxFor && currentRecommendation
                 && currentRecommendation.id === applicationBoxFor && applicationBox.isConnected !== false) {
@@ -545,28 +696,16 @@
         if (cancel) cancel.addEventListener("click", hideApprovalModal);
     }
 
-    function initYamlToggle() {
-        const panel = region.querySelector("#rec-raw-yaml");
-        const toggle = panel && panel.querySelector('[data-role="json-toggle"]');
-        if (!toggle) return;
-        toggle.addEventListener("click", () => {
-            const isOpen = panel.classList.toggle("is-open");
-            toggle.setAttribute("aria-expanded", String(isOpen));
-            const label = toggle.querySelector('[data-role="json-toggle-label"]');
-            if (label) label.textContent = isOpen ? "Hide Generated YAML" : "View Generated YAML";
-        });
-    }
-
     function showMetrics(summary) {
         const percent = (value) => (value === null || value === undefined ? "—" : `${Number(value).toFixed(0)}%`);
-        setMetric(region, "rec-baseline-blast-radius", percent(summary.baseline));
-        setMetric(region, "rec-best-predicted-blast-radius", percent(summary.bestPredicted));
+        setMetric(document, "rec-baseline-blast-radius", percent(summary.baseline));
+        setMetric(document, "rec-best-predicted-blast-radius", percent(summary.bestPredicted));
         setMetric(
-            region,
+            document,
             "rec-risk-reduction",
             summary.selectedRiskReduction === null ? "—" : `${summary.selectedRiskReduction} pp`
         );
-        setMetric(region, "rec-feasible-count", String(summary.feasibleCount));
+        setMetric(document, "rec-feasible-count", String(summary.feasibleCount));
     }
 
     // ---- Cluster, selections and evidence ----------------------------------------------------------------------------
@@ -624,6 +763,7 @@
             failuresFor = key;
             view.renderFailures(failuresResult, overview, (node) => {
                 if (nodeSelect) nodeSelect.value = node;
+                followTheWork();
                 controller.selectFailedNode(node);
             });
         } catch (error) {
@@ -712,6 +852,22 @@
         };
     }
 
+    // The research tabs sit outside the re-rendered region, so what fills them is looked up on the page, not in the region.
+    const tabPart = (role) => document.querySelector(`[data-role="${role}"]`);
+
+    /** Empty the research tabs, so nothing from an earlier recommendation is left beside a page that has none. */
+    function clearWorkbench() {
+        view.renderRankingTable(tabPart("rec-candidate-table-body"), { recommendations: [] });
+        const reasons = tabPart("rec-detail-list");
+        if (reasons) reasons.replaceChildren();
+        view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), null, null);
+        view.renderValidation(tabPart("rec-validation"), null);
+        view.renderYaml(tabPart("rec-yaml"), null);
+        const raw = tabPart("rec-raw-json");
+        if (raw) raw.textContent = "Nothing loaded yet.";
+        showMetrics({ baseline: null, bestPredicted: null, selectedRiskReduction: null, feasibleCount: 0 });
+    }
+
     function showDetail(v) {
         const detail = v.detail;
         const report = detail.report;
@@ -725,6 +881,8 @@
         const selected = currentRecommendation && detail.candidates.find((c) => c.id === currentRecommendation.id);
         currentApproval = selected ? selected.approval : { ready: false, reason: "No candidate is selected." };
         currentResearch = selected && selected.researchApproval ? selected.researchApproval : null;
+        stepFacts.approval = "none";                  // the stored decision of the new selection is read below
+        stepFacts.proven = null;                      // and so is whether the server has it proven
 
         // Evidence next to the report: what the engine returned, never anything computed here. Without a YAML generator
         // and without applied changes there is no YAML proposal and no validation: those panels say so.
@@ -740,8 +898,6 @@
         view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
             selected || null, v.cluster && v.cluster.identity ? v.cluster.identity : "");
         view.renderSelectedImprovement(region.querySelector('[data-role="rec-selected"]'), selected || null);
-        view.renderCandidateDetails(region.querySelector('[data-role="rec-detail-list"]'), detail);
-        showMetrics(view.summarise(report, context));
         // Each card says what it changes and, when it cannot be put forward, the engine's own reason.
         const descriptions = {};
         const reasons = {};
@@ -749,20 +905,30 @@
             if (c.recommendedChange) descriptions[c.id] = c.recommendedChange;
             if (!c.feasible && c.approval.reason) reasons[c.id] = c.approval.reason;
         });
-        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context, { descriptions, reasons });
-        view.renderPlacement(region.querySelector('[data-role="rec-placement-current"]'),
-            region.querySelector('[data-role="rec-placement-predicted"]'), shown, context);
-        view.renderRankingTable(region.querySelector('[data-role="rec-candidate-table-body"]'), report);
-        view.renderValidation(region.querySelector('[data-role="rec-validation"]'), context.validation);
-        view.renderYaml(region.querySelector('[data-role="rec-yaml"]'), context.yaml);
-        initYamlToggle();
-        initJsonPanel(region.querySelector("#rec-raw-recommendation"), detail);
-        updateLastRefreshed(lastRefreshed);
-        const validationNote = region.querySelector('[data-role="rec-validation-note"]');
-        if (validationNote) {
-            validationNote.textContent = detail.validation && detail.validation.reason ? "Not yet validated by an experiment." : "";
-            if (detail.validation && detail.validation.reason) validationNote.setAttribute("title", detail.validation.reason);
+        // A declared workflow's cards do not repeat the notice that production approval is unavailable: it is said once, above the steps.
+        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), report, context, {
+            descriptions, reasons,
+            hero: currentRecommendation ? { problem: view.problemStatement(detail), validationText: "Checking whether it was proven on a test cluster…" } : null,
+        });
+        for (const role of ["rec-prove-action", "rec-review-action"]) {
+            const action = region.querySelector(`[data-role="${role}"]`);
+            if (action) action.hidden = !currentRecommendation;
         }
+
+        // The research tabs.
+        view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
+        view.renderRankingTable(tabPart("rec-candidate-table-body"), report);
+        view.renderCandidateDetails(tabPart("rec-detail-list"), detail);
+        view.renderValidation(tabPart("rec-validation"), context.validation);
+        view.renderYaml(tabPart("rec-yaml"), context.yaml);
+        const raw = tabPart("rec-raw-json");
+        if (raw) raw.textContent = JSON.stringify(detail, null, 2);
+        showMetrics(view.summarise(report, context));
+        updateLastRefreshed(lastRefreshed);
+        // The engine's own statement about validation stays one hover away from the short line.
+        const validationNote = region.querySelector('[data-role="rec-validation-note"]');
+        if (validationNote && detail.validation && detail.validation.reason) validationNote.setAttribute("title", detail.validation.reason);
+
         stepFacts.selected = !!currentRecommendation;
         updateStepper();                              // render() drew it before the selection was known
         placeProof();
@@ -772,7 +938,7 @@
             const requestedFor = currentRecommendation.id;
             loadApprovalState().then((approval) => {
                 if (!currentRecommendation || currentRecommendation.id !== requestedFor) return;   // a newer view replaced it
-                const yamlPanel = region.querySelector('[data-role="rec-yaml"]');
+                const yamlPanel = tabPart("rec-yaml");
                 if (yamlPanel && approval && approval.yamlSnapshot) view.renderYaml(yamlPanel, approval.yamlSnapshot);
             });
         } else {
@@ -783,35 +949,69 @@
         }
     }
 
+    // The one line that says what the steps are about, and, for a declared workflow, the one place that says what that means.
+    const caseBox = document.querySelector('[data-role="rec-case"]');
+    const caseLine = document.querySelector('[data-role="rec-case-line"]');
+    const declaredNote = document.querySelector('[data-role="declared-note"]');
+
+    function renderCase(v) {
+        if (!caseBox || !caseLine) return;
+        const chosen = !!(v.namespace && v.workflowId);
+        caseBox.hidden = !chosen;
+        if (!chosen) return;
+        const failed = (v.detail && v.detail.evidence && v.detail.evidence.failedNode) || v.failedNode || "";
+        const pairs = [["Application", v.namespace], ["Workflow", v.workflowId], ["Failure", failed ? `${failed} stops` : "the worst-case node stops"]];
+        caseLine.replaceChildren(...pairs.map(([label, value]) => {
+            const item = document.createElement("span");
+            item.className = "rec-case__item";
+            const name = document.createElement("span");
+            name.className = "rec-case__label";
+            name.textContent = label;
+            const text = document.createElement("span");
+            text.className = "rec-case__value";
+            text.textContent = value;
+            item.append(name, text);
+            return item;
+        }));
+    }
+
+    function renderDeclaredNote(v, declared) {
+        if (!declaredNote) return;
+        declaredNote.hidden = !declared;
+        if (!declared) return;
+        // The engine's own statement, kept whole for the research view and as a tooltip; the plain view gets one sentence.
+        const full = v.detail && v.detail.declared && v.detail.declared.notApprovableBecause;
+        declaredNote.setAttribute("title", full || "");
+        const short = document.createElement("span");
+        short.textContent = "Declared workflow, not observed. It can be approved for research validation on a test cluster only; production approval is not available for it.";
+        if (full) {
+            const long = document.createElement("span");
+            long.className = "rec-research-only";
+            long.textContent = ` ${full}`;
+            declaredNote.replaceChildren(short, long);
+        } else {
+            declaredNote.replaceChildren(short);
+        }
+    }
+
     function render(v) {
         lastView = v;
         renderContext(v);
+        renderCase(v);
         stepFacts.chosen = !!(v.namespace && v.workflowId);
         stepFacts.status = v.status;
         if (v.status !== "ready") stepFacts.selected = false;
+        renderDeclaredNote(v, false);
         updateStepper();
         const busy = v.status === "loading" || v.status === "loading-recommendation";
         if (reloadButton) reloadButton.disabled = busy;
         if (v.status === "ready") {
             const declared = v.workflowKind === "declared";
-            applyBadge(sourceBadge, declared ? { variant: "warning", text: "Declared workflow · not approvable" }
+            applyBadge(sourceBadge, declared ? { variant: "warning", text: "Declared workflow · research approval only" }
                                              : { variant: "success", text: "Live evidence" });
             showDetail(v);
+            renderDeclaredNote(v, declared);
             if (declared) {
-                // Standing label: this is not observed and cannot be approved, whatever the candidates below say.
-                const full = (v.detail && v.detail.declared && v.detail.declared.notApprovableBecause)
-                    || "This recommendation uses a workflow a person declared. It can be read, but it cannot be approved or applied.";
-                const note = document.createElement("p");
-                note.className = "ui-note rec-declared";
-                note.setAttribute("data-role", "declared-note");
-                note.setAttribute("title", full);
-                const short = document.createElement("span");
-                short.textContent = "Declared workflow, not observed: research approval only.";
-                const long = document.createElement("span");
-                long.className = "rec-research-only";
-                long.textContent = ` ${full}`;
-                note.append(short, long);
-                region.prepend(note);
                 const outcome = region.querySelector('[data-role="rec-outcome"]');
                 if (outcome) outcome.setAttribute("data-declared", "true");   // the notice above already says it; the plain view hides the repeat
             }
@@ -820,7 +1020,10 @@
         currentRecommendation = null;
         currentApproval = { ready: false, reason: "" };
         currentResearch = null;
+        stepFacts.approval = "none";
+        stepFacts.proven = null;
         if (proofRoot) proofRoot.hidden = true;
+        clearWorkbench();
         if (busy) {
             applyBadge(sourceBadge, { variant: "muted", text: "Loading…" });
             region.replaceChildren();
@@ -847,6 +1050,7 @@
             // One sentence and the first thing to do; the rest of the list is for the research view.
             if (region.querySelectorAll) region.querySelectorAll(".error-state li").forEach((item, index) => { if (index > 0) item.classList.add("rec-research-only"); });
         }
+        updateStepper();
     }
 
     // The connected cluster's name, when this page runs inside the Docker Desktop extension. A page opened another way
@@ -887,13 +1091,15 @@
     setView(storedView(), false);
     updateStepper();
 
-    if (reloadButton) reloadButton.addEventListener("click", () => controller.reload());
-    if (namespaceSelect) namespaceSelect.addEventListener("change", () => controller.selectNamespace(namespaceSelect.value));
-    if (workflowSelect) workflowSelect.addEventListener("change", () => controller.selectWorkflow(workflowSelect.value));
-    if (nodeSelect) nodeSelect.addEventListener("change", () => controller.selectFailedNode(nodeSelect.value));
+    // Changing what the page is about starts the steps over: the page follows the work again.
+    if (reloadButton) reloadButton.addEventListener("click", () => { followTheWork(); controller.reload(); });
+    if (namespaceSelect) namespaceSelect.addEventListener("change", () => { followTheWork(); controller.selectNamespace(namespaceSelect.value); });
+    if (workflowSelect) workflowSelect.addEventListener("change", () => { followTheWork(); controller.selectWorkflow(workflowSelect.value); });
+    if (nodeSelect) nodeSelect.addEventListener("change", () => { followTheWork(); controller.selectFailedNode(nodeSelect.value); });
     if (failuresButton) failuresButton.addEventListener("click", loadFailures);
     // Choices belong to one cluster: when the connection changes, nothing chosen before is kept.
     window.addEventListener("resilience-cluster-changed", () => {
+        followTheWork();
         controller.clusterChanged();
         if (operationPanel) operationPanel.clusterChanged();
         if (proofPanel) proofPanel.reset();

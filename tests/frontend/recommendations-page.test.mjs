@@ -116,6 +116,7 @@ const contextOf = (over = {}) => ({
     nextActions: [], ready: true, readOnly: true, ...over,
 });
 const DETAIL = "GET /api/recommendations/live/detail?workflow_id=checkout&namespace=shop";
+const PROOF = "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout";
 const BASE = { "GET /_extension/cluster": { status: 200, body: { context: "docker-desktop" } }, "GET /api/recommendations/context": { status: 200, body: contextOf() } };
 
 async function openPage(routes) {
@@ -249,7 +250,7 @@ test("a candidate the server says is ready can be requested, with the same selec
         [`POST /api/recommendations/rec-live/request-approval${query}`]: { status: 200, headers: { "X-Evidence-Provenance": "verified" }, body: { status: "PENDING_APPROVAL", proposalVersion: "v1.0", yamlSnapshot: null, decisionNote: null } },
     });
 
-    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("No Approval Requested"));
+    assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("No approval requested"));
     const request = env.element('[data-role="approval-actions"]').children.find((child) => child.id === "btn-request-approval");
     assert.ok(!request.disabled);
     await request.listeners.click();
@@ -282,7 +283,7 @@ test("a stored YAML proposal is shown, and an unverified approval cannot be appr
 test("a failing approval lookup is reported on the page and does not hide the recommendation", async () => {
     const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 500, body: { detail: "boom" } } });
 
-    assert.ok(text(env.element('[data-role="rec-candidate-list"]')).includes("Topology Spread"));
+    assert.ok(text(env.element('[data-role="rec-candidate-list"]')).includes("Topology spread"));
     assert.ok(text(env.element('[data-role="approval-state-container"]')).includes("Could not load the approval state."));
 });
 
@@ -323,8 +324,10 @@ test("a declared workflow is asked for through the declared route, and the badge
 
     assert.ok(env.calls.some(([m, u]) => m === "GET" && u.includes("/declared/detail?workflow_id=checkout&namespace=shop")));
     assert.ok(!calls_include(env, "/live/detail"));
-    assert.equal(env.element('[data-role="source-badge"]').textContent, "Declared workflow · not approvable");
-    assert.ok(text(env.region).includes("declared, see the research tier"), "the standing notice");
+    assert.equal(env.element('[data-role="source-badge"]').textContent, "Declared workflow · research approval only");
+    assert.ok(text(env.element('[data-role="declared-note"]')).includes("declared, see the research tier"), "the standing notice");
+    assert.ok(!/not approvable|cannot be approved/i.test(env.element('[data-role="source-badge"]').textContent + text(env.element('[data-role="declared-note"]')).replace("declared, see the research tier", "")),
+        "nothing on a declared page says it cannot be approved: the research tier exists, and production approval is simply not offered");
 });
 
 test("for a declared workflow the production request button is replaced by the research form, and the production route is never used", async () => {
@@ -353,7 +356,7 @@ test("the research request sends the named person and the written acknowledgemen
     assert.deepEqual(env.bodies[index], { recommendationId: "rec-live", proposalVersion: "v1.0", acknowledgedBy: "asesh",
         acknowledgement: "I understand this workflow is declared by me, not observed, and approve it for research validation only." });
     const shown = text(env.element('[data-role="approval-state-container"]'));
-    assert.ok(shown.includes("PENDING_APPROVAL") && shown.includes("Research tier"), shown);
+    assert.ok(shown.includes("Research approval requested") && shown.includes("Research approval:") && !shown.includes("PENDING_APPROVAL"), shown);
     assert.ok(byId(env, "btn-show-approve") && byId(env, "btn-show-reject"));
     assert.ok(!byId(env, "btn-show-approve").disabled, "a research-declared record can be approved");
 });
@@ -574,10 +577,10 @@ test("the stepper follows the page and the impact step shows the engine's result
     const env = await openPage({ [DETAIL]: { status: 200, body: { ...detailOf([cand()], "rec-live"), baselineImpact: IMPACT } },
         "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
 
-    assert.deepEqual(stepStates(env), ["done", "done", "done", "todo", "current"]);
+    // Step 4 is the one to do and the approval waits for it: it is not shown as the step to do while the change is unproven.
+    assert.deepEqual(stepStates(env), ["done", "done", "done", "current", "waiting"]);
     assert.ok(text(env.element('[data-role="rec-impact"]')).includes("If w1 fails"));
     assert.ok(text(env.element('[data-role="rec-impact"]')).includes("The workflow does not survive"));
-    assert.ok(text(env.element('[data-role="rec-validation-note"]')) === "" || env.element('[data-role="rec-validation-note"]').textContent === "");
 });
 
 test("with missing evidence the stepper stops at the second step and nothing after it looks done", async () => {
@@ -586,7 +589,7 @@ test("with missing evidence the stepper stops at the second step and nothing aft
         nextActions: ["Freeze a workflow"] });
     const env = await openPage({ "GET /api/recommendations/context": { status: 200, body: missing } });
 
-    assert.deepEqual(stepStates(env), ["current", "todo", "todo", "todo", "todo"], "no workflow is chosen yet, so the first step is the one to do");
+    assert.deepEqual(stepStates(env), ["current", "waiting", "waiting", "waiting", "waiting"], "no workflow is chosen yet, so the first step is the one to do");
     assert.equal(env.element('[data-role="rec-evidence-summary"]').textContent, "Evidence: 3 of 5 available");
     assert.equal(env.element('[data-role="rec-evidence-details"]').attributes["data-attention"], "true", "missing evidence is marked on its line, and the card says what to do");
 });
@@ -594,7 +597,7 @@ test("with missing evidence the stepper stops at the second step and nothing aft
 test("a recommendation with nothing selected stops the stepper at the third step and offers nothing to approve", async () => {
     const env = await openPage({ [DETAIL]: { status: 200, body: { ...detailOf([cand({ feasible: false, selected: false, approval: NOT_READY() })], null), baselineImpact: IMPACT } } });
 
-    assert.deepEqual(stepStates(env), ["done", "done", "blocked", "todo", "todo"]);
+    assert.deepEqual(stepStates(env), ["done", "done", "blocked", "waiting", "waiting"]);
 });
 
 test("the view switch changes only the view attribute, remembers the choice when it can, and works when storage is blocked", async () => {
@@ -680,9 +683,9 @@ test("with only a declared workflow to choose, the page shows no error block: th
 test("the declared notice is one short line, with the full explanation kept for the research view and as a tooltip", async () => {
     const env = await openDeclared();
 
-    const note = env.region.children[0];
-    assert.equal(note.attributes["data-role"], "declared-note");
-    assert.equal(note.children[0].textContent, "Declared workflow, not observed: research approval only.");
+    const note = env.element('[data-role="declared-note"]');
+    assert.equal(note.hidden, false);
+    assert.equal(note.children[0].textContent, "Declared workflow, not observed. It can be approved for research validation on a test cluster only; production approval is not available for it.");
     assert.match(note.children[1].className, /rec-research-only/);
     assert.ok(note.children[1].textContent.includes("declared, see the research tier"));
     assert.ok(note.attributes.title.includes("declared, see the research tier"));
@@ -691,11 +694,14 @@ test("the declared notice is one short line, with the full explanation kept for 
 
 test("the validation note is one short line and keeps the engine's full statement as its tooltip", async () => {
     const body = { ...detailOf([cand()], "rec-live"), validation: { available: false, reason: "No experiment has been run for this change." } };
-    const env = await openPage({ [DETAIL]: { status: 200, body }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
+    const env = await openPage({ [DETAIL]: { status: 200, body }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} },
+        [PROOF]: { status: 200, body: { state: "NOT_RUN" } } });
 
     const note = env.element('[data-role="rec-validation-note"]');
-    assert.equal(note.textContent, "Not yet validated by an experiment.");
+    assert.equal(note.textContent, "Not proven on a test cluster.");
     assert.equal(note.attributes.title, "No experiment has been run for this change.");
+    assert.equal(env.element('[data-role="rec-validation-callout"]').attributes["data-state"], "unverified");
+    assert.equal(env.element(".candidate-card__validation-text").textContent, "Not proven on a test cluster.", "the lead card says the same thing");
 });
 
 test("a card carries a reason only when its own change cannot be put forward, not for the notice every declared card would repeat", async () => {
@@ -706,4 +712,153 @@ test("a card carries a reason only when its own change cannot be put forward, no
     const shown = text(env.element('[data-role="rec-candidate-list"]'));
     assert.ok(shown.includes("Not enough worker nodes."));
     assert.ok(!shown.includes("Declared: research tier only."));
+});
+
+// ---- one step at a time, and where the work stands --------------------------------------------------------------------------------
+
+const flow = (env) => env.element('[data-role="rec-flow"]');
+const stepButton = (env, number) => env.element('[data-role="rec-stepper"]').children[number - 1].children[0];
+const captionOf = (env, number) => text(env.element('[data-role="rec-stepper"]').children[number - 1]);
+const READY_ROUTES = (extra = {}) => ({ [DETAIL]: { status: 200, body: { ...detailOf([cand()], "rec-live"), baselineImpact: IMPACT } },
+    "GET /api/recommendations/rec-live/approval": { status: 404, body: {} }, [PROOF]: { status: 200, body: { state: "NOT_RUN" } }, ...extra });
+
+test("a ready recommendation opens at the impact step, one step is on screen, and the stepper can open the others", async () => {
+    const env = await openPage(READY_ROUTES());
+
+    assert.equal(flow(env).attributes["data-step"], "2", "the work is at the impact; the last open step is not where the page lands");
+    assert.equal(flow(env).attributes["data-ready"], "true");
+    stepButton(env, 3).listeners.click();
+    assert.equal(flow(env).attributes["data-step"], "3");
+    stepButton(env, 5).listeners.click();
+    assert.equal(flow(env).attributes["data-step"], "5", "the approval can be opened before the change is proven");
+    assert.equal(stepButton(env, 5).attributes["aria-current"], "step");
+});
+
+test("a step the person opened stays open until what the page is about changes, then the page follows the work again", async () => {
+    const env = await openPage(READY_ROUTES());
+    stepButton(env, 3).listeners.click();
+
+    await env.element('[data-role="reload-button"]').listeners.click();
+    await settle();
+
+    assert.equal(flow(env).attributes["data-step"], "2");
+});
+
+test("every button that says where it goes opens that step, and any other click does nothing", async () => {
+    const env = await openPage(READY_ROUTES());
+    const click = (target) => flow(env).listeners.click({ target });
+
+    click({ closest: () => ({ getAttribute: () => "4" }) });
+    assert.equal(flow(env).attributes["data-step"], "4");
+    click({ closest: () => null });
+    click({ closest: () => ({ getAttribute: () => "9" }) });
+    assert.equal(flow(env).attributes["data-step"], "4", "a click that names no step, or a step that does not exist, changes nothing");
+});
+
+test("the approval is neither done nor the step to do while the change is unproven, and becomes the step to do once the server says it is proven", async () => {
+    const unproven = await openPage(READY_ROUTES());
+    assert.deepEqual(stepStates(unproven), ["done", "done", "done", "current", "waiting"]);
+    assert.ok(captionOf(unproven, 4).includes("Not run yet") && captionOf(unproven, 5).includes("After step 4"));
+
+    const proven = await openPage(READY_ROUTES({ [PROOF]: { status: 200, body: { state: "PROVEN", preliminary: true, target: { name: "kind-test" } } } }));
+    assert.deepEqual(stepStates(proven), ["done", "done", "done", "done", "current"]);
+    assert.equal(proven.element('[data-role="rec-validation-callout"]').attributes["data-state"], "proven");
+    assert.equal(proven.element('[data-role="rec-validation-go"]').hidden, true, "nothing to go and prove");
+    assert.ok(proven.element('[data-role="rec-validation-note"]').textContent.startsWith("Proven on kind-test"));
+});
+
+test("a proof of another change, a failed test and an unreadable answer are each said, and none counts as proven", async () => {
+    const cases = [
+        [{ state: "OTHER_PROVEN", target: { name: "kind-test" } }, "other", "A different change was proven on kind-test, not this one."],
+        [{ state: "TESTED_NONE", target: { name: "kind-test" } }, "failed", "Tested on kind-test; no change was proven."],
+    ];
+    for (const [body, state, sentence] of cases) {
+        const env = await openPage(READY_ROUTES({ [PROOF]: { status: 200, body } }));
+        assert.equal(env.element('[data-role="rec-validation-callout"]').attributes["data-state"], state);
+        assert.equal(env.element('[data-role="rec-validation-note"]').textContent, sentence);
+        assert.equal(env.element('[data-role="rec-validation-go"]').hidden, false);
+        assert.notEqual(stepStates(env)[3], "done");
+    }
+    const unread = await openPage(READY_ROUTES({ [PROOF]: { status: 500, body: {} } }));
+    assert.equal(unread.element('[data-role="rec-validation-callout"]').attributes["data-state"], "unknown");
+    assert.equal(unread.element('[data-role="rec-validation-note"]').textContent, "Whether this change was proven could not be read.");
+    assert.notEqual(stepStates(unread)[3], "done", "an answer that could not be read is never a proof");
+});
+
+const production = (status, over = {}) => ({ id: 1, recommendationId: "rec-live", proposalVersion: "v1.0", status, requestedAt: "2026-10-20T08:00:00Z", requestedBy: "asesh",
+    decidedAt: status === "PENDING_APPROVAL" ? null : "2026-10-21T08:00:00Z", decidedBy: status === "PENDING_APPROVAL" ? null : "sam", decisionNote: null,
+    recommendationSnapshot: {}, yamlSnapshot: null, evaluationSnapshot: {}, ...over });
+const recordRoutes = (record, proof) => READY_ROUTES({ "GET /api/recommendations/rec-live/approval": { status: 200, headers: { "X-Evidence-Provenance": "verified" }, body: record },
+    "GET /api/recommendations/rec-live/application": { status: 200, body: { recommendationId: "rec-live", application: null, canApply: false, reason: "Writes are off.", tier: "production" } },
+    [PROOF]: { status: 200, body: proof } });
+const history = (env) => allNodes(env.element('[data-role="approval-state-container"]')).find((n) => /approval-history/.test(n.className || ""));
+
+test("an approval recorded before the change was proven is kept and shown as an earlier approval, in the production tier's words, and not as validation", async () => {
+    const env = await openPage(recordRoutes(production("APPROVED"), { state: "NOT_RUN" }));
+
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("Approved") && !shown.includes("APPROVED") && shown.includes("Approved by sam on"), shown);
+    assert.ok(shown.includes("Production approval, from live evidence."));
+    assert.equal(history(env).hidden, false, "the record says it does not count as a validation");
+    assert.ok(history(env).textContent.includes("does not count as one"));
+    assert.deepEqual(stepStates(env), ["done", "done", "done", "current", "recorded"]);
+    assert.ok(captionOf(env, 5).includes("Earlier approval"));
+});
+
+test("once the change is proven the earlier-approval note goes away and the record is just a record", async () => {
+    const env = await openPage(recordRoutes(production("APPROVED"), { state: "PROVEN", target: { name: "kind-test" } }));
+
+    assert.equal(history(env).hidden, true);
+    assert.deepEqual(stepStates(env), ["done", "done", "done", "done", "current"]);
+});
+
+test("a pending request and a rejection are worded as what they are, never as raw status codes", async () => {
+    const pending = await openPage(recordRoutes(production("PENDING_APPROVAL"), { state: "NOT_RUN" }));
+    const shownPending = text(pending.element('[data-role="approval-state-container"]'));
+    assert.ok(shownPending.includes("Approval requested") && shownPending.includes("Approval requested by asesh on") && !shownPending.includes("PENDING_APPROVAL"));
+    assert.ok(history(pending).textContent.startsWith("This request was made without"), "a request is not yet a decision");
+
+    const rejected = await openPage(recordRoutes(production("REJECTED"), { state: "NOT_RUN" }));
+    assert.ok(text(rejected.element('[data-role="approval-state-container"]')).includes("Rejected by sam on"));
+});
+
+test("a declared workflow's record is worded as research approval, and the production wording never appears beside it", async () => {
+    const env = await openApproved(applicationStatus());
+
+    const shown = text(env.element('[data-role="approval-state-container"]'));
+    assert.ok(shown.includes("Approved for research"), shown);
+    assert.ok(shown.includes("Research approval: the workflow was declared, not observed."));
+    assert.ok(!shown.includes("Production approval") && !/not approvable/i.test(shown));
+});
+
+test("a change applied on the cluster is announced on the other steps and left to its own panel on step 5", async () => {
+    const stored = applicationStatus({ application: applicationOf("APPLIED"), rolloutComplete: false, canApply: false, canReset: true, recommendationId: "rec-live",
+        operation: { direction: "apply", stage: "rollout", tone: "busy", headline: "Rolling out…", nextAction: "wait", steps: [], inProgress: false, pollMs: 3000, connectionLost: false }, analysis: {}, states: null });
+    const env = await openApproved(applicationStatus(), { "GET /api/recommendations/applications/current": { status: 200, body: stored } });
+    await settle();
+
+    stepButton(env, 3).listeners.click();
+    assert.equal(env.element('[data-role="rec-applied-notice"]').hidden, false);
+    assert.ok(env.element('[data-role="rec-applied-text"]').textContent.includes("db"));
+    stepButton(env, 5).listeners.click();
+    assert.equal(env.element('[data-role="rec-applied-notice"]').hidden, true, "step 5 shows the change itself");
+});
+
+test("nothing from an earlier recommendation is left in the research tabs when the evidence goes missing", async () => {
+    const missing = contextOf({ workflows: [], workflowId: null, workflowChoice: "none", ready: false,
+        evidence: [ev("cluster", "available"), ev("application", "available"), ev("topology", "available"), ev("workflow", "missing"), ev("failureImpact", "missing")] });
+    let answer = contextOf();
+    const env = await openPage({ ...READY_ROUTES(), "GET /api/recommendations/context": () => ({ status: 200, body: answer }),
+        "GET /api/recommendations/context?namespace=shop": () => ({ status: 200, body: answer }) });
+    assert.ok(env.element('[data-role="rec-raw-json"]').textContent.includes("rec-live"));
+    assert.ok(text(env.element('[data-role="rec-candidate-table-body"]')).includes("Topology spread"));
+
+    answer = missing;
+    env.windowListeners["resilience-cluster-changed"]();
+    await settle();
+    await settle();
+
+    assert.equal(env.element('[data-role="rec-raw-json"]').textContent, "Nothing loaded yet.");
+    assert.ok(text(env.element('[data-role="rec-candidate-table-body"]')).includes("No candidates to rank."));
+    assert.equal(env.element('[data-metric="rec-feasible-count"]').textContent, "0");
 });

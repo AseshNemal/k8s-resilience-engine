@@ -39,6 +39,26 @@
             .join(" ");
     }
 
+    /** "TOPOLOGY_SPREAD" -> "Topology spread": Docker Desktop writes sentence case. */
+    function strategyName(code) {
+        const label = codeLabel(code);
+        return label === MISSING ? label : label.charAt(0) + label.slice(1).toLowerCase();
+    }
+
+    /** "LOW" -> "Low cost". A cost the engine did not report is said to be unreported, never guessed. */
+    function costLabel(value) {
+        if (value === null || value === undefined || value === "") return "Cost not reported";
+        const word = String(value).toLowerCase();
+        return `${word.charAt(0).toUpperCase()}${word.slice(1)} cost`;
+    }
+
+    /** A share of 0-100 as a bar width. Only for drawing: the figure itself is printed beside the bar, as the engine gave it. */
+    function barWidth(value) {
+        const number = Number(value);
+        if (value === null || value === undefined || Number.isNaN(number)) return "0%";
+        return `${Math.max(0, Math.min(100, number))}%`;
+    }
+
     function documentOf(options) {
         return (options && options.document) || window.document;
     }
@@ -93,17 +113,54 @@
         };
     }
 
+    // ---- the blast-radius gauge: the one mark the page uses for "how bad now, how bad after" ---------------------------------
+
+    /**
+     * Two bars, now and predicted, each with its figure printed beside it. ``before`` null means the baseline was not supplied: only the
+     * predicted bar is drawn and the page says so, instead of drawing a "before" it does not have.
+     */
+    function gauge(doc, before, after, label, names) {
+        const hasBefore = before !== null && before !== undefined;
+        const wrap = element(doc, "div", undefined, "gauge", {
+            role: "img",
+            "aria-label": `${label || "Blast radius"}: ${hasBefore ? `${percent(before)} now, ` : names ? "" : "baseline not supplied, "}${percent(after)}${names ? "" : " predicted"}`,
+        });
+        const row = (name, value, kind) => {
+            const line = element(doc, "div", undefined, "gauge__row");
+            const track = element(doc, "span", undefined, "gauge__track", { "aria-hidden": "true" });
+            const fill = element(doc, "span", undefined, `gauge__fill gauge__fill--${kind}`);
+            fill.style.width = barWidth(value);
+            track.append(fill);
+            line.append(element(doc, "span", name, "gauge__name"), track, element(doc, "span", percent(value), "gauge__value"));
+            return line;
+        };
+        if (hasBefore) wrap.append(row("Now", before, "now"));
+        // The predicted bar is green only when it is shorter than the one before it: a change that predicts no gain is not drawn as one.
+        const improves = hasBefore && Number(after) < Number(before);
+        wrap.append(row((names && names.after) || "Predicted", after, names || (hasBefore && !improves) ? "now" : "after"));
+        return wrap;
+    }
+
     // ---- candidate cards -------------------------------------------------------------------------------------
 
-    function stat(doc, label, value, title, className) {
-        const wrapper = element(doc, "div", undefined, className);
-        wrapper.append(
-            element(doc, "div", label, "candidate-card__stat-label"),
-            element(doc, "div", value, "candidate-card__stat-value", title ? { title } : undefined)
-        );
+    function fact(doc, label, value, className) {
+        const wrapper = element(doc, "div", undefined, `candidate-card__fact${className ? ` ${className}` : ""}`);
+        wrapper.append(element(doc, "span", label, "candidate-card__fact-label"), element(doc, "span", value, "candidate-card__fact-value"));
         return wrapper;
     }
 
+    function chipOf(doc, text, variant, className) {
+        return element(doc, "span", text, `status-badge status-badge--${variant}${className ? ` ${className}` : ""}`);
+    }
+
+    /**
+     * One card per candidate: what it is (strategy and target), whether it can be put forward, what it is predicted to do and what it
+     * costs, in that order. The longer explanation sits behind "Details". The selected candidate is the lead card; ``options.hero``
+     * adds the problem statement, the validation status and the next actions to it (the plain view's whole answer in one place).
+     *   options.descriptions[id]  the engine's description of the change
+     *   options.reasons[id]       the engine's reason a candidate cannot be put forward
+     *   options.hero              { problem: string, validationText: string } for the selected card
+     */
     function renderCandidateCards(container, report, context, options) {
         const doc = documentOf(options);
         const ranked = rankCandidates(report);
@@ -116,58 +173,78 @@
         const baseline = context && context.baselineBlastRadius;
         const hasBaseline = baseline !== null && baseline !== undefined;
         const cards = ranked.map(({ candidate, rank, selected }) => {
-            const card = element(doc, "div", undefined, `candidate-card${selected ? " candidate-card--selected" : ""}`);
+            const lead = selected && !!(options && options.hero);
+            const card = element(doc, "article", undefined,
+                `candidate-card${selected ? " candidate-card--selected" : ""}${lead ? " candidate-card--lead" : ""}${candidate.feasible ? "" : " candidate-card--blocked"}`,
+                { "data-feasible": String(!!candidate.feasible) });
 
-            const titleBlock = element(doc, "div", undefined, "candidate-card__heading");
-            const heading = element(doc, "div");
-            heading.append(
-                element(doc, "div", codeLabel(candidate.type), "candidate-card__title"),
-                element(doc, "div", `Target: ${candidate.service}`, "candidate-card__target")
+            const identity = element(doc, "div", undefined, "candidate-card__heading");
+            const name = element(doc, "div", undefined, "candidate-card__id");
+            name.append(
+                element(doc, "div", strategyName(candidate.type), "candidate-card__title"),
+                element(doc, "div", `on ${candidate.service}`, "candidate-card__target")
             );
-            titleBlock.append(
-                element(doc, "span", undefined, "candidate-card__icon", { "data-kind": String(candidate.type || "").toLowerCase(), "aria-hidden": "true" }),
-                heading
-            );
-            const badges = element(doc, "div", undefined, "stack-sm");
-            if (rank !== null) badges.append(element(doc, "span", `#${rank}`, "status-badge status-badge--muted"));
-            badges.append(
-                element(doc, "span", candidate.feasible ? "Feasible" : "Not Feasible",
-                    `status-badge status-badge--${candidate.feasible ? "success" : "danger"}`)
-            );
-            if (selected) badges.append(element(doc, "span", "Selected Recommendation", "status-badge status-badge--info"));
-            if (selected) badges.append(element(doc, "span", "✓", "candidate-card__check", { "aria-hidden": "true" }));
+            identity.append(element(doc, "span", undefined, "candidate-card__icon", { "data-kind": String(candidate.type || "").toLowerCase(), "aria-hidden": "true" }), name);
+            const chips = element(doc, "div", undefined, "candidate-card__chips");
+            if (selected) chips.append(chipOf(doc, "Recommended", "info"));
+            chips.append(chipOf(doc, candidate.feasible ? "Feasible" : "Not feasible", candidate.feasible ? "success" : "danger"));
+            if (rank !== null) chips.append(chipOf(doc, `Rank ${rank}`, "muted", "rec-research-only"));
             const header = element(doc, "div", undefined, "candidate-card__header");
-            header.append(titleBlock, badges);
-
-            const primary = element(doc, "div", undefined, "candidate-card__stats");
-            primary.append(
-                hasBaseline
-                    ? stat(doc, "Before", percent(baseline))
-                    : stat(doc, "Before", MISSING, "Baseline blast radius was not supplied with this recommendation"),
-                stat(doc, "Predicted After", percent(candidate.predictedBlastRadius)),
-                stat(doc, "Risk Reduction", `${candidate.riskReduction} pp`)
-            );
-            // The cost stays in the plain view; confidence and score are the ranking's own terms and belong to the research view.
-            const secondary = element(doc, "div", undefined, "candidate-card__stats");
-            secondary.append(
-                stat(doc, "Resource Cost", candidate.resourceCost),
-                stat(doc, "Confidence", ratioPercent(candidate.confidence), undefined, "rec-research-only"),
-                stat(doc, "Score", ratioPercent(candidate.score), undefined, "rec-research-only")
-            );
-
+            header.append(identity, chips);
             card.append(header);
+
+            if (lead && options.hero.problem) {
+                const problem = element(doc, "p", undefined, "candidate-card__problem");
+                problem.append(element(doc, "span", "Problem", "candidate-card__fact-label"), element(doc, "span", options.hero.problem));
+                card.append(problem);
+            }
+
+            // The predicted improvement: the gauge, and the change in points beside it.
+            const effect = element(doc, "div", undefined, "candidate-card__effect");
+            effect.append(gauge(doc, hasBaseline ? baseline : null, candidate.predictedBlastRadius));
+            const gains = candidate.riskReduction > 0;
+            effect.append(element(doc, "div", gains ? `−${candidate.riskReduction} pp` : "No change", `candidate-card__delta${gains ? "" : " candidate-card__delta--none"}`,
+                { title: "Predicted change in blast radius, in percentage points" }));
+            card.append(effect);
+
+            const facts = element(doc, "div", undefined, "candidate-card__facts");
+            facts.append(fact(doc, "Cost", costLabel(candidate.resourceCost)));
+            facts.append(fact(doc, "Confidence", ratioPercent(candidate.confidence), "rec-research-only"));
+            facts.append(fact(doc, "Score", ratioPercent(candidate.score), "rec-research-only"));
+            card.append(facts);
+
+            if (lead && options.hero.validationText !== undefined) {
+                const validation = element(doc, "p", undefined, "candidate-card__validation");
+                validation.append(element(doc, "span", "Validation", "candidate-card__fact-label"),
+                    element(doc, "span", options.hero.validationText, "candidate-card__validation-text"));
+                card.append(validation);
+            }
+
+            // Everything longer than a line lives behind one disclosure.
             const description = options && options.descriptions && options.descriptions[candidate.id];
-            if (description) card.append(element(doc, "p", description, "candidate-card__description", { title: description }));
-            card.append(primary, secondary);
-            // Why a candidate cannot be put forward, in the card itself (the engine's own reason, never worded here).
             const reason = options && options.reasons && options.reasons[candidate.id];
-            if (reason) card.append(element(doc, "p", reason, "candidate-card__reason", { title: reason }));
-            if (!hasBaseline) {
-                card.append(element(doc, "p", "Baseline not provided: the blast radius before the change is shown only when a failure-impact result accompanies the recommendation.", "ui-note"));
+            if (description || reason || !hasBaseline) {
+                const more = element(doc, "details", undefined, "candidate-card__more");
+                more.append(element(doc, "summary", candidate.feasible ? "Details" : "Why not feasible"));
+                if (reason) more.append(element(doc, "p", reason, "candidate-card__reason"));
+                if (description) more.append(element(doc, "p", description, "candidate-card__description"));
+                if (!hasBaseline) {
+                    more.append(element(doc, "p", "Baseline not provided: the blast radius before the change is shown only when a failure-impact result accompanies the recommendation.", "ui-note"));
+                }
+                card.append(more);
             }
             return card;
         });
-        container.replaceChildren(...cards);
+        // The lead card, then the rest. Many alternatives sit behind one disclosure so the page stays a short answer, not a catalogue.
+        const lead = cards.filter((card) => /candidate-card--lead/.test(card.className));
+        const rest = cards.filter((card) => !/candidate-card--lead/.test(card.className));
+        if (!lead.length || rest.length <= 2) {
+            container.replaceChildren(...cards);
+            return;
+        }
+        const others = element(doc, "details", undefined, "rec-others");
+        others.append(element(doc, "summary", `Other options (${rest.length})`), ...rest);
+        container.replaceChildren(...lead, others);
     }
 
     // ---- ranking table ---------------------------------------------------------------------------------------
@@ -184,7 +261,7 @@
         tbody.replaceChildren(
             ...ranked.map(({ candidate, rank, selected }) => {
                 const row = element(doc, "tr");
-                const label = `${codeLabel(candidate.type)} · ${candidate.service}${selected ? " (selected)" : ""}`;
+                const label = `${strategyName(candidate.type)} · ${candidate.service}${selected ? " (recommended)" : ""}`;
                 for (const value of [
                     rank === null ? MISSING : String(rank),
                     label,
@@ -367,7 +444,7 @@
         }
         for (const candidate of detail.candidates) {
             const card = element(doc, "div", undefined, "card rec-detail", { "data-ready": String(candidate.approval.ready) });
-            card.append(element(doc, "h4", `${candidate.service} · ${codeLabel(candidate.type)}`, "rec-detail__title"));
+            card.append(element(doc, "h4", `${candidate.service} · ${strategyName(candidate.type)}`, "rec-detail__title"));
             card.append(labelled(doc, "Root cause", candidate.rootCause));
             card.append(labelled(doc, "Recommended change", candidate.recommendedChange));
             const feasibility = candidate.feasibility || {};
@@ -417,7 +494,7 @@
                 percent(row.blastRadiusBefore),
                 row.singlePointOfFailure ? "Yes" : "No",
                 `${row.feasible} feasible · ${row.ranked} ranked of ${row.candidates}`,
-                selected ? `${codeLabel(selected.type)} · ${selected.service} (${percent(selected.predictedBlastRadius)} after)` : (row.singlePointOfFailure ? "None can be selected" : "Nothing to fix"),
+                selected ? `${strategyName(selected.type)} · ${selected.service} (${percent(selected.predictedBlastRadius)} after)` : (row.singlePointOfFailure ? "None can be selected" : "Nothing to fix"),
                 selected ? selected.resourceCost : MISSING,
             ]) {
                 tr.append(element(doc, "td", value));
@@ -456,7 +533,7 @@
                 declared ? "User declaration" : "Live observation"],
             ["Assessed failed node", evidence.failedNode ? `${evidence.failedNode} (${evidence.failedNodeChosen === "requested" ? "chosen by you" : "the node whose loss hurts most"})` : null,
                 "Model assumption"],
-            ["Candidate strategy", `${codeLabel(candidate.type)} for ${candidate.service}`, "Prediction"],
+            ["Candidate strategy", `${strategyName(candidate.type)} for ${candidate.service}`, "Prediction"],
             ["Target Deployments", deployments.length ? deployments.join(", ") : null, "Live observation"],
             ["Proposed change", candidate.recommendedChange, "Prediction"],
             ["Expected benefit", candidate.predicted ? `blast radius ${percent(candidate.predicted.blastRadiusBefore)} → ${percent(candidate.predicted.blastRadiusAfter)} (${candidate.predicted.riskReduction} percentage points)` : null,
@@ -489,6 +566,14 @@
         return node;
     }
 
+    /** The problem in one sentence, from the engine's own failure-impact result. Null when the engine reported none: nothing is guessed. */
+    function problemStatement(detail) {
+        const impact = detail && detail.baselineImpact;
+        if (!impact || impact.blastRadius === null || impact.blastRadius === undefined) return null;
+        const node = (detail.evidence && detail.evidence.failedNode) || "the assessed node";
+        return `If ${node} fails, the workflow ${Number(impact.blastRadius) > 0 ? "does not survive" : "survives"}.`;
+    }
+
     /** Step 2: what is lost if the assessed node fails. A statement of a prediction, never of an observation. */
     function renderImpactSummary(container, detail, options) {
         const doc = documentOf(options);
@@ -505,40 +590,44 @@
         const failedServices = impact.failedServices || [];
         const failedWorkflows = impact.failedWorkflows || [];
         const known = (detail.currentDeployment && detail.currentDeployment.services) || [];
-
         const roles = (detail.workflowServices || []);
+        const total = roles.length || known.length;
+
         const banner = element(doc, "div", undefined, "rec-impact__banner", { "data-state": lost ? "lost" : "survives", role: "status" });
         banner.append(
             element(doc, "div", `If ${node} fails`, "rec-impact__lead"),
             element(doc, "div", lost ? "The workflow does not survive" : "The workflow survives", "rec-impact__headline"),
             element(doc, "div", "Predicted from the live topology, not measured.", "rec-impact__sub")
         );
-        const total = roles.length || known.length;
-        const tiles = element(doc, "div", undefined, "rec-impact__tiles");
+        // How much of the workflow is lost, as the one bar, then the services that go with the node.
+        const meter = element(doc, "div", undefined, "rec-impact__meter");
+        meter.append(gauge(doc, null, impact.blastRadius, "Blast radius", { after: "Lost" }));
+        const lostLine = element(doc, "div", undefined, "rec-impact__lost-line");
+        if (failedServices.length) {
+            lostLine.append(element(doc, "span", total ? `Services lost (${failedServices.length} of ${total})` : "Services lost", "rec-impact__lost-label"));
+            const list = element(doc, "ul", undefined, "rec-impact__chips");
+            for (const name of failedServices) list.append(element(doc, "li", name, "rec-impact__chip"));
+            lostLine.append(list);
+        } else {
+            lostLine.append(element(doc, "span", "No service is lost when this node fails.", "rec-impact__lost-label"));
+        }
+        if (failedWorkflows.length) lostLine.append(element(doc, "p", `Workflow lost: ${failedWorkflows.join(", ")}`, "ui-note"));
+
+        // The four figures are the research reading of the same result.
+        const tiles = element(doc, "div", undefined, "rec-impact__tiles rec-research-only");
         tiles.append(
             tile(doc, "Workflow survival", percent(impact.survivability)),
             tile(doc, "Blast radius", percent(impact.blastRadius), "share of workflows lost"),
             tile(doc, "Services lost", total ? `${failedServices.length} of ${total}` : String(failedServices.length)),
             tile(doc, "Failed node", node, evidence.failedNodeChosen === "requested" ? "chosen by you" : "the node whose loss hurts most", "rec-tile__value--name")
         );
-        const row = element(doc, "div", undefined, "rec-impact__row");
-        row.append(banner, tiles);
+        container.append(banner, meter, lostLine, tiles);
 
-        const lines = element(doc, "div", undefined, "rec-impact__lost");
-        if (roles.length) {
-            lines.append(element(doc, "div", "Services in this workflow", "op-subtitle"), servicesTable(doc, roles, failedServices, node));
-        } else {
-            lines.append(element(doc, "div", "Services lost", "op-subtitle"));
-            if (failedServices.length) {
-                const list = element(doc, "ul", undefined, "rec-impact__chips");
-                for (const name of failedServices) list.append(element(doc, "li", name, "rec-impact__chip"));
-                lines.append(list);
-            } else {
-                lines.append(element(doc, "p", "No service is lost when this node fails.", "ui-note"));
-            }
-        }
-        if (failedWorkflows.length) lines.append(element(doc, "p", `Workflow lost: ${failedWorkflows.join(", ")}`, "ui-note"));
-        container.append(row, lines);
+        const services = element(doc, "details", undefined, "rec-impact__services");
+        services.append(element(doc, "summary", roles.length ? "Services in this workflow" : "Where each service runs"));
+        if (roles.length) services.append(servicesTable(doc, roles, failedServices, node));
+        else services.append(element(doc, "p", "The frozen workflow did not report its services, so only the lost ones are listed above.", "ui-note"));
+        container.append(services);
     }
 
     /** Each service of the workflow, the role Component 1's frozen graph gives it, and whether it is lost with the node. */
@@ -569,7 +658,7 @@
         return scroll;
     }
 
-    /** Step 4: the one improvement being put to approval, with what it is expected to do. Every value is the engine's. */
+    /** Step 5: the one improvement being put to approval, with what it is expected to do. Every value is the engine's. */
     function renderSelectedImprovement(container, candidate, options) {
         const doc = documentOf(options);
         container.replaceChildren();
@@ -578,64 +667,95 @@
             return;
         }
         const heading = element(doc, "div", undefined, "rec-selected__heading");
+        const name = element(doc, "div");
+        name.append(element(doc, "div", strategyName(candidate.type), "rec-selected__title"), element(doc, "div", `on ${candidate.service}`, "candidate-card__target"));
         heading.append(
             element(doc, "span", undefined, "candidate-card__icon", { "data-kind": String(candidate.type || "").toLowerCase(), "aria-hidden": "true" }),
-            element(doc, "div", `${codeLabel(candidate.type)} for ${candidate.service}`, "rec-selected__title")
+            name,
+            chipOf(doc, costLabel(candidate.cost ? candidate.cost.resource : null), "muted", "rec-selected__cost")
         );
         container.append(heading);
         if (candidate.recommendedChange) container.append(element(doc, "p", candidate.recommendedChange, "rec-selected__change", { title: candidate.recommendedChange }));
         const predicted = candidate.predicted || {};
-        const outcome = element(doc, "div", undefined, "rec-selected__outcome");
-        outcome.append(
-            stat(doc, "Blast radius now", percent(predicted.blastRadiusBefore)),
-            stat(doc, "Predicted after", percent(predicted.blastRadiusAfter)),
-            stat(doc, "Resource cost", candidate.cost ? codeLabel(candidate.cost.resource) : MISSING)
-        );
-        container.append(outcome, element(doc, "p", "Predicted, not observed.", "ui-note"));
+        container.append(gauge(doc, predicted.blastRadiusBefore, predicted.blastRadiusAfter), element(doc, "p", "Predicted, not observed.", "ui-note"));
     }
 
     // ---- where the person is in the flow ------------------------------------------------------------------------------
 
     const STEP_LABELS = ["Select", "Impact", "Compare", "Prove it", "Approve"];
-    const STEP_STATE_TEXT = { done: "Done", current: "Now", blocked: "Needs attention", todo: "Not yet" };
+
+    function captionFor(index, state, facts, proof) {
+        if (state === "done") return "Done";
+        if (state === "blocked") return "Needs attention";
+        if (state === "recorded") return "Earlier approval";
+        if (state === "current") {
+            if (index === 0) return "Choose";
+            if (index === 1) return "Reading…";
+            if (index === 3) return proof === "running" ? "Running" : "Not run yet";
+            if (index === 4) return facts.approval === "APPROVED" ? "Apply next" : "Ready";
+            return "Next";
+        }
+        return index === 4 ? "After step 4" : "Waiting";
+    }
 
     /**
      * The state of the five steps, from facts the page already has: ``chosen`` (an application and a workflow are chosen),
      * ``status`` (the controller's), ``selected`` (the engine selected a candidate), ``proof`` (none, running, passed, failed or
-     * attention: what the test-cluster step last reported) and ``applied`` (a change was applied).
-     * A step is never shown as done unless its own evidence exists, and a later step waits for an earlier one. Proving is optional:
-     * it never holds back the approval, so while nothing has been run it is "Not yet" and the approval is "Now".
+     * attention: what the test-cluster step last reported), ``proven`` (whether the SERVER says this very change was proven on a test
+     * cluster; unknown until it has answered), ``approval`` (the stored decision: none, PENDING_APPROVAL, APPROVED or REJECTED) and
+     * ``applied`` (a change was applied).
+     *
+     * A step is "done" only when its own evidence exists, and a later step waits for an earlier one. The approval is the exception that
+     * proves the rule: it can be opened before the change is proven, but it is never shown as the step to do, or as done, until step 4
+     * has passed. A decision recorded before that is shown for what it is, an earlier approval ("recorded"), not as validation.
+     * Each step also says whether it can be opened (``available``).
      */
     function computeSteps(input) {
         const facts = input || {};
         const loading = facts.status === "loading" || facts.status === "loading-recommendation";
-        const states = ["todo", "todo", "todo", "todo", "todo"];
+        const proof = facts.proof || "none";
+        const proven = facts.proven === true || ((facts.proven === undefined || facts.proven === null) && proof === "passed");
+        const states = ["waiting", "waiting", "waiting", "waiting", "waiting"];
+        const available = [true, false, false, false, false];
         states[0] = facts.chosen ? "done" : "current";
         if (facts.chosen) {
+            available[1] = true;
             states[1] = loading ? "current" : facts.status === "ready" ? "done" : "blocked";
             if (states[1] === "done") {
+                available[2] = true;
                 states[2] = facts.selected ? "done" : "blocked";
                 if (states[2] === "done") {
-                    const proof = facts.proof || "none";
-                    states[3] = proof === "passed" ? "done" : proof === "running" ? "current" : proof === "failed" || proof === "attention" ? "blocked" : "todo";
-                    states[4] = facts.applied ? "done" : proof === "running" ? "todo" : "current";
+                    available[3] = available[4] = true;
+                    states[3] = proof === "running" ? "current" : proven ? "done" : proof === "failed" || proof === "attention" ? "blocked" : "current";
+                    if (proven && proof !== "running") states[4] = facts.applied ? "done" : "current";
+                    else states[4] = facts.approval && facts.approval !== "none" ? "recorded" : "waiting";
                 }
             }
         }
-        return states.map((state, index) => ({ number: index + 1, label: STEP_LABELS[index], state }));
+        return states.map((state, index) => ({
+            number: index + 1, label: STEP_LABELS[index], state, available: available[index], caption: captionFor(index, state, facts, proof),
+        }));
     }
 
+    /**
+     * Five buttons. ``options.viewing`` is the step on screen (it is not the same as the step to do), ``options.onSelect(number)`` opens
+     * one. A step that cannot be opened yet is disabled. State is a mark, a word and a colour, never the colour alone.
+     */
     function renderStepper(container, steps, options) {
         const doc = documentOf(options);
+        const viewing = options && options.viewing;
         container.replaceChildren(...steps.map((step) => {
             const item = element(doc, "li", undefined, "rec-stepper__item", { "data-state": step.state });
-            if (step.state === "current") item.setAttribute("aria-current", "step");
-            const mark = step.state === "done" ? "✓" : step.state === "blocked" ? "!" : String(step.number);
-            item.append(
-                element(doc, "span", mark, "rec-stepper__mark", { "aria-hidden": "true" }),
-                element(doc, "span", step.label, "rec-stepper__label"),
-                element(doc, "span", STEP_STATE_TEXT[step.state], "visually-hidden")
-            );
+            if (step.number === viewing) item.setAttribute("data-viewing", "true");
+            const button = element(doc, "button", undefined, "rec-stepper__btn", { type: "button", "data-step": String(step.number) });
+            if (step.number === viewing) button.setAttribute("aria-current", "step");
+            if (!step.available) button.disabled = true;
+            const mark = step.state === "done" ? "✓" : step.state === "blocked" ? "!" : step.state === "recorded" ? "◷" : String(step.number);
+            const text = element(doc, "span", undefined, "rec-stepper__text");
+            text.append(element(doc, "span", step.label, "rec-stepper__label"), element(doc, "span", step.caption, "rec-stepper__caption"));
+            button.append(element(doc, "span", mark, "rec-stepper__mark", { "aria-hidden": "true" }), text);
+            if (options && options.onSelect) button.addEventListener("click", () => options.onSelect(step.number));
+            item.append(button);
             return item;
         }));
     }
@@ -672,7 +792,11 @@
         renderSelectedImprovement,
         renderImpactSummary,
         computeSteps,
+        problemStatement,
         renderStepper,
+        gauge,
+        strategyName,
+        costLabel,
         evidenceSummary,
         nextActionHint,
         renderProposalSummary,

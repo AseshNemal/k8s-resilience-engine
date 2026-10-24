@@ -109,14 +109,14 @@
         };
     }
 
-    // A declared workflow in the dropdown: always labelled as declared and not approvable, and its value carries the prefix
+    // A declared workflow in the dropdown: always labelled as declared, with the one door that is open for it (research approval), and its value carries the prefix
     // that tells a choice of it apart from a frozen workflow of the same name.
     function declaredOption(workflow) {
         const by = workflow.declaredBy ? ` by ${workflow.declaredBy}` : "";
         return {
             workflowId: workflow.workflowId,
             value: DECLARED_PREFIX + workflow.workflowId, declared: true,
-            label: `${workflow.workflowId} · declared${by} · ${workflow.services.length} services — declared, not approvable`
+            label: `${workflow.workflowId} · declared${by} · ${workflow.services.length} services — declared, research approval only`
                 + (workflow.applicable ? "" : ` — not usable here: ${workflow.reason}`),
             applicable: workflow.applicable,
             reason: workflow.reason || null,

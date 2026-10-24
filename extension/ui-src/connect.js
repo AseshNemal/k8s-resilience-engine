@@ -51,14 +51,14 @@
         // expiry date: an expired one is simply being renewed.
         const managed = connected && Boolean(s.managed);
         status.dataset.state = !connected ? "none" : expired ? (managed ? "renewing" : "expired") : "connected";
-        title.textContent = !connected ? "Not connected" : expired ? (managed ? "Renewing automatically" : "Credential expired") : "Connected · full access";
+        title.textContent = !connected ? "Not connected" : expired ? (managed ? "Renewing automatically" : "Credential expired") : "Connected";
         summary.textContent = !connected
             ? "Choose a kubeconfig to connect your cluster. Until then pages report that no cluster is connected."
             : expired
                 ? (managed
                     ? "The credential is being renewed automatically. No action is needed; pages show data again as soon as that finishes."
                     : "Replace the credential to keep reading your cluster.")
-                : "The app reads your cluster, and can apply an approved change to it and reset it. Nothing is applied without an approved recommendation.";
+                : "You approved full access for this cluster. The app reads it; applying an approved change and resetting it need write permission, which the cluster checks when you apply. Nothing is applied without an approved recommendation.";
         details.hidden = !connected;
         disconnect.hidden = !connected;
         submit.textContent = connected ? "Replace credential" : "Connect";

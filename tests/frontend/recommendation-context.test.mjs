@@ -322,7 +322,8 @@ test("a declared workflow is offered, labelled, and never chosen for you even wh
     const [option] = plain(view.workflows);
     assert.equal(option.value, "declared:checkout");
     assert.equal(option.declared, true);
-    assert.match(option.label, /declared, not approvable/);
+    assert.match(option.label, /declared, research approval only/);
+    assert.doesNotMatch(option.label, /not approvable/);
     assert.equal(view.workflowId, "");
 });
 

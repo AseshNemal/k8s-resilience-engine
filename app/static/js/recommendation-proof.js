@@ -131,7 +131,7 @@
         const state = {
             phase: "loading", targets: null, blockingRun: null, plan: null, run: null, probeTest: null, message: null, alert: false,
             acknowledged: new Set(), desktopAcknowledged: false, confirmAbort: false, busy: false,
-            lastOkAt: null, failing: false, backoff: 1, assessment: null, researchIndex: 0,
+            lastOkAt: null, failing: false, backoff: 1, assessment: null, researchIndex: 0, researchTab: "charts",
         };
         let issued = 0;
         let shown = 0;
@@ -404,9 +404,9 @@
         }
 
         function drawHead(container, title, sub) {
-            const head = make(doc, "div", undefined, "rec-step__head");
-            head.append(make(doc, "h3", title, "rec-step__title", { id: "rec-step-4" }));
-            if (sub) head.append(make(doc, "p", sub, "rec-step__sub"));
+            const head = make(doc, "header", undefined, "rec-panel__head");
+            head.append(make(doc, "h3", title, "rec-panel__title", { id: "rec-step-4" }));
+            if (sub) head.append(make(doc, "p", sub, "rec-panel__sub"));
             container.append(head);
         }
 
@@ -417,7 +417,7 @@
         }
 
         function drawSetup(container) {
-            drawHead(container, "4. Prove it on a test cluster", "Stop a worker on purpose and check the workflow survives.");
+            drawHead(container, "Prove it on a test cluster", "Stop a worker on purpose and check the workflow survives.");
             drawMessage(container);
             if (state.blockingRun) {
                 container.append(make(doc, "p", `A run is already ${String(state.blockingRun.status).toLowerCase().replace(/_/g, " ")}. Finish or recover it first.`,
@@ -515,7 +515,7 @@
 
         function drawPlan(container) {
             const plan = state.plan;
-            drawHead(container, "4. Prove it on a test cluster", "Approving covers exactly this and nothing else.");
+            drawHead(container, "Prove it on a test cluster", "Approving covers exactly this and nothing else.");
             drawMessage(container);
             const mode = plan.mode;
             const summary = make(doc, "ul", undefined, "prf-summary");
@@ -589,7 +589,7 @@
         }
 
         function drawStrip(container, run) {
-            const strip = make(doc, "div", undefined, "prf-strip");
+            const strip = make(doc, "div", undefined, "prf-strip rec-research-only");
             const status = make(doc, "span", undefined, "prf-strip__status");
             status.append(chip(doc, run.statusLabel, run.stale ? "warn" : RUN_TONE[run.status] || "wait"));
             strip.append(tile("◎", "Target cluster", run.target.name), tile("▦", "Namespace", run.application.namespace),
@@ -617,7 +617,7 @@
 
         function drawFigures(container, run) {
             const m = run.metrics;
-            const grid = make(doc, "div", undefined, "prf-figures");
+            const grid = make(doc, "div", undefined, "prf-figures rec-research-only");
             grid.append(
                 figure("⚗", "Completed experiments", `${m.progress.done} / ${m.progress.total}`, m.skipped ? `${m.skipped} skipped` : null, meter(m.progress.done, m.progress.total, progressText(m))),
                 figure("▤", "Changes tested", `${m.candidatesTested} / ${m.candidatesPlanned}`, null, meter(m.candidatesTested, m.candidatesPlanned, "Changes tested")),
@@ -710,7 +710,8 @@
             if (timing.length) head.append(make(doc, "span", timing.join(" · "), "prf-caption"));
             card.append(head);
             if (!run.current) {
-                card.append(make(doc, "p", live ? "Waiting for the next experiment." : "No experiment is running.", "prf-caption", { role: "status" }));
+                if (!live) return null;
+                card.append(make(doc, "p", "Waiting for the next experiment.", "prf-caption", { role: "status" }));
                 return card;
             }
             const cur = run.current;
@@ -771,7 +772,7 @@
 
         function drawRun(container) {
             const run = state.run;
-            drawHead(container, "4. Prove it on a test cluster", null);
+            drawHead(container, "Prove it on a test cluster", null);
             if (!run) { container.append(make(doc, "p", "No run recorded yet.", "prf-caption")); return; }
             drawStrip(container, run);
             if (state.failing || run.stale) {
@@ -780,16 +781,19 @@
                     "approval-note prf-message prf-message--alert", { role: "alert" }));
             }
             drawMessage(container);
+            // A finished run opens with its answer; a running one with where it is.
+            if (run.result) drawResult(container, run);
             drawFigures(container, run);
             drawMatrix(container, run);
             const grid = make(doc, "div", undefined, "prf-opgrid");
             const operation = drawOperation(container, run);
             const safety = drawSafety(run);
             safety.append(drawControls(run));
-            grid.append(operation, safety);
+            // With nothing running there is no operation to show: the safety record stands alone.
+            if (operation) grid.append(operation); else grid.className += " prf-opgrid--single";
+            grid.append(safety);
             container.append(grid);
             if (run.research) drawResearch(container, run);
-            if (run.result) drawResult(container, run);
         }
 
         function drawResult(container, run) {
@@ -815,7 +819,9 @@
             const list = make(doc, "ul", undefined, "prf-outcomes");
             (result.candidates || []).forEach((c) => {
                 const li = make(doc, "li", undefined, "prf-outcome");
-                li.append(chip(doc, c.status, c.status === "PASSED" ? "pass" : c.status === "FAILED" ? "fail" : "warn"), make(doc, "span", ` ${c.candidateId}${c.reason ? ` — ${c.reason}` : ""}`));
+                const row = run.matrix.rows.find((r) => r.candidateId === c.candidateId);
+                const name = row ? `${HUMAN(row.strategy || row.candidateId)} on ${row.service || "the service"}` : c.candidateId;
+                li.append(chip(doc, HUMAN(c.status), c.status === "PASSED" ? "pass" : c.status === "FAILED" ? "fail" : "warn"), make(doc, "span", ` ${name}${c.reason ? ` — ${c.reason}` : ""}`));
                 list.append(li);
             });
             proof.append(list);
@@ -910,8 +916,6 @@
                 const charts = make(doc, "div", undefined, "prf-charts");
                 charts.append(lineChart("Workflow check passing", "%", samples.map((p) => ({ x: p.x, y: p.y, bad: p.bad })), marks, 100),
                     lineChart("Response time", " ms", samples.filter((p) => p.latency !== null && p.latency !== undefined).map((p) => ({ x: p.x, y: p.latency, bad: p.bad })), marks));
-                panel.append(charts);
-                const grid = make(doc, "div", undefined, "prf-research__grid");
                 // Probe samples
                 const sampleBox = make(doc, "div", undefined, "prf-subpanel");
                 sampleBox.append(make(doc, "h5", "Probe samples", "prf-subpanel__title"));
@@ -932,7 +936,6 @@
                 const scroll = make(doc, "div", undefined, "table-scroll"); scroll.append(table);
                 sampleBox.append(scroll);
                 if (raw.length > 8) sampleBox.append(make(doc, "p", `${raw.length - 8} more samples are in the stored record.`, "prf-caption"));
-                grid.append(sampleBox);
                 // Readiness
                 const readiness = e.outcome.readiness || { services: {} };
                 const readBox = make(doc, "div", undefined, "prf-subpanel");
@@ -940,7 +943,6 @@
                 const list = make(doc, "ul", undefined, "prf-checks");
                 Object.entries(readiness.services || {}).forEach(([name, v]) => list.append(stateRow(`${name}: ${v.readyElsewhere ?? "?"} ready elsewhere, ${v.readyOnWorker ?? "?"} on the worker`, v.ok === true ? "Holds" : v.ok === false ? "Lost" : "Unknown", v.ok === true ? "pass" : v.ok === false ? "fail" : "wait")));
                 readBox.append(list);
-                grid.append(readBox);
                 // Recovery timings, from the probe's own marks
                 const timeBox = make(doc, "div", undefined, "prf-subpanel");
                 timeBox.append(make(doc, "h5", "Recovery timings", "prf-subpanel__title"));
@@ -951,8 +953,16 @@
                     const li = make(doc, "li", undefined, "prf-check-row"); li.append(make(doc, "span", k, "prf-check-row__label"), make(doc, "strong", v)); times.append(li);
                 });
                 timeBox.append(times);
-                grid.append(timeBox);
-                panel.append(grid);
+                // One tab at a time: the observed data is long, and no tab depends on another.
+                const TABS = [["charts", "Charts", charts], ["samples", "Probe samples", sampleBox], ["readiness", "Readiness", readBox], ["timing", "Recovery timing", timeBox]];
+                const shown = TABS.find((tab) => tab[0] === state.researchTab) || TABS[0];
+                const bar = make(doc, "div", undefined, "rec-tabs prf-tabs", { role: "tablist", "aria-label": "Observed data of this experiment" });
+                TABS.forEach(([id, label]) => {
+                    const tab = make(doc, "button", label, "rec-tabs__tab", { type: "button", role: "tab", "aria-selected": String(id === shown[0]), "data-prf-tab": id });
+                    tab.addEventListener("click", () => { state.researchTab = id; draw(); });
+                    bar.append(tab);
+                });
+                panel.append(bar, shown[2]);
             }
             const events = make(doc, "details", undefined, "prf-opt");
             events.append(make(doc, "summary", "Run events"));
@@ -963,17 +973,26 @@
             container.append(panel);
         }
 
+        /** Back to the comparison, or on to the approval. Every state of this step offers both: proving is a choice, not a toll gate. */
+        function drawFoot(container) {
+            const foot = make(doc, "footer", undefined, "rec-panel__foot");
+            foot.append(make(doc, "button", "Back", "secondary-button", { type: "button", "data-go": "3" }),
+                make(doc, "button", "Review approval", "secondary-button", { type: "button", "data-go": "5" }));
+            container.append(foot);
+        }
+
         function draw() {
             if (destroyed) return;
             const body = make(doc, "div", undefined, "prf-body");
             if (state.phase === "loading") {
-                drawHead(body, "4. Prove it on a test cluster", null);
+                drawHead(body, "Prove it on a test cluster", null);
                 body.append(make(doc, "p", "Looking for test clusters and any earlier run…", "prf-caption", { role: "status" }));
             } else if (state.phase === "plan" && state.plan) drawPlan(body);
             else if ((state.phase === "run" || state.phase === "starting") && (state.run || state.phase === "starting")) {
-                if (state.phase === "starting" && !state.run) { drawHead(body, "4. Prove it on a test cluster", null); drawMessage(body); }
+                if (state.phase === "starting" && !state.run) { drawHead(body, "Prove it on a test cluster", null); drawMessage(body); }
                 else drawRun(body);
             } else drawSetup(body);
+            drawFoot(body);
             root.replaceChildren(body);
             root.setAttribute("aria-busy", state.busy ? "true" : "false");
         }

@@ -95,6 +95,11 @@ and Docker reached only through the `docker-proxy` service (`app/integrations/do
 explicit acknowledgement plus a `ResearchClusterAuthorization` for its exact UID; runs need `RESILIENCE_ALLOW_CLUSTER_WRITES=1`. It has only run
 against in-memory doubles: no real node has been stopped by it, and the product does not create the disposable kind cluster.
 
+The Recommendations page shows its five steps one at a time (`data-step` / `data-step-panel`, `data-go` buttons), with a Simple view that is the short answer and a
+Research view that adds a tabbed workbench. The stepper (`computeSteps`) never shows the approval as done or as the step to do until the server says this very change is
+proven on a test cluster, and keeps an earlier decision as an "earlier approval", never as validation; approval itself is not gated by the proof (UI only, logic and routes
+unchanged). A declared workflow is "research approval only", never "not approvable". The cluster chip says "Connected": write permission is not verified until a change is applied.
+
 ## Real data only
 
 - **Real data only at runtime.** No route, page, dashboard, prediction, recommendation, approval or
