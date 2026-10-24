@@ -131,3 +131,18 @@ def test_overview_script_reads_the_all_namespaces_endpoint_only():
     assert "/api/deployments/discovery/all" in script
     assert "discovery?namespace" not in script
     assert "describeOverview" in script
+
+
+def test_overview_has_the_research_summary_and_reads_only_stored_or_live_results():
+    response = client.get("/")
+    script = (SCRIPTS / "dashboard.js").read_text(encoding="utf-8")
+    summary = (ROOT / "app" / "static" / "js" / "overview-summary.js").read_text(encoding="utf-8")
+
+    for role in ("overview-status", "overview-risk", "overview-applied", "overview-results", "overview-placement", "overview-evidence",
+                 "overview-chip-cluster", "overview-chip-workflow", "overview-chip-prediction", "overview-chip-test"):
+        assert f'data-role="{role}"' in response.text, role
+    # the chip links are in the page, so the extension build can point them at its own files
+    assert 'href="/components/failure-impacts"' in response.text
+    # reads only: no write verb and no sample, demo or fixture source
+    assert "method:" not in script and "POST" not in script
+    assert not re.search(r"sample|demo|fixture|Math\.random", script + summary, re.I)

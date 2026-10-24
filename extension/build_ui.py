@@ -207,7 +207,9 @@ def _drop_tags(html: str, tag_pattern: str, needle: str) -> str:
 
 def _connect_page(index_html: str) -> str:
     html = _drop_tags(index_html, r"<link[^>]*>", "dashboard.css")
-    html = _drop_tags(html, r"<script[^>]*></script>", "dashboard.js")
+    html = _drop_tags(html, r"<link[^>]*>", "pages/recommendations.css")
+    for script in ("dashboard.js", "overview-summary.js", "recommendation-topology.js", "recommendation-apply-test.js"):
+        html = _drop_tags(html, r"<script[^>]*></script>", script)
     html = re.sub(r"sidebar__link\s+is-active", "sidebar__link ", html)
     html = html.replace('class="sidebar__link" data-role="connect-link"', 'class="sidebar__link is-active" data-role="connect-link"')
     html = html.replace('<body data-page="overview">', '<body data-page="connect">', 1)
