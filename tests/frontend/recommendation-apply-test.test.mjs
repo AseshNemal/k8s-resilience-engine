@@ -301,3 +301,19 @@ test("the live view tells old pods from new ones and shows node health and usage
     for (const expected of ["New version", "Old version", "Cordoned: takes no new pods", "250 mCPU", "512 MiB", "Unavailable"])
         assert.ok(shown.includes(expected), expected);
 });
+
+test("the sidebar offers Select only where the page's own rule would accept the click, and says why not otherwise", () => {
+    const window = {}, root = node("aside"), picked = [];
+    vm.runInNewContext(source, { window, setTimeout: () => 1, clearTimeout() {} });
+    // A declared workflow: only a research approval counts. `approval.ready` alone is not enough.
+    const canSelect = (c) => !!c.researchApproval?.available;
+    const sidebar = window.ResilienceApplyTest.createCandidateResultsSidebar({ root, document: { createElement: node }, strategyName: (type) => type,
+        onSelect: (id) => picked.push(id), canSelect, whyNotSelectable: (c) => c.researchApproval?.reason });
+    sidebar.update({ namespace: "shop", selectedId: "a", history: [], historyLoaded: true, candidates: [
+        { id: "a", type: "SPREAD", service: "web", approval: { ready: true }, researchApproval: { available: true } },
+        { id: "b", type: "SPREAD", service: "db", approval: { ready: true }, researchApproval: { available: false, reason: "Not verified feasible for research approval." } }] });
+    const [a, b] = walk(root).filter((n) => n.tag === "article");
+    assert.equal(walk(a).filter((n) => n.tag === "button").length, 1);
+    assert.equal(walk(b).filter((n) => n.tag === "button").length, 0, "no button that the click handler would silently ignore");
+    assert.match(text(b), /Not verified feasible for research approval/);
+});

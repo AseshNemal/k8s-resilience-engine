@@ -467,12 +467,13 @@
                     const report = make("button", "View saved report", "rec-link"); report.type = "button";
                     report.addEventListener("click", () => env.onReport(savedRun.runId)); card.append(report);
                 }
-                const selectable = !candidate.historical && (candidate.researchApproval?.available || candidate.approval?.ready);
+                // The page decides what may be selected (its rule depends on the workflow's tier); the same rule gates the click.
+                const selectable = !candidate.historical && (env.canSelect ? env.canSelect(candidate) : (candidate.researchApproval?.available || candidate.approval?.ready));
                 if (selectable) {
                     const choose = make("button", candidate.id === selectedId ? "Selected" : "Select candidate", "secondary-button"); choose.type = "button";
                     choose.disabled = candidate.id === selectedId;
                     choose.addEventListener("click", () => env.onSelect(candidate.id)); card.append(choose);
-                } else if (!candidate.historical) card.append(make("p", "Unavailable for the current placement", "rec-result-item__meta"));
+                } else if (!candidate.historical) card.append(make("p", env.whyNotSelectable?.(candidate) || "Unavailable for the current placement", "rec-result-item__meta"));
                 list.append(card);
             }
             root.append(list);

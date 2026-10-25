@@ -1360,10 +1360,20 @@
             candidates: lastView?.status === "ready" ? lastView.detail?.candidates || [] : [] });
     }
 
+    // One rule for "can this candidate be chosen": the sidebar draws a button only where this holds, and the click is gated by it too,
+    // so a button is never offered that does nothing. A declared workflow is judged by its research approval, any other by the production gate.
+    function canSelectCandidate(candidate) {
+        return !!candidate && !!(isDeclared() ? candidate.researchApproval?.available : candidate.approval?.ready);
+    }
+    function whyNotSelectable(candidate) {
+        const gate = isDeclared() ? candidate.researchApproval : candidate.approval;
+        return gate?.reason || "Unavailable for the current placement";
+    }
+
     function selectCandidate(id) {
         const v = lastView;
         const candidate = v?.status === "ready" && v.detail?.candidates?.find((item) => item.id === id);
-        if (!candidate || !(isDeclared() ? candidate.researchApproval?.available : candidate.approval?.ready)) return;
+        if (!canSelectCandidate(candidate)) return;
         preferredChange = { id: candidate.id, service: candidate.service, type: candidate.type };
         showDetail(v);
         rememberPage();                                       // selecting only changes what is shown; the sidebar follows and the page stays where it is
@@ -1372,7 +1382,7 @@
     const resultsSidebarRoot = document.querySelector('[data-role="rec-results-sidebar"]');
     if (allWorkflows && resultsSidebarRoot && window.ResilienceApplyTest) {
         resultsSidebar = window.ResilienceApplyTest.createCandidateResultsSidebar({ root: resultsSidebarRoot, document,
-            strategyName: view.strategyName, onSelect: selectCandidate,
+            strategyName: view.strategyName, onSelect: selectCandidate, canSelect: canSelectCandidate, whyNotSelectable,
             onReport: (runId) => testHistoryPanel?.openRun(runId), onLoadOlder: () => testHistoryPanel?.loadOlder() });
     }
 
