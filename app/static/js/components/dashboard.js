@@ -120,6 +120,8 @@
         appliedText: document.querySelector('[data-role="overview-applied-text"]'),
         risk: document.querySelector('[data-role="overview-risk"]'),
         riskHeadline: document.querySelector('[data-role="overview-risk-headline"]'),
+        riskBadge: document.querySelector('[data-role="overview-risk-badge"]'),
+        riskWorkflows: document.querySelector('[data-role="overview-risk-workflows"]'),
         riskSub: document.querySelector('[data-role="overview-risk-sub"]'),
         results: document.querySelector('[data-role="overview-results"]'),
         placement: document.querySelector('[data-role="overview-placement"]'),
@@ -230,6 +232,18 @@
         sections.risk.setAttribute("data-lost", String(risk.state === "available" && risk.survives === false));
         if (sections.riskHeadline) sections.riskHeadline.textContent = risk.headline;
         if (sections.riskSub) sections.riskSub.textContent = risk.sub;
+        const known = risk.state === "available" && !!risk.severity;
+        if (sections.riskBadge) {
+            sections.riskBadge.hidden = !known;
+            sections.riskBadge.textContent = known ? risk.severity.label : "";
+            if (known) sections.riskBadge.setAttribute("data-severity", risk.severity.level);
+        }
+        if (sections.riskWorkflows) {      // the workflows themselves, by name, in words as well as colour
+            const names = known ? risk.lostWorkflows || [] : [];
+            sections.riskWorkflows.replaceChildren(...names.map((name) => make("li", "overview-risk__workflow", `✕ ${name}`)),
+                ...(known && risk.moreLost ? [make("li", "overview-risk__workflow overview-risk__workflow--more", `+${risk.moreLost} more`)] : []));
+            sections.riskWorkflows.hidden = !names.length;
+        }
     }
 
     function drawApplied(applied) {

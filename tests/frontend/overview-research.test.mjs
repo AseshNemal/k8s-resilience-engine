@@ -32,7 +32,7 @@ class FakeNode {
 }
 
 const ROLES = ["overview-error-region", "reload-button", "source-badge", "discovery-summary", "overview-namespaces", "last-refreshed", "discovery-headline",
-    "discovery-notes", "discovery-provenance", "overview-applied", "overview-applied-text", "overview-status", "overview-risk", "overview-risk-headline",
+    "discovery-notes", "discovery-provenance", "overview-applied", "overview-applied-text", "overview-status", "overview-risk", "overview-risk-headline", "overview-risk-badge", "overview-risk-workflows",
     "overview-risk-sub", "overview-results", "overview-placement", "overview-evidence", "overview-scope", "overview-next-text", "overview-next-link", "overview-node-impact", "overview-workflow-impact", "overview-workflow-caption", "overview-fix", "overview-latest-test",
     "overview-focus-summary", "overview-focus-clear", "overview-focus-view", "overview-placement-focus",
     ...["cluster", "workflow", "prediction", "test"].flatMap((id) => [`overview-chip-${id}`, `overview-chip-${id}-state`, `overview-chip-${id}-detail`])];
@@ -81,16 +81,44 @@ function loadSummary() {
 }
 const OV = loadSummary();
 
-test("the current risk names the node and how many workflows are lost, and says it is predicted", () => {
+test("the current risk names the node, says what it would stop, and says it is predicted", () => {
     const risk = plain(OV.describeRisk(detail));
     assert.equal(risk.state, "available");
-    assert.equal(risk.headline, "If desktop-worker2 fails, 3 of 3 workflows are lost");
-    assert.match(risk.sub, /Blast radius 100%.*productpage.*not measured/);
+    assert.equal(risk.headline, "Losing desktop-worker2 would stop all 3 workflows");
+    assert.match(risk.sub, /Blast radius 100% · services affected: .*productpage.* · predicted from the live topology, not measured\./);
+    assert.deepEqual(risk.severity, { level: "critical", label: "Critical" });
+    assert.deepEqual(risk.lostWorkflows, detail.baselineImpact.failedWorkflows);
+});
+
+test("the sentence follows the case: all, some, one, or none of the workflows", () => {
+    const with_ = (failed, total) => ({ ...detail, portfolio: { workflows: Array.from({ length: total }, (_x, i) => ({ workflowId: `w${i}` })) },
+        baselineImpact: { blastRadius: failed ? 40 : 0, failedServices: [], failedWorkflows: Array.from({ length: failed }, (_x, i) => `w${i}`) } });
+    const said = (failed, total) => plain(OV.describeRisk(with_(failed, total))).headline;
+    assert.equal(said(3, 3), "Losing desktop-worker2 would stop all 3 workflows");
+    assert.equal(said(2, 3), "Losing desktop-worker2 would stop 2 of 3 workflows");
+    assert.equal(said(1, 3), "Losing desktop-worker2 would stop 1 of 3 workflows");
+    assert.equal(said(1, 1), "Losing desktop-worker2 would stop the workflow");
+    assert.equal(said(0, 3), "Losing desktop-worker2 is not predicted to stop any workflow");
+});
+
+test("the rating comes from the blast radius, can be configured, and never calls a loss resilient", () => {
+    const level = (blast, options) => plain(OV.describeRisk({ ...detail, baselineImpact: { ...detail.baselineImpact, blastRadius: blast } }, null, options)).severity.level;
+    assert.deepEqual([100, 75, 74.9, 50, 49.9, 25, 24.9, 0.1, 0].map((b) => level(b)), ["critical", "critical", "high", "high", "moderate", "moderate", "low", "low", "none"]);
+    assert.equal(level(60, { thresholds: { critical: 60 } }), "critical", "what counts as critical is configurable");
+    assert.equal(OV.describeRisk(detail).severity.label, "Critical");
+    assert.equal(plain(OV.describeRisk({ ...detail, baselineImpact: { blastRadius: 0, failedServices: [], failedWorkflows: [] } })).severity.label, "Resilient");
+});
+
+test("only the first workflows are named, and the rest are counted", () => {
+    const many = Array.from({ length: 11 }, (_x, i) => `wf-${i}`);
+    const risk = plain(OV.describeRisk({ ...detail, baselineImpact: { blastRadius: 90, failedServices: [], failedWorkflows: many } }));
+    assert.equal(risk.lostWorkflows.length, 8);
+    assert.equal(risk.moreLost, 3);
 });
 
 test("a failure the workflows survive says so, and an answer without a baseline claims nothing", () => {
     const survives = { ...detail, baselineImpact: { blastRadius: 0, failedServices: [], failedWorkflows: [] } };
-    assert.equal(plain(OV.describeRisk(survives)).headline, "If desktop-worker2 fails, every workflow survives");
+    assert.equal(plain(OV.describeRisk(survives)).headline, "Losing desktop-worker2 is not predicted to stop any workflow");
     const none = plain(OV.describeRisk({ ...detail, baselineImpact: null }));
     assert.equal(none.state, "missing");
     assert.ok(!/\d+%/.test(none.headline + none.sub), "no figure is invented");
@@ -165,7 +193,12 @@ test("the page draws the strip, the risk, the banner, the results and the eviden
 
     assert.deepEqual(plain(page.calls).sort(), ["/api/deployments/discovery/all", "/api/recommendations/apply-tests/history?limit=50", "/api/recommendations/applications/current",
         "/api/recommendations/context", "/api/recommendations/declared/detail?namespace=bookinfo&all_workflows=true"].sort());
-    assert.match(node(page, "overview-risk-headline").textContent, /If desktop-worker2 fails, 3 of 3 workflows are lost/);
+    assert.match(node(page, "overview-risk-headline").textContent, /Losing desktop-worker2 would stop all 3 workflows/);
+    const badge = node(page, "overview-risk-badge");
+    assert.deepEqual([badge.hidden, badge.textContent, badge.attributes["data-severity"]], [false, "Critical", "critical"]);
+    const chips = node(page, "overview-risk-workflows");
+    assert.equal(chips.hidden, false);
+    assert.deepEqual(chips.children.map((c) => c.textContent), detail.baselineImpact.failedWorkflows.map((w) => `✕ ${w}`), "each lost workflow is named, with a mark and not only a colour");
     assert.equal(node(page, "overview-risk").attributes["data-lost"], "true");
     assert.equal(node(page, "overview-applied").hidden, false);
     assert.match(node(page, "overview-applied-text").textContent, /ratings-v1/);
