@@ -67,6 +67,43 @@ test("cross-layer summaries preserve each workflow graph", () => {
     );
 });
 
+test("cross-layer graph layout preserves the five research layers and real edges", () => {
+    const demo = load();
+    const graph = {
+        workflowId: "checkout",
+        nodes: [
+            { identifier: "workflow:checkout", nodeType: "WORKFLOW", label: "checkout" },
+            { identifier: "service:cart", nodeType: "SERVICE", label: "cart" },
+            { identifier: "pod:cart-1", nodeType: "POD", label: "cart-1" },
+            { identifier: "node:worker-1", nodeType: "NODE", label: "worker-1" },
+            { identifier: "failure-domain:zone-a", nodeType: "FAILURE_DOMAIN", label: "zone-a" },
+        ],
+        edges: [
+            { source: "workflow:checkout", target: "service:cart", relationship: "REQUIRES_MANDATORY" },
+            { source: "service:cart", target: "pod:cart-1", relationship: "HAS_REPLICA" },
+            { source: "pod:cart-1", target: "node:worker-1", relationship: "RUNS_ON" },
+            { source: "node:worker-1", target: "failure-domain:zone-a", relationship: "IN_FAILURE_DOMAIN" },
+        ],
+        mandatoryServices: ["cart"],
+        optionalServices: [],
+        unresolvedServices: [],
+    };
+
+    const layout = demo.graphLayout(graph);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(layout.layers.map((layer) => layer.type))),
+        ["WORKFLOW", "SERVICE", "POD", "NODE", "FAILURE_DOMAIN"],
+    );
+    assert.equal(layout.edges.length, graph.edges.length);
+    assert.ok(layout.layers.every((layer, index, layers) => index === 0 || layer.x > layers[index - 1].x));
+
+    const markup = demo.renderCrossLayerGraph(graph, 0);
+    assert.match(markup, /<svg/);
+    assert.match(markup, /checkout cross-layer graph/);
+    assert.match(markup, /graph-node--workflow/);
+    assert.match(markup, /graph-edge--requires-mandatory/);
+});
+
 test("result rows keep single-node and all-node portfolio metrics", () => {
     const demo = load();
     const rows = demo.resultRows({

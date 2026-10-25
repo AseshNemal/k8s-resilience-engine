@@ -27,6 +27,160 @@
         }));
     }
 
+    const GRAPH_LAYERS = ["WORKFLOW", "SERVICE", "POD", "NODE", "FAILURE_DOMAIN"];
+    const GRAPH_LAYER_LABELS = {
+        WORKFLOW: "Workflow",
+        SERVICE: "Services",
+        POD: "Pods",
+        NODE: "Worker nodes",
+        FAILURE_DOMAIN: "Failure domains",
+    };
+
+    function graphLayout(graph) {
+        const width = 1100;
+        const nodeWidth = 164;
+        const nodeHeight = 42;
+        const top = 72;
+        const layerGap = 46;
+        const left = 28;
+        const rowGap = 18;
+        const nodesByLayer = Object.fromEntries(GRAPH_LAYERS.map((layer) => [layer, []]));
+
+        (graph?.nodes || []).forEach((node) => {
+            if (nodesByLayer[node.nodeType]) nodesByLayer[node.nodeType].push(node);
+        });
+        GRAPH_LAYERS.forEach((layer) => {
+            nodesByLayer[layer].sort((leftNode, rightNode) => (
+                String(leftNode.label).localeCompare(String(rightNode.label))
+            ));
+        });
+
+        const maxRows = Math.max(1, ...GRAPH_LAYERS.map((layer) => nodesByLayer[layer].length));
+        const height = Math.max(360, top + (maxRows * (nodeHeight + rowGap)) + 26);
+        const positions = {};
+        const layers = GRAPH_LAYERS.map((layer, layerIndex) => {
+            const x = left + layerIndex * (nodeWidth + layerGap);
+            const nodes = nodesByLayer[layer];
+            const contentHeight = height - top - 28;
+            const usedHeight = nodes.length * nodeHeight + Math.max(0, nodes.length - 1) * rowGap;
+            const startY = top + Math.max(0, (contentHeight - usedHeight) / 2);
+            const positionedNodes = nodes.map((node, nodeIndex) => {
+                const positioned = {
+                    ...node,
+                    x,
+                    y: startY + nodeIndex * (nodeHeight + rowGap),
+                    width: nodeWidth,
+                    height: nodeHeight,
+                };
+                positions[node.identifier] = positioned;
+                return positioned;
+            });
+            return {
+                type: layer,
+                label: GRAPH_LAYER_LABELS[layer],
+                x,
+                nodes: positionedNodes,
+            };
+        });
+
+        const edges = (graph?.edges || []).flatMap((edge) => {
+            const source = positions[edge.source];
+            const target = positions[edge.target];
+            if (!source || !target) return [];
+
+            const sourceY = source.y + source.height / 2;
+            const targetY = target.y + target.height / 2;
+            let path;
+            if (source.nodeType === target.nodeType) {
+                const sourceX = source.x + source.width / 2;
+                const targetX = target.x + target.width / 2;
+                const bendX = source.x + source.width + 28;
+                path = `M ${sourceX} ${sourceY} C ${bendX} ${sourceY}, ${bendX} ${targetY}, ${targetX} ${targetY}`;
+            } else {
+                const sourceX = source.x + source.width;
+                const targetX = target.x;
+                const midpoint = sourceX + (targetX - sourceX) / 2;
+                path = `M ${sourceX} ${sourceY} C ${midpoint} ${sourceY}, ${midpoint} ${targetY}, ${targetX} ${targetY}`;
+            }
+            return [{ ...edge, path }];
+        });
+
+        return { width, height, layers, edges };
+    }
+
+    function graphClass(value) {
+        return String(value || "unknown").toLowerCase().replaceAll("_", "-");
+    }
+
+    function shortGraphLabel(value, limit = 21) {
+        const label = String(value ?? "");
+        return label.length > limit ? `${label.slice(0, limit - 1)}…` : label;
+    }
+
+    function renderCrossLayerGraph(graph, graphIndex) {
+        const layout = graphLayout(graph);
+        const markerId = `graph-arrow-${graphIndex}`;
+        const laneWidth = 184;
+        const laneHeight = layout.height - 54;
+
+        const lanes = layout.layers.map((layer) => `
+            <g class="graph-layer graph-layer--${graphClass(layer.type)}">
+                <rect class="graph-layer__background" x="${layer.x - 10}" y="48" width="${laneWidth}" height="${laneHeight}" rx="14"></rect>
+                <text class="graph-layer__label" x="${layer.x}" y="31">${escapeHtml(layer.label)}</text>
+                <text class="graph-layer__count" x="${layer.x + laneWidth - 30}" y="31">${layer.nodes.length}</text>
+            </g>
+        `).join("");
+
+        const edges = layout.edges.map((edge) => `
+            <path
+                class="graph-edge graph-edge--${graphClass(edge.relationship)}"
+                d="${edge.path}"
+                marker-end="url(#${markerId})"
+            ><title>${escapeHtml(edge.source)} → ${escapeHtml(edge.target)} · ${escapeHtml(edge.relationship)}</title></path>
+        `).join("");
+
+        const nodes = layout.layers.flatMap((layer) => layer.nodes).map((node) => `
+            <g class="graph-node graph-node--${graphClass(node.nodeType)}" transform="translate(${node.x} ${node.y})">
+                <title>${escapeHtml(node.nodeType)} · ${escapeHtml(node.label)}</title>
+                <rect width="${node.width}" height="${node.height}" rx="10"></rect>
+                <circle cx="17" cy="21" r="5"></circle>
+                <text x="29" y="26">${escapeHtml(shortGraphLabel(node.label))}</text>
+            </g>
+        `).join("");
+
+        return `
+            <div class="cross-layer-visual">
+                <div class="graph-legend" aria-label="Cross-layer graph legend">
+                    ${GRAPH_LAYERS.map((layer) => `
+                        <span><i class="graph-legend__node graph-legend__node--${graphClass(layer)}"></i>${escapeHtml(GRAPH_LAYER_LABELS[layer])}</span>
+                    `).join("")}
+                    <span><i class="graph-legend__edge graph-legend__edge--mandatory"></i>Mandatory</span>
+                    <span><i class="graph-legend__edge graph-legend__edge--optional"></i>Optional</span>
+                    <span><i class="graph-legend__edge graph-legend__edge--calls"></i>Service call</span>
+                </div>
+                <div class="graph-canvas" tabindex="0" aria-label="Scrollable cross-layer graph for ${escapeHtml(graph.workflowId)}">
+                    <svg
+                        class="cross-layer-svg"
+                        viewBox="0 0 ${layout.width} ${layout.height}"
+                        role="img"
+                        aria-labelledby="graph-title-${graphIndex} graph-description-${graphIndex}"
+                    >
+                        <title id="graph-title-${graphIndex}">${escapeHtml(graph.workflowId)} cross-layer graph</title>
+                        <desc id="graph-description-${graphIndex}">Workflow dependencies connected to services, pods, worker nodes, and failure domains.</desc>
+                        <defs>
+                            <marker id="${markerId}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z"></path>
+                            </marker>
+                        </defs>
+                        ${lanes}
+                        <g class="graph-edges">${edges}</g>
+                        <g class="graph-nodes">${nodes}</g>
+                    </svg>
+                </div>
+            </div>
+        `;
+    }
+
     function resultRows(resultArtifact) {
         return (resultArtifact?.results || []).map((result) => ({
             failedNode: result.failedNode,
@@ -115,12 +269,16 @@
                             <span class="pill">Optional: ${escapeHtml(summary.optionalServices.join(", ") || "none")}</span>
                             <span class="pill">Unresolved: ${escapeHtml(summary.unresolvedServices.join(", ") || "none")}</span>
                         </div>
-                        <div class="table-wrap"><table>
-                            <thead><tr><th>Source</th><th>Relationship</th><th>Target</th></tr></thead>
-                            <tbody>${graph.edges.map((edge) => `
-                                <tr><td>${escapeHtml(edge.source)}</td><td>${escapeHtml(edge.relationship)}</td><td>${escapeHtml(edge.target)}</td></tr>
-                            `).join("")}</tbody>
-                        </table></div>
+                        ${renderCrossLayerGraph(graph, index)}
+                        <details class="graph-evidence">
+                            <summary>View ${graph.edges.length} relationship records</summary>
+                            <div class="table-wrap"><table>
+                                <thead><tr><th>Source</th><th>Relationship</th><th>Target</th></tr></thead>
+                                <tbody>${graph.edges.map((edge) => `
+                                    <tr><td>${escapeHtml(edge.source)}</td><td>${escapeHtml(edge.relationship)}</td><td>${escapeHtml(edge.target)}</td></tr>
+                                `).join("")}</tbody>
+                            </table></div>
+                        </details>
                     </div>
                 </details>`;
         }).join("");
@@ -232,7 +390,13 @@
         });
     }
 
-    global.DisposablePortfolioDemo = { graphSummaries, resultRows, init };
+    global.DisposablePortfolioDemo = {
+        graphLayout,
+        graphSummaries,
+        renderCrossLayerGraph,
+        resultRows,
+        init,
+    };
     if (typeof document !== "undefined") {
         document.addEventListener("DOMContentLoaded", init);
     }
