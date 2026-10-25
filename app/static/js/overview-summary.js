@@ -31,11 +31,32 @@
         return value ? value.charAt(0).toUpperCase() + value.slice(1) : "Candidate";
     }
 
+    // How serious a predicted loss is, from the blast radius (percent, criticality-weighted). The lower bound of each level; a deployment
+    // may pass its own through describeRisk's third argument, because what counts as "critical" is a judgement, not a measurement.
+    const SEVERITY_THRESHOLDS = { critical: 75, high: 50, moderate: 25 };
+    const SEVERITY_LABELS = { critical: "Critical", high: "High", moderate: "Moderate", low: "Low", none: "Resilient" };
+    const LOST_SHOWN = 8;                  // workflow names drawn before "+N more"
+
+    function severityOf(blastRadius, thresholds) {
+        const t = { ...SEVERITY_THRESHOLDS, ...(thresholds || {}) };
+        const level = blastRadius <= 0 ? "none" : blastRadius >= t.critical ? "critical" : blastRadius >= t.high ? "high" : blastRadius >= t.moderate ? "moderate" : "low";
+        return { level, label: SEVERITY_LABELS[level] };
+    }
+
+    /** One plain sentence for the card: what stopping the assessed node is predicted to do, worded for the case. */
+    function riskSentence(node, lost, total, survives) {
+        if (survives) return `Losing ${node} is not predicted to stop any workflow`;
+        if (lost === null) return `Losing ${node} would stop the workflow`;
+        if (total === null) return `Losing ${node} would stop ${plural(lost, "workflow")}`;
+        if (total > 0 && lost >= total) return total === 1 ? `Losing ${node} would stop the workflow` : `Losing ${node} would stop all ${total} workflows`;
+        return `Losing ${node} would stop ${lost} of ${plural(total, "workflow")}`;
+    }
+
     /**
      * The current risk: what is lost when the assessed node fails, from the all-workflows recommendation detail. ``detail`` is that
      * body, or null when it could not be read, in which case ``reason`` is the backend's explanation.
      */
-    function describeRisk(detail, reason) {
+    function describeRisk(detail, reason, options) {
         if (!detail) return { state: reason && reason.pending ? PENDING : MISSING, headline: reason && reason.pending ? "Computing the failure impact…" : "No failure impact yet",
             sub: reason && reason.message ? text(reason.message) : "It needs a connected cluster and a workflow that applies to the application.", lostPercent: null };
         const impact = detail.baselineImpact;
@@ -45,12 +66,16 @@
         }
         const total = detail.portfolio && Array.isArray(detail.portfolio.workflows) ? detail.portfolio.workflows.length : null;
         const lost = Array.isArray(impact.failedWorkflows) ? impact.failedWorkflows.length : null;
-        const scope = total !== null && lost !== null ? `${lost} of ${plural(total, "workflow")}` : lost !== null ? plural(lost, "workflow") : "the workflow";
         const survives = impact.blastRadius === 0;
+        const names = Array.isArray(impact.failedWorkflows) ? impact.failedWorkflows.map((w) => text(w, 80)).filter(Boolean) : [];
+        const services = Array.isArray(impact.failedServices) && impact.failedServices.length
+            ? ` · services affected: ${impact.failedServices.slice(0, 8).map((s) => text(s, 60)).join(", ")}` : "";
         return {
             state: AVAILABLE, survives, lostPercent: impact.blastRadius, node,
-            headline: survives ? `If ${node} fails, every workflow survives` : `If ${node} fails, ${scope} ${lost === 1 ? "is" : "are"} lost`,
-            sub: `Blast radius ${percent(impact.blastRadius)}${Array.isArray(impact.failedServices) && impact.failedServices.length ? `; services lost: ${impact.failedServices.slice(0, 8).map((s) => text(s, 60)).join(", ")}` : ""}. Predicted from the live topology, not measured.`,
+            severity: severityOf(impact.blastRadius, options && options.thresholds),
+            lostWorkflows: names.slice(0, LOST_SHOWN), moreLost: Math.max(0, names.length - LOST_SHOWN),
+            headline: riskSentence(node, lost, total, survives),
+            sub: `Blast radius ${percent(impact.blastRadius)}${services} · predicted from the live topology, not measured.`,
         };
     }
 
@@ -246,5 +271,5 @@
     }
 
     global.ResilienceOverview = { describeRisk, describeChips, describeApplied, describeResults, describeEvidence, describeImpact, describeMatrix,
-        describeService, describeAction, describeFocus, AVAILABLE, MISSING, INCOMPLETE, PENDING };
+        describeService, describeAction, describeFocus, severityOf, SEVERITY_THRESHOLDS, AVAILABLE, MISSING, INCOMPLETE, PENDING };
 })(typeof window !== "undefined" ? window : globalThis);
