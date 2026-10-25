@@ -44,4 +44,6 @@ def test_failure_impact_page_links_to_the_explicit_research_mount() -> None:
         in template
     )
     assert "Open Synthetic Portfolio" in template
-    assert "not live cluster evidence" in template
+    assert "separate from live cluster evidence" in template
+    assert "Synthetic &amp; disposable" in template
+    assert "cluster changes" in template

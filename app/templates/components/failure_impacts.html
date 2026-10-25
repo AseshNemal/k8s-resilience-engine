@@ -27,19 +27,47 @@
     </div>
 </div>
 
-<div class="card synthetic-portfolio-link" data-role="synthetic-portfolio-link">
-    <div>
-        <div class="synthetic-portfolio-link__eyebrow">Viva research demonstration</div>
-        <div class="section-header__title">Synthetic multi-workflow portfolio</div>
-        <p class="ui-note synthetic-portfolio-link__note">
-            Generate four assumed workflows, inspect their cross-layer graphs, and virtually fail
-            one or every synthetic worker node. This is demonstration data, not live cluster evidence.
-        </p>
+<section class="card synthetic-portfolio-link" data-role="synthetic-portfolio-link" aria-labelledby="synthetic-portfolio-title">
+    <div class="synthetic-portfolio-link__visual" aria-hidden="true">
+        <svg viewBox="0 0 64 64" role="presentation">
+            <path d="M18 18H32M32 18L45 31M32 18L19 45M45 31V45M19 45H45"></path>
+            <circle cx="18" cy="18" r="7"></circle>
+            <circle cx="32" cy="18" r="5"></circle>
+            <circle cx="45" cy="31" r="5"></circle>
+            <circle cx="19" cy="45" r="7"></circle>
+            <circle cx="45" cy="45" r="7"></circle>
+        </svg>
     </div>
-    <a class="action-button" href="/components/failure-impacts/synthetic-portfolio/">
-        Open Synthetic Portfolio
-    </a>
-</div>
+
+    <div class="synthetic-portfolio-link__content">
+        <div class="synthetic-portfolio-link__labels">
+            <span class="synthetic-portfolio-link__eyebrow">Viva research demonstration</span>
+            <span class="synthetic-portfolio-link__badge">Synthetic &amp; disposable</span>
+        </div>
+        <h3 id="synthetic-portfolio-title" class="synthetic-portfolio-link__title">
+            Explore failure impact across four workflows
+        </h3>
+        <p class="synthetic-portfolio-link__note">
+            Build the assumed cross-layer graphs, then virtually fail one worker node or compare
+            every node side by side. Demonstration data is kept separate from live cluster evidence.
+        </p>
+        <ul class="synthetic-portfolio-link__facts" aria-label="Synthetic portfolio contents">
+            <li><strong>4</strong><span>workflows</span></li>
+            <li><strong>3</strong><span>worker nodes</span></li>
+            <li><strong>0</strong><span>cluster changes</span></li>
+        </ul>
+    </div>
+
+    <div class="synthetic-portfolio-link__action">
+        <a class="action-button synthetic-portfolio-link__button" href="/components/failure-impacts/synthetic-portfolio/">
+            <span>Open Synthetic Portfolio</span>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M4 10h11M11 6l4 4-4 4"></path>
+            </svg>
+        </a>
+        <span class="synthetic-portfolio-link__safety">Safe virtual simulation</span>
+    </div>
+</section>
 
 <div class="card" style="margin-bottom: var(--space-lg);">
     <div class="scenario-panel">
