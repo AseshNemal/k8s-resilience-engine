@@ -42,12 +42,12 @@ const SELECTORS = [
     '[data-role="overview-error-region"]', '[data-role="reload-button"]', '[data-role="source-badge"]',
     '[data-role="discovery-summary"]', '[data-role="overview-namespaces"]', '[data-role="last-refreshed"]',
     '[data-role="discovery-headline"]', '[data-role="discovery-notes"]', '[data-role="discovery-provenance"]',
-    '[data-metric="cluster-nodes"]', '[data-metric="services-discovered"]', '[data-metric="unresolved-items"]',
 ];
 
 function boot(respond) {
     const nodes = Object.fromEntries(SELECTORS.map((selector) => [selector, new FakeNode("div")]));
     const calls = [];
+    const diagrams = [];
     let onLoad;
     const document = {
         createElement: (tag) => new FakeNode(tag),
@@ -56,16 +56,20 @@ function boot(respond) {
     };
     const window = {
         document,
+        ResilienceTopologyCompare: { render: (target, current, after, options) => {
+            diagrams.push({ current, after, options });
+            const label = new FakeNode("p"); label.textContent = "Observed topology"; target.append(label);
+        } },
         ResilienceApi: { fetchJson: async (url) => { calls.push(url); return respond(url); } },
         ResilienceUi: { updateLastRefreshed: (node) => { node.textContent = "refreshed"; } },
     };
     const context = vm.createContext({ window, document, console });
     vm.runInContext(connectionState, context);
     vm.runInContext(dashboard, context);
-    return { nodes, calls, load: () => onLoad() };
+    return { nodes, calls, diagrams, load: () => onLoad() };
 }
 
-const metric = (nodes, name) => nodes[`[data-metric="${name}"]`].textContent;
+const headline = (nodes) => nodes['[data-role="discovery-headline"]'].textContent;
 const region = (nodes) => nodes['[data-role="overview-namespaces"]'];
 
 function overview(extra = {}) {
@@ -100,11 +104,11 @@ test("it shows the totals and one card per namespace with each service, its repl
     const page = boot(() => overview());
     await page.load();
 
-    assert.equal(metric(page.nodes, "cluster-nodes"), "3");
-    assert.equal(metric(page.nodes, "services-discovered"), "3");
-    assert.equal(metric(page.nodes, "unresolved-items"), "0");
+    assert.match(headline(page.nodes), /3 services in 2 namespaces on 3 worker nodes/);
     const cards = region(page.nodes).children;
     assert.equal(cards.length, 2);
+    assert.equal(cards[0].tagName, "article", "application content is always visible");
+    assert.equal(page.diagrams.length, 0, "inventory does not repeat the placement graph");
     assert.match(cards[0].text(), /bookinfo/);
     assert.match(cards[0].text(), /productpage[\s\S]*1\/1 ready[\s\S]*worker2/);
     assert.match(cards[1].text(), /paymentservice[\s\S]*3\/3 ready[\s\S]*worker\b/);
@@ -118,7 +122,8 @@ test("an unresolved pod is listed under its namespace and counted", async () => 
     const page = boot(() => data);
     await page.load();
 
-    assert.equal(metric(page.nodes, "unresolved-items"), "1");
+    assert.match(region(page.nodes).children[0].text(), /1 unresolved/);
+    assert.match(page.nodes['[data-role="source-badge"]'].textContent, /partial evidence/);
     assert.match(region(page.nodes).children[0].text(), /Unresolved Pod stray: NO_MATCHING_DEPLOYMENT/);
 });
 
@@ -127,7 +132,7 @@ test("an empty cluster shows no cards, an explicit headline and the worker count
     await page.load();
 
     assert.equal(region(page.nodes).children.length, 0);
-    assert.equal(metric(page.nodes, "cluster-nodes"), "3");
+    assert.match(headline(page.nodes), /3 worker nodes/);
     assert.match(page.nodes['[data-role="discovery-headline"]'].textContent, /no workloads/i);
 });
 
@@ -144,7 +149,7 @@ test("a failure shows an explicit error, no figures and no stale cards", async (
     await page.load();
 
     assert.equal(region(page.nodes).children.length, 0);
-    assert.equal(metric(page.nodes, "services-discovered"), "—");
+    assert.equal(headline(page.nodes), "Cluster inventory unavailable");
     assert.equal(page.nodes['[data-role="source-badge"]'].textContent, "Not showing live data");
     assert.match(page.nodes['[data-role="overview-error-region"]'].text(), /CLUSTER_NOT_CONNECTED/);
 });

@@ -146,3 +146,12 @@ def test_overview_has_the_research_summary_and_reads_only_stored_or_live_results
     # reads only: no write verb and no sample, demo or fixture source
     assert "method:" not in script and "POST" not in script
     assert not re.search(r"sample|demo|fixture|Math\.random", script + summary, re.I)
+
+
+def test_overview_keeps_applications_and_topology_comparison_visible():
+    markup = client.get("/").text
+    assert 'id="overview-applications-title"' in markup
+    assert 'overview-topology-comparison"' in markup
+    assert '<details' not in (TEMPLATES / "dashboard.html").read_text(encoding="utf-8")
+    assert markup.count('data-role="overview-placement"') == 1
+    assert 'data-role="overview-matrix"' not in markup

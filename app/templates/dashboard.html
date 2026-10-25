@@ -3,134 +3,112 @@
 {% from "partials/icons.html" import icon %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/dashboard.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/dashboard.css') }}?v=overview-complete-20261025">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/recommendations.css') }}">
 {% endblock %}
 
 {% block content %}
+<div class="overview-dashboard">
 <div class="page-header">
-    <h2 class="page-header__title">Kubernetes Workflow Resilience Overview</h2>
-    <p class="page-header__subtitle">
-        Understand how worker-node failures affect critical microservice workflows.
-        Everything on this page comes from the connected cluster.
-    </p>
-    <div class="page-header__meta">
+    <h2 class="page-header__title">Workflow resilience</h2>
+    <div class="overview-toolbar">
         <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Not loaded</span>
-        <button type="button" class="secondary-button" data-role="reload-button">
-            Refresh from cluster
-        </button>
+        <span class="overview-inventory" data-role="discovery-headline">Reading cluster inventory…</span>
+        <button type="button" class="secondary-button" data-role="reload-button">Refresh</button>
     </div>
 </div>
-
 <div data-role="overview-error-region"></div>
-
-<div class="card" data-role="discovery-summary" hidden>
-    <p data-role="discovery-headline"></p>
-    <ul data-role="discovery-notes"></ul>
-    <p class="footer-note" data-role="discovery-provenance"></p>
-</div>
-
 <div class="overview-applied" data-role="overview-applied" role="status" hidden>
     <span data-role="overview-applied-text"></span>
-    <a class="overview-applied__link" href="/components/recommendations">Open Recommendations</a>
+    <a class="overview-applied__link" href="/components/recommendations">Review applied change</a>
 </div>
-
-<section class="overview-status" data-role="overview-status" aria-label="Where you are">
-    <a class="overview-chip" href="/components/deployments" data-role="overview-chip-cluster" data-state="pending">
-        <div class="overview-chip__top"><span data-role="overview-chip-cluster-state">Checking</span></div>
-        <div class="overview-chip__label">Cluster</div>
-        <div class="overview-chip__detail" data-role="overview-chip-cluster-detail">Checking…</div>
-    </a>
-    <a class="overview-chip" href="/components/workflows" data-role="overview-chip-workflow" data-state="pending">
-        <div class="overview-chip__top"><span data-role="overview-chip-workflow-state">Checking</span></div>
-        <div class="overview-chip__label">Workflow</div>
-        <div class="overview-chip__detail" data-role="overview-chip-workflow-detail">Checking…</div>
-    </a>
-    <a class="overview-chip" href="/components/failure-impacts" data-role="overview-chip-prediction" data-state="pending">
-        <div class="overview-chip__top"><span data-role="overview-chip-prediction-state">Checking</span></div>
-        <div class="overview-chip__label">Prediction</div>
-        <div class="overview-chip__detail" data-role="overview-chip-prediction-detail">Checking…</div>
-    </a>
-    <a class="overview-chip" href="/components/recommendations" data-role="overview-chip-test" data-state="pending">
-        <div class="overview-chip__top"><span data-role="overview-chip-test-state">Checking</span></div>
-        <div class="overview-chip__label">Fix tested</div>
-        <div class="overview-chip__detail" data-role="overview-chip-test-detail">Checking…</div>
-    </a>
+<div class="overview-lead">
+    <section class="card overview-risk" data-role="overview-risk" aria-live="polite">
+        <div class="overview-risk__label">Predicted impact</div>
+        <div class="overview-risk__headline" data-role="overview-risk-headline">Checking the failure impact…</div>
+        <p class="overview-scope" data-role="overview-scope">Assessing application scope…</p>
+        <p class="overview-risk__sub" data-role="overview-risk-sub"></p>
+    </section>
+    <section class="card overview-next">
+        <h3>Next action</h3>
+        <div data-role="overview-next-text"><p>Reading the evidence…</p></div>
+        <a class="secondary-button" data-role="overview-next-link" href="/components/recommendations">Review recommendations</a>
+    </section>
+</div>
+<div class="overview-analysis-grid overview-impact-grid">
+    <section class="card overview-panel">
+        <div class="overview-panel-heading"><h3>Impact by worker node</h3><span class="overview-evidence-tag" data-kind="predicted">Predicted impact</span></div>
+        <p class="overview-caption">Criticality-weighted workflow loss. <span class="overview-help" tabindex="0" aria-label="About failure impact" aria-describedby="overview-impact-help">ⓘ<span class="overview-tooltip" id="overview-impact-help" role="tooltip">Each bar predicts the consequences after assuming that worker fails. The percentage is weighted by workflow criticality; it is not the probability of a failure or a measured outage.</span></span></p>
+        <div data-role="overview-node-impact"><p class="ui-note">Waiting for the prediction…</p></div>
+    </section>
+    <section class="card overview-panel">
+        <div class="overview-panel-heading"><h3>Workflow survival</h3><span class="overview-evidence-tag" data-kind="predicted">Predicted impact</span></div>
+        <p class="overview-caption" data-role="overview-workflow-caption">Predicted survival when each worker node fails.</p>
+        <div data-role="overview-workflow-impact"><p class="ui-note">Waiting for workflow evidence…</p></div>
+        <p class="overview-focus-summary" data-role="overview-focus-summary" role="status" aria-live="polite">Select a node or workflow cell to highlight its placement.</p>
+        <div class="overview-focus-controls">
+            <a href="#overview-placement-section" data-role="overview-focus-view" hidden>View highlighted placement</a>
+            <button type="button" class="overview-text-button" data-role="overview-focus-clear" hidden>Clear highlight</button>
+        </div>
+    </section>
+</div>
+<div class="overview-analysis-grid">
+    <section class="card overview-panel">
+        <div class="overview-panel-heading"><h3>Selected fix</h3><span class="overview-evidence-tag" data-kind="predicted">Predicted impact</span></div>
+        <div data-role="overview-fix"><p class="ui-note">Reading the recommendation…</p></div>
+    </section>
+    <section class="card overview-panel">
+        <div class="overview-panel-heading"><h3>Latest saved test</h3><span class="overview-evidence-tag" data-kind="recorded">Recorded test result</span></div>
+        <div data-role="overview-latest-test"><p class="ui-note">Reading saved tests…</p></div>
+        <a href="/components/recommendations">Open test reports</a>
+    </section>
+</div>
+<section class="overview-applications" aria-labelledby="overview-applications-title">
+    <div class="overview-panel-heading"><h3 id="overview-applications-title">Applications</h3><span class="overview-evidence-tag" data-kind="observed">Observed placement</span></div>
+    <div class="overview-namespaces" data-role="overview-namespaces"></div>
 </section>
-
-<section class="card overview-risk" data-role="overview-risk" aria-live="polite">
-    <div class="overview-risk__label">Current risk</div>
-    <div class="overview-risk__headline" data-role="overview-risk-headline">Checking the failure impact…</div>
-    <p class="overview-risk__sub" data-role="overview-risk-sub"></p>
+<section class="card overview-panel overview-topology-comparison" id="overview-placement-section">
+    <div class="overview-panel-heading"><h3>Where the assessed application runs</h3><span class="overview-evidence-tag" data-kind="observed">Observed placement</span> <span class="overview-help" tabindex="0" aria-label="About placement" aria-describedby="overview-placement-help">ⓘ<span class="overview-tooltip" id="overview-placement-help" role="tooltip">These pods and nodes were read from the cluster. The red outline marks the assessed failure scenario, not a real outage. Blue highlighting follows your selection without changing that assessment.</span></span></div>
+    <p class="overview-focus-summary" data-role="overview-placement-focus" hidden></p>
+    <div class="overview-placement" data-role="overview-placement"><p class="ui-note">Waiting for the recommendation…</p></div>
 </section>
-
-<section class="metric-grid" aria-label="Overview metrics">
-    <div class="metric-card">
-        <div class="metric-card__top">
-            <span class="icon-badge icon-badge--teal">{{ icon("server", 18) }}</span>
-        </div>
-        <div class="metric-card__body">
-            <div class="metric-card__label">Worker Nodes</div>
-            <div class="metric-card__value" data-metric="cluster-nodes">—</div>
-            <div class="metric-card__hint">Read from the connected cluster</div>
-        </div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-card__top">
-            <span class="icon-badge icon-badge--blue">{{ icon("workflow", 18) }}</span>
-        </div>
-        <div class="metric-card__body">
-            <div class="metric-card__label">Services Discovered</div>
-            <div class="metric-card__value" data-metric="services-discovered">—</div>
-            <div class="metric-card__hint">Across every application namespace in the cluster</div>
-        </div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-card__top">
-            <span class="icon-badge icon-badge--amber">{{ icon("alert", 18) }}</span>
-        </div>
-        <div class="metric-card__body">
-            <div class="metric-card__label">Unresolved Items</div>
-            <div class="metric-card__value" data-metric="unresolved-items">—</div>
-            <div class="metric-card__hint">Pods or workloads whose placement could not be resolved</div>
-        </div>
-    </div>
+<section class="overview-details card">
+    <h3 class="overview-section-title">Saved fix comparisons <span class="overview-caption">Historical runs; scope and cluster may differ</span></h3>
+    <p class="overview-caption">Risk values remain model predictions. <span class="overview-help" tabindex="0" aria-label="About saved results" aria-describedby="overview-results-help">ⓘ<span class="overview-tooltip" id="overview-results-help" role="tooltip">Before, proposed and after-rollout risk are model values. A post-rollout recalculation uses observed placement; it is not experimental proof. The test outcome describes the recorded checks. Saved runs can use different proposals and clusters.</span></span></p>
+    <div class="overview-results" data-role="overview-results" role="region" aria-label="Saved fix comparisons" tabindex="0"><p class="ui-note">Reading saved tests…</p></div>
 </section>
-
-<div class="section-header">
-    <h3 class="section-header__title">Applications by namespace</h3>
-    <span class="section-header__note">Everything running in the connected cluster</span>
-</div>
-<div class="overview-namespaces" data-role="overview-namespaces"></div>
-<div class="section-header">
-    <h3 class="section-header__title">Fix results</h3>
-    <span class="section-header__note">Latest saved test per candidate. Risk is a model prediction; the outcome is what the test found.</span>
-</div>
-<div class="card overview-results" data-role="overview-results">
-    <p class="ui-note">Reading saved tests…</p>
-</div>
-
-<div class="section-header">
-    <h3 class="section-header__title">Placement now and after the selected fix</h3>
-    <span class="section-header__note">From the same simulation as the Recommendations page. A prediction, not a measurement.</span>
-</div>
-<div class="card overview-placement" data-role="overview-placement">
-    <p class="ui-note">Waiting for the recommendation…</p>
-</div>
-
-<div class="section-header">
-    <h3 class="section-header__title">Evidence health</h3>
-    <span class="section-header__note">What each result is built on, and what is missing</span>
-</div>
-<div class="card overview-evidence" data-role="overview-evidence">
-    <p class="ui-note">Checking the evidence…</p>
-</div>
-
-<div class="section-header">
-    <h3 class="section-header__title">System Pipeline</h3>
-    <span class="section-header__note">Workflow → Service → Pod → Node → Failure Domain</span>
-</div>
-
+<section class="overview-details card">
+    <h3 class="overview-section-title">Evidence details</h3>
+    <div data-role="discovery-summary" hidden>
+        <ul data-role="discovery-notes"></ul>
+        <p class="overview-caption" data-role="discovery-provenance"></p>
+    </div>
+    <div class="overview-evidence" data-role="overview-evidence"><p class="ui-note">Checking evidence…</p></div>
+    <section class="overview-status" data-role="overview-status" aria-label="Evidence availability">
+        <a class="overview-chip" href="/components/deployments" data-role="overview-chip-cluster" data-state="pending">
+            <div class="overview-chip__label">Cluster</div>
+            <div class="overview-chip__top" data-role="overview-chip-cluster-state">Checking</div>
+            <div class="overview-chip__detail" data-role="overview-chip-cluster-detail">Checking…</div>
+        </a>
+        <a class="overview-chip" href="/components/workflows" data-role="overview-chip-workflow" data-state="pending">
+            <div class="overview-chip__label">Workflow</div>
+            <div class="overview-chip__top" data-role="overview-chip-workflow-state">Checking</div>
+            <div class="overview-chip__detail" data-role="overview-chip-workflow-detail">Checking…</div>
+        </a>
+        <a class="overview-chip" href="/components/failure-impacts" data-role="overview-chip-prediction" data-state="pending">
+            <div class="overview-chip__label">Prediction</div>
+            <div class="overview-chip__top" data-role="overview-chip-prediction-state">Checking</div>
+            <div class="overview-chip__detail" data-role="overview-chip-prediction-detail">Checking…</div>
+        </a>
+        <a class="overview-chip" href="/components/recommendations" data-role="overview-chip-test" data-state="pending">
+            <div class="overview-chip__label">Latest test</div>
+            <div class="overview-chip__top" data-role="overview-chip-test-state">Checking</div>
+            <div class="overview-chip__detail" data-role="overview-chip-test-detail">Checking…</div>
+        </a>
+    </section>
+</section>
+<section class="overview-details card overview-research">
+    <h3 class="overview-section-title">Research pipeline and component ownership</h3>
 <section class="pipeline" aria-label="Component pipeline">
     <article class="pipeline-stage">
         <div class="pipeline-stage__badge-row">
@@ -217,11 +195,13 @@
     </article>
 </section>
 
+</section>
+</div>
 {% endblock %}
 
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/recommendation-apply-test.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/recommendation-topology.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/overview-summary.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/components/dashboard.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-topology.js') }}?v=overview-complete-20261025" defer></script>
+<script src="{{ url_for('static', path='/js/overview-summary.js') }}?v=overview-complete-20261025" defer></script>
+<script src="{{ url_for('static', path='/js/components/dashboard.js') }}?v=overview-complete-20261025" defer></script>
 {% endblock %}

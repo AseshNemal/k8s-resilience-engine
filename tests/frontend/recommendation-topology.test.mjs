@@ -79,3 +79,18 @@ test("a node only a pod names is still drawn, and no capacity is invented", () =
 test("an identical prediction says so", () => {
     assert.match(topo.summaryText(topo.buildModel(now, now)), /same as the observed/);
 });
+
+test("an application-only diagram labels observed pods without implying a missing recommendation", () => {
+    class Node {
+        constructor() { this.children = []; this.textContent = ""; }
+        append(...nodes) { this.children.push(...nodes); }
+        replaceChildren(...nodes) { this.children = nodes; }
+        setAttribute() {}
+        text() { return [this.textContent, ...this.children.map((n) => n.text())].join(" "); }
+    }
+    const target = new Node();
+    topo.render(target, now, null, { document: { createElement: () => new Node() }, observedOnly: true });
+    assert.match(target.text(), /Each chip is one observed pod/);
+    assert.match(target.text(), /Now \(observed\)/);
+    assert.doesNotMatch(target.text(), /No predicted placement|After the change/);
+});

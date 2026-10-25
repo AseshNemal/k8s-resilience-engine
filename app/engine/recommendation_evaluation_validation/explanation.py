@@ -221,6 +221,7 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
         "candidates": candidates,
         # Component 3's own result for the assumed failure (blast radius, survivability, services and workflows lost), display only.
         "baselineImpact": details.get("baselineImpact"),
+        "nodeRiskRanking": details.get("nodeRiskRanking"),
         "workflowServices": details.get("workflowServices"),
         "currentDeployment": details.get("currentDeployment"),
         "yaml": _selected_yaml(candidates),
