@@ -64,6 +64,7 @@
         }
 
         function nextDelay(report) {
+            if (report.coverage?.status === 'scanning') return 100;
             if (report.state === "jaeger_unavailable") return healthRetryMs;
             const discovered = report.state === "discovered";
             const base = discovered ? refreshMs : waitingForTracesMs;

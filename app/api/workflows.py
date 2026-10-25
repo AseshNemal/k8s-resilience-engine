@@ -692,7 +692,11 @@ def discover_workflow_analysis_operations(
 def discover_observed_workflows(
     payload: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
-    """Read bounded recent traces and report what was observed; never approves or classifies anything.
+    """Read recent traces and report what was observed; never approves or classifies anything.
+
+    ``continuous: true`` advances one query of a fixed-window scan. Pass the returned
+    ``scanId`` to continue, or also ``cancel: true`` to stop. Coverage is explicit.
+    Legacy callers without this flag retain the bounded single-request behavior.
 
     An unreachable trace service is a normal answer (``state: jaeger_unavailable``) so a page can wait and retry.
     """

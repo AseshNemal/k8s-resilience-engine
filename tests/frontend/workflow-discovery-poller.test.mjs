@@ -14,6 +14,17 @@ const { create, HEALTH_RETRY_MS, WAITING_FOR_TRACES_MS, EVIDENCE_REFRESH_MS, FOC
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('an unfinished fixed-window scan schedules another batch promptly', async () => {
+    const h = harness({report: {state: 'discovered', coverage: {status: 'scanning'}}});
+    h.poller.start();
+    await flush();
+    await h.advance(99);
+    assert.equal(h.discoverCalls, 1);
+    await h.advance(1);
+    assert.equal(h.discoverCalls, 2);
+    h.poller.stop();
+});
+
 function harness({ healthy = true, report = { state: "discovered", workflows: [{}] }, hidden = false } = {}) {
     const h = {
         clock: 0,
