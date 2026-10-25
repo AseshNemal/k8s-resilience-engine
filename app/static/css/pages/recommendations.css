@@ -773,6 +773,45 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .test-history .data-table th, .test-history .data-table td { min-width: 100px; }
 .test-history .data-table button { white-space: nowrap; }
 .test-history .data-table td { max-width: 320px; overflow-wrap: anywhere; }
+/* Test comparison: one column per saved run, grouped rows, state in words and shape as well as colour. */
+.cmp { margin-top: 12px; }
+.cmp-warning { margin: 0 0 12px; padding: 10px 12px; border-left: 4px solid var(--color-danger); background: color-mix(in srgb, var(--color-danger) 10%, transparent); font-size: 13px; }
+.cmp-toggle { display: inline-flex; gap: 6px; align-items: center; margin: 0 0 10px; font-size: 13px; color: var(--color-text-muted); }
+.cmp-scroll { max-height: 70vh; overflow: auto; }
+.test-history .cmp-table { min-width: 560px; border-collapse: separate; border-spacing: 0; }
+.cmp-table th, .cmp-table td { vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--color-border); max-width: none; min-width: 150px; }
+.cmp-table thead th { position: sticky; top: 0; z-index: 2; background: var(--color-surface, var(--color-bg, #111)); text-align: left; }
+.cmp-table .cmp-corner, .cmp-table .cmp-label { position: sticky; left: 0; z-index: 1; background: var(--color-surface, var(--color-bg, #111)); min-width: 130px; color: var(--color-text-muted); font-weight: 600; }
+.cmp-table thead .cmp-corner { z-index: 3; }
+.cmp-head { display: grid; gap: 4px; align-content: start; }
+.cmp-head[data-selected="true"] { box-shadow: inset 0 -3px 0 var(--color-success); }
+.cmp-strategy { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
+.cmp-services { font-weight: 600; overflow-wrap: anywhere; }
+.cmp-section th { background: color-mix(in srgb, var(--color-text-muted) 10%, transparent); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-muted); }
+.cmp-same .cmp-label::after { content: " · same"; font-weight: 400; font-size: 11px; }
+.cmp-cell { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cmp-cell--risk { display: block; }
+.cmp-id { font-size: 12px; }
+.cmp-none { color: var(--color-text-muted); }
+.cmp-arrow, .cmp-unit { color: var(--color-text-muted); font-size: 12px; }
+.cmp-copy { background: none; border: 0; padding: 0 2px; font-size: 11px; color: var(--color-text-muted); text-decoration: underline; cursor: pointer; }
+.cmp-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.cmp-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--color-border); white-space: nowrap; }
+.cmp-chip[data-state="ok"], .cmp-chip[data-state="passed"] { border-color: var(--color-success); background: color-mix(in srgb, var(--color-success) 14%, transparent); }
+.cmp-chip[data-state="bad"], .cmp-chip[data-state="failed"] { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 14%, transparent); }
+.cmp-chip[data-state="gaps"] { border-color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 16%, transparent); }
+.cmp-chip[data-state="running"] { border-color: #2684ff; }
+.cmp-chip[data-state="muted"], .cmp-chip[data-state="unknown"] { border-style: dashed; color: var(--color-text-muted); }
+.cmp-cell--ready[data-state="bad"] { color: var(--color-danger); font-weight: 600; }
+.cmp-cell--ready[data-state="ok"] { color: var(--color-success); }
+.cmp-risk { display: grid; gap: 4px; min-width: 150px; }
+.cmp-risk__line { display: grid; grid-template-columns: 62px 1fr 38px; gap: 6px; align-items: center; font-size: 12px; }
+.cmp-risk__name { color: var(--color-text-muted); }
+.cmp-risk__track { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--color-text-muted) 20%, transparent); overflow: hidden; }
+.cmp-risk__fill { display: block; height: 100%; background: var(--color-danger); }
+.cmp-risk__fill[data-kind="predicted"] { background: var(--color-success); }
+.cmp-risk__fill[data-kind="after"] { background: var(--color-warning); }
+.cmp-risk__value { text-align: right; }
 .test-history > section { margin-top: 20px; border-top: 1px solid var(--color-border); padding-top: 16px; }
 @media (max-width: 900px) {
     .rec-candidate-comparison { grid-template-columns: 1fr; }

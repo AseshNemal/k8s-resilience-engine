@@ -1367,6 +1367,7 @@
     }
 
     function updateCandidateResults() {
+        testHistoryPanel?.redraw?.();             // the comparison marks the selected candidate's column
         updateCardEvidence();
         updateSelectedData();
         const applied = applyTestPanel?.state();
@@ -1405,6 +1406,7 @@
     if (allWorkflows && testHistoryRoot && window.ResilienceApplyTest) {
         testHistoryPanel = window.ResilienceApplyTest.createHistoryPanel({ root: testHistoryRoot, document,
             fetchImpl: (url, init) => fetch(url, init), storage: window.localStorage, download: downloadRunReport,
+            strategyName: view.strategyName, selectedId: () => (lastView?.status === "ready" ? currentRecommendation?.id : null),
             onRows: (rows, meta) => { sidebarHistory = { history: rows, ...meta }; updateCandidateResults(); } });
     }
 
