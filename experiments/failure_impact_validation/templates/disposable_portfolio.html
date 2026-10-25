@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }}</title>
+    <link rel="stylesheet" href="{{ url_for('assets', path='/disposable_portfolio.css') }}">
+</head>
+<body>
+    <header class="hero">
+        <div>
+            <p class="eyebrow">Component 3 · Research demonstration</p>
+            <h1>Synthetic cross-layer failure portfolio</h1>
+            <p class="hero-copy">
+                Generate assumed Component 1 and Component 2 outputs, inspect every
+                workflow-to-node graph, and simulate single worker-node failures.
+            </p>
+        </div>
+        <div class="evidence-badge">SYNTHETIC_DISPOSABLE</div>
+    </header>
+
+    <main>
+        <section class="warning" aria-label="Evidence disclaimer">
+            <strong>Demonstration only.</strong>
+            These values are synthetic assumptions, not observed Kubernetes evidence
+            and not empirical validation results. No cluster resource is changed.
+        </section>
+
+        <section class="panel controls" aria-labelledby="controls-title">
+            <div>
+                <p class="section-kicker">Step 1</p>
+                <h2 id="controls-title">Generate the portfolio</h2>
+                <p>Create four workflow graphs over one shared three-node deployment.</p>
+            </div>
+            <div class="control-grid">
+                <label>
+                    Scenario ID
+                    <input id="scenario-id" value="viva-portfolio-01" maxlength="64" autocomplete="off">
+                </label>
+                <button id="generate-button" class="primary" type="button">Generate synthetic data</button>
+            </div>
+            <div id="status" class="status" role="status" aria-live="polite">Ready to generate.</div>
+        </section>
+
+        <section id="generated-section" class="stack hidden" aria-live="polite">
+            <section class="panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Generated inputs</p>
+                        <h2>Workflow portfolio and deployment</h2>
+                    </div>
+                    <div class="button-row">
+                        <button id="download-workflows" class="secondary" type="button">Download workflows</button>
+                        <button id="download-deployment" class="secondary" type="button">Download deployment</button>
+                    </div>
+                </div>
+                <div id="portfolio-summary" class="metric-grid"></div>
+                <div id="workflow-list" class="card-grid"></div>
+                <h3>Service placement</h3>
+                <div class="table-wrap"><table id="deployment-table"></table></div>
+            </section>
+
+            <section class="panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Cross-layer output</p>
+                        <h2>One graph for every workflow</h2>
+                    </div>
+                    <button id="download-graphs" class="secondary" type="button">Download all graphs</button>
+                </div>
+                <p>Each graph joins workflow dependencies to services, pods, nodes and failure domains.</p>
+                <div id="cross-layer-graphs" class="graph-list"></div>
+            </section>
+
+            <section class="panel simulation-panel">
+                <div>
+                    <p class="section-kicker">Step 2</p>
+                    <h2>Run virtual node failures</h2>
+                    <p>Each node is evaluated independently from the unchanged original graph.</p>
+                </div>
+                <div class="simulation-controls">
+                    <label>
+                        Worker node
+                        <select id="failed-node"></select>
+                    </label>
+                    <button id="fail-one-button" class="danger" type="button">Fail selected node</button>
+                    <button id="fail-all-button" class="primary" type="button">Fail all nodes independently</button>
+                </div>
+            </section>
+        </section>
+
+        <section id="results-section" class="panel hidden" aria-live="polite">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">Prediction output</p>
+                    <h2>Portfolio failure impact</h2>
+                </div>
+                <button id="download-results" class="secondary" type="button">Download results</button>
+            </div>
+            <div class="table-wrap"><table id="result-table"></table></div>
+            <div id="workflow-outcomes" class="outcome-list"></div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('assets', path='/disposable_portfolio.js') }}"></script>
+</body>
+</html>
