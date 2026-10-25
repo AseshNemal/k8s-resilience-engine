@@ -182,7 +182,7 @@
             for (const item of node.chips) {
                 chips.append(element(doc, "span", item.service, "rec-topo__chip", {
                     "data-colour": String(item.colour), "data-state": item.state, "data-ready": String(item.ready),
-                    "data-service": item.service, title: chipTitle(item, which),
+                    "data-service": item.service, "data-node": item.node, title: chipTitle(item, which),
                 }));
             }
             card.append(chips);
@@ -213,12 +213,15 @@
             container.append(element(doc, "p", "No topology evidence was supplied, so there is nothing to compare.", "ui-note"));
             return null;
         }
-        container.append(element(doc, "p", summaryText(model), "rec-topo__summary", { role: "status" }));
+        const observedOnly = options && options.observedOnly && !model.after;
+        if (!observedOnly) container.append(element(doc, "p", summaryText(model), "rec-topo__summary", { role: "status" }));
         const grid = element(doc, "div", undefined, "rec-topo__grid");
         grid.append(renderSide(doc, model, "now"));
         if (model.after) grid.append(renderSide(doc, model, "after"));
         container.append(grid);
-        const legend = element(doc, "p", "Dashed: pod not ready. Ringed: moved or added by the change. Struck through: on the node whose failure is assessed.", "rec-topo__legend");
+        const legend = element(doc, "p", observedOnly
+            ? "Each chip is one observed pod. Dashed chips are not ready. Service counts show ready / declared replicas."
+            : "Dashed: pod not ready. Ringed: moved or added by the change. Struck through: on the node whose failure is assessed.", "rec-topo__legend");
         container.append(legend);
         if (doc.createElementNS) scheduleLinks(grid);
         return model;
@@ -257,6 +260,11 @@
             path.setAttribute("d", `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`);
             path.setAttribute("class", "rec-topo__link");
             path.setAttribute("data-colour", chip.getAttribute("data-colour"));
+            path.setAttribute("data-service", chip.getAttribute("data-service"));
+            path.setAttribute("data-node", node.getAttribute("data-node"));
+            // Preserve Overview's linked highlight when a responsive layout redraws the curves.
+            if (service.getAttribute("data-highlighted") !== null) path.setAttribute("data-highlighted",
+                String(service.getAttribute("data-highlighted") === "true" && node.getAttribute("data-highlighted") === "true"));
             svg.append(path);
         }
         panel.prepend(svg);

@@ -82,7 +82,8 @@ def test_navigation_has_six_sentence_case_labels_and_one_active_item(built, name
 def test_overview_puts_the_cluster_connection_first(built):
     page = html(built, "index.html")
     assert 'data-role="cluster-panel"' in page
-    assert page.index('data-role="cluster-panel"') < page.index('class="page-header"') < page.index('class="metric-grid"')
+    assert page.index('data-role="cluster-panel"') < page.index('class="page-header"') < page.index('data-role="overview-risk"')
+    assert page.index('data-role="overview-node-impact"') < page.index('data-role="overview-placement"')
     assert 'data-role="connect-file"' not in page
 
 

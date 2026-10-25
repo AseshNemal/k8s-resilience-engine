@@ -9,9 +9,27 @@
     const outcomeLabel = (value) => value?.riskTargetMet === false || value?.report?.riskTargetMet === false
         ? "Risk target not met" : LABELS[value?.status] || value?.status;
 
+    const fmtCpu = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(n|u|m)?$/);
+        if (!match) return String(raw);
+        const milli = Number(match[1]) * ({ n: 0.000001, u: 0.001, m: 1 }[match[2]] ?? 1000);
+        if (milli > 0 && milli < 0.001) return "<0.001 mCPU";
+        return `${Number(milli.toFixed(3))} mCPU`;
+    };
+    const fmtMemory = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(Ki|Mi|Gi|Ti|k|M|G)?$/);
+        if (!match) return String(raw);
+        const bytes = Number(match[1]) * ({ Ki: 1024, Mi: 1048576, Gi: 1073741824, Ti: 1099511627776, k: 1000, M: 1000000, G: 1000000000 }[match[2]] ?? 1);
+        return `${Number((bytes / 1048576).toFixed(2))} MiB`;
+    };
+
     function createPanel(env) {
         const { root, document, fetchImpl } = env;
         let run = null, pending = false, error = null, timer = null, destroyed = false, epoch = 0, resetting = false;
+        let resetFailure = null;      // {message, match}: a refused Reset stays shown until the cluster it was refused on is no longer the one connected
+        let live = null;      // the cluster's own picture of the target Deployments and pods; only read while a run is busy
         let expectedRequest = env.pendingRequestKey?.() || null;
         let startError = null;
         let awaitingReset = false;
@@ -46,24 +64,9 @@
         function resources(snapshot) {
             const data = snapshot?.resources;
             if (!data || !(data.nodes?.length || data.pods?.length)) return make("p", "CPU/memory usage unavailable. Resource requests are not measured usage.", "ui-note");
-            const cpu = (raw) => {
-                if (raw === null || raw === undefined) return null;
-                const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(n|u|m)?$/);
-                if (!match) return String(raw);
-                const milli = Number(match[1]) * ({ n: 0.000001, u: 0.001, m: 1 }[match[2]] ?? 1000);
-                if (milli > 0 && milli < 0.001) return "<0.001 mCPU";
-                return `${Number(milli.toFixed(3))} mCPU`;
-            };
-            const memory = (raw) => {
-                if (raw === null || raw === undefined) return null;
-                const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(Ki|Mi|Gi|Ti|k|M|G)?$/);
-                if (!match) return String(raw);
-                const bytes = Number(match[1]) * ({ Ki: 1024, Mi: 1048576, Gi: 1073741824, Ti: 1099511627776, k: 1000, M: 1000000, G: 1000000000 }[match[2]] ?? 1);
-                return `${Number((bytes / 1048576).toFixed(2))} MiB`;
-            };
             const rows = [];
-            (data.nodes || []).forEach((n) => rows.push([`Node ${n.name}`, cpu(n.usage?.cpu), memory(n.usage?.memory), n.timestamp]));
-            (data.pods || []).forEach((p) => (p.containers || []).forEach((c) => rows.push([`${p.name} / ${c.name}`, cpu(c.usage?.cpu), memory(c.usage?.memory), p.timestamp])));
+            (data.nodes || []).forEach((n) => rows.push([`Node ${n.name}`, fmtCpu(n.usage?.cpu), fmtMemory(n.usage?.memory), n.timestamp]));
+            (data.pods || []).forEach((p) => (p.containers || []).forEach((c) => rows.push([`${p.name} / ${c.name}`, fmtCpu(c.usage?.cpu), fmtMemory(c.usage?.memory), p.timestamp])));
             const wrap = make("div");
             if (!data.available) wrap.append(make("p", "Some resource measurements are unavailable; the values below are the samples that could be read.", "ui-note"));
             wrap.append(make("p", `Source: ${data.source}. CPU in millicores (1000 mCPU = 1 core); memory in MiB. Raw samples are preserved in the download.`, "ui-note"),
@@ -117,6 +120,40 @@
             return details;
         }
 
+        const clock = (iso) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString() : "unknown time"; };
+
+        function drawLive() {
+            const section = make("section", null, "apply-test__live");
+            section.setAttribute("aria-label", "Live activity");
+            section.append(make("h4", "Live activity"));
+            const recent = (run?.events || []).slice(-5).reverse();
+            if (recent.length) {
+                const list = make("ol", null, "apply-test__recent");
+                recent.forEach((event, index) => list.append(make("li", `${clock(event.at)} · ${event.message}`, index === 0 ? "is-latest" : "")));
+                section.append(list);
+            }
+            if (!live) { section.append(make("p", "Reading what the cluster is doing…", "ui-note")); return section; }
+            if (!live.available) { section.append(make("p", live.message || "The live view is not available yet.", "ui-note")); return section; }
+            section.append(make("p", `Updated ${clock(live.capturedAt)} from the cluster · namespace ${live.namespace || ""}`, "ui-note"));
+            (live.deployments || []).forEach((deployment) => {
+                const head = make("h5", deployment.missing ? `${deployment.name} — not found in the cluster`
+                    : `${deployment.name} — ${deployment.ready}/${deployment.desired} ready · ${deployment.updated}/${deployment.desired} on the new version`);
+                section.append(head);
+                if (deployment.blockedReason) section.append(make("p", deployment.blockedReason, "approval-note"));
+                if (deployment.pods?.length) {
+                    const versions = { new: "New version", old: "Old version" };
+                    section.append(table(["Pod", "Node", "Version", "State"], deployment.pods.map((pod) =>
+                        [pod.name, pod.node || "Not scheduled yet", versions[pod.version] || "Unknown", pod.restarts ? `${pod.state} (${pod.restarts} restarts)` : pod.state])));
+                } else if (!deployment.missing) section.append(make("p", "No pods yet.", "ui-note"));
+            });
+            if (live.nodes?.length) {
+                const health = (n) => n.ready === false ? "Not ready" : n.schedulable === false ? "Cordoned: takes no new pods" : n.ready === true ? "Ready" : "Unknown";
+                section.append(make("h5", "Nodes"), table(["Node", "Pods from this run", "Status", "CPU", "Memory"],
+                    live.nodes.map((n) => [n.name, n.pods, health(n), fmtCpu(n.cpu) ?? "Unavailable", fmtMemory(n.memory) ?? "Unavailable"])));
+            }
+            return section;
+        }
+
         function draw() {
             root.replaceChildren();
             root.hidden = !run && !pending && !error;
@@ -144,6 +181,7 @@
                 operation.append(make("h4", "Current operation"), make("p", run.current.message), make("code", run.current.command, "apply-test__command"));
                 root.append(operation);
             }
+            if (busy() && run) root.append(drawLive());
             if (error) { const note = make("p", error, "approval-note"); note.setAttribute("role", "alert"); root.append(note); }
             if (awaitingReset || run?.application?.status === "RESETTING") root.append(make("p", "Restoring the saved configuration. Your test report stays saved. Candidate selection will return when restoration completes.", "ui-note"));
             const events = make("ol", null, "apply-test__events");
@@ -190,6 +228,10 @@
                 }
                 run = found;
                 pending = false; error = run ? null : startError;
+                if (resetFailure) {
+                    if (run && run.clusterMatch !== resetFailure.match) resetFailure = null;
+                    else error = resetFailure.message;
+                }
                 if (!env.readOnly && run?.application?.status === "RESETTING") awaitingReset = true;
                 if (awaitingReset && run?.application?.status === "RESET") {
                     awaitingReset = false;
@@ -200,13 +242,18 @@
                     error = "Restoration failed. Inspect the saved application before testing another candidate.";
                 }
                 if (run && TERMINAL.has(run.status)) { expectedRequest = null; env.clearRequestKey?.(); }
+                live = null;
+                if (run?.runId && busy()) {
+                    try { const view = await request(`${BASE}/${encodeURIComponent(run.runId)}/live`); if (generation === epoch && !destroyed) live = view; }
+                    catch (_e) { live = null; }      // the live view is extra; the run's own status above is what counts
+                }
             } catch (e) { if (generation === epoch) error = e.message; }
             draw(); notify(); arm();
         }
 
         async function apply(selection) {
             if (env.readOnly || busy()) return;
-            epoch += 1; pending = true; error = null; startError = null; run = null; draw(); notify();
+            epoch += 1; pending = true; error = null; startError = null; resetFailure = null; run = null; draw(); notify();
             // Scrolling is optional presentation; a host webview failure must not prevent the request.
             try { root.scrollIntoView?.({ block: "start", behavior: "smooth" }); } catch (_error) { /* Keep Apply working. */ }
             expectedRequest = selection.requestKey;
@@ -227,14 +274,17 @@
 
         async function resetChanges() {
             if (env.readOnly || busy() || !run?.canReset) return;
-            resetting = true; error = null; draw(); notify();
+            resetting = true; error = null; resetFailure = null; draw(); notify();
             try {
                 const base = run.declared ? "/api/recommendations/declared" : "/api/recommendations";
                 await request(`${base}/${encodeURIComponent(run.candidateId)}/reset`, { method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ resetBy: "Explicit Reset action" }) });
                 awaitingReset = true;
                 if (env.onReset) env.onReset();
-            } catch (e) { error = e.message; resetting = false; draw(); notify(); return; }
+            } catch (e) {
+                error = e.message; resetFailure = { message: e.message, match: run?.clusterMatch }; resetting = false;
+                draw(); notify(); arm(); return;       // arm: re-check, so the message goes once the connected cluster is no longer the one it was about
+            }
             resetting = false; await poll();
         }
 
@@ -246,22 +296,126 @@
             destroy() { destroyed = true; clearTimeout(timer); },
             clusterChanged() { epoch += 1; run = null; pending = false; error = null; startError = null; awaitingReset = false; expectedRequest = null; clearTimeout(timer); draw(); return poll(); } };
     }
+    // ---- comparing saved tests: what to show, decided apart from how it is drawn --------------------------------------------------------
+    const RISK_MATCH_TOLERANCE = 1;          // percentage points; a measured risk further than this from the predicted one is flagged
+    const TYPE_SLUGS = { "combination": "COMBINATION", "topology-spread": "TOPOLOGY_SPREAD", "replica-increase": "REPLICA_INCREASE", "pod-anti-affinity": "POD_ANTI_AFFINITY" };
+    const plainStrategy = (type) => { const words = String(type || "").toLowerCase().replace(/_/g, " "); return words.charAt(0).toUpperCase() + words.slice(1); };
+    const finite = (value) => typeof value === "number" && Number.isFinite(value);
+
+    /** The first `keep` characters of an identifier; the whole value stays available as a title and for copying. */
+    function shortId(value, keep = 8) {
+        const text = value === null || value === undefined ? "" : String(value);
+        if (!text) return null;
+        const bare = text.replace(/^apply-test-/, "");
+        return bare.length > keep + 1 ? `${bare.slice(0, keep)}…` : bare;
+    }
+
+    /** "Today 05:31", "Yesterday 11:40" or "24 Oct 11:40" for a saved timestamp (stored as UTC without a zone mark); the raw value is the title. */
+    function friendlyTime(iso, options = {}) {
+        if (!iso) return null;
+        const raw = String(iso);
+        const moment = new Date(/(Z|[+-]\d\d:?\d\d)$/.test(raw) ? raw : `${raw}Z`);
+        if (Number.isNaN(moment.getTime())) return raw;
+        const zone = options.timeZone ? { timeZone: options.timeZone } : {};
+        const day = (date) => date.toLocaleDateString("en-CA", zone);
+        const now = options.now ? new Date(options.now) : new Date();
+        const clock = moment.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", ...zone });
+        if (day(moment) === day(now)) return `Today ${clock}`;
+        if (day(moment) === day(new Date(now.getTime() - 86400000))) return `Yesterday ${clock}`;
+        return `${moment.toLocaleDateString("en-GB", { day: "numeric", month: "short", ...zone })} ${clock}`;
+    }
+
+    /** A column title a person can read: the strategy and the services, with the raw id only as a fallback or a hover. */
+    function candidateTitle(row, strategyName = plainStrategy) {
+        let type = row.candidate && row.candidate.type, service = row.candidate && row.candidate.service;
+        if (!type || !service) {
+            const parsed = /^rec-.*?-([\w+.]+)-(combination|topology-spread|replica-increase|pod-anti-affinity)$/.exec(row.candidateId || "");
+            if (parsed) { service = service || parsed[1]; type = type || TYPE_SLUGS[parsed[2]]; }
+        }
+        if (!type || !service) return { strategy: null, services: row.candidateId || "Unknown candidate", id: row.candidateId };
+        return { strategy: strategyName(type), services: String(service).split("+").join(" + "), id: row.candidateId };
+    }
+
+    const countOf = (value) => value && value.rows ? { ready: value.rows.filter((r) => r.readiness === "READY").length, total: value.rows.length } : null;
+    function httpGroups(value) {
+        if (!value || !value.rows) return null;
+        const counts = {};
+        value.rows.forEach((row) => { const status = row.httpStatus || "UNAVAILABLE"; counts[status] = (counts[status] || 0) + 1; });
+        const state = { PASSED: "ok", FAILED: "bad", NOT_CONFIGURED: "muted", UNAVAILABLE: "muted" };
+        return Object.entries(counts).map(([status, count]) => ({ text: `${status === "NOT_CONFIGURED" ? "Not configured" : plainStrategy(status)} ×${count}`, state: state[status] || "neutral" }));
+    }
+    function quantity(value) {
+        if (!finite(value)) return null;
+        return value >= 100 ? Math.round(value).toLocaleString("en-US") : value >= 1 ? String(Number(value.toFixed(1))) : String(Number(value.toFixed(3)));
+    }
+    /** Before → after for a sampled resource. Neutral on purpose: the runs can have different workloads, so a rise is not a verdict. */
+    function usageCell(before, after, unit) {
+        const a = quantity(before), b = quantity(after);
+        let delta = null;
+        if (finite(before) && finite(after) && before > 0) {
+            const change = (after - before) / before * 100;
+            delta = `${change >= 0 ? "+" : "−"}${Math.abs(change) >= 100 ? Math.round(Math.abs(change)).toLocaleString("en-US") : Number(Math.abs(change).toFixed(1))}%`;
+        }
+        return { kind: "usage", before: a, after: b, unit, delta, key: `${a}|${b}` };
+    }
+    const mostCommon = (values) => {
+        const counts = new Map();
+        values.filter(Boolean).forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+        return [...counts.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] || null;
+    };
+
+    /**
+     * The comparison as data: columns, then sections of rows whose cells say what to draw. Nothing is computed that the saved run does not
+     * contain; a missing value stays a missing value ("unknown"), and a row is "same" only when every run shows the same thing.
+     */
+    function buildComparison(rows, strategyName = plainStrategy) {
+        const uids = rows.map((r) => r.clusterUid || null);
+        const digests = rows.map((r) => r.workflowSetDigest || null);
+        const homeUid = mostCommon(uids), homeDigest = mostCommon(digests);
+        const columns = rows.map((row, i) => ({ ...candidateTitle(row, strategyName), candidateId: row.candidateId, runId: row.runId,
+            otherCluster: !!uids[i] && !!homeUid && uids[i] !== homeUid }));
+        const text = (value, title) => ({ kind: "text", text: value, title: title || null, key: String(value) });
+        const identifier = (value) => ({ kind: "id", text: shortId(value), full: value || null, key: String(value) });
+        const row = (label, cells, collapsible = true) => ({ label, cells, collapsible, same: cells.every((c) => c.key === cells[0].key) });
+        const risk = (r) => {
+            const before = finite(r.baselineRisk) ? r.baselineRisk : null, predicted = finite(r.predictedRisk) ? r.predictedRisk : null, after = finite(r.afterRisk) ? r.afterRisk : null;
+            const mismatch = predicted !== null && after !== null && Math.abs(predicted - after) > RISK_MATCH_TOLERANCE;
+            return { kind: "risk", before, predicted, after, mismatch, key: `${before}|${predicted}|${after}` };
+        };
+        const readiness = (r) => {
+            const before = countOf(r.beforeWorkflows), after = countOf(r.afterWorkflows);
+            const worse = !!before && !!after && after.ready < before.ready;
+            return { kind: "ready", before, after, state: !after ? "unknown" : worse ? "bad" : after.total && after.ready === after.total ? "ok" : "neutral",
+                key: JSON.stringify([before, after]) };
+        };
+        const http = (r) => { const before = httpGroups(r.beforeWorkflows), after = httpGroups(r.afterWorkflows); return { kind: "http", before, after, key: JSON.stringify([before, after]) }; };
+        const sampled = (r) => `${r.beforeResources === true ? "available" : r.beforeResources === false ? "unavailable" : "not collected"} (${r.beforePodUsage?.sampledPods ?? "?"} pods) → ` +
+            `${r.afterResources === true ? "available" : r.afterResources === false ? "unavailable" : "not collected"} (${r.afterPodUsage?.sampledPods ?? "?"} pods)`;
+        const sections = [
+            { title: "Run", rows: [
+                row("Run", rows.map((r) => identifier(r.runId)), false),
+                row("Started", rows.map((r) => ({ kind: "time", text: friendlyTime(r.createdAt), title: r.createdAt ? `${r.createdAt} UTC` : null, key: String(r.createdAt) })), false)] },
+            { title: "Outcome", rows: [row("Result", rows.map((r) => { const [label, state] = resultLabel(r); return { kind: "chip", text: outcomeLabel(r), state, key: label }; }), false)] },
+            { title: "What the runs were measured on", rows: [
+                row("Cluster", rows.map((r, i) => ({ ...identifier(r.clusterUid), kind: "id", differs: !!uids[i] && !!homeUid && uids[i] !== homeUid, key: String(r.clusterUid) }))),
+                row("Workflow version", rows.map((r, i) => ({ ...identifier(r.workflowSetDigest), differs: !!digests[i] && !!homeDigest && digests[i] !== homeDigest, key: String(r.workflowSetDigest) })))] },
+            { title: "Risk (model)", rows: [row("Before / predicted / after", rows.map(risk), false)] },
+            { title: "Readiness and checks", rows: [row("Pods ready", rows.map(readiness)), row("Workflow requests", rows.map(http))] },
+            { title: "Sampled resources", rows: [
+                row("CPU", rows.map((r) => usageCell(r.beforePodUsage?.cpuMillicores, r.afterPodUsage?.cpuMillicores, "mCPU"))),
+                row("Memory", rows.map((r) => usageCell(r.beforePodUsage?.memoryMiB, r.afterPodUsage?.memoryMiB, "MiB"))),
+                row("Samples", rows.map((r) => text(sampled(r))))] },
+        ];
+        return { columns, sections, clusterMismatch: new Set(uids.filter(Boolean)).size > 1 };
+    }
+
     function createHistoryPanel(env) {
         const { root, document, fetchImpl } = env;
         let rows = [], more = false, loading = false, error = null, viewer = null, closed = false;
+        let hideSame = false;       // a view choice only: it hides rows that read the same in every selected run
         let selected = new Set();
         try { selected = new Set(JSON.parse(env.storage?.getItem("resilience.apply-test.compare.v1") || "[]")); } catch (_error) { /* Optional storage. */ }
         const make = (tag, text) => { const node = document.createElement(tag); if (text !== undefined && text !== null) node.textContent = String(text); return node; };
-        const percent = (value) => Number.isFinite(value) ? `${value}%` : "Unavailable";
-        const available = (value) => value === true ? "Available" : value === false ? "Unavailable" : "Not collected";
-        const quantity = (value, unit) => Number.isFinite(value) ? `${Number(value.toFixed(3))} ${unit}` : "Unavailable";
-        const readiness = (value) => value?.rows ? `${value.rows.filter((row) => row.readiness === "READY").length}/${value.rows.length} ready` : "Not collected";
-        const checks = (value) => {
-            if (!value?.rows) return "Not collected";
-            const counts = {};
-            value.rows.forEach((row) => { const status = row.httpStatus || "Unavailable"; counts[status] = (counts[status] || 0) + 1; });
-            return Object.entries(counts).map(([status, count]) => `${status}: ${count}`).join(", ") || "No checks";
-        };
         const label = (row) => row.candidate ? `${row.candidate.type} on ${row.candidate.service}` : row.candidateId;
         function button(text, action) { const node = make("button", text); node.type = "button"; node.className = "secondary-button"; node.addEventListener("click", action); return node; }
         function grid(headers, entries) {
@@ -279,13 +433,105 @@
             viewer = createPanel({ root: detailRoot, document, fetchImpl, runId: row.runId, readOnly: true, download: env.download });
             return viewer.start();
         }
+
+        const el = (tag, text, cls, attrs) => {
+            const node = make(tag, text);
+            if (cls) node.className = cls;
+            for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+            return node;
+        };
+        const none = (what = "Unavailable") => el("span", "—", "cmp-none", { title: what, "aria-label": what });
+        const chip = (text, state) => el("span", text, "cmp-chip", { "data-state": state || "neutral" });
+        function copyButton(value, what) {
+            const node = el("button", "Copy", "cmp-copy", { type: "button", "aria-label": `Copy ${what}`, title: `Copy the full ${what}` });
+            node.addEventListener("click", async () => { try { await env.clipboard?.writeText?.(value) ?? globalThis.navigator?.clipboard?.writeText?.(value); node.textContent = "Copied"; } catch (_error) { node.textContent = "Not copied"; } });
+            return node;
+        }
+        function riskBars(cell) {
+            const wrap = el("div", null, "cmp-risk");
+            [["Before", cell.before], ["Predicted", cell.predicted], ["After", cell.after]].forEach(([name, value]) => {
+                const line = el("div", null, "cmp-risk__line");
+                line.append(el("span", name, "cmp-risk__name"));
+                const track = el("span", null, "cmp-risk__track", { "aria-hidden": "true" });
+                if (value !== null) track.append(el("span", null, "cmp-risk__fill", { style: `width:${Math.max(0, Math.min(100, value))}%`, "data-kind": name.toLowerCase() }));
+                line.append(track, value === null ? none() : el("span", `${value}%`, "cmp-risk__value"));
+                wrap.append(line);
+            });
+            if (cell.mismatch) wrap.append(chip("Measured differs from predicted", "bad"));
+            return wrap;
+        }
+        function renderCell(cell) {
+            const wrap = el("div", null, `cmp-cell cmp-cell--${cell.kind}`);
+            if (cell.kind === "id") {
+                if (!cell.full) { wrap.append(none()); return wrap; }
+                wrap.append(el("code", cell.text, "cmp-id", { title: cell.full }));
+                if (cell.differs) wrap.append(chip("Different", "bad"));
+                wrap.append(copyButton(cell.full, "value"));
+            } else if (cell.kind === "time") wrap.append(cell.text ? el("span", cell.text, null, { title: cell.title || "" }) : none());
+            else if (cell.kind === "chip") wrap.append(chip(cell.text, cell.state));
+            else if (cell.kind === "risk") wrap.append(riskBars(cell));
+            else if (cell.kind === "ready") {
+                const part = (c) => (c ? el("span", `${c.ready}/${c.total}`) : none("Not collected"));
+                wrap.append(part(cell.before), el("span", "→", "cmp-arrow", { "aria-hidden": "true" }), part(cell.after));
+                wrap.setAttribute("data-state", cell.state);
+            } else if (cell.kind === "http") {
+                const group = (items) => { const g = el("span", null, "cmp-chips"); (items || []).forEach((i) => g.append(chip(i.text, i.state))); return items ? g : none("Not collected"); };
+                wrap.append(group(cell.before), el("span", "→", "cmp-arrow", { "aria-hidden": "true" }), group(cell.after));
+            } else if (cell.kind === "usage") {
+                const side = (value) => (value === null ? none() : el("span", value));
+                wrap.append(side(cell.before), el("span", "→", "cmp-arrow", { "aria-hidden": "true" }), side(cell.after));
+                if (cell.before !== null && cell.after !== null) wrap.append(el("span", cell.unit, "cmp-unit"));
+                if (cell.delta) wrap.append(chip(cell.delta, "neutral"));
+            } else wrap.append(cell.text ? el("span", cell.text, null, { title: cell.title || "" }) : none());
+            return wrap;
+        }
+        function comparisonView(chosen) {
+            const model = buildComparison(chosen, env.strategyName || plainStrategy);
+            const root = el("div", null, "cmp");
+            if (model.clusterMismatch) root.append(el("p", "These runs come from different clusters, so they are not directly comparable. Columns marked “Different cluster” differ from the rest.", "cmp-warning", { role: "note" }));
+            const toggle = el("label", null, "cmp-toggle");
+            const box = el("input"); box.type = "checkbox"; box.checked = hideSame;
+            box.addEventListener("change", () => { hideSame = box.checked; draw(); });
+            toggle.append(box, el("span", " Hide rows that are the same in every run"));
+            root.append(toggle);
+            const wrap = el("div", null, "table-scroll cmp-scroll"), table = el("table", null, "data-table cmp-table");
+            const head = el("tr"), selectedId = env.selectedId?.();
+            head.append(el("th", "Metric", "cmp-corner", { scope: "col" }));
+            model.columns.forEach((c) => {
+                // The header cell stays a table cell; the stacking of its content is on an inner block.
+                const th = el("th", null, "cmp-th", { scope: "col", "data-selected": String(!!selectedId && c.candidateId === selectedId) });
+                const inner = el("div", null, "cmp-head");
+                if (c.strategy) inner.append(el("span", c.strategy, "cmp-strategy"));
+                inner.append(el("span", c.services, "cmp-services", { title: c.id || "" }));
+                if (c.otherCluster) inner.append(chip("Different cluster", "bad"));
+                if (selectedId && c.candidateId === selectedId) inner.append(chip("Selected", "ok"));
+                th.append(inner);
+                head.append(th);
+            });
+            const thead = el("thead"); thead.append(head); table.append(thead);
+            const body = el("tbody");
+            model.sections.forEach((section) => {
+                const visible = section.rows.filter((r) => !(hideSame && r.collapsible && r.same && chosen.length > 1));
+                if (!visible.length) return;
+                const band = el("tr", null, "cmp-section"), title = el("th", section.title, null, { scope: "colgroup", colspan: String(model.columns.length + 1) });
+                band.append(title); body.append(band);
+                visible.forEach((r) => {
+                    const line = el("tr", null, r.same && chosen.length > 1 ? "cmp-same" : "");
+                    line.append(el("th", r.label, "cmp-label", { scope: "row" }));
+                    r.cells.forEach((cell) => { const td = el("td"); td.append(renderCell(cell)); line.append(td); });
+                    body.append(line);
+                });
+            });
+            table.append(body); wrap.append(table); root.append(wrap);
+            return root;
+        }
         function draw() {
             root.replaceChildren(make("h3", "Test history and comparison"),
                 make("p", "Every test is saved, including interrupted and failed runs. Reset does not delete results. Select tests below to compare their recorded evidence."));
             root.append(button(loading ? "Loading history…" : "Refresh test history", () => load(false)));
             if (error) { const message = make("p", error); message.setAttribute("role", "alert"); root.append(message); }
             if (!rows.length) root.append(make("p", loading ? "Reading saved tests…" : "No saved candidate tests yet."));
-            else root.append(grid(["Compare", "Candidate", "Started (UTC)", "Cluster / application", "Result", "Report"], rows.map((row) => {
+            else root.append(grid(["Compare", "Candidate", "Started", "Cluster / application", "Result", "Report"], rows.map((row) => {
                 const check = make("input"); check.type = "checkbox"; check.checked = selected.has(row.runId);
                 check.setAttribute("aria-label", `Compare ${label(row)} ${row.createdAt}`);
                 check.addEventListener("change", () => {
@@ -293,25 +539,19 @@
                     try { env.storage?.setItem("resilience.apply-test.compare.v1", JSON.stringify([...selected])); } catch (_error) { /* Optional storage. */ }
                     draw();
                 });
-                return [check, label(row), row.createdAt, `${row.clusterName || "Unknown cluster"} / ${row.namespace}`, outcomeLabel(row),
+                const title = candidateTitle(row, env.strategyName || plainStrategy), when = friendlyTime(row.createdAt);
+                const name = el("div", null, "cmp-head");
+                if (title.strategy) name.append(el("span", title.strategy, "cmp-strategy"));
+                name.append(el("span", title.services, "cmp-services", { title: title.id || "" }));
+                const time = el("span", when || "", null, { title: row.createdAt ? `${row.createdAt} UTC` : "" });
+                return [check, name, when ? time : none(), `${row.clusterName || "Unknown cluster"} / ${row.namespace}`, chip(outcomeLabel(row), resultLabel(row)[1]),
                     button("View saved report", () => open(row))];
             })));
             if (more) root.append(button("Load older tests", () => load(true)));
             const chosen = rows.filter((row) => selected.has(row.runId));
             if (chosen.length) {
                 root.append(make("h4", "Selected test comparison"), make("p", "These are separate runs, not a controlled ranking. Compare cluster UID, workflow version and baseline risk. Resource totals sum recorded pod samples; workloads and sample times can differ. Missing checks and interrupted runs are not passes."));
-                const metrics = [
-                    ["Run", (row) => row.runId], ["Started (UTC)", (row) => row.createdAt],
-                    ["Result", outcomeLabel],
-                    ["Cluster UID", (row) => row.clusterUid], ["Workflow version", (row) => row.workflowSetDigest],
-                    ["Model risk before / predicted / after", (row) => `${percent(row.baselineRisk)} / ${percent(row.predictedRisk)} / ${percent(row.afterRisk)}`],
-                    ["Readiness before → after", (row) => `${readiness(row.beforeWorkflows)} → ${readiness(row.afterWorkflows)}`],
-                    ["HTTP before → after", (row) => `${checks(row.beforeWorkflows)} → ${checks(row.afterWorkflows)}`],
-                    ["Sampled pod CPU before → after", (row) => `${quantity(row.beforePodUsage?.cpuMillicores, "mCPU")} → ${quantity(row.afterPodUsage?.cpuMillicores, "mCPU")}`],
-                    ["Sampled pod memory before → after", (row) => `${quantity(row.beforePodUsage?.memoryMiB, "MiB")} → ${quantity(row.afterPodUsage?.memoryMiB, "MiB")}`],
-                    ["Samples before → after", (row) => `${available(row.beforeResources)} (${row.beforePodUsage?.sampledPods ?? "?"} pods) → ${available(row.afterResources)} (${row.afterPodUsage?.sampledPods ?? "?"} pods)`],
-                ];
-                root.append(grid(["Metric", ...chosen.map(label)], metrics.map(([title, value]) => [title, ...chosen.map(value)])));
+                root.append(comparisonView(chosen));
             }
             root.append(detailRoot);
         }
@@ -334,7 +574,7 @@
             }
         }
         draw();
-        return { start: () => load(false), refresh: () => load(false), loadOlder: () => load(true),
+        return { start: () => load(false), refresh: () => load(false), loadOlder: () => load(true), redraw: draw,
             async openRun(runId) {
                 const row = rows.find((item) => item.runId === runId);
                 if (!row) return;
@@ -417,12 +657,13 @@
                     const report = make("button", "View saved report", "rec-link"); report.type = "button";
                     report.addEventListener("click", () => env.onReport(savedRun.runId)); card.append(report);
                 }
-                const selectable = !candidate.historical && (candidate.researchApproval?.available || candidate.approval?.ready);
+                // The page decides what may be selected (its rule depends on the workflow's tier); the same rule gates the click.
+                const selectable = !candidate.historical && (env.canSelect ? env.canSelect(candidate) : (candidate.researchApproval?.available || candidate.approval?.ready));
                 if (selectable) {
                     const choose = make("button", candidate.id === selectedId ? "Selected" : "Select candidate", "secondary-button"); choose.type = "button";
                     choose.disabled = candidate.id === selectedId;
                     choose.addEventListener("click", () => env.onSelect(candidate.id)); card.append(choose);
-                } else if (!candidate.historical) card.append(make("p", "Unavailable for the current placement", "rec-result-item__meta"));
+                } else if (!candidate.historical) card.append(make("p", env.whyNotSelectable?.(candidate) || "Unavailable for the current placement", "rec-result-item__meta"));
                 list.append(card);
             }
             root.append(list);
@@ -431,5 +672,6 @@
         }
         return { update };
     }
-    window.ResilienceApplyTest = { createPanel, createHistoryPanel, createCandidateResultsSidebar, resultLabel };
+    window.ResilienceApplyTest = { createPanel, createHistoryPanel, createCandidateResultsSidebar, resultLabel,
+        compare: { buildComparison, shortId, friendlyTime, candidateTitle, usageCell, RISK_MATCH_TOLERANCE } };
 })();

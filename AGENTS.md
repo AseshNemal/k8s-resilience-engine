@@ -31,6 +31,7 @@ Do not rename these folders without explicit approval.
 - Other components should use the owning component's public `service.py` interface.
 - Member 4 must call Member 3 for failure-impact recalculation rather than duplicate that algorithm.
 - Never auto-apply Kubernetes YAML. Apply and Reset are explicit, named-person steps (`application/`); a status request reads the cluster and advances the stored rollout and post-change analysis but never patches (`docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`). That analysis is a model recalculation over observed placement, not an experiment.
+- An applied change belongs to the cluster it was applied to. `ApplicationService.status()` and `ApplyTestService.read()` return `clusterMatch` (`same` | `other` | `unknown`); a change on another cluster blocks nothing and offers no Reset here (each cluster is independent), and an unreadable cluster UID is `unknown` with a retryable `CLUSTER_IDENTITY_UNKNOWN`, never `CLUSTER_CHANGED`. While an Apply-and-test run is busy its panel reads the read-only `GET /api/recommendations/apply-tests/{run_id}/live` (replicas, each pod's node, state and version, node status and usage, recent steps); it never writes.
 - Developer approval is required before cluster changes.
 
 ## Validation

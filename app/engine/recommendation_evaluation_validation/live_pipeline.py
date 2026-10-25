@@ -652,6 +652,7 @@ def evaluate_recommendation(
         report=report, evidence=evidence,
         details={"currentDeployment": _dump(deployment), "candidates": candidate_details,
                  "baselineImpact": impact_detail(before),
+                 "nodeRiskRanking": [risk.model_dump(by_alias=True) for risk in before.node_risk_ranking],
                  # Display only, kept apart from baselineImpact (which the post-change analysis stores): each service the workflow
                  # names and the role Component 1's frozen graph gives it.
                  "workflowServices": [{"name": name, "role": "mandatory"} for name in workflow.mandatory_services]

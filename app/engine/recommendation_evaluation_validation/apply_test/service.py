@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.engine.recommendation_evaluation_validation.application import AppliedChangeRepository, ApplicationRefused
+from app.engine.recommendation_evaluation_validation.application import AppliedChangeRepository, ApplicationRefused, ApplicationService
 from app.engine.recommendation_evaluation_validation.approval import (
     ApprovalModel, ApprovalRepository, DECLARED_WORKFLOW_SOURCE, LIVE_EVIDENCE_SOURCE,
     evaluate_eligibility, has_research_provenance, has_verified_provenance,
@@ -72,8 +72,8 @@ class ApplyTestService:
         identity = self.gateway_factory().identity()
         if not identity.cluster_uid:
             raise ApplicationRefused("CLUSTER_IDENTITY_UNKNOWN", "The connected cluster UID could not be verified. The extension must be able to read the kube-system namespace. Open Connect cluster and set up this cluster again to review and update its access.")
-        with Session(self.engine) as db:
-            if AppliedChangeRepository(db).active():
+        with Session(self.engine) as db:     # each cluster is independent: a change left on another one blocks nothing here
+            if any(ApplicationService._cluster_match(c, identity.cluster_uid) != "other" for c in AppliedChangeRepository(db).active()):
                 raise ApplicationRefused("CHANGE_ACTIVE", "A change is already applied or awaiting recovery. Reset it before starting another run.")
         run_id = "apply-test-" + uuid.uuid4().hex
         payload = {"candidateId": candidate_id, "namespace": namespace, "declared": declared,
@@ -97,12 +97,22 @@ class ApplyTestService:
             self.execute(run_id)
         return self.read(run_id)
 
+    def _connected_uid(self):
+        """The connected cluster's UID, or None when it cannot be read just now. None is unknown, never "a different cluster"."""
+        try:
+            return getattr(self.gateway_factory().identity(), "cluster_uid", None) or None
+        except Exception:     # not connected, unreachable, credential renewing: the cluster is unknown, not another one
+            return None
+
     def _event(self, run_id, phase, command, message):
         self.repo.update(run_id, event={"phase": phase, "command": command, "message": message})
 
     def _identity(self, run):
         gateway = self.gateway_factory()
-        if gateway.identity().cluster_uid != run["clusterUid"]:
+        uid = gateway.identity().cluster_uid
+        if not uid:
+            raise ApplicationRefused("CLUSTER_IDENTITY_UNKNOWN", "The connected cluster could not be identified just now (its connection may still be renewing). The run stopped without writing.", http_status=503, retryable=True)
+        if uid != run["clusterUid"]:
             raise ApplicationRefused("CLUSTER_CHANGED", "The connected cluster changed. The run stopped without writing to the new cluster.")
         return gateway
 
@@ -244,8 +254,61 @@ class ApplyTestService:
             # A crash can happen after the snapshot is saved but before the worker records applicationId.
             if change and change.approval_id == run.get("authorizationId"):
                 run["application"] = change.to_dict()
-                run["canReset"] = change.status in ("APPLYING", "APPLIED", "RESET_FAILED") and run["status"] in TERMINAL
+                match = ApplicationService._cluster_match(change, self._connected_uid())
+                run["clusterMatch"] = match       # "same" | "other" | "unknown": the stored change against the cluster connected now
+                run["changeCluster"] = ({"context": change.cluster.get("context"), "apiServer": change.cluster.get("apiServer")}
+                                        if match == "other" else None)
+                run["canReset"] = (change.status in ("APPLYING", "APPLIED", "RESET_FAILED") and run["status"] in TERMINAL
+                                   and match != "other")
         return run
+
+    def live(self, run_id=None):
+        """What the cluster is doing for this run right now: each target Deployment's replicas and each pod's node and state.
+
+        Read only, and never replayed into a write. It says why it has nothing to show (no change applied yet, another cluster
+        connected, cluster unreadable) instead of showing an empty table.
+        """
+        run = self.read(run_id)
+        if run is None:
+            return None
+        current = (run.get("events") or [{}])[-1] if run.get("events") else {}
+        base = {"runId": run["runId"], "runStatus": run["status"], "phase": current.get("phase"), "message": current.get("message"),
+                "capturedAt": now().isoformat(), "namespace": run.get("namespace")}
+        names = list((run.get("application") or {}).get("deployments") or [])
+        if not names:
+            return {**base, "available": False, "reason": "NOTHING_APPLIED_YET",
+                    "message": "No Deployment has been changed yet; the live view starts when Apply patches them."}
+        if run.get("clusterMatch") == "other":
+            return {**base, "available": False, "reason": "OTHER_CLUSTER",
+                    "message": "This run belongs to another cluster than the one connected now."}
+        try:
+            deployments = self.gateway_factory().read_live_activity(run["namespace"], names)
+        except Exception:        # the cluster could not be read just now: say so, never show the last picture as current
+            return {**base, "available": False, "reason": "CLUSTER_UNREADABLE",
+                    "message": "The cluster could not be read just now. This view refreshes on its own."}
+        per_node: dict[str, int] = {}
+        for deployment in deployments:
+            for pod in deployment["pods"]:
+                if pod.get("node"):
+                    per_node[pod["node"]] = per_node.get(pod["node"], 0) + 1
+        gateway = self.gateway_factory()
+        states, usage = self._best_effort(gateway, "read_node_states"), self._node_usage(gateway, run["namespace"])
+        nodes = [{"name": n, "pods": per_node.get(n, 0), "ready": (states.get(n) or {}).get("ready"),
+                  "schedulable": (states.get(n) or {}).get("schedulable"), "cpu": (usage.get(n) or {}).get("cpu"),
+                  "memory": (usage.get(n) or {}).get("memory")} for n in sorted(set(per_node) | set(states))]
+        return {**base, "available": True, "deployments": deployments, "nodes": nodes}
+
+    @staticmethod
+    def _best_effort(gateway, method, *args):
+        """Extra detail for the live view: when it cannot be read it is simply absent (None means unknown, never zero)."""
+        try:
+            return getattr(gateway, method)(*args) or {}
+        except Exception:
+            return {}
+
+    def _node_usage(self, gateway, namespace):
+        data = self._best_effort(gateway, "read_resource_usage", namespace)
+        return {n.get("name"): n.get("usage") or {} for n in data.get("nodes") or []}
 
     def history(self, *, limit=20, offset=0):
         rows, more = self.repo.history(limit=limit, offset=offset)

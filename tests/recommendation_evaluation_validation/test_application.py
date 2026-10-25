@@ -277,6 +277,47 @@ def test_a_change_is_never_reset_onto_a_different_cluster(ready, cluster):
     assert refused.value.code == "CLUSTER_CHANGED" and other.restores == []
 
 
+def test_a_change_on_one_cluster_does_not_block_applying_on_another(ready, cluster):
+    service, approval, _ = ready
+    service.apply(approval.recommendation_id, "asesh", evaluate=evaluate)       # applied while connected to cluster A
+    other = FakeApplyGateway([db_deployment(), other_deployment()], uid="uid-cluster-b")
+    service._gateway_factory = lambda: other
+
+    status = service.status(approval.recommendation_id)
+    change = service.apply(approval.recommendation_id, "asesh", evaluate=evaluate)
+
+    assert status["canApply"] is True and status["canReset"] is False and status["clusterMatch"] == "other"
+    assert change.status == APPLIED and change.cluster["clusterUid"] == "uid-cluster-b"
+    assert other.deployments["db"].has_hostname_spread and cluster.deployments["db"].has_hostname_spread
+
+
+def test_the_first_cluster_can_still_be_reset_when_it_is_connected_again(ready, cluster):
+    service, approval, _ = ready
+    service.apply(approval.recommendation_id, "asesh", evaluate=evaluate)
+    service._gateway_factory = lambda: FakeApplyGateway([db_deployment()], uid="uid-cluster-b")
+    assert service.status(approval.recommendation_id)["canReset"] is False
+    service._gateway_factory = lambda: cluster
+
+    status = service.status(approval.recommendation_id)
+    change = service.reset(approval.recommendation_id, "asesh")
+
+    assert status["canReset"] is True and status["clusterMatch"] == "same"
+    assert change.status == RESET and not cluster.deployments["db"].has_hostname_spread
+
+
+def test_a_cluster_whose_identity_is_briefly_unreadable_is_not_called_a_different_cluster(ready, cluster):
+    service, approval, _ = ready
+    service.apply(approval.recommendation_id, "asesh", evaluate=evaluate)
+    service._gateway_factory = lambda: FakeApplyGateway([db_deployment()], uid=None)    # reconnecting: kube-system not readable yet
+
+    status = service.status(approval.recommendation_id)
+    with pytest.raises(ApplicationRefused) as refused:
+        service.reset(approval.recommendation_id, "asesh")
+
+    assert status["clusterMatch"] == "unknown" and status["canReset"] is True
+    assert refused.value.code == "CLUSTER_IDENTITY_UNKNOWN" and refused.value.retryable is True
+
+
 # --- what the page is told ---------------------------------------------------------------------------------------------------------------
 
 def test_status_says_what_can_be_done_next(ready):

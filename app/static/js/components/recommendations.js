@@ -442,6 +442,7 @@
         apply.disabled = !eligible || !selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256 || run.busy || !!run.run?.canReset;
         if (eligible && (!selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256)) state.append(note("The selected change is missing its verified proposal. Refresh recommendations before Apply."));
         if (run.run?.canReset) state.append(note("The previous test is still applied. Reset it here to restore the baseline, then review and Apply the next candidate. All reports are kept."));
+        if (run.run?.clusterMatch === "other") state.append(note(`An earlier test is still applied on another cluster${run.run.changeCluster?.context ? ` (${run.run.changeCluster.context})` : ""}. It does not affect this one; reconnect that cluster to reset it.`));
         if (!eligible) state.append(note(selected?.approval?.reason || "This candidate cannot be applied from the current evidence."));
         actions.replaceChildren(apply);
         if (run.run?.canReset && !run.busy) actions.append(button("Reset previous test", "secondary-button", "btn-reset-previous-test", () => applyTestPanel.reset()));
@@ -1017,8 +1018,23 @@
     // The research tabs sit outside the re-rendered region, so what fills them is looked up on the page, not in the region.
     const tabPart = (role) => document.querySelector(`[data-role="${role}"]`);
 
+    // The workflows at risk sit above the steps in every view: the application exists to run them. Redrawn for each selected candidate.
+    function drawWorkflowRisk(detail, selected) {
+        const box = document.querySelector('[data-role="rec-workflow-risk-box"]');
+        const target = document.querySelector('[data-role="rec-workflow-risk"]');
+        if (!box || !target || !window.ResilienceWorkflowRisk) return;
+        const nodes = ((detail && detail.currentDeployment && detail.currentDeployment.nodes) || []).map((n) => n.name).filter(Boolean);
+        const model = detail && detail.workflowRisk
+            ? window.ResilienceWorkflowRisk.render(target, detail.workflowRisk, nodes, selected || null,
+                { failedNode: (detail.evidence && detail.evidence.failedNode) || null })
+            : null;
+        box.hidden = !model;
+        if (!model) target.replaceChildren();
+    }
+
     /** Empty the research tabs, so nothing from an earlier recommendation is left beside a page that has none. */
     function clearWorkbench() {
+        drawWorkflowRisk(null, null);
         view.renderRankingTable(tabPart("rec-candidate-table-body"), { recommendations: [] });
         const reasons = tabPart("rec-detail-list");
         if (reasons) reasons.replaceChildren();
@@ -1103,6 +1119,7 @@
 
         // The research tabs.
         view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
+        drawWorkflowRisk(detail, selected || null);
         // The whole topology now and after the selected change, from the same two graphs; only drawn when there is one to compare.
         const topologyBox = region.querySelector('[data-role="rec-topology-box"]');
         if (topologyBox && window.ResilienceTopologyCompare) {
@@ -1297,7 +1314,8 @@
         const chosen = lastView?.status === "ready" ? currentRecommendation?.id : null;
         const live = applyTestPanel.state().run;
         const showLive = !chosen || !!(live && live.candidateId === chosen);
-        applyTestRoot.setAttribute("data-shows", showLive ? "live" : "other");
+        // A run that is going on stays on screen whichever candidate is selected; the selected one's data is shown beside it.
+        applyTestRoot.setAttribute("data-shows", showLive || applyTestPanel.state().busy ? "live" : "other");
         selectedDataRoot.hidden = showLive;
         if (showLive) { dropSelectedViewer(); return; }
         const candidate = lastView.detail?.candidates?.find((item) => item.id === chosen);
@@ -1349,6 +1367,7 @@
     }
 
     function updateCandidateResults() {
+        testHistoryPanel?.redraw?.();             // the comparison marks the selected candidate's column
         updateCardEvidence();
         updateSelectedData();
         const applied = applyTestPanel?.state();
@@ -1358,10 +1377,20 @@
             candidates: lastView?.status === "ready" ? lastView.detail?.candidates || [] : [] });
     }
 
+    // One rule for "can this candidate be chosen": the sidebar draws a button only where this holds, and the click is gated by it too,
+    // so a button is never offered that does nothing. A declared workflow is judged by its research approval, any other by the production gate.
+    function canSelectCandidate(candidate) {
+        return !!candidate && !!(isDeclared() ? candidate.researchApproval?.available : candidate.approval?.ready);
+    }
+    function whyNotSelectable(candidate) {
+        const gate = isDeclared() ? candidate.researchApproval : candidate.approval;
+        return gate?.reason || "Unavailable for the current placement";
+    }
+
     function selectCandidate(id) {
         const v = lastView;
         const candidate = v?.status === "ready" && v.detail?.candidates?.find((item) => item.id === id);
-        if (!candidate || !(isDeclared() ? candidate.researchApproval?.available : candidate.approval?.ready)) return;
+        if (!canSelectCandidate(candidate)) return;
         preferredChange = { id: candidate.id, service: candidate.service, type: candidate.type };
         showDetail(v);
         rememberPage();                                       // selecting only changes what is shown; the sidebar follows and the page stays where it is
@@ -1370,13 +1399,14 @@
     const resultsSidebarRoot = document.querySelector('[data-role="rec-results-sidebar"]');
     if (allWorkflows && resultsSidebarRoot && window.ResilienceApplyTest) {
         resultsSidebar = window.ResilienceApplyTest.createCandidateResultsSidebar({ root: resultsSidebarRoot, document,
-            strategyName: view.strategyName, onSelect: selectCandidate,
+            strategyName: view.strategyName, onSelect: selectCandidate, canSelect: canSelectCandidate, whyNotSelectable,
             onReport: (runId) => testHistoryPanel?.openRun(runId), onLoadOlder: () => testHistoryPanel?.loadOlder() });
     }
 
     if (allWorkflows && testHistoryRoot && window.ResilienceApplyTest) {
         testHistoryPanel = window.ResilienceApplyTest.createHistoryPanel({ root: testHistoryRoot, document,
             fetchImpl: (url, init) => fetch(url, init), storage: window.localStorage, download: downloadRunReport,
+            strategyName: view.strategyName, selectedId: () => (lastView?.status === "ready" ? currentRecommendation?.id : null),
             onRows: (rows, meta) => { sidebarHistory = { history: rows, ...meta }; updateCandidateResults(); } });
     }
 

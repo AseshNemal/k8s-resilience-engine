@@ -142,7 +142,8 @@ test("saved reports and comparisons remain read-only while the current candidate
     const check = walk(root).find((n) => n.type === "checkbox");
     check.checked = true; check.listeners.change();
     assert.match(text(root), /Selected test comparison/);
-    assert.match(text(root), /100% \/ 0% \/ Unavailable/);
+    assert.match(text(root), /Before.*100%.*Predicted.*0%/, "the risk row draws before and predicted");
+    assert.ok(walk(root).some((n) => n.attributes["aria-label"] === "Unavailable"), "the missing measured risk is a labelled dash, not a number");
     await walk(root).find((n) => n.textContent === "View saved report").listeners.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.ok(calls.some(([url]) => url.endsWith("/saved-1")));
@@ -249,4 +250,139 @@ test("with nothing applied, no candidate is called Active; the selected one show
     assert.ok(!/Active/.test(text(card)) && card.attributes["data-active"] === "false");
     assert.match(text(card), /Selected/);
     assert.match(text(card), /80% → 20%/);
+});
+
+test("while a run is busy the live view names each Deployment, pod and node, and it is dropped once the run ends", async () => {
+    const live = { available: true, capturedAt: "2026-10-25T05:31:06Z", namespace: "shop", nodes: [{ name: "worker-a", pods: 1 }],
+        deployments: [{ name: "db", desired: 2, ready: 1, updated: 1, pods: [
+            { name: "db-0", node: "worker-a", state: "Ready", restarts: 0 }, { name: "db-1", node: null, state: "Unschedulable", restarts: 0 }] }] };
+    let finished = false;
+    const env = setup((url) => url.endsWith("/live") ? response(live) : response({ run: finished ? complete : running }));
+    await env.panel.start();
+    const shown = text(env.root);
+    assert.ok(env.calls.some(([url]) => url.endsWith("/run-1/live")) && env.calls.every(([, method]) => method === "GET"));
+    for (const expected of ["Live activity", "db — 1/2 ready", "db-0", "worker-a", "db-1", "Not scheduled yet", "Unschedulable", "Nodes", "Pods from this run"])
+        assert.ok(shown.includes(expected), expected);
+    finished = true;
+    await env.panel.start();
+    assert.ok(!text(env.root).includes("Live activity"));
+});
+
+test("a live view that cannot be read leaves the run's own status in place", async () => {
+    const env = setup((url) => url.endsWith("/live") ? response({ detail: "gone" }, 500) : response({ run: running }));
+    await env.panel.start();
+    assert.ok(text(env.root).includes("Reading what the cluster is doing"));
+    assert.ok(text(env.root).includes("Waiting for replicas"));
+});
+
+test("a refused Reset stays shown until the connected cluster is no longer the one it was refused on", async () => {
+    let match = "same", refuse = true;
+    const finished = { ...complete, canReset: true };
+    const env = setup((url, init) => init.method === "POST" && refuse
+        ? response({ detail: { message: "The connected cluster is not the one this change was applied to" } }, 409)
+        : response({ run: { ...finished, clusterMatch: match } }), { readOnly: false });
+    await env.panel.start();
+    await env.panel.reset();
+    assert.ok(text(env.root).includes("not the one this change was applied to"));
+    await env.panel.start();                                  // a re-check on the same cluster keeps the explanation
+    assert.ok(text(env.root).includes("not the one this change was applied to"));
+    match = "other";                                          // another cluster is connected now: the old refusal is not about it
+    await env.panel.start();
+    assert.ok(!text(env.root).includes("not the one this change was applied to"));
+});
+
+test("the live view tells old pods from new ones and shows node health and usage", async () => {
+    const live = { available: true, capturedAt: "2026-10-25T05:31:06Z", namespace: "shop", deployments: [{ name: "db", desired: 2, ready: 2, updated: 1,
+        pods: [{ name: "db-new", node: "worker-a", state: "Ready", version: "new" }, { name: "db-old", node: "worker-b", state: "Terminating", version: "old" }] }],
+        nodes: [{ name: "worker-a", pods: 1, ready: true, schedulable: true, cpu: "250m", memory: "512Mi" },
+                { name: "worker-b", pods: 1, ready: true, schedulable: false, cpu: null, memory: null }] };
+    const env = setup((url) => url.endsWith("/live") ? response(live) : response({ run: running }));
+    await env.panel.start();
+    const shown = text(env.root);
+    for (const expected of ["New version", "Old version", "Cordoned: takes no new pods", "250 mCPU", "512 MiB", "Unavailable"])
+        assert.ok(shown.includes(expected), expected);
+});
+
+test("the sidebar offers Select only where the page's own rule would accept the click, and says why not otherwise", () => {
+    const window = {}, root = node("aside"), picked = [];
+    vm.runInNewContext(source, { window, setTimeout: () => 1, clearTimeout() {} });
+    // A declared workflow: only a research approval counts. `approval.ready` alone is not enough.
+    const canSelect = (c) => !!c.researchApproval?.available;
+    const sidebar = window.ResilienceApplyTest.createCandidateResultsSidebar({ root, document: { createElement: node }, strategyName: (type) => type,
+        onSelect: (id) => picked.push(id), canSelect, whyNotSelectable: (c) => c.researchApproval?.reason });
+    sidebar.update({ namespace: "shop", selectedId: "a", history: [], historyLoaded: true, candidates: [
+        { id: "a", type: "SPREAD", service: "web", approval: { ready: true }, researchApproval: { available: true } },
+        { id: "b", type: "SPREAD", service: "db", approval: { ready: true }, researchApproval: { available: false, reason: "Not verified feasible for research approval." } }] });
+    const [a, b] = walk(root).filter((n) => n.tag === "article");
+    assert.equal(walk(a).filter((n) => n.tag === "button").length, 1);
+    assert.equal(walk(b).filter((n) => n.tag === "button").length, 0, "no button that the click handler would silently ignore");
+    assert.match(text(b), /Not verified feasible for research approval/);
+});
+
+// ---- the saved-test comparison: what it decides to show --------------------------------------------------------------------------------
+function load() { const w = {}; vm.runInNewContext(source, { window: w, setTimeout: () => 1, clearTimeout() {} }); return w.ResilienceApplyTest.compare; }
+const cmp = load();
+const plain = (value) => JSON.parse(JSON.stringify(value));
+const savedRun = (extra) => ({ runId: "apply-test-deb04f5ae5f044fcae5c099145cc76db", candidateId: "rec-all-workflows-productpage+ratings-combination",
+    createdAt: "2026-10-25T05:31:06.731478", status: "COMPLETED_WITH_GAPS", clusterUid: "uid-a", workflowSetDigest: "digest-1",
+    baselineRisk: 100, predictedRisk: 0, afterRisk: 0, ...extra });
+
+test("identifiers are shortened for reading and times are said the way a person says them", () => {
+    assert.equal(cmp.shortId("apply-test-deb04f5ae5f044fcae5c099145cc76db"), "deb04f5a…");
+    assert.equal(cmp.shortId("abc"), "abc");
+    assert.equal(cmp.shortId(null), null);
+    const options = { now: "2026-10-25T09:00:00Z", timeZone: "UTC" };
+    assert.equal(cmp.friendlyTime("2026-10-25T05:31:06.731478", options), "Today 05:31");
+    assert.equal(cmp.friendlyTime("2026-10-24T11:40:14.059232", options), "Yesterday 11:40");
+    assert.equal(cmp.friendlyTime("2026-10-20T11:40:14", options), "20 Oct 11:40");
+    assert.equal(cmp.friendlyTime("not a time", options), "not a time", "an unreadable value is shown as it is, not invented");
+});
+
+test("a column is titled by strategy and services, also for an older run that stored only a candidate id", () => {
+    const named = cmp.candidateTitle({ candidateId: "x", candidate: { type: "TOPOLOGY_SPREAD", service: "web" } });
+    assert.deepEqual(plain(named), { strategy: "Topology spread", services: "web", id: "x" });
+    const old = cmp.candidateTitle({ candidateId: "rec-all-workflows-details+productpage-combination" });
+    assert.deepEqual(plain(old), { strategy: "Combination", services: "details + productpage", id: "rec-all-workflows-details+productpage-combination" });
+    assert.equal(cmp.candidateTitle({ candidateId: "odd" }).services, "odd");
+});
+
+test("a run on another cluster is marked, and the rest are not", () => {
+    const model = cmp.buildComparison([savedRun(), savedRun({ runId: "r2" }), savedRun({ runId: "r3", clusterUid: "uid-b" })]);
+    assert.equal(model.clusterMismatch, true);
+    assert.deepEqual(model.columns.map((c) => c.otherCluster), [false, false, true]);
+    const cluster = model.sections.flatMap((s) => s.rows).find((r) => r.label === "Cluster");
+    assert.deepEqual(cluster.cells.map((c) => !!c.differs), [false, false, true]);
+    assert.equal(cmp.buildComparison([savedRun(), savedRun({ runId: "r2" })]).clusterMismatch, false);
+});
+
+test("the risk row flags a measured risk that differs from the predicted one, and a missing value stays missing", () => {
+    const rows = cmp.buildComparison([savedRun({ afterRisk: 100 }), savedRun({ runId: "r2", afterRisk: 0 }), savedRun({ runId: "r3", afterRisk: undefined })])
+        .sections.flatMap((s) => s.rows).find((r) => r.label === "Before / predicted / after").cells;
+    assert.deepEqual(rows.map((c) => c.mismatch), [true, false, false]);
+    assert.equal(rows[2].after, null, "unknown is not 0%");
+});
+
+test("resource cells show before, after and the change without calling a rise good or bad", () => {
+    const cell = plain(cmp.usageCell(5.221, 2236.479, "mCPU"));
+    assert.deepEqual([cell.before, cell.after, cell.delta, cell.unit], ["5.2", "2,236", "+42,736%", "mCPU"]);
+    const missing = plain(cmp.usageCell(6.07, null, "mCPU"));
+    assert.deepEqual([missing.before, missing.after, missing.delta], ["6.1", null, null]);
+});
+
+test("rows that read the same in every run are marked, and the toggle hides only those", async () => {
+    const window = {}, root = node("section");
+    vm.runInNewContext(source, { window, setTimeout: () => 1, clearTimeout() {} });
+    const rows = [savedRun(), savedRun({ runId: "apply-test-second", candidateId: "rec-all-workflows-details+reviews-combination", afterRisk: 100 })];
+    const history = window.ResilienceApplyTest.createHistoryPanel({ root, document: { createElement: node }, selectedId: () => rows[0].candidateId,
+        fetchImpl: async () => response({ runs: rows, hasMore: false }) });
+    await history.start();
+    walk(root).filter((n) => n.type === "checkbox").forEach((c) => { c.checked = true; c.listeners.change(); });
+    assert.ok(text(root).includes("Cluster") && text(root).includes("Workflow version"));
+    assert.ok(text(root).includes("Productpage") || text(root).includes("productpage + ratings"));
+    const toggle = walk(root).find((n) => n.type === "checkbox" && !n.attributes["aria-label"]);
+    toggle.checked = true; toggle.listeners.change();
+    const labels = walk(root).filter((n) => n.className === "cmp-label").map((n) => n.textContent);
+    assert.ok(!labels.includes("Cluster") && !labels.includes("Workflow version"), "identical rows are hidden");
+    assert.ok(labels.includes("Before / predicted / after") && labels.includes("Run"), "rows that differ, or identify a run, stay");
+    assert.ok(walk(root).some((n) => n.attributes["data-selected"] === "true"), "the selected candidate's column is marked");
 });

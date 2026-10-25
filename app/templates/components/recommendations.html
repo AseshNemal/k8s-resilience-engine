@@ -86,7 +86,6 @@
     <p class="ui-note" data-role="rec-selected-data-note"></p>
     <div data-role="rec-selected-data-body"></div>
 </section>
-<section class="card rec-panel test-history" data-role="rec-test-history" aria-label="Saved candidate tests"></section>
 
 {# Research view: the detail that the steps leave out, one tab at a time. Static, so it works before a recommendation exists. #}
 <section class="card rec-workbench rec-research-only" data-role="rec-workbench" aria-label="Research data">
@@ -169,6 +168,18 @@
 </div>
 <aside class="card rec-results-sidebar" data-role="rec-results-sidebar" aria-label="Candidate test results"></aside>
 </div>
+
+{# Last on the page, full width: which workflows survive the loss of each worker, today and after the selected fix. #}
+<section class="card rec-panel rec-workflows" data-role="rec-workflow-risk-box" aria-labelledby="rec-workflows-title" hidden>
+    <header class="rec-panel__head">
+        <h3 class="rec-panel__title" id="rec-workflows-title">Workflows at risk</h3>
+        <p class="rec-panel__sub">What survives the loss of each worker.</p>
+    </header>
+    <div data-role="rec-workflow-risk"></div>
+</section>
+
+{# The very last panel: every saved test, and the side-by-side comparison of the ones the person selects. #}
+<section class="card rec-panel test-history" data-role="rec-test-history" aria-label="Saved candidate tests"></section>
 
 <template data-role="operation-template">
     <div class="op" data-role="op-body">
@@ -352,6 +363,7 @@
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-topology.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-workflow-risk.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-context.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-portfolio.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-operation.js') }}" defer></script>

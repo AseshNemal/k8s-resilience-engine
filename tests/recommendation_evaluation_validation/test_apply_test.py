@@ -281,3 +281,74 @@ def test_earlier_reports_expose_risk_mismatch_without_overwriting_the_saved_evid
     assert service.history()["runs"][0]["riskTargetMet"] is False
     assert "riskTargetMet" not in service.repo.get(run["runId"])["report"]
     assert len(gateway.patches) == writes
+
+
+def _connect(service, gateway):
+    """Point the service (and the application service it builds) at another cluster, as reconnecting does."""
+    service.gateway_factory = lambda: gateway
+    service.application_factory = lambda db, declared: (
+        get_research_application_service(db, lambda: gateway, ResearchAnalyser()) if declared
+        else get_application_service(db, lambda: gateway, ProductionAnalyser()))
+
+
+def _other_cluster(uid):
+    return FakeApplyGateway([ObservedDeployment(name, "shop", str(i + 10), 1, replicas, {"app": name}, {"app": name})
+                             for i, (name, replicas) in enumerate((("db", 3), ("cache", 2), ("web", 2)))], uid=uid)
+
+
+def test_a_change_left_on_one_cluster_is_not_offered_for_reset_on_another_and_does_not_block_a_run_there(world):
+    service, gateway, selection = world
+    first = service.start(**selection, background=False)
+    assert first["canReset"] and first["clusterMatch"] == "same"
+    other = _other_cluster("uid-cluster-b")
+    other.read_resource_usage = gateway.read_resource_usage
+    _connect(service, other)
+
+    seen = service.read(first["runId"])
+    second = service.start(**{**selection, "request_key": "click-on-cluster-b"}, background=False)
+
+    assert seen["canReset"] is False and seen["clusterMatch"] == "other"
+    assert second["status"] == "COMPLETED" and {p["metadata"]["name"] for p in other.patches} == {"db", "cache"}
+
+
+def test_a_cluster_that_cannot_be_identified_just_now_is_not_called_a_different_cluster(world):
+    service, gateway, selection = world
+    first = service.start(**selection, background=False)
+    _connect(service, _other_cluster(None))
+
+    seen = service.read(first["runId"])
+
+    assert seen["clusterMatch"] == "unknown" and seen["canReset"] is True
+
+
+def test_live_view_names_each_deployment_pod_and_node_and_says_why_when_it_has_nothing(world):
+    service, gateway, selection = world
+    run = service.start(**selection, background=False)
+
+    live = service.live(run["runId"])
+    by_name = {d["name"]: d for d in live["deployments"]}
+
+    assert live["available"] is True and set(by_name) == {"db", "cache"} and live["phase"] == "report"
+    assert by_name["db"]["desired"] == 3 and len(by_name["db"]["pods"]) == 3
+    assert all(p["node"] and p["state"] == "Ready" for p in by_name["db"]["pods"])
+    assert sum(n["pods"] for n in live["nodes"]) == 5
+    _connect(service, _other_cluster("uid-cluster-b"))
+    assert service.live(run["runId"])["reason"] == "OTHER_CLUSTER"
+    gateway.unreachable = True
+    _connect(service, gateway)
+    assert service.live(run["runId"])["reason"] == "CLUSTER_UNREADABLE"
+    assert service.live("apply-test-missing") is None
+
+
+def test_live_view_reports_pod_version_and_node_health_and_usage(world):
+    service, gateway, selection = world
+    run = service.start(**selection, background=False)
+    gateway.cordoned.add("desktop-worker2")
+    gateway.read_resource_usage = lambda ns: {"nodes": [{"name": "desktop-worker", "usage": {"cpu": "250m", "memory": "512Mi"}}]}
+
+    live = service.live(run["runId"])
+    nodes = {n["name"]: n for n in live["nodes"]}
+
+    assert {p["version"] for d in live["deployments"] for p in d["pods"]} == {"new"}
+    assert nodes["desktop-worker"]["cpu"] == "250m" and nodes["desktop-worker"]["schedulable"] is True
+    assert nodes["desktop-worker2"]["schedulable"] is False and nodes["desktop-worker2"]["cpu"] is None   # unknown, not zero

@@ -87,8 +87,10 @@
             detail: !risk ? "Checking…" : risk.state === AVAILABLE ? risk.headline : risk.state === PENDING ? "Computing…" : text(risk.sub, 160) });
 
         const runs = history && Array.isArray(history.runs) ? history.runs : null;
-        chips.push({ id: "test", label: "Fix tested", href: "/components/recommendations",
-            state: runs === null ? (history === null ? MISSING : PENDING) : runs.length ? AVAILABLE : MISSING,
+        const outcome = runs && runs.length ? resultOf(runs[0]) : null;
+        chips.push({ id: "test", label: "Latest test", href: "/components/recommendations", statusLabel: outcome && outcome[0],
+            state: runs === null ? (history === null ? MISSING : PENDING) : !runs.length ? MISSING
+                : outcome[1] === "passed" ? AVAILABLE : outcome[1] === "failed" ? MISSING : INCOMPLETE,
             detail: runs === null ? (history === null ? "Saved tests could not be read" : "Checking…")
                 : runs.length ? `${plural(runs.length, "saved test")}; latest: ${resultOf(runs[0])[0].toLowerCase()}` : "No fix has been applied and tested yet" });
         return chips;
@@ -98,11 +100,11 @@
     function describeApplied(body) {
         const application = body && body.application;
         const active = ["APPLYING", "APPLIED", "RESET_FAILED"];
-        if (!application || !active.includes(application.status)) return { visible: false };
+        if (!application || body.clusterMatch === "other" || !active.includes(application.status)) return { visible: false };
         const names = Array.isArray(application.deployments) ? application.deployments.map((d) => text(d, 80)) : [];
         const status = text(application.status, 30).replace(/_/g, " ").toLowerCase();
         return { visible: true, namespace: text(application.namespace, 80), deployments: names,
-            text: `A change is on the cluster: ${text(application.namespace, 80)}${names.length ? ` · ${names.join(", ")}` : ""} (${status}${application.appliedAt ? `, applied ${text(application.appliedAt, 40)}` : ""}). Its results are on the Recommendations page, where it can also be reset.` };
+            text: `${text(application.namespace, 80)}${names.length ? ` · ${names.join(", ")}` : ""} · ${status}${body.clusterMatch === "unknown" ? " · cluster identity unconfirmed" : ""}` };
     }
 
     /** The latest saved test per candidate (newest first), for the results table. Predicted and measured stay apart. */
@@ -119,7 +121,7 @@
             rows.push({
                 name: candidate.type ? `${strategyName(candidate.type)}${candidate.service ? ` on ${text(candidate.service, 60)}` : ""}` : text(run.candidateId, 80),
                 namespace: text(run.namespace, 60), baseline: percent(run.baselineRisk), predicted: percent(run.predictedRisk), after: percent(run.afterRisk),
-                outcome, outcomeState, when: text(run.createdAt, 40), runId: run.runId,
+                outcome, outcomeState, when: text(run.createdAt, 40), runId: run.runId, cluster: text(run.clusterName || run.clusterUid || "Unverified cluster", 100),
             });
             if (rows.length >= (limit || 6)) break;
         }
@@ -147,5 +149,102 @@
         return items;
     }
 
-    global.ResilienceOverview = { describeRisk, describeChips, describeApplied, describeResults, describeEvidence, AVAILABLE, MISSING, INCOMPLETE, PENDING };
+    /** Display data only. Survival and per-node impact come from the predictor, never from replica counts. */
+    function describeImpact(detail) {
+        const ranking = detail && Array.isArray(detail.nodeRiskRanking) ? detail.nodeRiskRanking : [];
+        const nodes = ranking.filter((r) => r.node && finite(r.blastRadius) && r.blastRadius >= 0 && r.blastRadius <= 100)
+            .map((r) => ({ node: text(r.node), value: r.blastRadius })).sort((a, b) => b.value - a.value || a.node.localeCompare(b.node));
+        const exposure = detail && detail.workflowExposure && detail.workflowExposure.before;
+        const assessed = detail && detail.evidence && detail.evidence.failedNode;
+        const definitions = detail && Array.isArray(detail.workflowDefinitions) ? detail.workflowDefinitions : [];
+        const lostServices = detail && detail.baselineImpact && detail.baselineImpact.failedServices;
+        const workflows = ((detail && detail.portfolio && detail.portfolio.workflows) || []).map((w) => {
+            const failures = exposure && exposure[w.workflowId];
+            const known = Array.isArray(failures) && !!assessed;
+            const failed = known ? failures.includes(assessed) : null;
+            const definition = definitions.find((d) => (d.workflowId || d.workflow_id) === w.workflowId);
+            const mandatory = definition && (definition.mandatoryServices || definition.mandatory_services);
+            const causes = failed && Array.isArray(mandatory) && Array.isArray(lostServices) ? mandatory.filter((s) => lostServices.includes(s)) : [];
+            return { name: text(w.workflowId), failed, causes, failures: Array.isArray(failures) ? failures : null };
+        });
+        return { nodes, workflows, assessed };
+    }
+
+    /** Observed pod counts, retaining unknown readiness and unresolved placements explicitly. */
+    function describeMatrix(discovery) {
+        const namespaces = discovery && Array.isArray(discovery.namespaces) ? discovery.namespaces : [];
+        const nodes = [...new Set(namespaces.flatMap((ns) => (ns.graph && ns.graph.nodes || []).map((n) => n.name)))];
+        const rows = namespaces.flatMap((ns) => (ns.graph && ns.graph.services || []).map((service) => {
+            const pods = Array.isArray(service.pods) ? service.pods : null;
+            const cells = nodes.map((node) => {
+                if (!pods) return null;
+                const placed = pods.filter((p) => p.node === node);
+                return placed.some((p) => typeof p.ready !== "boolean") ? null : placed.filter((p) => p.ready === true).length;
+            });
+            const ready = pods ? pods.filter((p) => p.ready === true) : [];
+            const unresolved = pods ? pods.filter((p) => !nodes.includes(p.node)).length : null;
+            const concentrated = !!pods && pods.every((p) => typeof p.ready === "boolean") && ready.length > 0
+                && ready.every((p) => p.node === ready[0].node) && nodes.includes(ready[0].node);
+            return { namespace: text(ns.namespace), service: text(service.name), cells, concentrated, unresolved,
+                unready: pods && pods.every((p) => typeof p.ready === "boolean") ? pods.filter((p) => p.ready === false).length : null };
+        }));
+        return { nodes, rows };
+    }
+
+    function describeService(service) {
+        const ready = service && service.readyReplicas;
+        const declared = service && service.declaredReplicas;
+        const count = (n) => Number.isInteger(n) && n >= 0;
+        const known = count(ready) && count(declared);
+        const share = service && service.replicaConcentration;
+        return {
+            replicas: known ? `${ready}/${declared} ready` : "Replica counts unavailable",
+            readyShare: known && declared > 0 ? Math.min(1, ready / declared) : null,
+            readiness: !known || declared === 0 ? "unknown" : ready < declared ? "incomplete" : "available",
+            concentrated: service && typeof service.concentrated === "boolean" && count(ready) && ready > 0 ? service.concentrated : null,
+            concentration: finite(share) && share >= 0 && share <= 1 && count(ready) && ready > 0 ? share : null,
+        };
+    }
+
+    const CHANGES = {
+        TOPOLOGY_SPREAD: "Add topology spread", POD_ANTI_AFFINITY: "Require pod anti-affinity",
+        REPLICA_INCREASE: "Add one replica and spread", REPLICA_INCREASE_PLUS_2: "Add two replicas and spread",
+        REPLICA_INCREASE_ANTI_AFFINITY: "Add one replica with anti-affinity", COMBINATION: "Review combined change",
+    };
+    function describeAction(detail, reason) {
+        const candidate = detail && (detail.candidates || []).find((c) => c.selected);
+        if (!candidate) return { title: "No fix selected", changes: [], benefit: null, cost: "Not reported", costNote: "",
+            explanation: text(reason || detail?.outcome?.message || "Review the available evidence."), reviewable: false };
+        const parts = Array.isArray(candidate.parts) && candidate.parts.length ? candidate.parts : [candidate];
+        return { title: candidate.type === "COMBINATION" ? "Review the combined fix" : CHANGES[candidate.type] || strategyName(candidate.type),
+            changes: parts.map((p) => ({ service: text(p.service, 120), change: CHANGES[p.type] || strategyName(p.type) })),
+            benefit: finite(candidate.predicted?.riskReduction) ? candidate.predicted.riskReduction : null,
+            cost: text(candidate.cost?.resource || "Not reported", 40), costNote: candidate.type === "COMBINATION"
+                ? "The combined cost class is the highest member's class, not total resource usage. Review each listed change for added replicas. Rollout disruption is not modelled."
+                : text(candidate.cost?.note, 800),
+            explanation: text(candidate.recommendedChange, 800), reviewable: true };
+    }
+
+    /** Link an existing prediction to observed placement; never infer service or workflow survival here. */
+    function describeFocus(detail, workflowName, node) {
+        const graph = detail && detail.currentDeployment;
+        if (!graph || !(graph.nodes || []).some((n) => n.name === node)) return null;
+        const services = Array.isArray(graph.services) ? graph.services : [];
+        const hosted = services.filter((s) => (s.pods || []).some((p) => p.node === node)).map((s) => s.name);
+        if (!workflowName) return { node, workflow: null, namespace: detail.evidence?.namespace || null, services: hosted,
+            message: `Placement on ${node}: ${hosted.length ? hosted.join(", ") : "no service pods observed"}.` };
+        const workflow = describeImpact(detail).workflows.find((w) => w.name === workflowName);
+        if (!workflow) return null;
+        const definition = (detail.workflowDefinitions || []).find((w) => (w.workflowId || w.workflow_id) === workflowName);
+        const references = definition ? [...(definition.mandatoryServices || definition.mandatory_services || []),
+            ...(definition.optionalServices || definition.optional_services || []), ...(definition.edges || []).flatMap((e) => [e.source, e.target])] : null;
+        const causesKnown = node === detail.evidence?.failedNode && workflow.causes.length > 0;
+        const related = causesKnown ? workflow.causes : references ? hosted.filter((s) => references.includes(s)) : [];
+        const outcome = workflow.failures === null ? "Outcome unknown" : workflow.failures.includes(node) ? "Predicted to fail" : "Predicted to survive";
+        return { node, workflow: workflowName, namespace: detail.evidence?.namespace || null, services: related,
+            message: `${workflowName} · ${node}: ${outcome}. ${causesKnown ? `Services lost: ${related.join(", ")}.` : references ? `Dependencies observed here: ${related.length ? related.join(", ") : "none"}.` : "Workflow dependency details unavailable."}` };
+    }
+
+    global.ResilienceOverview = { describeRisk, describeChips, describeApplied, describeResults, describeEvidence, describeImpact, describeMatrix,
+        describeService, describeAction, describeFocus, AVAILABLE, MISSING, INCOMPLETE, PENDING };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -10,19 +10,31 @@ const sources = ["connection-state.js", "recommendation-apply-test.js", "overvie
 const dashboard = read("components/dashboard.js");
 
 class FakeNode {
-    constructor(tag) { this.tagName = tag; this.children = []; this.attributes = {}; this.className = ""; this.textContent = ""; this.hidden = false; this.disabled = false; this.listeners = {}; }
+    constructor(tag) { this.style = {}; this.tagName = tag; this.children = []; this.attributes = {}; this.className = ""; this.textContent = ""; this.hidden = false; this.disabled = false; this.listeners = {}; }
     append(...nodes) { this.children.push(...nodes); }
     appendChild(node) { this.children.push(node); return node; }
     replaceChildren(...nodes) { this.children = nodes; }
     setAttribute(name, value) { this.attributes[name] = String(value); }
-    removeAttribute() {}
+    getAttribute(name) { return this.attributes[name] ?? null; }
+    removeAttribute(name) { delete this.attributes[name]; }
+    querySelectorAll(selector) {
+        const matches = (node, part) => {
+            if (part.startsWith(".")) return node.className.split(" ").includes(part.slice(1));
+            const attr = part.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
+            return attr ? node.getAttribute(attr[1]) !== null && (attr[2] === undefined || node.getAttribute(attr[1]) === attr[2]) : false;
+        };
+        const result = [];
+        const visit = (node) => { for (const child of node.children) { if (selector.split(",").some((part) => matches(child, part.trim()))) result.push(child); visit(child); } };
+        visit(this); return result;
+    }
     addEventListener(type, handler) { this.listeners[type] = handler; }
     text() { return [this.textContent, ...this.children.map((child) => child.text())].join(" "); }
 }
 
 const ROLES = ["overview-error-region", "reload-button", "source-badge", "discovery-summary", "overview-namespaces", "last-refreshed", "discovery-headline",
     "discovery-notes", "discovery-provenance", "overview-applied", "overview-applied-text", "overview-status", "overview-risk", "overview-risk-headline",
-    "overview-risk-sub", "overview-results", "overview-placement", "overview-evidence",
+    "overview-risk-sub", "overview-results", "overview-placement", "overview-evidence", "overview-scope", "overview-next-text", "overview-next-link", "overview-node-impact", "overview-workflow-impact", "overview-workflow-caption", "overview-fix", "overview-latest-test",
+    "overview-focus-summary", "overview-focus-clear", "overview-focus-view", "overview-placement-focus",
     ...["cluster", "workflow", "prediction", "test"].flatMap((id) => [`overview-chip-${id}`, `overview-chip-${id}-state`, `overview-chip-${id}-detail`])];
 
 function boot(respond, { withModules = true } = {}) {
@@ -41,7 +53,7 @@ function boot(respond, { withModules = true } = {}) {
     };
     const context = vm.createContext({ window, document, console, globalThis: window });
     vm.runInContext(sources[0], context);
-    if (withModules) { vm.runInContext(sources[1], context); vm.runInContext(sources[2], context); }
+    if (withModules) { vm.runInContext(sources[1], context); vm.runInContext(sources[2], context); vm.runInContext(read("recommendation-topology.js"), context); }
     vm.runInContext(dashboard, context);
     return { nodes, calls, window, load: async () => { await onLoad(); await new Promise((resolve) => setTimeout(resolve, 20)); } };
 }
@@ -92,7 +104,7 @@ test("with no detail the risk is missing with the reason, or pending while it is
 
 test("the status strip: each chip is available, missing or pending from what is known so far, and links to the page that moves it on", () => {
     const chips = plain(OV.describeChips({ discovery: true, context, risk: OV.describeRisk(detail), history: { runs: [run()] } }));
-    assert.deepEqual(chips.map((c) => [c.id, c.state]), [["cluster", "available"], ["workflow", "available"], ["prediction", "available"], ["test", "available"]]);
+    assert.deepEqual(chips.map((c) => [c.id, c.state]), [["cluster", "available"], ["workflow", "available"], ["prediction", "available"], ["test", "incomplete"]]);
     assert.match(chips[1].detail, /2 declared workflows apply \(declared, not observed\)/);
     assert.match(chips[3].detail, /1 saved test; latest: missing checks/);
     assert.deepEqual(chips.map((c) => c.href), ["/components/deployments", "/components/workflows", "/components/failure-impacts", "/components/recommendations"]);
@@ -107,7 +119,7 @@ test("the status strip: each chip is available, missing or pending from what is 
 test("the applied-change banner shows only while a change is on the cluster", () => {
     const body = (status) => ({ application: { status, namespace: "bookinfo", deployments: ["productpage-v1"], appliedAt: "2026-10-24T11:00:00" } });
     assert.equal(OV.describeApplied(body("APPLIED")).visible, true);
-    assert.match(OV.describeApplied(body("APPLIED")).text, /bookinfo · productpage-v1 \(applied/);
+    assert.match(OV.describeApplied(body("APPLIED")).text, /bookinfo · productpage-v1 · applied/);
     assert.equal(OV.describeApplied(body("RESET_FAILED")).visible, true);
     for (const closed of [body("RESET"), body("FAILED"), { application: null }, null]) assert.equal(OV.describeApplied(closed).visible, false);
 });
@@ -157,9 +169,9 @@ test("the page draws the strip, the risk, the banner, the results and the eviden
     assert.equal(node(page, "overview-risk").attributes["data-lost"], "true");
     assert.equal(node(page, "overview-applied").hidden, false);
     assert.match(node(page, "overview-applied-text").textContent, /ratings-v1/);
-    assert.deepEqual(["cluster", "workflow", "prediction", "test"].map((id) => node(page, `overview-chip-${id}`).attributes["data-state"]), ["available", "available", "available", "available"]);
+    assert.deepEqual(["cluster", "workflow", "prediction", "test"].map((id) => node(page, `overview-chip-${id}`).attributes["data-state"]), ["available", "available", "available", "incomplete"]);
     assert.match(node(page, "overview-chip-workflow-detail").textContent, /2 declared workflows apply/);
-    assert.equal(node(page, "overview-chip-test-state").textContent, "Ready");
+    assert.equal(node(page, "overview-chip-test-state").textContent, "Missing checks");
     assert.match(node(page, "overview-results").text(), /Combination on ratings\+reviews[\s\S]*Missing checks/);
     assert.match(node(page, "overview-evidence").text(), /Workflow checks[\s\S]*0 of 2 workflows have an HTTP check configured/);
 });
@@ -170,7 +182,7 @@ test("when saved tests cannot be read the page says so; it does not draw an empt
 
     assert.equal(node(page, "overview-chip-test").attributes["data-state"], "missing");
     assert.match(node(page, "overview-chip-test-detail").textContent, /Saved tests could not be read/);
-    assert.match(node(page, "overview-results").text(), /No fix has been applied and tested yet/);
+    assert.match(node(page, "overview-results").text(), /Saved tests could not be read/);
     assert.match(node(page, "overview-risk-headline").textContent, /desktop-worker2/, "the other parts are unaffected");
 });
 
@@ -188,4 +200,119 @@ test("without the summary module the page still draws the cluster and asks for n
     await page.load();
 
     assert.deepEqual(plain(page.calls), ["/api/deployments/discovery/all"]);
+});
+
+
+test("failed and interrupted runs never receive a successful test state", () => {
+    for (const [status, expected, label] of [["FAILED", "missing", "Run stopped"], ["INTERRUPTED", "incomplete", "Interrupted"], ["COMPLETED", "available", "Checks passed"]]) {
+        const chip = OV.describeChips({ history: { runs: [run({ status })] } })[3];
+        assert.equal(chip.state, expected); assert.equal(chip.statusLabel, label);
+    }
+});
+
+test("node percentages and workflow causes come from explicit predictor evidence", () => {
+    const model = plain(OV.describeImpact({ ...detail,
+        nodeRiskRanking: [{ node: "w1", blastRadius: 75 }, { node: "w2", blastRadius: 25 }, { node: "invalid", blastRadius: null }],
+        workflowExposure: { before: { a: ["desktop-worker2"], b: [] } },
+        workflowDefinitions: [{ workflow_id: "a", mandatory_services: ["productpage"] }],
+    }));
+    assert.deepEqual(model.nodes, [{ node: "w1", value: 75 }, { node: "w2", value: 25 }]);
+    assert.deepEqual(model.workflows.map((w) => w.failed), [true, false, null]);
+    assert.deepEqual(model.workflows[0].causes, ["productpage"]);
+    assert.equal(OV.describeImpact(null).nodes.length, 0);
+});
+
+test("placement distinguishes concentrated, unready, unresolved and unknown pods", () => {
+    const matrix = plain(OV.describeMatrix({ namespaces: [{ namespace: "shop", graph: { nodes: [{ name: "w1" }, { name: "w2" }], services: [
+        { name: "db", pods: [{ node: "w1", ready: true }, { node: "w1", ready: true }, { node: "w2", ready: false }, { node: "unknown", ready: false }] },
+        { name: "missing", pods: [{ node: "w1" }] },
+    ] } }] }));
+    assert.deepEqual(matrix.rows[0].cells, [2, 0]);
+    assert.equal(matrix.rows[0].concentrated, true);
+    assert.equal(matrix.rows[0].unresolved, 1);
+    assert.equal(matrix.rows[0].unready, 2);
+    assert.equal(matrix.rows[1].cells[0], null);
+    assert.equal(matrix.rows[1].unready, null);
+});
+
+test("a failed refresh clears earlier research results and applied banner", async () => {
+    let fail = false;
+    const page = boot((url) => { if (fail) throw new Error("Disconnected"); return respond()(url); });
+    await page.load();
+    fail = true;
+    await page.load();
+    assert.equal(node(page, "overview-applied").hidden, true);
+    assert.match(node(page, "overview-risk-sub").textContent, /Disconnected/);
+    assert.doesNotMatch(node(page, "overview-results").text(), /Combination/);
+    assert.match(node(page, "overview-latest-test").text(), /unavailable/);
+});
+
+test("a change on another cluster offers no applied-change banner here", () => {
+    assert.equal(OV.describeApplied({ clusterMatch: "other", application: { status: "APPLIED" } }).visible, false);
+});
+
+const interactiveDetail = {
+    evidence: { namespace: "bookinfo", failedNode: "w1" },
+    portfolio: { workflows: [{ workflowId: "checkout" }] },
+    baselineImpact: { blastRadius: 100, failedServices: ["db"], failedWorkflows: ["checkout"] },
+    nodeRiskRanking: [{ node: "w1", blastRadius: 100 }, { node: "w2", blastRadius: 0 }],
+    workflowExposure: { before: { checkout: ["w1"] } },
+    workflowDefinitions: [{ workflow_id: "checkout", mandatory_services: ["db", "web"] }],
+    currentDeployment: { nodes: [{ name: "w1" }, { name: "w2" }], services: [
+        { name: "db", declaredReplicas: 1, readyReplicas: 1, concentrated: true, replicaConcentration: 1, pods: [{ name: "db-1", node: "w1", ready: true }] },
+        { name: "web", declaredReplicas: 1, readyReplicas: 1, concentrated: true, replicaConcentration: 1, pods: [{ name: "web-1", node: "w2", ready: true }] },
+    ] },
+    candidates: [{ selected: true, type: "REPLICA_INCREASE", service: "db", predicted: { blastRadiusBefore: 100, blastRadiusAfter: 0, riskReduction: 100 },
+        cost: { resource: "MEDIUM", note: "Adds a replica." }, recommendedChange: "Add one replica and topology spread." }],
+};
+
+test("the next action names the proposed change, benefit and cost without guessing missing values", () => {
+    const action = plain(OV.describeAction(interactiveDetail));
+    assert.deepEqual(action.changes, [{ service: "db", change: "Add one replica and spread" }]);
+    assert.equal(action.benefit, 100); assert.equal(action.cost, "MEDIUM");
+    assert.match(OV.describeAction({ candidates: [{ ...interactiveDetail.candidates[0], type: "COMBINATION" }] }).costNote, /highest member.*not total resource usage/);
+    assert.equal(OV.describeAction({ candidates: [{ selected: true, type: "X" }] }).benefit, null);
+    assert.equal(OV.describeAction(null).reviewable, false);
+});
+
+test("service indicators keep readiness separate from concentration and retain unknown evidence", () => {
+    const complete = OV.describeService(interactiveDetail.currentDeployment.services[0]);
+    assert.equal(complete.readyShare, 1); assert.equal(complete.concentrated, true);
+    assert.equal(OV.describeService({ readyReplicas: 1, declaredReplicas: 3 }).readiness, "incomplete");
+    assert.equal(OV.describeService({ readyReplicas: 0, declaredReplicas: 0 }).readyShare, null);
+    const unknown = OV.describeService({});
+    assert.equal(unknown.readyShare, null); assert.equal(unknown.concentration, null); assert.equal(unknown.concentrated, null);
+});
+
+test("linked inspection distinguishes reported failure causes from observed dependencies at another node", () => {
+    assert.deepEqual(plain(OV.describeFocus(interactiveDetail, "checkout", "w1")).services, ["db"]);
+    const other = plain(OV.describeFocus(interactiveDetail, "checkout", "w2"));
+    assert.deepEqual(other.services, ["web"]);
+    assert.match(other.message, /Predicted to survive.*Dependencies observed here/);
+    assert.doesNotMatch(other.message, /Services lost/);
+    assert.equal(OV.describeFocus(interactiveDetail, "unknown", "w1"), null);
+    assert.equal(OV.describeFocus(interactiveDetail, "checkout", "foreign-node"), null);
+});
+
+test("selecting a survival cell links to one topology and clears on explicit reset or refresh, using no new requests", async () => {
+    const page = boot((url) => url.includes("/declared/detail") ? interactiveDetail : url === "/api/deployments/discovery/all"
+        ? { ...discovery, namespaces: [{ namespace: "bookinfo", status: "ok", unresolved: [], graph: interactiveDetail.currentDeployment }] } : respond()(url));
+    await page.load();
+    const calls = page.calls.length;
+    const cell = node(page, "overview-workflow-impact").querySelectorAll(".overview-survival-cell")[0];
+    cell.listeners.click();
+    assert.equal(cell.getAttribute("aria-pressed"), "true");
+    assert.match(node(page, "overview-focus-summary").textContent, /Services lost: db/);
+    assert.equal(node(page, "overview-focus-view").hidden, false);
+    const db = node(page, "overview-placement").querySelectorAll('.rec-topo__service').find((el) => el.getAttribute("data-service") === "db");
+    const web = node(page, "overview-placement").querySelectorAll('.rec-topo__service').find((el) => el.getAttribute("data-service") === "web");
+    assert.equal(db.getAttribute("data-highlighted"), "true"); assert.equal(web.getAttribute("data-highlighted"), "false");
+    assert.match(node(page, "overview-next-text").text(), /db.*Add one replica.*100 pp.*MEDIUM/);
+    assert.equal(page.calls.length, calls, "inspection never recomputes or mutates cluster state");
+    node(page, "overview-focus-clear").listeners.click();
+    assert.equal(cell.getAttribute("aria-pressed"), "false");
+    assert.equal(node(page, "overview-placement").getAttribute("data-focus-active"), "false");
+    cell.listeners.click();
+    await page.load();
+    assert.equal(node(page, "overview-focus-clear").hidden, true, "a refresh cannot retain a previous cluster's highlight");
 });

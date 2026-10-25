@@ -338,3 +338,29 @@ def test_the_detail_carries_every_field_the_page_reads(use_cluster, tmp_path, mo
         assert "explanation" in candidate["feasibility"] and "resource" in candidate["cost"]
     ranked = [c for c in detail["candidates"] if c["ranking"] and c["ranking"]["rank"] is not None]
     assert ranked and all(c["coverage"] and {"worstCaseBefore", "worstCaseAfter", "protectsEveryWorkflow"} <= set(c["coverage"]) for c in ranked)
+
+
+def test_the_detail_lists_each_workflow_with_its_criticality_and_the_workers_whose_loss_breaks_it(use_cluster, tmp_path, monkeypatch):
+    use_cluster(two_problem_cluster())
+    declared_file(tmp_path, monkeypatch)
+
+    detail = describe_portfolio(build_declared_portfolio("shop", failed_node="w1"))
+    risk = {item["workflowId"]: item for item in detail["workflowRisk"]}
+
+
+    assert [item["workflowId"] for item in detail["workflowRisk"]] == ["checkout", "browse"]      # most critical first
+    assert risk["checkout"] == {"workflowId": "checkout", "criticality": 0.9, "breaksAt": ["w1"]}
+    assert risk["browse"] == {"workflowId": "browse", "criticality": 0.3, "breaksAt": ["w2"]}
+
+
+def test_overview_display_evidence_matches_the_predictor_without_changing_approval(use_cluster, tmp_path, monkeypatch):
+    use_cluster(two_problem_cluster())
+    declared_file(tmp_path, monkeypatch)
+    live = build_declared_portfolio("shop", failed_node="w1")
+    detail = describe_portfolio(live)
+    report = predict_portfolio_impact(WorkflowPortfolio((CHECKOUT, BROWSE)),
+                                      discover_live(namespace="shop").graph, "w1", predict_failure_impact)
+    assert detail["nodeRiskRanking"] == [risk.model_dump(by_alias=True) for risk in report.node_risk_ranking]
+    assert detail["workflowExposure"]["before"] == {"checkout": ["w1"], "browse": ["w2"]}
+    assert detail["workflowDefinitions"] == live.details["portfolioWorkflows"]
+    assert all(c["approval"]["ready"] is False for c in detail["candidates"])

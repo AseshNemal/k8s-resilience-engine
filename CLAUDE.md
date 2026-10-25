@@ -61,6 +61,11 @@ This is an early-stage scaffold, not a working system yet:
   rollout is watched from the Deployments' own generation and replica counts, the failure impact is recalculated from the freshly observed topology and compared with a
   baseline stored before the change, Reset has its own rollout, restoration check and analysis, and an "Applied change" panel (`recommendation-operation.js`, outside the
   re-rendered region) shows it from Apply to Reset. See `docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`.
+  An applied change belongs to the cluster it was applied to (`change.cluster.clusterUid`): `ApplicationService.status()` and `ApplyTestService.read()` return
+  `clusterMatch` (`same` | `other` | `unknown`), a change on another cluster blocks and offers nothing here (each cluster is independent; Reset needs the original cluster
+  connected), and a cluster UID that cannot be read just now is `unknown` and answers a retryable `CLUSTER_IDENTITY_UNKNOWN`, never `CLUSTER_CHANGED`. While an Apply-and-test run is
+  busy its panel polls the read-only `GET /api/recommendations/apply-tests/{run_id}/live` (`ApplyTestService.live`, gateway `read_live_activity` / `read_node_states`): per target
+  Deployment its replicas and each pod's node, state and version (new or old template), plus node status, usage and a recent-steps timeline. It never writes, and says why when it has nothing to show.
   The offline harness and benchmark (`tests/support/member4_*.py`, `experiments/member4_offline_benchmark/`,
   see `docs/MEMBER4_OFFLINE_VALIDATION.md`) are test/research only and stamp a non-live evidence source the
   approval gate refuses.

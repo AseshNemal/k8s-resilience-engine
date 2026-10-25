@@ -145,8 +145,11 @@
         }
         if (panel) {
             panel.dataset.state = info.state;
-            panel.querySelector('[data-role="cluster-panel-title"]').textContent = info.title;
-            panel.querySelector('[data-role="cluster-panel-detail"]').textContent = info.detail;
+            panel.querySelector('[data-role="cluster-panel-title"]').textContent = info.state === "connected" && status.context
+                ? `Connected to ${status.context}` : info.title;
+            const detail = panel.querySelector('[data-role="cluster-panel-detail"]');
+            detail.textContent = info.detail;
+            detail.hidden = info.state === "connected";
             const link = panel.querySelector('[data-role="cluster-panel-link"]');
             link.textContent = info.action || "";
             link.hidden = !info.action;
