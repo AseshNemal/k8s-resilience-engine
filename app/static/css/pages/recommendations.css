@@ -778,6 +778,10 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
     .rec-candidate-comparison { grid-template-columns: 1fr; }
     .apply-test__stages { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+.apply-test__live { margin: 16px 0; }
+.apply-test__live h5 { margin: 16px 0 6px; font-size: 14px; }
+.apply-test__recent { padding-left: 20px; margin: 0 0 12px; font-size: 13px; color: var(--color-text-muted); }
+.apply-test__recent .is-latest { color: var(--color-text); font-weight: 600; }
 .apply-test__command, .apply-test__events code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .apply-test__command { padding: 12px; background: var(--color-surface-soft); border-radius: var(--radius-medium); }
 .apply-test__events { max-height: 260px; overflow: auto; padding-left: 24px; }

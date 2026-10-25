@@ -219,6 +219,32 @@ def _unschedulable(pods: Sequence[dict], selector: Mapping[str, str]) -> str | N
     return f"{len(stuck)} pod(s) cannot be scheduled ({stuck[0][0]}: {stuck[0][1]})"
 
 
+def _pod_activity(pod: dict) -> dict[str, Any]:
+    """One pod as the live view shows it: where it is and what it is doing, in words a person can read. Unknown stays None."""
+    meta, spec, status = _meta(pod), pod.get("spec") or {}, pod.get("status") or {}
+    ready = next((c.get("status") == "True" for c in status.get("conditions") or [] if c.get("type") == "Ready"), None)
+    waiting = next((((s.get("state") or {}).get("waiting") or {}).get("reason") for s in status.get("containerStatuses") or []
+                    if ((s.get("state") or {}).get("waiting") or {}).get("reason")), None)
+    unschedulable = any(c.get("type") == "PodScheduled" and c.get("status") == "False" and c.get("reason") == "Unschedulable"
+                        for c in status.get("conditions") or [])
+    phase = status.get("phase")
+    if meta.get("deletionTimestamp"):
+        state = "Terminating"
+    elif unschedulable:
+        state = "Unschedulable"
+    elif waiting:
+        state = waiting
+    elif ready:
+        state = "Ready"
+    elif phase in ("Pending", "Running"):
+        state = "Starting"
+    else:
+        state = phase
+    return {"name": meta.get("name"), "node": spec.get("nodeName"), "phase": phase, "ready": ready, "state": state,
+            "startedAt": status.get("startTime"), "restarts": sum(int(s.get("restartCount") or 0) for s in status.get("containerStatuses") or []),
+            "templateHash": (meta.get("labels") or {}).get("pod-template-hash")}
+
+
 class KubernetesTestClusterGateway:
     @property
     def evidence_class(self) -> str:
@@ -414,6 +440,33 @@ class KubernetesTestClusterGateway:
                 available=int(status.get("availableReplicas") or 0),
                 progress_failed_reason=progress_failed, uid=meta.get("uid"), total=int(status.get("replicas") or 0),
                 blocked_reason=_unschedulable(pods, dict((spec.get("selector") or {}).get("matchLabels") or {})))
+        return found
+
+    def read_live_activity(self, namespace: str, names: Sequence[str]) -> list[dict[str, Any]]:
+        """What is happening to the named Deployments right now: replica counts and, per pod, the node it is on and its state.
+
+        Read only, two list calls. A pod belongs to a Deployment when its labels contain every pair of the Deployment's selector.
+        """
+        ns = quote(namespace, safe="")
+        deployments = {_meta(i).get("name"): i for i in self._items("deployments", f"/apis/apps/v1/namespaces/{ns}/deployments")}
+        pods = self._items("pods", f"/api/v1/namespaces/{ns}/pods") if deployments else []
+        found = []
+        for name in names:
+            item = deployments.get(name)
+            if item is None:
+                found.append({"name": name, "missing": True, "pods": []})
+                continue
+            meta, spec, status = _meta(item), item.get("spec") or {}, item.get("status") or {}
+            selector = dict((spec.get("selector") or {}).get("matchLabels") or {})
+            found.append({
+                "name": name, "missing": False, "generation": int(meta.get("generation") or 0),
+                "observedGeneration": int(status.get("observedGeneration") or 0),
+                "desired": 1 if spec.get("replicas") is None else int(spec["replicas"]),
+                "updated": int(status.get("updatedReplicas") or 0), "ready": int(status.get("readyReplicas") or 0),
+                "total": int(status.get("replicas") or 0),
+                "blockedReason": _unschedulable(pods, selector),
+                "pods": sorted((_pod_activity(p) for p in pods if selector and all(
+                    (_meta(p).get("labels") or {}).get(k) == v for k, v in selector.items())), key=lambda p: p["name"] or "")})
         return found
 
     def node_ready(self, node: str) -> bool | None:

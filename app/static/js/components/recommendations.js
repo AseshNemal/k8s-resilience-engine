@@ -442,6 +442,7 @@
         apply.disabled = !eligible || !selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256 || run.busy || !!run.run?.canReset;
         if (eligible && (!selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256)) state.append(note("The selected change is missing its verified proposal. Refresh recommendations before Apply."));
         if (run.run?.canReset) state.append(note("The previous test is still applied. Reset it here to restore the baseline, then review and Apply the next candidate. All reports are kept."));
+        if (run.run?.clusterMatch === "other") state.append(note(`An earlier test is still applied on another cluster${run.run.changeCluster?.context ? ` (${run.run.changeCluster.context})` : ""}. It does not affect this one; reconnect that cluster to reset it.`));
         if (!eligible) state.append(note(selected?.approval?.reason || "This candidate cannot be applied from the current evidence."));
         actions.replaceChildren(apply);
         if (run.run?.canReset && !run.busy) actions.append(button("Reset previous test", "secondary-button", "btn-reset-previous-test", () => applyTestPanel.reset()));
@@ -1297,7 +1298,8 @@
         const chosen = lastView?.status === "ready" ? currentRecommendation?.id : null;
         const live = applyTestPanel.state().run;
         const showLive = !chosen || !!(live && live.candidateId === chosen);
-        applyTestRoot.setAttribute("data-shows", showLive ? "live" : "other");
+        // A run that is going on stays on screen whichever candidate is selected; the selected one's data is shown beside it.
+        applyTestRoot.setAttribute("data-shows", showLive || applyTestPanel.state().busy ? "live" : "other");
         selectedDataRoot.hidden = showLive;
         if (showLive) { dropSelectedViewer(); return; }
         const candidate = lastView.detail?.candidates?.find((item) => item.id === chosen);

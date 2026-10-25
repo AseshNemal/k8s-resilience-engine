@@ -250,3 +250,26 @@ test("with nothing applied, no candidate is called Active; the selected one show
     assert.match(text(card), /Selected/);
     assert.match(text(card), /80% → 20%/);
 });
+
+test("while a run is busy the live view names each Deployment, pod and node, and it is dropped once the run ends", async () => {
+    const live = { available: true, capturedAt: "2026-10-25T05:31:06Z", namespace: "shop", nodes: [{ name: "worker-a", pods: 1 }],
+        deployments: [{ name: "db", desired: 2, ready: 1, updated: 1, pods: [
+            { name: "db-0", node: "worker-a", state: "Ready", restarts: 0 }, { name: "db-1", node: null, state: "Unschedulable", restarts: 0 }] }] };
+    let finished = false;
+    const env = setup((url) => url.endsWith("/live") ? response(live) : response({ run: finished ? complete : running }));
+    await env.panel.start();
+    const shown = text(env.root);
+    assert.ok(env.calls.some(([url]) => url.endsWith("/run-1/live")) && env.calls.every(([, method]) => method === "GET"));
+    for (const expected of ["Live activity", "db — 1/2 ready", "db-0", "worker-a", "db-1", "Not scheduled yet", "Unschedulable", "Pods per node: worker-a 1"])
+        assert.ok(shown.includes(expected), expected);
+    finished = true;
+    await env.panel.start();
+    assert.ok(!text(env.root).includes("Live activity"));
+});
+
+test("a live view that cannot be read leaves the run's own status in place", async () => {
+    const env = setup((url) => url.endsWith("/live") ? response({ detail: "gone" }, 500) : response({ run: running }));
+    await env.panel.start();
+    assert.ok(text(env.root).includes("Reading what the cluster is doing"));
+    assert.ok(text(env.root).includes("Waiting for replicas"));
+});

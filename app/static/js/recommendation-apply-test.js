@@ -12,6 +12,7 @@
     function createPanel(env) {
         const { root, document, fetchImpl } = env;
         let run = null, pending = false, error = null, timer = null, destroyed = false, epoch = 0, resetting = false;
+        let live = null;      // the cluster's own picture of the target Deployments and pods; only read while a run is busy
         let expectedRequest = env.pendingRequestKey?.() || null;
         let startError = null;
         let awaitingReset = false;
@@ -117,6 +118,35 @@
             return details;
         }
 
+        const clock = (iso) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString() : "unknown time"; };
+
+        function drawLive() {
+            const section = make("section", null, "apply-test__live");
+            section.setAttribute("aria-label", "Live activity");
+            section.append(make("h4", "Live activity"));
+            const recent = (run?.events || []).slice(-5).reverse();
+            if (recent.length) {
+                const list = make("ol", null, "apply-test__recent");
+                recent.forEach((event, index) => list.append(make("li", `${clock(event.at)} · ${event.message}`, index === 0 ? "is-latest" : "")));
+                section.append(list);
+            }
+            if (!live) { section.append(make("p", "Reading what the cluster is doing…", "ui-note")); return section; }
+            if (!live.available) { section.append(make("p", live.message || "The live view is not available yet.", "ui-note")); return section; }
+            section.append(make("p", `Updated ${clock(live.capturedAt)} from the cluster · namespace ${live.namespace || ""}`, "ui-note"));
+            (live.deployments || []).forEach((deployment) => {
+                const head = make("h5", deployment.missing ? `${deployment.name} — not found in the cluster`
+                    : `${deployment.name} — ${deployment.ready}/${deployment.desired} ready · ${deployment.updated}/${deployment.desired} on the new version`);
+                section.append(head);
+                if (deployment.blockedReason) section.append(make("p", deployment.blockedReason, "approval-note"));
+                if (deployment.pods?.length) {
+                    section.append(table(["Pod", "Node", "State"], deployment.pods.map((pod) =>
+                        [pod.name, pod.node || "Not scheduled yet", pod.restarts ? `${pod.state} (${pod.restarts} restarts)` : pod.state])));
+                } else if (!deployment.missing) section.append(make("p", "No pods yet.", "ui-note"));
+            });
+            if (live.nodes?.length) section.append(make("p", `Pods per node: ${live.nodes.map((n) => `${n.name} ${n.pods}`).join(" · ")}`, "ui-note"));
+            return section;
+        }
+
         function draw() {
             root.replaceChildren();
             root.hidden = !run && !pending && !error;
@@ -144,6 +174,7 @@
                 operation.append(make("h4", "Current operation"), make("p", run.current.message), make("code", run.current.command, "apply-test__command"));
                 root.append(operation);
             }
+            if (busy() && run) root.append(drawLive());
             if (error) { const note = make("p", error, "approval-note"); note.setAttribute("role", "alert"); root.append(note); }
             if (awaitingReset || run?.application?.status === "RESETTING") root.append(make("p", "Restoring the saved configuration. Your test report stays saved. Candidate selection will return when restoration completes.", "ui-note"));
             const events = make("ol", null, "apply-test__events");
@@ -200,6 +231,11 @@
                     error = "Restoration failed. Inspect the saved application before testing another candidate.";
                 }
                 if (run && TERMINAL.has(run.status)) { expectedRequest = null; env.clearRequestKey?.(); }
+                live = null;
+                if (run?.runId && busy()) {
+                    try { const view = await request(`${BASE}/${encodeURIComponent(run.runId)}/live`); if (generation === epoch && !destroyed) live = view; }
+                    catch (_e) { live = null; }      // the live view is extra; the run's own status above is what counts
+                }
             } catch (e) { if (generation === epoch) error = e.message; }
             draw(); notify(); arm();
         }

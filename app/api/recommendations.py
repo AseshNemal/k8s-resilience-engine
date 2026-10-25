@@ -342,6 +342,15 @@ def read_apply_test(run_id: str, service: ApplyTestService = Depends(get_apply_t
     return run
 
 
+@router.get("/apply-tests/{run_id}/live")
+def apply_test_live(run_id: str, service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
+    """Read only: the target Deployments' replicas and each pod's node and state, as the cluster reports them now."""
+    live = service.live(run_id)
+    if live is None:
+        raise HTTPException(status_code=404, detail="Apply and test run not found")
+    return live
+
+
 @router.get("/apply-tests/{run_id}/report")
 def apply_test_report(run_id: str, response: Response, service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
     run = read_apply_test(run_id, service)

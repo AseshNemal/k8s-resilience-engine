@@ -105,5 +105,21 @@ class FakeApplyGateway:
                 progress_failed_reason=self.progress_failed, uid=deployment.uid, blocked_reason=self.blocked_reason)
         return found
 
+    def read_live_activity(self, namespace: str, names):
+        self._reachable()
+        nodes = ("desktop-worker", "desktop-worker2")
+        found = []
+        for name in names:
+            d = self.deployments.get(name)
+            if d is None or d.namespace != namespace:
+                found.append({"name": name, "missing": True, "pods": []})
+                continue
+            found.append({"name": name, "missing": False, "generation": d.generation, "observedGeneration": d.generation,
+                          "desired": d.replicas, "updated": d.replicas, "ready": d.replicas, "total": d.replicas,
+                          "blockedReason": self.blocked_reason,
+                          "pods": [{"name": f"{name}-{i}", "node": nodes[i % 2], "phase": "Running", "ready": True, "state": "Ready",
+                                    "startedAt": None, "restarts": 0, "templateHash": f"hash{d.generation}"} for i in range(d.replicas)]})
+        return found
+
     def rollout_complete(self, namespace: str, names) -> bool:
         return all(r.observed_generation >= r.generation and not r.missing for r in self.read_rollout(namespace, names).values())

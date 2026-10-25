@@ -187,6 +187,31 @@ class ApplicationService:
         # shown apart from the recalculation. Nothing here runs or starts an experiment.
         self.experiments = experiments
 
+    # -- which cluster a change belongs to ---------------------------------------------------------------------------
+
+    def _connected_uid(self) -> str | None:
+        """The kube-system UID of the connected cluster, or None when it cannot be read just now (not connected, unreachable, or
+        the credential is renewing). None means *unknown*, never "a different cluster"."""
+        try:
+            return getattr(self._gateway_factory().identity(), "cluster_uid", None) or None
+        except _CLUSTER_ERRORS:
+            return None
+
+    @staticmethod
+    def _cluster_match(change: AppliedChange | None, uid: str | None) -> str | None:
+        """"same", "other" or "unknown": where the connected cluster stands against the one this change was applied to."""
+        if change is None:
+            return None
+        stored = (change.cluster or {}).get("clusterUid")
+        if not uid or not stored:
+            return "unknown"
+        return "same" if uid == stored else "other"
+
+    def _active_here(self, uid: str | None) -> list[AppliedChange]:
+        """The applied changes that stand on the connected cluster. Each cluster is independent, so a change left on another one
+        blocks nothing here; when the connected cluster cannot be identified, every change counts (the cautious reading)."""
+        return [c for c in self.repository.active() if self._cluster_match(c, uid) != "other"]
+
     # -- reads -------------------------------------------------------------------------------------------------------
 
     def status(self, recommendation_id: str) -> dict[str, Any]:
@@ -199,9 +224,11 @@ class ApplicationService:
         approval = self.approvals.get_by_recommendation_id(recommendation_id)
         approved = approval is not None and approval.status == ApprovalStatus.APPROVED and self._trusted(approval)
         lost = None
+        uid = self._connected_uid()
+        match = self._cluster_match(change, uid)
         if change is not None and change.status in (APPLIED, RESET):
             change, lost = self._advance(change)
-        active = self.repository.active()
+        active = self._active_here(uid)
         blocking = next((c for c in active if change is None or c.application_id != change.application_id), None)
         rollout = change.rollout if change else None
         analyses = self._analyses_of(change)
@@ -221,7 +248,11 @@ class ApplicationService:
             "experiments": self._experiments(recommendation_id),
             "canApply": can_apply,
             "writesEnabled": self.writes_enabled,
-            "canReset": bool(change and change.status in RESETTABLE),
+            "canReset": bool(change and change.status in RESETTABLE and match != "other"),
+            # "same" | "other" | "unknown" | None: the stored change against the cluster connected now; "other" is shown, never reset here.
+            "clusterMatch": match,
+            "changeCluster": ({"context": change.cluster.get("context"), "apiServer": change.cluster.get("apiServer")}
+                              if change is not None and match == "other" else None),
             "canRetryAnalysis": bool(change and state == rollout_watch.COMPLETED and current is not None
                                      and current.status == ANALYSIS_FAILED),
             "reason": (None if can_apply else
@@ -357,7 +388,12 @@ class ApplicationService:
     def _recalculate(self, change: AppliedChange, analysis: ChangeAnalysis) -> ChangeAnalysis:
         try:
             gateway = self._gateway_factory()
-            if getattr(gateway.identity(), "cluster_uid", None) != change.cluster.get("clusterUid"):
+            uid = getattr(gateway.identity(), "cluster_uid", None)
+            if not uid:
+                raise EvidenceError("CLUSTER_IDENTITY_UNKNOWN", "The connected cluster could not be identified just now, so its "
+                                    "topology was not compared with the baseline. Try again in a moment.",
+                                    http_status=503, component=COMPONENT, retryable=True)
+            if uid != change.cluster.get("clusterUid"):
                 raise AnalysisUnavailable("CLUSTER_CHANGED", "The connected cluster is not the one this change was applied to, "
                                           "so its topology cannot be compared with the baseline taken from the other one.")
             observed = self.analyser.recalculate(analysis.basis)
@@ -405,10 +441,10 @@ class ApplicationService:
         self._run_analysis(change, analysis)
         return self.repository.get(change.application_id) or change
 
-    def _require_settled_reset(self) -> None:
+    def _require_settled_reset(self, uid: str | None) -> None:
         """A reset whose rollout is still going is not finished, so nothing new is applied over it (it is read now, not trusted)."""
         last = self.repository.latest()
-        if last is None or last.status != RESET or not last.rollout:
+        if last is None or last.status != RESET or not last.rollout or self._cluster_match(last, uid) == "other":
             return
         if last.rollout.get("state") in rollout_watch.TERMINAL:
             return
@@ -434,8 +470,9 @@ class ApplicationService:
         if not self._trusted(approval):
             raise ApplicationRefused("PROVENANCE_NOT_ACCEPTED", f"This approval was not made at the {self.tier} gate, so it "
                                      f"cannot be applied here.")
-        self._require_settled_reset()
-        if active := self.repository.active():
+        uid = self._connected_uid()
+        self._require_settled_reset(uid)
+        if active := self._active_here(uid):
             raise ApplicationRefused("APPLICATION_ACTIVE", f"{active[0].recommendation_id} is still applied to the cluster. "
                                      f"Reset it before applying another change.")
         yaml_text, namespace, current = self._still_what_was_approved(approval, recommendation_id, evaluate)
@@ -560,7 +597,11 @@ class ApplicationService:
         try:
             gateway = self._gateway_factory()
             identity = gateway.identity()
-            if getattr(identity, "cluster_uid", None) != change.cluster.get("clusterUid"):
+            if not getattr(identity, "cluster_uid", None):
+                raise ApplicationRefused("CLUSTER_IDENTITY_UNKNOWN", "The connected cluster could not be identified just now "
+                                         "(its connection may still be renewing), so nothing was restored. Try again in a moment.",
+                                         http_status=503, retryable=True)
+            if identity.cluster_uid != change.cluster.get("clusterUid"):
                 raise ApplicationRefused("CLUSTER_CHANGED", "The connected cluster is not the one this change was applied to, so "
                                          "its stored state is not restored here. Reconnect that cluster to reset it.")
             self._require_same_deployments(gateway, change)
