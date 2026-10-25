@@ -300,3 +300,10 @@ def test_every_script_a_built_page_loads_is_copied_into_the_image(built):
     loaded = {name for page in PAGE_FILES for name in re.findall(r'<script src="([A-Za-z0-9_-]+\.js)"', html(built, page))}
     assert loaded, "the pages load the extension's scripts"
     assert loaded <= shipped, sorted(loaded - shipped)
+
+
+def test_the_sample_data_demo_is_not_offered_inside_the_extension(built):
+    """The synthetic-portfolio demo is a labelled sample-data page of the web app; the extension shows real cluster evidence only."""
+    page = html(built, "failure-impacts.html")
+    assert "synthetic-portfolio" not in page and "Viva research demonstration" not in page
+    assert "data-role=\"scenario-select\"" in page or "scenario-panel" in page, "the rest of the page is still there"
