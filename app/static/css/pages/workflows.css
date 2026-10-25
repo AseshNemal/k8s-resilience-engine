@@ -1,11 +1,62 @@
 /* Component-owned workspace styles; shared shell and tokens remain unchanged. */
+.workflow-dependency-map { margin: 20px 0; padding: 20px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface-soft); color: var(--color-text); }
+.workflow-dependency-map .wdm-heading { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.workflow-dependency-map .wdm-heading h4 { margin: 0; font-size: 19px; }
+.workflow-dependency-map .wdm-source { color: var(--color-text-muted); font-size: 12px; }
+.workflow-dependency-map .wdm-explanation, .workflow-dependency-map .wdm-entry-note { color: var(--color-text-muted); font-size: 13px; margin: 10px 0 18px; }
+.workflow-dependency-map .wdm-entry-note { padding: 10px 12px; border-left: 3px solid var(--color-primary); background: var(--color-surface); }
+.workflow-dependency-map .wdm-body { position: relative; display: grid; grid-template-columns: minmax(150px, .9fr) minmax(0, 1.7fr); gap: clamp(40px, 5vw, 90px); align-items: start; }
+.workflow-dependency-map .wdm-services, .workflow-dependency-map .wdm-groups { position: relative; z-index: 1; display: grid; gap: 12px; min-width: 0; }
+.workflow-dependency-map .wdm-column-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-muted); margin: 4px 0 2px; }
+.workflow-dependency-map .wdm-mandatory { --wdm-accent: #8471e9; }
+.workflow-dependency-map .wdm-supporting { --wdm-accent: #3999d8; }
+.workflow-dependency-map .wdm-optional { --wdm-accent: #279f86; }
+.workflow-dependency-map .wdm-unresolved { --wdm-accent: #8191a6; }
+.workflow-dependency-map .wdm-entry { --wdm-accent: var(--color-primary); }
+.workflow-dependency-map .wdm-service { display: grid; gap: 5px; position: relative; text-align: left; width: 100%; min-width: 0; min-height: 68px; padding: 12px 12px 12px 19px; border: 1px solid color-mix(in srgb, var(--wdm-accent) 48%, var(--color-border)); border-radius: 10px; background: color-mix(in srgb, var(--wdm-accent) 7%, var(--color-surface)); color: var(--color-text); }
+.workflow-dependency-map .wdm-service::before { content: ''; position: absolute; inset: 12px auto 12px 0; width: 4px; border-radius: 0 4px 4px 0; background: var(--wdm-accent); }
+.workflow-dependency-map .wdm-service-name { overflow-wrap: anywhere; font-weight: 600; font-size: 13px; }
+.workflow-dependency-map .wdm-service-label { color: var(--color-text-muted); font-size: 11px; font-weight: 400; }
+.workflow-dependency-map .wdm-service:hover, .workflow-dependency-map .wdm-chip:hover { border-color: var(--wdm-accent); }
+.workflow-dependency-map [aria-pressed=true] { outline: 2px solid var(--wdm-accent); outline-offset: 2px; }
+.workflow-dependency-map .wdm-group { min-width: 0; padding: 15px; border: 1px solid var(--color-border); border-left: 4px solid var(--wdm-accent); border-radius: 11px; background: var(--color-surface); }
+.workflow-dependency-map .wdm-group-title { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.workflow-dependency-map .wdm-group-title h5 { margin: 0; font-size: 15px; }
+.workflow-dependency-map .wdm-count { display: inline-grid; place-items: center; min-width: 26px; height: 26px; border-radius: 50%; font-size: 12px; font-weight: 700; color: var(--color-text); background: color-mix(in srgb, var(--wdm-accent) 18%, var(--color-surface)); }
+.workflow-dependency-map .wdm-group-description { font-size: 12px; color: var(--color-text-muted); margin: 6px 0 12px; }
+.workflow-dependency-map .wdm-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.workflow-dependency-map .wdm-chip { max-width: 100%; min-height: 44px; padding: 8px 11px; border-radius: 22px; border: 1px solid color-mix(in srgb, var(--wdm-accent) 45%, var(--color-border)); color: var(--color-text); background: color-mix(in srgb, var(--wdm-accent) 12%, var(--color-surface)); text-align: left; }
+.workflow-dependency-map .wdm-chip .wdm-service-name { font-size: 12px; }
+.workflow-dependency-map .wdm-empty { color: var(--color-text-muted); font-size: 12px; }
+.workflow-dependency-map .wdm-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.workflow-dependency-map .wdm-link { stroke: var(--wdm-accent); stroke-width: 1.8; fill: none; }
+.workflow-dependency-map .wdm-link.wdm-unresolved { stroke-dasharray: 5 4; }
+.workflow-dependency-map .wdm-evidence { margin-top: 20px; padding: 16px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); }
+.workflow-dependency-map .wdm-evidence h5 { margin: 0 0 10px; font-size: 16px; overflow-wrap: anywhere; }
+.workflow-dependency-map .wdm-evidence p { margin: 0; font-size: 13px; color: var(--color-text-muted); }
+.workflow-dependency-map .wdm-badge { display: inline-block; font-size: 12px; padding: 4px 8px; border-left: 3px solid var(--wdm-accent); background: color-mix(in srgb, var(--wdm-accent) 12%, var(--color-surface)); }
+.workflow-dependency-map .wdm-facts { display: grid; grid-template-columns: minmax(110px, .7fr) minmax(0, 1.3fr); gap: 9px 14px; margin: 16px 0; font-size: 13px; }
+.workflow-dependency-map .wdm-facts dt { color: var(--color-text-muted); }
+.workflow-dependency-map .wdm-facts dd { margin: 0; overflow-wrap: anywhere; }
+.workflow-dependency-map .wdm-reasons { margin-bottom: 0; font-size: 13px; }
+@media (max-width: 650px) {
+    .workflow-dependency-map { padding: 14px; }
+    .workflow-dependency-map .wdm-body { grid-template-columns: 1fr; gap: 24px; }
+    .workflow-dependency-map .wdm-services { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+    .workflow-dependency-map .wdm-column-title { grid-column: 1 / -1; }
+    .workflow-dependency-map .wdm-lines { display: none; }
+    .workflow-dependency-map .wdm-facts { grid-template-columns: 1fr; gap: 5px; }
+    .workflow-dependency-map .wdm-facts dd { margin-bottom: 8px; }
+}
 .workflow-workspace { max-width: 1500px; margin-inline: auto; }
 .workspace-header, .workspace-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .workspace-header { margin-bottom: 28px; }
 .workspace-header h2 { font-size: 28px; letter-spacing: -.6px; margin: 0 0 8px; }
 .workflow-workspace p { line-height: 1.6; margin: 10px 0 18px; overflow-wrap: anywhere; }
 .workspace-header p, .workspace-help, .workspace-status, .workspace-saved > p { color: #475569; font-size: 14px; }
-.workspace-layout { display: grid; grid-template-columns: minmax(200px, 250px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.workspace-layout { display: block; }
+.workspace-datasets { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 16px; margin-bottom: 20px; }
+.workspace-datasets p { grid-column: 1 / -1; font-size: 12px; color: var(--color-text-muted); margin: 0; }
 .workspace-main, .workspace-saved, .workspace-card { min-width: 0; }
 .workspace-saved { padding: 4px 0; }
 .workspace-saved h3 { font-size: 15px; margin: 0; }

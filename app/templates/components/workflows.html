@@ -3,7 +3,7 @@
 {% set show_project_metadata = false %}
 {% set source_label = "No workflow selected" %}
 {% block page_css %}
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=guided-setup-4">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=recorded-results-10">
 {% endblock %}
 {% block content %}
     <div class="workflow-workspace">
@@ -17,25 +17,18 @@
                 </p>
             </div>
             <button type="button" class="secondary-button" data-role="new-workflow">
-                New workflow
+                Collect new evidence
             </button>
         </header>
+        <section class="workspace-datasets" aria-label="Experiment dataset">
+            <div>
+                <label for="workflow-dataset">Experiment data</label>
+                <select id="workflow-dataset" data-role="saved-workflows"><option value="">Choose an experiment</option></select>
+            </div>
+            <button type="button" class="text-button" data-role="refresh-saved">Refresh datasets</button>
+            <p data-role="saved-status" role="status">Loading experiment data…</p>
+        </section>
         <div class="workspace-layout">
-            <aside class="workspace-saved" aria-labelledby="saved-title">
-                <div class="workspace-section-heading">
-                    <h3 id="saved-title">
-                        Saved workflows
-                    </h3>
-                    <button type="button" class="text-button" data-role="refresh-saved">
-                        Refresh
-                    </button>
-                </div>
-                <p data-role="saved-status" role="status">
-                    Loading saved workflows…
-                </p>
-                <div data-role="saved-workflows" class="saved-workflows">
-                </div>
-            </aside>
             <div class="workspace-main">
                 <section class="workspace-card" data-role="source-panel" aria-labelledby="source-title">
                     <h3 id="source-title" data-role="source-title">
@@ -52,6 +45,10 @@
                     </div>
                     <div data-role="live-source">
                         <form data-role="guided-analysis-form" class="workspace-form">
+                            <div class="full-width">
+                                <button type="button" class="secondary-button" data-role="fill-boutique-settings">Use local Kubernetes Boutique settings</button>
+                                <p class="workspace-help">Fills editable connection and checkout inputs only. It does not connect, run requests, upload traces or supply dependency labels.</p>
+                            </div>
                             <div>
                                 <label for="workflow-input-1">
                                     Tracing backend
@@ -156,6 +153,7 @@
                                 <button type="button" class="experiment-button" data-role="guided-auto-discover">
                                     Find workflows
                                 </button>
+                                <button type="button" class="secondary-button" data-role="stop-workflow-scan" hidden>Stop scan</button>
                             </div>
                             <div data-role="guided-service-field" class="full-width" hidden>
                                 <label for="workflow-input-8">
@@ -194,6 +192,10 @@
                                 Inspect traces and set up workflow
                             </button>
                         </div>
+                        <details data-role="discovery-coverage" hidden>
+                            <summary>Search coverage and unresolved windows</summary>
+                            <pre data-role="discovery-coverage-details"></pre>
+                        </details>
                         <p data-role="guided-analysis-status" class="workspace-status" role="status" aria-live="polite" tabindex="-1">
                             Connect to find your recorded services and operations.
                         </p>
@@ -310,7 +312,8 @@
     </div>
 {% endblock %}
 {% block page_js %}
-    <script src="{{ url_for('static', path='/js/workflow-discovery-poller.js') }}" defer></script>
-    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=guided-setup-4" defer>
+    <script src="{{ url_for('static', path='/js/workflow-discovery-poller.js') }}?v=continuous-discovery-2" defer></script>
+    <script src="{{ url_for('static', path='/js/workflow-dependency-map.js') }}?v=dependency-map-1" defer></script>
+    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=recorded-results-10" defer>
     </script>
 {% endblock %}
