@@ -170,20 +170,20 @@ summary { padding: 15px 17px; cursor: pointer; font-weight: 750; }
 .result-block__heading p { max-width: 480px; margin: 0; font-size: .78rem; text-align: right; }
 .result-block__heading .section-kicker { margin-bottom: 5px; text-align: left; }
 .risk-ranking { display: grid; gap: 8px; }
-.risk-row { display: grid; grid-template-columns: 34px minmax(185px, .9fr) minmax(170px, 1.4fr) 48px auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-soft); }
+.risk-row { display: grid; grid-template-columns: 34px minmax(185px, .9fr) minmax(170px, 1.4fr) 48px 132px; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-soft); }
 .risk-row__rank { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 8px; background: #20344b; color: var(--muted); font-size: .72rem; font-weight: 800; }
 .risk-row:first-child .risk-row__rank { background: rgba(255, 107, 122, .14); color: #ffabb5; }
 .risk-row__identity { display: grid; min-width: 0; gap: 3px; }
 .risk-row__identity strong { font-size: .88rem; }
 .risk-row__identity span { overflow: hidden; color: var(--muted); font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
-.risk-row__bar { overflow: hidden; height: 9px; border-radius: 999px; background: #20344b; }
+.risk-row__bar { min-width: 0; overflow: hidden; height: 9px; border-radius: 999px; background: #20344b; }
 .risk-row__bar span { display: block; height: 100%; border-radius: inherit; background: var(--danger); }
 .risk-row--medium .risk-row__bar span { background: var(--amber); }
 .risk-row--none .risk-row__bar span { width: 4px !important; background: var(--success); }
 .risk-row__value { color: var(--danger); text-align: right; }
 .risk-row--medium .risk-row__value { color: var(--amber); }
 .risk-row--none .risk-row__value { color: var(--success); }
-.impact-badge { padding: 5px 9px; border-radius: 999px; font-size: .65rem; font-weight: 850; white-space: nowrap; }
+.impact-badge { justify-self: end; padding: 5px 9px; border-radius: 999px; font-size: .65rem; font-weight: 850; text-align: center; white-space: nowrap; }
 .impact-badge--high { background: rgba(255, 107, 122, .13); color: #ffabb5; }
 .impact-badge--medium { background: rgba(255, 200, 87, .12); color: #ffdc8a; }
 .impact-badge--none { background: rgba(98, 216, 159, .12); color: #91edbd; }
