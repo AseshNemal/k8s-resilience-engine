@@ -43,6 +43,7 @@ def _placement(analysis) -> dict[str, dict[str, Any]]:
 
 
 def _moved_pods(t0, t1) -> int:
+    # Pods that exist at both T0 and T1 but sit on a different node. (Replacement pods have new names.)
     before = {p.name: p.node for s in t0.graph.services for p in s.pods}
     after = {p.name: p.node for s in t1.graph.services for p in s.pods}
     return sum(1 for name, node in before.items() if name in after and after[name] != node)
@@ -113,12 +114,15 @@ class LiveExperimentRunner:
 
     def reset(self, manifest: str) -> None:
         """Every run starts from a fresh deployment on uncordoned nodes."""
+        # Undo anything a previous run may have left (a cordoned node, old pods), then deploy again,
+        # so no run is affected by the one before it.
         for node in self.kube.worker_nodes():
             self.kube.uncordon(node)
         self.kube.delete_experiment_workloads()
         self.kube.wait_until_no_pods(EXPERIMENT_LABEL)
         self.kube.apply(manifest)
         self.kube.wait_until_stable(self.deployments)
+        # A short pause so readiness has settled before T0 is observed.
         time.sleep(self.settle_s)
 
     def run_once(self, scenario: LiveScenario, config: str, repetition: int) -> RunRecord:
@@ -126,11 +130,13 @@ class LiveExperimentRunner:
         started = datetime.now(timezone.utc).isoformat()
         self.reset(manifest)
 
+        # T0: placement before the disruption, read with Component 2's own collector.
         t0 = self.observe(self.kube.namespace, manifest)
         ctx = RunContext(kube=self.kube, t0=t0, deployments=self.deployments, observe_nodes=self.observe_nodes,
                          workload=self.workload)
         error = None
         try:
+            # The one real kubectl action of this scenario.
             action = scenario.disrupt(ctx)
             try:
                 wait_s = self.kube.wait_until_stable(self.deployments, timeout_s=self.disruption_timeout_s)
@@ -139,10 +145,13 @@ class LiveExperimentRunner:
                 # Not settling is itself an observation (e.g. pods Pending under a spread rule).
                 wait_s, stable, error = None, False, str(exc)
             time.sleep(self.settle_s)
+            # T1: placement after the cluster has settled (or after the 90 s limit).
             t1 = self.observe(self.kube.namespace, manifest)
         finally:
+            # Always undo (uncordon, remove fillers), even if something above failed.
             scenario.undo(ctx)
 
+        # Compare T0 and T1 with the shared metric definitions.
         drift = pm.placement_drift(_statuses(t0), _statuses(t1))
         e0, e1 = t0.report.exposure_rate, t1.report.exposure_rate
         return RunRecord(
@@ -189,6 +198,8 @@ class LiveExperimentRunner:
     def run(self, scenarios: list[LiveScenario], configs: list[str], repetitions: int,
             on_record: Callable[[RunRecord | None], None] | None = None) -> list[RunRecord]:
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        # Repetition 1 of everything first, then repetition 2, and so on, so a run stopped early
+        # still has results for every scenario and config.
         conditions = [(s, c, r) for r in range(1, repetitions + 1) for c in configs for s in scenarios]
         records = []
         try:
@@ -199,6 +210,7 @@ class LiveExperimentRunner:
                 if on_record:
                     on_record(record)
         finally:
+            # Never leave a node blocked when the experiment ends or crashes.
             for node in self.kube.worker_nodes():
                 self.kube.uncordon(node)
         return records

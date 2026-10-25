@@ -79,6 +79,8 @@ class GroundTruthRecorder:
     # --- setup --------------------------------------------------------------------------------
 
     def apply_mixed_setup(self, setup: MixedSetup) -> None:
+        # Build a layout where some services must go down and others must survive a node failure,
+        # so the accuracy check tests both kinds of prediction.
         if setup.manifest:
             self.kube.apply(setup.manifest)
             self.kube.wait_until_stable(self.deployments, timeout_s=self.recover_timeout_s)
@@ -139,11 +141,14 @@ class GroundTruthRecorder:
             raise ChaosSafetyError(f"Refusing to stop '{node}': not a worker node of this cluster.")
         failure = case / f"{node}-failure"
         failure.mkdir(parents=True, exist_ok=True)
+        # A KinD node is a Docker container, so stopping the container is a real node failure.
         self.docker("stop", node)
         try:
+            # Wait until Kubernetes itself has noticed: the node is NotReady and its endpoints are no longer ready.
             self._wait(lambda: self._node_status(node) == "NotReady", self.detect_timeout_s, f"{node} NotReady")
             self._wait(lambda: ready_endpoints_on(self._endpoint_slices(), node) == 0, self.detect_timeout_s,
                        f"endpoints on {node} not ready")
+            # Save what Kubernetes reports now: this is the observed outcome the predictions are marked against.
             slices = self._endpoint_slices()
             (failure / "nodes-after-detection.txt").write_text(self.kube.run("get", "nodes", "-o", "wide", namespaced=False), encoding="utf-8")
             (failure / "endpointslices-after.json").write_text(json.dumps({"items": slices}, indent=2), encoding="utf-8")
@@ -154,6 +159,7 @@ class GroundTruthRecorder:
                 encoding="utf-8")
             return outcome
         finally:
+            # Always start the node again, also when something above failed.
             self.docker("start", node)
             self._wait(lambda: self._node_status(node) == "Ready", self.recover_timeout_s, f"{node} Ready again")
             self.kube.wait_until_stable(self.deployments, timeout_s=self.recover_timeout_s)
