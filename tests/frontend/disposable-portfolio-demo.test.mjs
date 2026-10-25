@@ -163,3 +163,17 @@ test("node risk ranking preserves the server ranking and failure evidence", () =
         { rank: 3, node: "node-2", blastRadius: 0, failedWorkflows: [] },
     ]);
 });
+
+test("generated-input helpers create readable workflow names and concentration states", () => {
+    const demo = load();
+
+    assert.equal(demo.humanizeId("cart-management"), "Cart Management");
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(demo.concentrationStatus(1))),
+        { key: "exposed", label: "Single-node exposure" },
+    );
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(demo.concentrationStatus(0.5))),
+        { key: "distributed", label: "Distributed" },
+    );
+});

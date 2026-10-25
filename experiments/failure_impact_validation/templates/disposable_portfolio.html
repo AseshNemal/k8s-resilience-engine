@@ -57,10 +57,29 @@
                         <button id="download-deployment" class="secondary" type="button">Download deployment</button>
                     </div>
                 </div>
-                <div id="portfolio-summary" class="metric-grid"></div>
-                <div id="workflow-list" class="card-grid"></div>
-                <h3>Service placement</h3>
-                <div class="table-wrap"><table id="deployment-table"></table></div>
+                <div id="portfolio-summary" class="portfolio-metrics"></div>
+
+                <section class="generated-input-block" aria-labelledby="workflow-portfolio-title">
+                    <div class="generated-input-block__heading">
+                        <div>
+                            <p class="section-kicker">Component 1 assumption</p>
+                            <h3 id="workflow-portfolio-title">Workflow dependency portfolio</h3>
+                        </div>
+                        <p>Mandatory services determine survival; optional services provide supporting context.</p>
+                    </div>
+                    <div id="workflow-list" class="workflow-grid"></div>
+                </section>
+
+                <section class="generated-input-block" aria-labelledby="service-placement-title">
+                    <div class="generated-input-block__heading">
+                        <div>
+                            <p class="section-kicker">Component 2 assumption</p>
+                            <h3 id="service-placement-title">Service placement snapshot</h3>
+                        </div>
+                        <p>Replica concentration highlights services exposed to a single worker-node failure.</p>
+                    </div>
+                    <div class="table-wrap placement-table-wrap"><table id="deployment-table" class="placement-table"></table></div>
+                </section>
             </section>
 
             <section class="panel">

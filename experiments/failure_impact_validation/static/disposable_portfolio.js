@@ -223,6 +223,22 @@
         return String(workflowId).startsWith(prefix) ? String(workflowId).slice(prefix.length) : workflowId;
     }
 
+    function humanizeId(value) {
+        return String(value ?? "")
+            .replaceAll("_", "-")
+            .split("-")
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" ");
+    }
+
+    function concentrationStatus(value) {
+        const concentration = Number(value) || 0;
+        if (concentration >= 1) return { key: "exposed", label: "Single-node exposure" };
+        if (concentration > 0.5) return { key: "concentrated", label: "Concentrated" };
+        return { key: "distributed", label: "Distributed" };
+    }
+
     function percent(value) {
         return Math.max(0, Math.min(100, Number(value) || 0));
     }
@@ -265,33 +281,89 @@
         const summaries = graphSummaries(graphs);
 
         document.getElementById("portfolio-summary").innerHTML = [
-            ["Workflows", workflows.length],
-            ["Services", deployment.services.length],
-            ["Worker nodes", deployment.nodes.length],
-            ["Cross-layer graphs", graphs.workflowCount],
-        ].map(([label, value]) => (
-            `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
-        )).join("");
-
-        document.getElementById("workflow-list").innerHTML = workflows.map((workflow) => `
-            <article class="workflow-card">
-                <h3>${escapeHtml(workflow.workflowId)}</h3>
-                <small>Criticality ${escapeHtml(workflow.criticality)}</small>
-                <p><strong>Mandatory:</strong> ${escapeHtml(workflow.mandatoryServices.join(", ") || "none")}</p>
-                <p><strong>Optional:</strong> ${escapeHtml(workflow.optionalServices.join(", ") || "none")}</p>
+            { key: "workflow", label: "Workflows", value: workflows.length, note: "business paths" },
+            { key: "service", label: "Services", value: deployment.services.length, note: "deployment targets" },
+            { key: "node", label: "Worker nodes", value: deployment.nodes.length, note: "failure candidates" },
+            { key: "graph", label: "Cross-layer graphs", value: graphs.workflowCount, note: "complete mappings" },
+        ].map((metric) => `
+            <article class="portfolio-metric portfolio-metric--${metric.key}">
+                <div class="portfolio-metric__icon" aria-hidden="true">${metric.key.charAt(0).toUpperCase()}</div>
+                <div>
+                    <span>${escapeHtml(metric.label)}</span>
+                    <strong>${escapeHtml(metric.value)}</strong>
+                    <small>${escapeHtml(metric.note)}</small>
+                </div>
             </article>
         `).join("");
 
+        document.getElementById("workflow-list").innerHTML = workflows.map((workflow, index) => {
+            const shortId = displayWorkflowId(workflow.workflowId, state.scenarioId);
+            const criticality = percent(workflow.criticality * 100);
+            return `
+                <article class="workflow-card">
+                    <header class="workflow-card__header">
+                        <span class="workflow-card__number">${String(index + 1).padStart(2, "0")}</span>
+                        <span class="criticality-badge" title="Workflow criticality ${escapeHtml(workflow.criticality)}">
+                            ${escapeHtml(criticality.toFixed(0))}% criticality
+                        </span>
+                    </header>
+                    <h3 title="${escapeHtml(workflow.workflowId)}">${escapeHtml(humanizeId(shortId))}</h3>
+                    <div class="workflow-card__services">
+                        <span class="workflow-card__label">Mandatory services</span>
+                        <div class="service-chip-list">
+                            ${workflow.mandatoryServices.map((service) => `<span class="service-chip service-chip--mandatory">${escapeHtml(service)}</span>`).join("") || '<span class="service-chip service-chip--empty">None</span>'}
+                        </div>
+                    </div>
+                    <div class="workflow-card__services workflow-card__services--optional">
+                        <span class="workflow-card__label">Optional services</span>
+                        <div class="service-chip-list">
+                            ${workflow.optionalServices.map((service) => `<span class="service-chip service-chip--optional">${escapeHtml(service)}</span>`).join("") || '<span class="service-chip service-chip--empty">None</span>'}
+                        </div>
+                    </div>
+                </article>
+            `;
+        }).join("");
+
         document.getElementById("deployment-table").innerHTML = `
-            <thead><tr><th>Service</th><th>Ready replicas</th><th>Concentration</th><th>Pod placement</th></tr></thead>
-            <tbody>${deployment.services.map((service) => `
-                <tr>
-                    <td>${escapeHtml(service.name)}</td>
-                    <td>${escapeHtml(service.readyReplicas)} / ${escapeHtml(service.declaredReplicas)}</td>
-                    <td>${escapeHtml((service.replicaConcentration * 100).toFixed(0))}%</td>
-                    <td>${service.pods.map((pod) => `${escapeHtml(pod.name)} → ${escapeHtml(pod.node)}`).join("<br>")}</td>
-                </tr>
-            `).join("")}</tbody>`;
+            <thead><tr><th>Service</th><th>Replica health</th><th>Replica concentration</th><th>Pod → worker node</th></tr></thead>
+            <tbody>${deployment.services.map((service) => {
+                const concentration = percent(service.replicaConcentration * 100);
+                const status = concentrationStatus(service.replicaConcentration);
+                const allReady = service.readyReplicas === service.declaredReplicas;
+                return `
+                    <tr>
+                        <td>
+                            <div class="service-identity">
+                                <span aria-hidden="true">S</span>
+                                <div><strong>${escapeHtml(service.name)}</strong><small>Kubernetes service</small></div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="replica-health">
+                                <strong>${escapeHtml(service.readyReplicas)} <span>/ ${escapeHtml(service.declaredReplicas)}</span></strong>
+                                <span class="readiness-badge readiness-badge--${allReady ? "ready" : "degraded"}">${allReady ? "All ready" : "Degraded"}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="concentration concentration--${status.key}">
+                                <div><strong>${escapeHtml(concentration.toFixed(0))}%</strong><span>${status.label}</span></div>
+                                <div class="concentration__track"><span style="width: ${concentration}%"></span></div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="placement-list">
+                                ${service.pods.map((pod) => `
+                                    <div class="placement-route">
+                                        <span class="placement-route__pod">${escapeHtml(pod.name)}</span>
+                                        <span class="placement-route__arrow" aria-hidden="true">→</span>
+                                        <span class="placement-route__node">${escapeHtml(pod.node)}</span>
+                                    </div>
+                                `).join("")}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join("")}</tbody>`;
 
         document.getElementById("cross-layer-graphs").innerHTML = graphs.graphs.map((graph, index) => {
             const summary = summaries[index];
@@ -551,6 +623,8 @@
     global.DisposablePortfolioDemo = {
         graphLayout,
         graphSummaries,
+        concentrationStatus,
+        humanizeId,
         nodeRiskRanking,
         renderCrossLayerGraph,
         resultRows,
