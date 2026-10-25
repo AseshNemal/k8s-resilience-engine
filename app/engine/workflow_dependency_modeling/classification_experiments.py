@@ -19,6 +19,7 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_repository im
 from app.engine.workflow_dependency_modeling.dependency_assessment_service import (
     get_dependency_assessment,
 )
+from .dependency_assessor import classify_cohort_effect
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,25 @@ def _summary_classification(
     assessment: DependencyAssessment,
     policy: AssessmentPolicy,
 ) -> ValidatedDependencyType:
+    # Do not pool business conditions: different branches can have different
+    # necessity labels even if their aggregate success rate looks ordinary.
+    if result.condition_results:
+        from dataclasses import replace
+        labels = {
+            _summary_classification(
+                replace(result, baseline=item.baseline, intervention=item.intervention,
+                        condition_results=()),
+                replace(assessment, interventions=tuple(
+                    cohort for cohort in assessment.interventions
+                    if cohort.condition_id == item.condition_id
+                )),
+                policy,
+            )
+            for item in result.condition_results
+        }
+        if ValidatedDependencyType.INSUFFICIENT_EVIDENCE in labels:
+            return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+        return next(iter(labels)) if len(labels) == 1 else ValidatedDependencyType.CONDITIONAL
     intervention = next(
         (
             cohort
@@ -109,6 +129,9 @@ def _summary_classification(
         None,
     )
     if intervention is None or not intervention.intervention_confirmed:
+        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+    if (set(result.baseline.eligible_execution_ids) & set(result.intervention.eligible_execution_ids)
+            or set(result.baseline.eligible_trace_ids) & set(result.intervention.eligible_trace_ids)):
         return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
     if result.baseline.eligible_records < policy.min_samples_per_cohort:
         return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
@@ -121,14 +144,7 @@ def _summary_classification(
     ):
         return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
 
-    effect = result.baseline.success_rate - result.intervention.success_rate
-    if effect >= policy.mandatory_effect_threshold:
-        if result.intervention.success_rate <= policy.max_mandatory_success_rate:
-            return ValidatedDependencyType.MANDATORY
-        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
-    if effect <= policy.optional_effect_tolerance:
-        return ValidatedDependencyType.OPTIONAL
-    return ValidatedDependencyType.SUPPORTING
+    return classify_cohort_effect(result.baseline, result.intervention, policy)[0]
 
 
 def analyze_threshold_sensitivity(

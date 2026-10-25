@@ -40,9 +40,9 @@ class OnlineBoutiqueRunResult:
     product_id: str
     started_at: datetime
     finished_at: datetime
-    product_status: int
-    cart_status: int
-    checkout_status: int
+    product_status: int | None
+    cart_status: int | None
+    checkout_status: int | None
     business_success: bool
     reason: str
 
@@ -189,9 +189,9 @@ def run_online_boutique_checkout(
         product_id=product_id,
         started_at=run.started_at,
         finished_at=run.finished_at,
-        product_status=statuses.get("view_product", 0),
-        cart_status=statuses.get("add_to_cart", 0),
-        checkout_status=statuses.get("checkout", 0),
+        product_status=statuses.get("view_product"),
+        cart_status=statuses.get("add_to_cart"),
+        checkout_status=statuses.get("checkout"),
         business_success=run.business_success,
         reason=run.reason,
     )

@@ -27,7 +27,7 @@ def _statistics(
 ) -> tuple[CohortStatistics, tuple[str, ...]]:
     outcomes = list(records)
     execution_counts = Counter(item.registration.execution_id for item in outcomes)
-    trace_counts = Counter(item.matched_trace_id for item in outcomes)
+    trace_counts = Counter(trace_id for item in outcomes for trace_id in item.trace_ids)
     eligible = [
         item
         for item in outcomes
@@ -35,7 +35,7 @@ def _statistics(
         and item.matched_trace_id is not None
         and item.matched_trace_id == item.registration.expected_trace_id
         and execution_counts[item.registration.execution_id] == 1
-        and trace_counts[item.matched_trace_id] == 1
+        and all(trace_counts[trace_id] == 1 for trace_id in item.trace_ids)
         and item.status
         in {ExecutionOutcomeStatus.SUCCEEDED, ExecutionOutcomeStatus.FAILED}
         and (allowed_execution_ids is None or item.registration.execution_id in allowed_execution_ids)
@@ -59,9 +59,9 @@ def _statistics(
                 item.registration.execution_id for item in eligible
             ),
             eligible_trace_ids=tuple(
-                item.matched_trace_id
+                trace_id
                 for item in eligible
-                if item.matched_trace_id is not None
+                for trace_id in sorted(item.trace_ids)
             ),
         ),
         excluded,
@@ -89,6 +89,34 @@ def _cohorts_overlap(baseline: CohortStatistics, intervention: CohortStatistics)
         set(baseline.eligible_execution_ids) & set(intervention.eligible_execution_ids)
         or set(baseline.eligible_trace_ids) & set(intervention.eligible_trace_ids)
     )
+
+
+def classify_cohort_effect(
+    baseline: CohortStatistics,
+    intervention: CohortStatistics,
+    policy: AssessmentPolicy,
+) -> tuple[ValidatedDependencyType, float | None]:
+    """One decision rule for service, edge and sensitivity calculations.
+
+    Callers still enforce intervention verification, sample and baseline gates.
+    A large drop with surviving runs, or a material improvement, is unresolved.
+    """
+    if baseline.success_rate is None or intervention.success_rate is None:
+        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE, None
+    effect = round(baseline.success_rate - intervention.success_rate, 4)
+    if effect >= policy.mandatory_effect_threshold:
+        label = (
+            ValidatedDependencyType.MANDATORY
+            if intervention.success_rate <= policy.max_mandatory_success_rate
+            else ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+        )
+    elif effect < -policy.optional_effect_tolerance:
+        label = ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+    elif effect <= policy.optional_effect_tolerance:
+        label = ValidatedDependencyType.OPTIONAL
+    else:
+        label = ValidatedDependencyType.SUPPORTING
+    return label, effect
 
 
 def assess_service_dependency(
@@ -124,15 +152,13 @@ def assess_service_dependency(
         reasons.append("Baseline success rate is below the configured stability gate")
 
     gate_failed = bool(reasons)
-    effect = None
-    if baseline.success_rate is not None and intervention_stats.success_rate is not None:
-        effect = round(baseline.success_rate - intervention_stats.success_rate, 4)
+    effect_label, effect = classify_cohort_effect(baseline, intervention_stats, policy)
 
     classification = ValidatedDependencyType.INSUFFICIENT_EVIDENCE
     if not gate_failed and effect is not None:
         if effect >= policy.mandatory_effect_threshold:
-            if intervention_stats.success_rate <= policy.max_mandatory_success_rate:
-                classification = ValidatedDependencyType.MANDATORY
+            if effect_label is ValidatedDependencyType.MANDATORY:
+                classification = effect_label
                 reasons.append(
                     "Confirmed intervention produced a repeatable workflow failure effect"
                 )
@@ -143,12 +169,12 @@ def assess_service_dependency(
         elif effect < -policy.optional_effect_tolerance:
             reasons.append("Intervention improved success materially; investigate confounding before classification")
         elif effect <= policy.optional_effect_tolerance:
-            classification = ValidatedDependencyType.OPTIONAL
+            classification = effect_label
             reasons.append(
                 "Confirmed intervention did not materially change workflow success"
             )
         else:
-            classification = ValidatedDependencyType.SUPPORTING
+            classification = effect_label
             reasons.append(
                 "Intervention caused partial degradation below the mandatory threshold"
             )
@@ -208,15 +234,13 @@ def assess_edge_dependency(
     ):
         reasons.append("Baseline success rate is below the configured stability gate")
 
-    effect = None
-    if baseline.success_rate is not None and intervention_stats.success_rate is not None:
-        effect = round(baseline.success_rate - intervention_stats.success_rate, 4)
+    effect_label, effect = classify_cohort_effect(baseline, intervention_stats, policy)
 
     classification = ValidatedDependencyType.INSUFFICIENT_EVIDENCE
     if not reasons and effect is not None:
         if effect >= policy.mandatory_effect_threshold:
-            if intervention_stats.success_rate <= policy.max_mandatory_success_rate:
-                classification = ValidatedDependencyType.MANDATORY
+            if effect_label is ValidatedDependencyType.MANDATORY:
+                classification = effect_label
                 reasons.append(
                     "Confirmed edge intervention produced a repeatable workflow failure effect"
                 )
@@ -227,12 +251,12 @@ def assess_edge_dependency(
         elif effect < -policy.optional_effect_tolerance:
             reasons.append("Intervention improved success materially; investigate confounding before classification")
         elif effect <= policy.optional_effect_tolerance:
-            classification = ValidatedDependencyType.OPTIONAL
+            classification = effect_label
             reasons.append(
                 "Confirmed edge intervention did not materially change workflow success"
             )
         else:
-            classification = ValidatedDependencyType.SUPPORTING
+            classification = effect_label
             reasons.append(
                 "Edge intervention caused partial degradation below the mandatory threshold"
             )
