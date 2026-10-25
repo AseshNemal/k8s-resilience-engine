@@ -24,15 +24,18 @@ _QUANTITY_SUFFIX = {
     "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18,
     "Ki": 2.0 ** 10, "Mi": 2.0 ** 20, "Gi": 2.0 ** 30, "Ti": 2.0 ** 40, "Pi": 2.0 ** 50, "Ei": 2.0 ** 60,
 }
-_QUANTITY = re.compile(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)([A-Za-z]*)")
+# The number part only; whatever follows it must be one of the suffixes above.
+_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 
 
 def parse_quantity(value: Any) -> float:
     """A Kubernetes quantity as a float. Raises ValueError for text that is not a quantity."""
-    match = _QUANTITY.fullmatch(str(value).strip())
-    if match is None or match.group(2) not in _QUANTITY_SUFFIX:
+    text = str(value).strip()
+    match = _NUMBER.match(text)
+    suffix = text[match.end():] if match else None
+    if suffix not in _QUANTITY_SUFFIX:
         raise ValueError(f"not a Kubernetes quantity: {value!r}")
-    return float(match.group(1)) * _QUANTITY_SUFFIX[match.group(2)]
+    return float(match.group()) * _QUANTITY_SUFFIX[suffix]
 
 
 def _quantity(value: Any) -> float:
