@@ -20,11 +20,12 @@ def _metrics(
     label: ValidatedDependencyType,
     actual: dict[str, ValidatedDependencyType],
     predicted: dict[str, ValidatedDependencyType],
+    *, complete_reference: bool = False,
 ) -> ClassificationMetrics:
-    services = set(actual) & set(predicted)
-    tp = sum(actual[name] is label and predicted[name] is label for name in services)
-    fp = sum(actual[name] is not label and predicted[name] is label for name in services)
-    fn = sum(actual[name] is label and predicted[name] is not label for name in services)
+    services = set(actual) if complete_reference else set(actual) & set(predicted)
+    tp = sum(actual[name] is label and predicted.get(name) is label for name in services)
+    fp = sum(actual[name] is not label and predicted.get(name) is label for name in services)
+    fn = sum(actual[name] is label and predicted.get(name) is not label for name in services)
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
@@ -124,4 +125,9 @@ def evaluate_dependency_classification(
         unexpected_services=tuple(unexpected),
         created_at=timestamp.astimezone(timezone.utc),
         created_by=actor,
+        complete_reference_metrics={
+            label.value: _metrics(label, actual, predicted, complete_reference=True)
+            for label in EVALUATED_LABELS
+        },
+        complete_reference_accuracy=correct / expected_count if expected_count else None,
     )

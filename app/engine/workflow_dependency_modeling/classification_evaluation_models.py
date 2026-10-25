@@ -190,6 +190,8 @@ class ClassificationEvaluation:
     unexpected_services: tuple[str, ...]
     created_at: datetime
     created_by: str
+    complete_reference_metrics: dict[str, ClassificationMetrics] | None = None
+    complete_reference_accuracy: float | None = None
 
     @property
     def selective_accuracy(self) -> float:
@@ -213,6 +215,11 @@ class ClassificationEvaluation:
             },
             "accuracy": self.accuracy,
             "selectiveAccuracy": self.selective_accuracy,
+            "completeReferenceMetrics": (
+                {label: value.to_mapping() for label, value in self.complete_reference_metrics.items()}
+                if self.complete_reference_metrics is not None else None
+            ),
+            "completeReferenceAccuracy": self.complete_reference_accuracy,
             "classifiedCount": self.classified_count,
             "expectedCount": self.expected_count,
             "macroF1": self.macro_f1,
@@ -259,4 +266,10 @@ class ClassificationEvaluation:
             unexpected_services=tuple(data.get("unexpectedServices", [])),
             created_at=_timestamp(data.get("createdAt"), "createdAt"),
             created_by=_text(data, "createdBy"),
+            complete_reference_metrics=(
+                {label: ClassificationMetrics.from_mapping(value)
+                 for label, value in data["completeReferenceMetrics"].items()}
+                if data.get("completeReferenceMetrics") is not None else None
+            ),
+            complete_reference_accuracy=data.get("completeReferenceAccuracy"),
         )
