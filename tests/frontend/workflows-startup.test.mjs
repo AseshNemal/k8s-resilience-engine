@@ -6,15 +6,17 @@ import vm from 'node:vm';
 const script = readFileSync(new URL('../../app/static/js/components/workflows.js', import.meta.url), 'utf8');
 const pollerScript = readFileSync(new URL('../../app/static/js/workflow-discovery-poller.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
-function makeEnvironment({discover, hidden = false, traceService} = {}) {
+function makeEnvironment({discover, hidden = false, traceService, ddClient, campaigns = [], assessments = []} = {}) {
     const registry = new Map();
     const element = key => {
         if (registry.has(key)) return registry.get(key);
         const node = {children: [], value: '', textContent: '', disabled: false, hidden: false, checked: false,
-            dataset: {}, listeners: {}, classList: {toggle() {}},
+            dataset: {}, style: {}, isConnected: true, listeners: {}, classList: {toggle() {}, add() {}},
             setAttribute() {}, addEventListener(type, fn) {this.listeners[type] = fn;},
+            remove() {}, replaceWith() {},
             replaceChildren(...children) {this.children = children; this.value = '';},
             append(...children) {this.children.push(...children);}, focus() {},
+            appendChild(child) {this.children.push(child);},
             querySelector: selector => element(selector), querySelectorAll: () => []};
         registry.set(key, node);
         return node;
@@ -30,12 +32,16 @@ function makeEnvironment({discover, hidden = false, traceService} = {}) {
     const listeners = {}, windowListeners = {};
     const document = {hidden, querySelector: element, querySelectorAll: () => [],
         createElement: tag => element('new:' + tag + ':' + Math.random()),
+        createElementNS: (_, tag) => element('new:' + tag + ':' + Math.random()),
         addEventListener(type, fn) {listeners[type] = fn;}};
     const calls = [];
     const json = (code, body) => ({ok: code < 400, status: code, json: async () => body});
     const fetch = async (url, options = {}) => {
         calls.push([options.method || 'GET', url, options.body]);
         if (url === '/api/workflows/discovery') return discover();
+        if (url === '/api/workflows/experiment-campaigns') return json(200, campaigns);
+        if (url === '/api/workflows/dependency-assessments') return json(200, assessments);
+        if (url.endsWith('/assessment')) return assessments.length ? json(200, assessments[0]) : json(404, {detail: 'Not found'});
         return json(200, []);
     };
     // A fake clock: timers run only when a test advances it.
@@ -58,7 +64,8 @@ function makeEnvironment({discover, hidden = false, traceService} = {}) {
 
     element('[data-role="trace-start-prompt"]').hidden = true;
     element('[data-role="trace-stop-button"]').hidden = true;
-    const window = {__resilienceTraceService: traceService, addEventListener(type, fn) {windowListeners[type] = fn;}};
+    const maps = [];
+    const window = {ddClient, WorkflowDependencyMap: {render(_, input) {maps.push(input);}}, __resilienceTraceService: traceService, addEventListener(type, fn) {windowListeners[type] = fn;}};
     const sandbox = {window, document, fetch, console, setTimeout, clearTimeout,
         URL, location: {href: 'http://localhost/components/workflows'}, history: {replaceState() {}},
         localStorage: {getItem: () => null, setItem() {}},
@@ -67,7 +74,7 @@ function makeEnvironment({discover, hidden = false, traceService} = {}) {
     vm.createContext(sandbox);
     vm.runInContext(pollerScript, sandbox);
     vm.runInContext(script, sandbox);
-    return {element, field, calls, json, advance, document, listeners, windowListeners};
+    return {element, field, calls, json, advance, document, listeners, windowListeners, maps};
 }
 const discoverCalls = env => env.calls.filter(([, url]) => url === '/api/workflows/discovery');
 const find = env => env.element('[data-role="guided-auto-discover"]').listeners.click();
@@ -88,14 +95,58 @@ test('startup loads saved workflows without inventing a connection or starting d
     assert.equal(env.field('traceEndpoint').value, '');
     assert.equal(discoverCalls(env).length, 0);
     assert.equal(env.calls[0][1], '/api/workflows/experiment-campaigns');
-    assert.match(env.element('[data-role="saved-status"]').textContent, /No saved workflows/);
+    assert.match(env.element('[data-role="saved-status"]').textContent, /No experiment data/);
+});
+
+test('startup opens a real recorded assessment without trace queries or rerunning the baseline', async () => {
+    const campaign = {campaignId: 'campaign:recorded', workflowId: 'orders', workflowName: 'Order experiment', environmentId: 'compose-test',
+        executionDefinition: {steps: [{method: 'POST', path: '/orders'}]}};
+    const assessment = {assessmentId: 'assessment:recorded', workflowId: 'orders', environmentId: 'compose-test', createdAt: '2026-10-24T10:00:00Z', structuralEntryService: 'web',
+        services: [{serviceName: 'payment', classification: 'mandatory', baseline: {succeededRecords: 5, eligibleRecords: 5, excludedRecords: 0}, intervention: {succeededRecords: 0, eligibleRecords: 5, excludedRecords: 0}, failureEffect: 1, reasons: ['Recorded test']}],
+        candidateGraph: {edges: [{source: 'web', target: 'payment'}]}, policy: {}};
+    const env = makeEnvironment({campaigns: [campaign], assessments: [assessment]});
+    await flush(); await flush();
+    assert.equal(env.maps.length, 1);
+    assert.equal(env.maps[0].assessments[0].classification, 'mandatory');
+    assert.match(env.maps[0].sourceLabel, /Historical experiment.*compose-test/);
+    assert.equal(env.element('[data-role="saved-workflows"]').value, 'campaign:recorded');
+    assert.equal(env.element('[data-role="source-panel"]').hidden, true);
+    assert.equal(env.calls.every(([method]) => method === 'GET'), true);
+    assert.equal(discoverCalls(env).length, 0);
+    assert.equal(env.calls.some(([, url]) => url.includes('baseline-runs') || url.includes('/progress')), false);
+});
+
+test('Boutique inputs fill only on request and remain editable without making requests', async () => {
+    const env = makeEnvironment({ddClient: {}});
+    await flush();
+    const before = env.calls.length;
+    env.element('[data-role="fill-boutique-settings"]').listeners.click();
+    assert.equal(env.field('traceEndpoint').value, 'http://host.docker.internal:17686');
+    assert.equal(env.field('environmentId').value, 'online-boutique-kind-resilience-research-20261025');
+    assert.equal(env.field('evidenceTier').value, 'experimental');
+    assert.equal(env.field('traceAuthentication').value, 'none');
+    assert.equal(env.field('operationName').value, 'POST /cart/checkout');
+    assert.equal(env.field('criticality').value, '0.9');
+    assert.equal(env.calls.length, before);
+    env.field('traceEndpoint').value = 'https://traces.example.test';
+    assert.equal(env.field('traceEndpoint').disabled, false);
+    assert.equal(env.field('traceEndpoint').value, 'https://traces.example.test');
+    assert.match(status(env), /verified from real traces/);
+});
+
+test('Boutique input shortcut uses localhost in an ordinary browser', async () => {
+    const env = makeEnvironment();
+    await flush();
+    env.element('[data-role="fill-boutique-settings"]').listeners.click();
+    assert.equal(env.field('traceEndpoint').value, 'http://localhost:17686');
 });
 test('automatic discovery requires the user connection and does not require an entry service', async () => {
     const env = makeEnvironment({discover: () => env.json(200, report())});
     find(env); await flush(); assert.equal(discoverCalls(env).length, 0);
     configure(env); find(env); await flush();
     const payload = JSON.parse(discoverCalls(env)[0][2]);
-    assert.deepEqual(Object.keys(payload).sort(), ['lookback', 'traceSource']);
+    assert.deepEqual(Object.keys(payload).sort(), ['continuous', 'lookback', 'traceSource']);
+    assert.equal(payload.continuous, true);
     assert.equal(payload.traceSource.endpoint, 'http://localhost:16686');
     assert.match(select(env).children[1].textContent, /GET \/orders.*gateway.*3 traces/);
 });
@@ -151,7 +202,46 @@ test('rejected settings show the server message and stop retries', async () => {
 });
 test('bounded discovery tells the user that additional workflows may exist', async () => {
     const env = makeEnvironment({discover: () => env.json(200, report('discovered', [], {truncated: true}))});
-    configure(env); find(env); await flush(); assert.match(status(env), /scan reached its limit/);
+    configure(env); find(env); await flush(); assert.match(status(env), /Partial search/);
+});
+
+const coverage = (state, completed = 0) => ({status: state, servicesCompleted: completed, servicesTotal: 2, queriesCompleted: completed + 1});
+test('discovery continues with its scan identity and displays progress until the fixed window completes', async () => {
+    let index = 0;
+    const env = makeEnvironment({discover: () => env.json(200, report('discovered', [workflow('web', 'GET /orders')], {
+        scanId: 'opaque-scan', tracesFetched: 60, coverage: coverage(index++ ? 'complete' : 'scanning', index > 1 ? 2 : 0),
+    }))});
+    configure(env); find(env); await flush();
+    assert.match(status(env), /Searching.*60 unique traces/);
+    assert.equal(env.element('[data-role="stop-workflow-scan"]').hidden, false);
+    await env.advance(100);
+    assert.equal(JSON.parse(discoverCalls(env)[1][2]).scanId, 'opaque-scan');
+    assert.match(status(env), /Search completed for the fixed window/);
+    assert.equal(env.element('[data-role="stop-workflow-scan"]').hidden, true);
+});
+
+test('stopping a scan cancels its backend session and prevents more search batches', async () => {
+    const env = makeEnvironment({discover: () => env.json(200, report('discovered', [workflow('web', 'GET /orders')], {
+        scanId: 'opaque-scan', tracesFetched: 20, coverage: coverage('scanning'),
+    }))});
+    configure(env); find(env); await flush();
+    env.element('[data-role="stop-workflow-scan"]').listeners.click();
+    await flush();
+    assert.equal(JSON.parse(discoverCalls(env).at(-1)[2]).cancel, true);
+    assert.match(status(env), /Scan stopped.*partial results/);
+    const count = discoverCalls(env).length;
+    await env.advance(200000);
+    assert.equal(discoverCalls(env).length, count);
+});
+
+test('a partial search does not silently restart or become complete', async () => {
+    const env = makeEnvironment({discover: () => env.json(200, report('discovered', [workflow('web', 'GET /orders')], {
+        scanId: 'opaque-scan', tracesFetched: 20, coverage: coverage('partial'),
+    }))});
+    configure(env); find(env); await flush();
+    assert.match(status(env), /Partial search/);
+    await env.advance(200000);
+    assert.equal(discoverCalls(env).length, 1);
 });
 
 const click = (env, role) => env.element(`[data-role="${role}"]`).listeners.click();
