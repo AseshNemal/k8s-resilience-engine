@@ -498,11 +498,14 @@
             const head = el("tr"), selectedId = env.selectedId?.();
             head.append(el("th", "Metric", "cmp-corner", { scope: "col" }));
             model.columns.forEach((c) => {
-                const th = el("th", null, "cmp-head", { scope: "col", "data-selected": String(!!selectedId && c.candidateId === selectedId) });
-                if (c.strategy) th.append(el("span", c.strategy, "cmp-strategy"));
-                th.append(el("span", c.services, "cmp-services", { title: c.id || "" }));
-                if (c.otherCluster) th.append(chip("Different cluster", "bad"));
-                if (selectedId && c.candidateId === selectedId) th.append(chip("Selected", "ok"));
+                // The header cell stays a table cell; the stacking of its content is on an inner block.
+                const th = el("th", null, "cmp-th", { scope: "col", "data-selected": String(!!selectedId && c.candidateId === selectedId) });
+                const inner = el("div", null, "cmp-head");
+                if (c.strategy) inner.append(el("span", c.strategy, "cmp-strategy"));
+                inner.append(el("span", c.services, "cmp-services", { title: c.id || "" }));
+                if (c.otherCluster) inner.append(chip("Different cluster", "bad"));
+                if (selectedId && c.candidateId === selectedId) inner.append(chip("Selected", "ok"));
+                th.append(inner);
                 head.append(th);
             });
             const thead = el("thead"); thead.append(head); table.append(thead);
