@@ -173,6 +173,7 @@
 .tab-pane {
     animation: tab-fade-in 0.25s ease-out;
 }
+@media (prefers-reduced-motion: reduce) { .tab-pane { animation: none; } }
 
 .tab-pane[hidden] {
     display: none;
