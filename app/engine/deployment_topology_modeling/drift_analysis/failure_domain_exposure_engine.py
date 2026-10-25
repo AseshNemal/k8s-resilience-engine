@@ -41,6 +41,8 @@ class FailureDomainExposureEngine:
         ready_count = pm.ready_replica_count(runtime_pods)
         ratio = pm.concentration_ratio(runtime_pods)
 
+        # Compliance only means something for a service that declares a rule; otherwise it stays None.
+        # A service can obey its rule and still be exposed (e.g. spread rule kept, but pods left Pending).
         rules_satisfied: bool | None = None
         if has_placement_rules:
             rules_satisfied = not any(v.drift_type in PLACEMENT_RULE_DRIFT_TYPES for v in violations)

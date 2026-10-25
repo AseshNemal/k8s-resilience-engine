@@ -35,6 +35,7 @@ class DeploymentOnlyBaselineEngine:
 
         ranked = sorted(service_exposures, key=cls._sort_key)
 
+        # Which services each node would take down on its own.
         exposed_by_node: dict[str, list[str]] = {}
         for e in ranked:
             for node in e.exposed_failure_domains:
@@ -54,6 +55,7 @@ class DeploymentOnlyBaselineEngine:
             for rank, e in enumerate(ranked, start=1)
         ]
 
+        # The node that would take down the most services; ties go to the first name, so the answer never changes.
         most_critical_node = None
         if exposed_by_node:
             most_critical_node = min(exposed_by_node, key=lambda n: (-len(exposed_by_node[n]), n))

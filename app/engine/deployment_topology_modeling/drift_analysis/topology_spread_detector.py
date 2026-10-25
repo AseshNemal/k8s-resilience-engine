@@ -41,12 +41,14 @@ class TopologySpreadDriftDetector(BaseDriftDetector):
         nodes: dict[str, dict[str, str]],
     ) -> Counter[str]:
         """Scheduled pods per domain, over eligible nodes only; empty domains count as 0."""
+        # Only nodes the pod is allowed on (its nodeSelector / required affinity) count, like in Kubernetes.
         node_domain: dict[str, str] = {}
         for node_name, labels in nodes.items():
             domain = self._domain_of(node_name, labels, topology_key)
             if domain is not None and ia.node_satisfies_required_placement(declared_intent, labels):
                 node_domain[node_name] = domain
 
+        # Start every domain at 0, so an empty node pulls the minimum down to 0.
         counts: Counter[str] = Counter(dict.fromkeys(set(node_domain.values()), 0))
         for pod in runtime_pods:
             node_name = pm.pod_node(pod)
@@ -78,10 +80,12 @@ class TopologySpreadDriftDetector(BaseDriftDetector):
         if not counts or sum(counts.values()) == 0:
             return None
 
+        # e.g. pods per node {2, 1, 0}: skew = 2 - 0 = 2, which breaks maxSkew 1.
         actual_skew = self._skew(counts, constraint["min_domains"])
         if actual_skew <= max_skew:
             return None
 
+        # A hard rule (DoNotSchedule) that is broken is worse than a soft one (ScheduleAnyway).
         return DriftViolation(
             drift_type=DriftType.TOPOLOGY_SPREAD_DRIFT,
             severity=DriftSeverity.HIGH if when_unsatisfiable == "DoNotSchedule" else DriftSeverity.MEDIUM,

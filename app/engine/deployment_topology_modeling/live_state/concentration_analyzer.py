@@ -21,9 +21,12 @@ def analyze_replica_concentration(
         pods = []
         for p in data["pods"]:
             node = p.get("node")
+            # Ready only if the pod says Ready AND its node is not NotReady.
+            # (An unknown node state, None, does not count against the pod.)
             effective = bool(p.get("ready")) and node_ready.get(node) is not False
             pods.append({**p, "readyCondition": bool(p.get("ready")), "ready": effective})
 
+        # All numbers below come from placement_metrics, so every part of the tool uses the same definitions.
         ratio = pm.concentration_ratio(pods)
         analyzed.append({
             **{k: v for k, v in data.items() if k != "pods"},

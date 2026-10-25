@@ -42,6 +42,7 @@ def pod_node(pod: Mapping[str, Any]) -> str | None:
 
 
 def ready_replicas_per_node(pods: Iterable[Mapping[str, Any]]) -> Counter[str]:
+    # e.g. {"worker": 2, "worker2": 1}. Pods that are not ready or have no node yet are not counted.
     return Counter(
         node for pod in pods
         if pod_is_ready(pod) and (node := pod_node(pod)) is not None
@@ -55,6 +56,7 @@ def ready_replica_count(pods: Iterable[Mapping[str, Any]]) -> int:
 def exposed_failure_domains(pods: Iterable[Mapping[str, Any]]) -> list[str]:
     """Nodes n with SA(s, {n}) = 0. Under single-node failure this has at most one element."""
     per_node = ready_replicas_per_node(pods)
+    # If every ready copy is on one node, losing that node leaves nothing. Two or more nodes: no single node does.
     return sorted(per_node) if len(per_node) == 1 else []
 
 
@@ -70,13 +72,16 @@ def concentration_ratio(pods: Iterable[Mapping[str, Any]]) -> float | None:
     """Max ready replicas on one node / total ready replicas (PROJECT_CONTEXT section 15)."""
     per_node = ready_replicas_per_node(pods)
     total = sum(per_node.values())
+    # No ready copies: the ratio is undefined, so None rather than a made-up 0.
     if total == 0:
         return None
+    # e.g. 2 of 3 copies on the busiest node -> 0.67. 1.0 means everything on one node.
     return max(per_node.values()) / total
 
 
 def exposure_status(pods: Iterable[Mapping[str, Any]]) -> ExposureStatus:
     pods = list(pods)
+    # Already down before any failure: a node failure can't take it down, so it is not "exposed".
     if ready_replica_count(pods) == 0:
         return ExposureStatus.UNAVAILABLE
     return ExposureStatus.EXPOSED if exposed_failure_domains(pods) else ExposureStatus.NOT_EXPOSED
@@ -114,6 +119,7 @@ class PlacementDriftResult:
 
     @property
     def rate(self) -> float | None:
+        # D_rate = services whose exposure status changed / services compared
         if not self.compared_services:
             return None
         return len(self.changed_services) / len(self.compared_services)
@@ -128,6 +134,7 @@ def placement_drift(
     Only services present in both snapshots are compared; services that appear or disappear
     are reported separately and are not counted in the rate.
     """
+    # Only services seen at both T0 and T1 are compared; new or removed services are listed separately.
     compared = sorted(set(before) & set(after))
     changed = [s for s in compared if before[s] != after[s]]
     return PlacementDriftResult(

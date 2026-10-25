@@ -112,6 +112,7 @@ def collect_live_cluster(namespace: str = "default") -> tuple[list[ClusterNode],
             "DISCOVERY_FAILED", "The cluster returned an unexpected error during discovery.",
             http_status=502, retryable=True,
         )) from None
+    # Node readiness is passed in too, so a pod on a NotReady node is not counted as a ready copy.
     return nodes, analyze_replica_concentration(workloads, {n.name: n.ready for n in nodes})
 
 
@@ -216,6 +217,8 @@ def _associate_manifest_intents(
         ]
         if not matching or not service_name:
             continue
+        # One Service can sit in front of several Deployments (e.g. reviews-v1, -v2, -v3),
+        # so the YAML's replicas are added up and a rule counts if any of them declares it.
         primary = matching[0]
         expected_replicas = sum(item.expected_replicas for item in matching)
         spread = [c for item in matching for c in item.spread_constraints]
@@ -377,9 +380,11 @@ def _analyse(
     load_manifests: bool = True,
     namespace: str = "default",
 ) -> TopologyAnalysis:
+    # 1. what the YAML asks for, matched to each Service
     manifest_map, service_intents = (
         _load_manifest_intents(manifest_path, analyzed_services, namespace) if load_manifests else ({}, {})
     )
+    # 2. compare it with what is running: drift, exposure, compliance and Baseline B2
     report, baseline_b2 = DriftAnalyzer().analyze_cluster(
         manifests_by_service=manifest_map,
         runtime_pods_by_service={s["name"]: s.get("pods", []) for s in analyzed_services if s.get("name")},
@@ -389,6 +394,7 @@ def _analyse(
         # Nothing was declared to compare the cluster against. Say so, and never let that read as 100%
         # compliance: exposure and concentration still come from actual placement.
         report = report.model_copy(update={"constraint_compliance_rate": None, "declared_state": "unavailable"})
+    # 3. put it all into the shared DeploymentGraph
     builder = DeploymentGraphBuilder()
     builder.attach_nodes(nodes)
     builder.attach_services(analyzed_services, _drift_reports(report), service_intents)
@@ -494,6 +500,7 @@ def _pooled_ground_truth(recordings: str | None = None):
         recording_dirs,
     )
     dirs = recording_dirs()
+    # e.g. recordings="bookinfo-exp" keeps only the Bookinfo recordings (the Accuracy tab uses this).
     if recordings:
         dirs = [d for d in dirs if d.relative_to(GROUND_TRUTH_ROOT).parts[0].startswith(recordings)]
     return evaluate_recordings(dirs)
@@ -574,6 +581,7 @@ def get_drift_spofs(namespace: str = "default") -> list[dict[str, Any]]:
 
 
 def spofs_from_report(report: ClusterExposureReport) -> list[dict[str, Any]]:
+    # SPOF = single point of failure: one node whose loss takes the whole service down.
     return [
         {
             "service_name": svc.service_name,
@@ -936,6 +944,7 @@ def get_live_experiment_results(results_dir: Path | None = None, workload: str =
         return None
     summary = json.loads(summary_file.read_text(encoding="utf-8"))
     conditions = []
+    # One condition = one scenario with one config (e.g. node drain, no rule): its statistics plus every run.
     for c in summary["conditions"]:
         # "runs" is already the stored run count, so the placements of every run get their own key.
         placements = _condition_runs(results_dir, c["scenario_id"], c["config"])

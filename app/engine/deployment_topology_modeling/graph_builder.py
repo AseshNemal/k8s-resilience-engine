@@ -27,6 +27,7 @@ class DeploymentGraphBuilder:
     def attach_nodes(self, nodes: List[Any]) -> None:
         """Attaches worker nodes (ClusterNode objects)."""
         for n in nodes:
+            # Kept so each pod can be given its node's zone below.
             self.node_zone_map[n.name] = n.zone
             self.node_models.append(NodeModel(
                 name=n.name,
@@ -71,6 +72,7 @@ class DeploymentGraphBuilder:
         for svc in analyzed_services:
             pod_models = []
             for p in svc["pods"]:
+                # A Pending pod has no node yet; it is shown as "unscheduled" instead of being dropped.
                 pod_node = p.get("node") or UNSCHEDULED_NODE
                 pod_models.append(PodModel(
                     name=p.get("name", "unknown"),
@@ -91,6 +93,7 @@ class DeploymentGraphBuilder:
             drift_data = drift_reports.get(svc.get("name"), {"drift_detected": False, "drift_reasons": []})
             intent = (service_intents or {}).get(svc.get("name"))
 
+            # One entry per Service in the shared contract. This is what Component 3 reads.
             self.service_models.append(ServicePlacement(
                 name=svc.get("name", "unknown"),
                 namespace=svc.get("namespace", "default"),
@@ -119,6 +122,7 @@ class DeploymentGraphBuilder:
 
     def build(self, runtime_overhead_ms: float = 0.0) -> DeploymentGraph:
         """Accuracy metrics stay None until measured against independent ground truth."""
+        # The failure domain is the worker node (kubernetes.io/hostname).
         return DeploymentGraph(
             snapshot_id=f"snap-{self._placement_fingerprint()}",
             timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -132,6 +136,7 @@ class DeploymentGraphBuilder:
         )
 
     def _parse_cpu_value(self, cpu_str: str) -> float | None:
+        # CPU in cores: "500m" (millicores) -> 0.5, "2" -> 2.0. Unknown stays None.
         if not cpu_str or cpu_str.lower() in {"none", "null"}:
             return None
         if cpu_str.endswith("m"):

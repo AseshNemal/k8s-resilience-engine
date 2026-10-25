@@ -12,6 +12,7 @@ from app.engine.deployment_topology_modeling.manifest_parsing.manifest_models im
 
 def run_manifest_pipeline(directory: str = "deploy/test-workloads") -> List[DeclaredIntent]:
     """Declared Deployment intent from a manifest file or directory."""
+    # read the YAML files -> keep the Deployments -> turn each one into a DeclaredIntent
     return parse_declared_intents(read_yaml_manifests(directory))
 
 

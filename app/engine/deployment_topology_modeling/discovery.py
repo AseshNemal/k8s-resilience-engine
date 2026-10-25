@@ -134,11 +134,13 @@ def _unresolved(kind: str, name: str, reason: str, namespace: str, affects: list
 
 def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryResult:
     namespace = (namespace or "").strip()
+    # Reject names Kubernetes would never allow before anything is sent to the cluster.
     if not NAMESPACE_PATTERN.match(namespace):
         raise DiscoveryError("INVALID_NAMESPACE", "The namespace is not a valid Kubernetes namespace name.",
                              http_status=422)
 
     source = source or get_cluster_source()
+    # The five read-only lists the whole model is built from.
     try:
         nodes = source.list_nodes()
         pods = source.list_pods(namespace)
@@ -148,6 +150,7 @@ def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryRe
         deployments = source.list_objects("deployments", f"/apis/apps/v1/namespaces/{base}/deployments")
         fingerprint = source.connection_fingerprint()
     except ClusterAccessError as error:
+        # No connection, bad credential, missing permission...: answer with a clear error code, never sample data.
         logger.warning("Cluster discovery failed (%s): %s", type(error).__name__, error)
         raise _classify(error) from None
     except DiscoveryError:
@@ -158,6 +161,7 @@ def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryRe
         raise DiscoveryError("DISCOVERY_FAILED", "The cluster returned an unexpected error during discovery.",
                              http_status=502, retryable=True) from None
 
+    # Worker nodes are the failure domains: application pods only run there.
     workers = [n for n in nodes if not n.control_plane]
     worker_names = {n.name for n in workers}
     warnings: list[DiscoveryWarning] = []
@@ -192,6 +196,8 @@ def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryRe
             del workloads[name]
             continue
         reasons = evidence_reasons.setdefault(name, [])
+        # Sort the pods: on a worker (placed), not scheduled yet, or on a node we don't model (excluded).
+        # Anything not placed is reported as unresolved instead of being guessed.
         placed, excluded = [], []
         for pod in all_pods:
             if pod["node"] is None:
@@ -244,11 +250,13 @@ def discover(namespace: str, source: ClusterSource | None = None) -> DiscoveryRe
                     "verified with the current read permissions.",
         ))
 
+    # Concentration and exposure per service, then the shared DeploymentGraph.
     builder = DeploymentGraphBuilder()
     builder.attach_nodes(workers)
     builder.attach_services(analyze_replica_concentration(workloads), {})
     graph = builder.build()
 
+    # partial = something could not be resolved; empty = no services; ok = everything resolved.
     if unresolved or not workers:
         status = "partial"
     elif not graph.services:

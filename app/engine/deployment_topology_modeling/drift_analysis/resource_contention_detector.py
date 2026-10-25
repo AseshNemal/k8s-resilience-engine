@@ -66,6 +66,7 @@ class ResourceContentionDetector(BaseDriftDetector):
         runtime_pods: list[dict[str, Any]],
         cluster_nodes: list[dict[str, Any]],
     ) -> list[DriftViolation]:
+        # Can be switched off in DriftConfig. Its findings are shown, but never counted as placement drift.
         if not self.config.enforce_resource_limits or not declared_intent:
             return []
 
