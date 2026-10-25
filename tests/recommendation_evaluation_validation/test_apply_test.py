@@ -338,3 +338,17 @@ def test_live_view_names_each_deployment_pod_and_node_and_says_why_when_it_has_n
     _connect(service, gateway)
     assert service.live(run["runId"])["reason"] == "CLUSTER_UNREADABLE"
     assert service.live("apply-test-missing") is None
+
+
+def test_live_view_reports_pod_version_and_node_health_and_usage(world):
+    service, gateway, selection = world
+    run = service.start(**selection, background=False)
+    gateway.cordoned.add("desktop-worker2")
+    gateway.read_resource_usage = lambda ns: {"nodes": [{"name": "desktop-worker", "usage": {"cpu": "250m", "memory": "512Mi"}}]}
+
+    live = service.live(run["runId"])
+    nodes = {n["name"]: n for n in live["nodes"]}
+
+    assert {p["version"] for d in live["deployments"] for p in d["pods"]} == {"new"}
+    assert nodes["desktop-worker"]["cpu"] == "250m" and nodes["desktop-worker"]["schedulable"] is True
+    assert nodes["desktop-worker2"]["schedulable"] is False and nodes["desktop-worker2"]["cpu"] is None   # unknown, not zero

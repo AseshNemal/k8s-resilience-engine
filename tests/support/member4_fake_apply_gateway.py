@@ -33,6 +33,8 @@ class FakeApplyGateway:
         self.progress_failed: str | None = None                 # Progressing=False with this reason
         self.stale_old_pods = 0                                 # old-generation pods still owned after the write
         self.reads = 0
+        self.cordoned: set[str] = set()                         # nodes that accept no new pods
+        self.not_ready: set[str] = set()
 
     def _reachable(self) -> None:
         if self.credential_rejected:
@@ -118,8 +120,13 @@ class FakeApplyGateway:
                           "desired": d.replicas, "updated": d.replicas, "ready": d.replicas, "total": d.replicas,
                           "blockedReason": self.blocked_reason,
                           "pods": [{"name": f"{name}-{i}", "node": nodes[i % 2], "phase": "Running", "ready": True, "state": "Ready",
-                                    "startedAt": None, "restarts": 0, "templateHash": f"hash{d.generation}"} for i in range(d.replicas)]})
+                                    "startedAt": None, "restarts": 0, "templateHash": f"hash{d.generation}", "version": "new"} for i in range(d.replicas)]})
         return found
+
+    def read_node_states(self):
+        self._reachable()
+        return {n: {"ready": n not in self.not_ready, "schedulable": n not in self.cordoned}
+                for n in ("desktop-worker", "desktop-worker2")}
 
     def rollout_complete(self, namespace: str, names) -> bool:
         return all(r.observed_generation >= r.generation and not r.missing for r in self.read_rollout(namespace, names).values())

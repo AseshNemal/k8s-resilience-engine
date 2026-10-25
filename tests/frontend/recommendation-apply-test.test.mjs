@@ -260,7 +260,7 @@ test("while a run is busy the live view names each Deployment, pod and node, and
     await env.panel.start();
     const shown = text(env.root);
     assert.ok(env.calls.some(([url]) => url.endsWith("/run-1/live")) && env.calls.every(([, method]) => method === "GET"));
-    for (const expected of ["Live activity", "db — 1/2 ready", "db-0", "worker-a", "db-1", "Not scheduled yet", "Unschedulable", "Pods per node: worker-a 1"])
+    for (const expected of ["Live activity", "db — 1/2 ready", "db-0", "worker-a", "db-1", "Not scheduled yet", "Unschedulable", "Nodes", "Pods from this run"])
         assert.ok(shown.includes(expected), expected);
     finished = true;
     await env.panel.start();
@@ -272,4 +272,32 @@ test("a live view that cannot be read leaves the run's own status in place", asy
     await env.panel.start();
     assert.ok(text(env.root).includes("Reading what the cluster is doing"));
     assert.ok(text(env.root).includes("Waiting for replicas"));
+});
+
+test("a refused Reset stays shown until the connected cluster is no longer the one it was refused on", async () => {
+    let match = "same", refuse = true;
+    const finished = { ...complete, canReset: true };
+    const env = setup((url, init) => init.method === "POST" && refuse
+        ? response({ detail: { message: "The connected cluster is not the one this change was applied to" } }, 409)
+        : response({ run: { ...finished, clusterMatch: match } }), { readOnly: false });
+    await env.panel.start();
+    await env.panel.reset();
+    assert.ok(text(env.root).includes("not the one this change was applied to"));
+    await env.panel.start();                                  // a re-check on the same cluster keeps the explanation
+    assert.ok(text(env.root).includes("not the one this change was applied to"));
+    match = "other";                                          // another cluster is connected now: the old refusal is not about it
+    await env.panel.start();
+    assert.ok(!text(env.root).includes("not the one this change was applied to"));
+});
+
+test("the live view tells old pods from new ones and shows node health and usage", async () => {
+    const live = { available: true, capturedAt: "2026-10-25T05:31:06Z", namespace: "shop", deployments: [{ name: "db", desired: 2, ready: 2, updated: 1,
+        pods: [{ name: "db-new", node: "worker-a", state: "Ready", version: "new" }, { name: "db-old", node: "worker-b", state: "Terminating", version: "old" }] }],
+        nodes: [{ name: "worker-a", pods: 1, ready: true, schedulable: true, cpu: "250m", memory: "512Mi" },
+                { name: "worker-b", pods: 1, ready: true, schedulable: false, cpu: null, memory: null }] };
+    const env = setup((url) => url.endsWith("/live") ? response(live) : response({ run: running }));
+    await env.panel.start();
+    const shown = text(env.root);
+    for (const expected of ["New version", "Old version", "Cordoned: takes no new pods", "250 mCPU", "512 MiB", "Unavailable"])
+        assert.ok(shown.includes(expected), expected);
 });

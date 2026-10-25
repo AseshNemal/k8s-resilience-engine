@@ -291,8 +291,24 @@ class ApplyTestService:
             for pod in deployment["pods"]:
                 if pod.get("node"):
                     per_node[pod["node"]] = per_node.get(pod["node"], 0) + 1
-        return {**base, "available": True, "deployments": deployments,
-                "nodes": [{"name": n, "pods": c} for n, c in sorted(per_node.items())]}
+        gateway = self.gateway_factory()
+        states, usage = self._best_effort(gateway, "read_node_states"), self._node_usage(gateway, run["namespace"])
+        nodes = [{"name": n, "pods": per_node.get(n, 0), "ready": (states.get(n) or {}).get("ready"),
+                  "schedulable": (states.get(n) or {}).get("schedulable"), "cpu": (usage.get(n) or {}).get("cpu"),
+                  "memory": (usage.get(n) or {}).get("memory")} for n in sorted(set(per_node) | set(states))]
+        return {**base, "available": True, "deployments": deployments, "nodes": nodes}
+
+    @staticmethod
+    def _best_effort(gateway, method, *args):
+        """Extra detail for the live view: when it cannot be read it is simply absent (None means unknown, never zero)."""
+        try:
+            return getattr(gateway, method)(*args) or {}
+        except Exception:
+            return {}
+
+    def _node_usage(self, gateway, namespace):
+        data = self._best_effort(gateway, "read_resource_usage", namespace)
+        return {n.get("name"): n.get("usage") or {} for n in data.get("nodes") or []}
 
     def history(self, *, limit=20, offset=0):
         rows, more = self.repo.history(limit=limit, offset=offset)

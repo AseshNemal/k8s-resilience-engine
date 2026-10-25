@@ -9,9 +9,26 @@
     const outcomeLabel = (value) => value?.riskTargetMet === false || value?.report?.riskTargetMet === false
         ? "Risk target not met" : LABELS[value?.status] || value?.status;
 
+    const fmtCpu = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(n|u|m)?$/);
+        if (!match) return String(raw);
+        const milli = Number(match[1]) * ({ n: 0.000001, u: 0.001, m: 1 }[match[2]] ?? 1000);
+        if (milli > 0 && milli < 0.001) return "<0.001 mCPU";
+        return `${Number(milli.toFixed(3))} mCPU`;
+    };
+    const fmtMemory = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(Ki|Mi|Gi|Ti|k|M|G)?$/);
+        if (!match) return String(raw);
+        const bytes = Number(match[1]) * ({ Ki: 1024, Mi: 1048576, Gi: 1073741824, Ti: 1099511627776, k: 1000, M: 1000000, G: 1000000000 }[match[2]] ?? 1);
+        return `${Number((bytes / 1048576).toFixed(2))} MiB`;
+    };
+
     function createPanel(env) {
         const { root, document, fetchImpl } = env;
         let run = null, pending = false, error = null, timer = null, destroyed = false, epoch = 0, resetting = false;
+        let resetFailure = null;      // {message, match}: a refused Reset stays shown until the cluster it was refused on is no longer the one connected
         let live = null;      // the cluster's own picture of the target Deployments and pods; only read while a run is busy
         let expectedRequest = env.pendingRequestKey?.() || null;
         let startError = null;
@@ -47,24 +64,9 @@
         function resources(snapshot) {
             const data = snapshot?.resources;
             if (!data || !(data.nodes?.length || data.pods?.length)) return make("p", "CPU/memory usage unavailable. Resource requests are not measured usage.", "ui-note");
-            const cpu = (raw) => {
-                if (raw === null || raw === undefined) return null;
-                const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(n|u|m)?$/);
-                if (!match) return String(raw);
-                const milli = Number(match[1]) * ({ n: 0.000001, u: 0.001, m: 1 }[match[2]] ?? 1000);
-                if (milli > 0 && milli < 0.001) return "<0.001 mCPU";
-                return `${Number(milli.toFixed(3))} mCPU`;
-            };
-            const memory = (raw) => {
-                if (raw === null || raw === undefined) return null;
-                const match = String(raw).match(/^([0-9]+(?:\.[0-9]+)?)(Ki|Mi|Gi|Ti|k|M|G)?$/);
-                if (!match) return String(raw);
-                const bytes = Number(match[1]) * ({ Ki: 1024, Mi: 1048576, Gi: 1073741824, Ti: 1099511627776, k: 1000, M: 1000000, G: 1000000000 }[match[2]] ?? 1);
-                return `${Number((bytes / 1048576).toFixed(2))} MiB`;
-            };
             const rows = [];
-            (data.nodes || []).forEach((n) => rows.push([`Node ${n.name}`, cpu(n.usage?.cpu), memory(n.usage?.memory), n.timestamp]));
-            (data.pods || []).forEach((p) => (p.containers || []).forEach((c) => rows.push([`${p.name} / ${c.name}`, cpu(c.usage?.cpu), memory(c.usage?.memory), p.timestamp])));
+            (data.nodes || []).forEach((n) => rows.push([`Node ${n.name}`, fmtCpu(n.usage?.cpu), fmtMemory(n.usage?.memory), n.timestamp]));
+            (data.pods || []).forEach((p) => (p.containers || []).forEach((c) => rows.push([`${p.name} / ${c.name}`, fmtCpu(c.usage?.cpu), fmtMemory(c.usage?.memory), p.timestamp])));
             const wrap = make("div");
             if (!data.available) wrap.append(make("p", "Some resource measurements are unavailable; the values below are the samples that could be read.", "ui-note"));
             wrap.append(make("p", `Source: ${data.source}. CPU in millicores (1000 mCPU = 1 core); memory in MiB. Raw samples are preserved in the download.`, "ui-note"),
@@ -139,11 +141,16 @@
                 section.append(head);
                 if (deployment.blockedReason) section.append(make("p", deployment.blockedReason, "approval-note"));
                 if (deployment.pods?.length) {
-                    section.append(table(["Pod", "Node", "State"], deployment.pods.map((pod) =>
-                        [pod.name, pod.node || "Not scheduled yet", pod.restarts ? `${pod.state} (${pod.restarts} restarts)` : pod.state])));
+                    const versions = { new: "New version", old: "Old version" };
+                    section.append(table(["Pod", "Node", "Version", "State"], deployment.pods.map((pod) =>
+                        [pod.name, pod.node || "Not scheduled yet", versions[pod.version] || "Unknown", pod.restarts ? `${pod.state} (${pod.restarts} restarts)` : pod.state])));
                 } else if (!deployment.missing) section.append(make("p", "No pods yet.", "ui-note"));
             });
-            if (live.nodes?.length) section.append(make("p", `Pods per node: ${live.nodes.map((n) => `${n.name} ${n.pods}`).join(" · ")}`, "ui-note"));
+            if (live.nodes?.length) {
+                const health = (n) => n.ready === false ? "Not ready" : n.schedulable === false ? "Cordoned: takes no new pods" : n.ready === true ? "Ready" : "Unknown";
+                section.append(make("h5", "Nodes"), table(["Node", "Pods from this run", "Status", "CPU", "Memory"],
+                    live.nodes.map((n) => [n.name, n.pods, health(n), fmtCpu(n.cpu) ?? "Unavailable", fmtMemory(n.memory) ?? "Unavailable"])));
+            }
             return section;
         }
 
@@ -221,6 +228,10 @@
                 }
                 run = found;
                 pending = false; error = run ? null : startError;
+                if (resetFailure) {
+                    if (run && run.clusterMatch !== resetFailure.match) resetFailure = null;
+                    else error = resetFailure.message;
+                }
                 if (!env.readOnly && run?.application?.status === "RESETTING") awaitingReset = true;
                 if (awaitingReset && run?.application?.status === "RESET") {
                     awaitingReset = false;
@@ -242,7 +253,7 @@
 
         async function apply(selection) {
             if (env.readOnly || busy()) return;
-            epoch += 1; pending = true; error = null; startError = null; run = null; draw(); notify();
+            epoch += 1; pending = true; error = null; startError = null; resetFailure = null; run = null; draw(); notify();
             // Scrolling is optional presentation; a host webview failure must not prevent the request.
             try { root.scrollIntoView?.({ block: "start", behavior: "smooth" }); } catch (_error) { /* Keep Apply working. */ }
             expectedRequest = selection.requestKey;
@@ -263,14 +274,17 @@
 
         async function resetChanges() {
             if (env.readOnly || busy() || !run?.canReset) return;
-            resetting = true; error = null; draw(); notify();
+            resetting = true; error = null; resetFailure = null; draw(); notify();
             try {
                 const base = run.declared ? "/api/recommendations/declared" : "/api/recommendations";
                 await request(`${base}/${encodeURIComponent(run.candidateId)}/reset`, { method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ resetBy: "Explicit Reset action" }) });
                 awaitingReset = true;
                 if (env.onReset) env.onReset();
-            } catch (e) { error = e.message; resetting = false; draw(); notify(); return; }
+            } catch (e) {
+                error = e.message; resetFailure = { message: e.message, match: run?.clusterMatch }; resetting = false;
+                draw(); notify(); arm(); return;       // arm: re-check, so the message goes once the connected cluster is no longer the one it was about
+            }
             resetting = false; await poll();
         }
 
