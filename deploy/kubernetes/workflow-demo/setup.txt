@@ -1,0 +1,39 @@
+REVIEW PLAN: instrumented Online Boutique in the repository kind cluster
+
+Namespace: resilience-workflow-demo
+Source: deploy/docker-compose.boutique.yml plus its instrumented overlay
+Contents: 12 single-replica application/tracing/storage Deployments and Services.
+Jaeger: 1 GiB persistent volume, Badger storage, single writer (Recreate rollout).
+Reference: https://www.jaegertracing.io/docs/1.76/deployment/#badger---local-storage
+Volume persistence is not a research backup; keep the trace snapshots and exports.
+No load generator. No cluster roles, cluster bindings or automatic experiments.
+Pods do not mount service-account credentials. Images must be loaded into kind;
+imagePullPolicy Never prevents an unreviewed remote image from being pulled.
+TCP readiness means listening, not business correctness. Workflow probes must
+verify actual HTTP responses and business success separately.
+
+Regenerate the review artifacts after building the instrumented images:
+  .venv\Scripts\python.exe scripts/prepare_workflow_demo.py
+
+AFTER developer approval, load exactly the images listed in images.json with:
+  kind load docker-image <image> --name resilience-research
+Then apply ONLY the reviewed namespace manifest:
+  kubectl --context kind-resilience-research apply -f deploy/kubernetes/workflow-demo/manifest.yaml
+  kubectl --context kind-resilience-research -n resilience-workflow-demo get pods
+
+After every rollout is ready, open host loopback forwards in separate terminals:
+  kubectl --context kind-resilience-research -n resilience-workflow-demo port-forward service/frontend 18080:8080 --address 127.0.0.1
+  kubectl --context kind-resilience-research -n resilience-workflow-demo port-forward service/jaeger 17686:16686 --address 127.0.0.1
+
+Inside the Docker Desktop extension:
+  Trace query URL: http://host.docker.internal:17686
+  Application URL: http://host.docker.internal:18080
+  Environment type: Test environment
+Generate requests by visiting the storefront on http://localhost:18080 or running
+an explicitly reviewed workflow in the extension. Never seed synthetic spans.
+The existing Compose pilot on ports 8080/16686 is separate evidence and stays
+separate. Do not combine their cohorts or treat them as the same environment.
+
+Stopping services or changing replicas requires a separately approved experiment.
+Component 1 reads Kubernetes inventory; this plan does not change connection permissions.
+The current local Docker outage controller does not manage Kubernetes workloads.

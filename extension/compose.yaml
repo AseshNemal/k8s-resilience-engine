@@ -11,6 +11,9 @@ services:
       # The host must also be on the safelist the workflow component checks before it contacts a trace server.
       WORKFLOW_JAEGER_URL: http://host.docker.internal:16686
       WORKFLOW_JAEGER_ALLOWED_HOSTS: localhost,127.0.0.1,::1,jaeger,host.docker.internal
+      # Explicit host access for reviewed workflow probes. localhost inside the
+      # backend is the backend container, so local applications use this name.
+      WORKFLOW_TARGET_ALLOWED_HOSTS: host.docker.internal
       # Member 4's own source for a workflow when Component 1 has none frozen (no traces): a JSON file a person writes, on the
       # data volume so only the app user can read it. Declared, not observed: the page labels it and nothing computed from it
       # can be approved at the production gate. If the file is absent the page says so and offers no declared workflow.
