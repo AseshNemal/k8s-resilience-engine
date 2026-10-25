@@ -37,9 +37,11 @@ class AffinityDriftDetector(BaseDriftDetector):
         runtime_pods: list[dict[str, Any]],
         nodes: dict[str, dict[str, str]],
     ) -> list[DriftViolation]:
+        # Hard rules ("must run on these nodes") vs soft rules ("prefer these nodes").
         has_hard = bool(ia.node_selector(declared_intent) or ia.required_node_terms(declared_intent))
         preferred = ia.preferred_node_terms(declared_intent)
         violations: list[DriftViolation] = []
+        # Check each running pod against the labels of the node it actually landed on.
         for pod in runtime_pods:
             node_name = pm.pod_node(pod)
             labels = nodes.get(node_name) if node_name else None
@@ -75,6 +77,8 @@ class AffinityDriftDetector(BaseDriftDetector):
         nodes: dict[str, dict[str, str]],
     ) -> list[DriftViolation]:
         violations: list[DriftViolation] = []
+        # Anti-affinity says "don't put two of my pods in the same domain" (usually the same node),
+        # so any domain holding more than one pod breaks it.
         for term, is_required in ia.pod_anti_affinity_terms(declared_intent):
             topology_key = term.get("topologyKey") or self.config.failure_domain_key
             per_domain = self._pods_per_domain(runtime_pods, nodes, topology_key)

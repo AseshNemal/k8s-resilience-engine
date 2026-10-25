@@ -31,6 +31,8 @@ def read_yaml_manifests_with_report(
 
     manifests: List[Dict[str, Any]] = []
     skipped: List[tuple[str, str]] = []
+    # One file can hold several objects separated by "---", so every document is read.
+    # safe_load_all only builds plain data (dicts, lists), never Python objects.
     for file_path in files:
         if file_path.name.startswith("."):
             continue

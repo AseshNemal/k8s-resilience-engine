@@ -4,6 +4,7 @@
 
 {% block page_css %}
 <link rel="stylesheet" href="{{ url_for('static', path='/css/dashboard.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/recommendations.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -28,6 +29,40 @@
     <ul data-role="discovery-notes"></ul>
     <p class="footer-note" data-role="discovery-provenance"></p>
 </div>
+
+<div class="overview-applied" data-role="overview-applied" role="status" hidden>
+    <span data-role="overview-applied-text"></span>
+    <a class="overview-applied__link" href="/components/recommendations">Open Recommendations</a>
+</div>
+
+<section class="overview-status" data-role="overview-status" aria-label="Where you are">
+    <a class="overview-chip" href="/components/deployments" data-role="overview-chip-cluster" data-state="pending">
+        <div class="overview-chip__top"><span data-role="overview-chip-cluster-state">Checking</span></div>
+        <div class="overview-chip__label">Cluster</div>
+        <div class="overview-chip__detail" data-role="overview-chip-cluster-detail">Checking…</div>
+    </a>
+    <a class="overview-chip" href="/components/workflows" data-role="overview-chip-workflow" data-state="pending">
+        <div class="overview-chip__top"><span data-role="overview-chip-workflow-state">Checking</span></div>
+        <div class="overview-chip__label">Workflow</div>
+        <div class="overview-chip__detail" data-role="overview-chip-workflow-detail">Checking…</div>
+    </a>
+    <a class="overview-chip" href="/components/failure-impacts" data-role="overview-chip-prediction" data-state="pending">
+        <div class="overview-chip__top"><span data-role="overview-chip-prediction-state">Checking</span></div>
+        <div class="overview-chip__label">Prediction</div>
+        <div class="overview-chip__detail" data-role="overview-chip-prediction-detail">Checking…</div>
+    </a>
+    <a class="overview-chip" href="/components/recommendations" data-role="overview-chip-test" data-state="pending">
+        <div class="overview-chip__top"><span data-role="overview-chip-test-state">Checking</span></div>
+        <div class="overview-chip__label">Fix tested</div>
+        <div class="overview-chip__detail" data-role="overview-chip-test-detail">Checking…</div>
+    </a>
+</section>
+
+<section class="card overview-risk" data-role="overview-risk" aria-live="polite">
+    <div class="overview-risk__label">Current risk</div>
+    <div class="overview-risk__headline" data-role="overview-risk-headline">Checking the failure impact…</div>
+    <p class="overview-risk__sub" data-role="overview-risk-sub"></p>
+</section>
 
 <section class="metric-grid" aria-label="Overview metrics">
     <div class="metric-card">
@@ -67,10 +102,29 @@
     <span class="section-header__note">Everything running in the connected cluster</span>
 </div>
 <div class="overview-namespaces" data-role="overview-namespaces"></div>
-<p class="footer-note">
-    {{ icon("info", 15) }} Failure-impact predictions and recommendations are produced on their own pages,
-    from a frozen workflow and the live topology. They are not summarised here until they have been run.
-</p>
+<div class="section-header">
+    <h3 class="section-header__title">Fix results</h3>
+    <span class="section-header__note">Latest saved test per candidate. Risk is a model prediction; the outcome is what the test found.</span>
+</div>
+<div class="card overview-results" data-role="overview-results">
+    <p class="ui-note">Reading saved tests…</p>
+</div>
+
+<div class="section-header">
+    <h3 class="section-header__title">Placement now and after the selected fix</h3>
+    <span class="section-header__note">From the same simulation as the Recommendations page. A prediction, not a measurement.</span>
+</div>
+<div class="card overview-placement" data-role="overview-placement">
+    <p class="ui-note">Waiting for the recommendation…</p>
+</div>
+
+<div class="section-header">
+    <h3 class="section-header__title">Evidence health</h3>
+    <span class="section-header__note">What each result is built on, and what is missing</span>
+</div>
+<div class="card overview-evidence" data-role="overview-evidence">
+    <p class="ui-note">Checking the evidence…</p>
+</div>
 
 <div class="section-header">
     <h3 class="section-header__title">System Pipeline</h3>
@@ -166,5 +220,8 @@
 {% endblock %}
 
 {% block page_js %}
+<script src="{{ url_for('static', path='/js/recommendation-apply-test.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-topology.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/overview-summary.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/dashboard.js') }}" defer></script>
 {% endblock %}

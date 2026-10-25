@@ -88,9 +88,6 @@
         document.querySelectorAll('[data-role="output-snapshot"]').forEach((n) => { n.textContent = graph.snapshotId || "n/a"; });
         document.querySelectorAll('[data-role="output-services"]').forEach((n) => { n.textContent = (graph.services || []).length; });
         document.querySelectorAll('[data-role="output-nodes"]').forEach((n) => { n.textContent = (graph.nodes || []).length; });
-        document.querySelectorAll('[data-role="output-time"]').forEach((n) => {
-            n.textContent = box.querySelector('[data-role="evidence-time"]').textContent;
-        });
     }
 
     const readyCount = (s) => s.readyReplicas ?? s.ready_replicas ?? (s.pods ? s.pods.filter((p) => p.ready).length : 0);
@@ -116,6 +113,7 @@
 
     // The status bar's answer, from the same rule as the Exposed services tab. `detail` is its tooltip.
     function verdictFor(services) {
+        // A service with no ready copy can't be taken down by a node failure, so it isn't counted.
         const evaluated = services.filter((s) => readyCount(s) > 0);
         const exposed = evaluated.filter((s) => exposedDomains(s).length > 0);
         const unavailable = services.length - evaluated.length;

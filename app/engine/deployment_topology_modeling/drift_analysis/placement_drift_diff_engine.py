@@ -45,6 +45,7 @@ class PlacementDriftDiffEngine:
         baseline_id: str = "T0-baseline",
         target_id: str = "T1-current",
     ) -> PlacementDriftDiffReport:
+        # Exposure status per service at T0 and at T1, then the shared D_rate definition.
         before = cls._parse_statuses(baseline_snapshot)
         after = cls._parse_statuses(target_snapshot)
         drift = pm.placement_drift(before, after)
@@ -57,6 +58,7 @@ class PlacementDriftDiffEngine:
             drifted_services_count=len(drift.changed_services),
             placement_drift_rate=round(drift.rate, 4) if drift.rate is not None else None,
             drifted_services=drift.changed_services,
+            # got worse (now exposed) / got better (was exposed, now safe)
             newly_exposed_services=[s for s in drift.changed_services if after[s] == exposed],
             remediated_services=[
                 s for s in drift.changed_services

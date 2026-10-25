@@ -18,11 +18,14 @@ def describe(values: list[float], rate: bool = True) -> dict[str, Any]:
     if n == 0:
         return {"n": 0, "mean": None, "sd": None, "ci95": None}
     mean = sum(values) / n
+    # One value has no spread, so no SD or interval.
     if n < 2:
         return {"n": 1, "mean": round(mean, 4), "sd": None, "ci95": None}
+    # Sample SD (n - 1), and a 95% interval with the Student-t value because the sample is small (5 runs).
     sd = math.sqrt(sum((v - mean) ** 2 for v in values) / (n - 1))
     half = t_critical_95(n - 1) * sd / math.sqrt(n)
     low, high = mean - half, mean + half
+    # A share can't go below 0% or above 100%.
     if rate:
         low, high = max(0.0, low), min(1.0, high)
     return {"n": n, "mean": round(mean, 4), "sd": round(sd, 4), "ci95": [round(low, 4), round(high, 4)]}
@@ -40,6 +43,7 @@ def summarise(results_dir: Path) -> dict[str, Any]:
 
     conditions = []
     for (scenario, config), group in sorted(groups.items()):
+        # Failed runs are counted but left out of the statistics.
         ok = [r for r in group if not r.get("failed")]
         conditions.append({
             "scenario_id": scenario,

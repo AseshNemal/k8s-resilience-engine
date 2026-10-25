@@ -42,6 +42,8 @@ class ScaleDriftDetector(BaseDriftDetector):
         ready_pods_count = pm.ready_replica_count(runtime_pods)
         total_pods_count = len(runtime_pods)
 
+        # Drift = the YAML's replica count and the ready pods disagree.
+        # None ready is critical, fewer is high, more (e.g. a manual kubectl scale) is low.
         if ready_pods_count != declared_replicas:
             if ready_pods_count == 0:
                 severity = DriftSeverity.CRITICAL

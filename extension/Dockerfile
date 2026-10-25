@@ -69,10 +69,10 @@ RUN python -m extension.build_ui /out
 # --- Final extension image ------------------------------------------------------------------
 FROM runtime
 LABEL org.opencontainers.image.title="K8s Resilience Engine" \
-      org.opencontainers.image.description="Dependency-aware resilience assessment for Kubernetes deployments, inside Docker Desktop. Read-only cluster access; nothing is applied automatically." \
+      org.opencontainers.image.description="Dependency-aware resilience assessment for Kubernetes deployments, inside Docker Desktop. Nothing is applied or stopped without your approval of exactly what will happen." \
       org.opencontainers.image.vendor="K8s Resilience Engine research project (SLIIT J26-SE-311)" \
       com.docker.desktop.extension.api.version=">= 0.2.3" \
-      com.docker.extension.detailed-description="Reads a local Kubernetes test cluster with a read-only, time-limited credential and shows which workflows survive worker-node failures. Recommendations are never applied automatically." \
+      com.docker.extension.detailed-description="Reads a local Kubernetes cluster and shows which workflows survive worker-node failures. A change is applied, or a worker node stopped on a test run, only after you approve exactly what will happen; everything is put back afterwards." \
       com.docker.extension.changelog="Automatic cluster setup and credential renewal through a host helper (verified on macOS only). Initial local build. Not published; the Marketplace-only labels (icon URL, screenshots, publisher URL) are intentionally omitted." \
       com.docker.extension.categories="kubernetes,utility-tools"
 

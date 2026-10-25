@@ -4,11 +4,11 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.58">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.58">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.58">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.58">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.58">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_tokens.css') }}?v=5.61">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments.css') }}?v=5.61">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_topology.css') }}?v=5.61">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_drift.css') }}?v=5.61">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/deployments_modals.css') }}?v=5.61">
 {% endblock %}
 
 {% block content %}
@@ -133,10 +133,6 @@
                 <span class="flow__arrow" aria-hidden="true">➜</span>
                 <div class="flow-box flow-box--next"><span class="flow-box__icon">🔮</span><strong>Component 3</strong><span>predicts which workflows fail when a node fails</span></div>
             </div>
-            <p class="main-output__desc">
-                Read at <span data-role="output-time">…</span>. Component 3 gets it from <code>get_live_deployment_graph()</code>
-                or <code>GET /api/deployments/live</code>; it is the same graph every other tab shows.
-            </p>
             {{ raw_json_panel("deployment-raw-json", "Show the DeploymentGraph JSON") }}
         </section>
     </div>
@@ -159,13 +155,13 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.58"></script>
-<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.58"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.61"></script>
 {% endblock %}

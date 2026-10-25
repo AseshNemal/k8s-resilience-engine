@@ -125,6 +125,35 @@ function carryQueryString() {
     }, true);
 }
 
+// Docker may recreate the view at index.html when returning to the extension. Remember only
+// a known local page name, and always use the current SDK query string when restoring it.
+function restoreNavigation() {
+    if (!window.ddClient || !window.document || !window.location.search) return;
+    const pages = ["index.html", "workflows.html", "deployments.html", "failure-impacts.html", "recommendations.html", "connect.html"];
+    const key = "resilience.extension.page.v1";
+    const current = window.location.pathname.split("/").pop();
+    if (!pages.includes(current)) return;
+    try {
+        const saved = window.localStorage.getItem(key);
+        if (current === "index.html" && pages.includes(saved) && saved !== current) {
+            window.location.replace(saved + window.location.search);
+            return;
+        }
+        window.localStorage.setItem(key, current);
+    } catch (_error) { /* Storage may be disabled by the host. */ }
+    window.document.addEventListener("click", (event) => {
+        if (event.defaultPrevented || event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const anchor = event.target && event.target.closest && event.target.closest("a[href]");
+        if (!anchor || anchor.getAttribute("target") === "_blank" || anchor.hasAttribute?.("download")) return;
+        const href = anchor.getAttribute("href") || "";
+        const page = href.split("?")[0];
+        // Recording the destination lets an explicit click on Overview stay on Overview.
+        if (pages.includes(page)) {
+            try { window.localStorage.setItem(key, page); } catch (_error) { /* Storage is optional. */ }
+        }
+    });
+}
+
 function installFetchAdapter() {
     const service = window.ddClient && window.ddClient.extension && window.ddClient.extension.vm
         ? window.ddClient.extension.vm.service
@@ -170,5 +199,6 @@ function installFetchAdapter() {
 }
 
 carryQueryString();
+restoreNavigation();
 installFetchAdapter();
 })();

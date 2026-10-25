@@ -83,7 +83,9 @@ class KubernetesValidationExecutor:
         probe_factory: Callable[[], Any] | None = None, failure_window_s: float = 30.0,
         pre_failure_samples: int = 5, post_restore_samples: int = 3,
         sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+        on_restore_points: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
+        self._on_restore_points = on_restore_points
         self._injector = require_node_failure(injector)       # refused before the cluster is even contacted
         self._gateway, self._designation, self._override = gateway, designation, research_override
         self.writes_enabled, self._max_added = writes_enabled, max_added_replicas
@@ -166,6 +168,14 @@ class KubernetesValidationExecutor:
                                  baseline_generations=self._baseline_generations, max_added_replicas=self._max_added)
         for patch in patches:      # the restore points are taken before the first write, from what was just read
             self._restore_points.setdefault(patch.name, live[patch.name])
+        if self._on_restore_points is not None and patches:
+            # The undo information has to be stored BEFORE the first write: a backend that dies mid-run could not otherwise
+            # put the Deployments back. If it cannot be stored, nothing is written.
+            try:
+                self._on_restore_points({name: asdict(point) for name, point in self._restore_points.items()})
+            except Exception as error:      # noqa: BLE001
+                raise ValidationRefusedError("RESTORE_POINTS_NOT_PERSISTED", f"The undo information could not be stored, so "
+                                             f"nothing is written: {error}") from error
         self._affected = [patch.name for patch in patches]
         self._applied = True      # from here on a failure is a failure AFTER the change
         for patch in patches:
@@ -239,7 +249,13 @@ class KubernetesValidationExecutor:
         if self._probe is not None:
             self._probe.mark("pods-unready")
             self._sample_for(self._failure_window_s)       # the state the prediction describes
-        return self._gateway.read_graph(self.namespace)
+        graph = self._gateway.read_graph(self.namespace)
+        if self._gateway.node_ready(node) is not False:
+            # A container runtime or an orchestrator can restart a node that was killed (a restart policy of on-failure or always).
+            # Then the node was not down for the whole window, and what was observed is not the failure the prediction describes.
+            raise RuntimeError(f"node {node} reported Ready again before the failure was observed to the end (it may have been "
+                               f"restarted by its restart policy), so the failure window is not valid and nothing was measured")
+        return graph
 
     def restore_node(self, node: str) -> None:
         if self._probe is not None:

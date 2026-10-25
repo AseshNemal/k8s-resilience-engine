@@ -32,7 +32,8 @@ class FakeDocker:
         if verb == "inspect":
             if known is None:
                 return CommandResult(1, "", f"Error: No such object: {name}")
-            body = [{"Config": {"Labels": known["labels"]}, "State": {"Running": known["running"]}}]
+            body = [{"Config": {"Labels": known["labels"]}, "State": {"Running": known["running"]},
+                     "HostConfig": {"RestartPolicy": {"Name": known.get("policy", "no")}}}]
             return CommandResult(0, json.dumps(body), "")
         if verb == "kill":
             if self.on_kill:

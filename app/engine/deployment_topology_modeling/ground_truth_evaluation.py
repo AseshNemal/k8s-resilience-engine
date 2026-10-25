@@ -84,6 +84,7 @@ class SnapshotEvaluation:
 
 def _map_counts(predicted: dict[str, str], truth: dict[str, str]) -> tuple[int, int]:
     """Same rule as _map_accuracy (union of keys; a missing or invented prediction is an error), as counts."""
+    # Using keys from both sides means a pod the model missed, or a pod it made up, both count as wrong.
     keys = set(truth) | set(predicted)
     return sum(predicted.get(k) == truth.get(k) for k in keys), len(keys)
 
@@ -124,6 +125,7 @@ def _exposure_checks(analyzed: list[dict], observations: list[FailureObservation
             if observed is None:
                 continue  # no recorded outcome for this service: not a labelled case
             per_node = pm.ready_replicas_per_node(svc["pods"])
+            # Prediction made from the "before" snapshot only: does a ready copy sit on a node that did not fail?
             checks.append({
                 "service": svc["name"],
                 "failed_nodes": obs.failed_nodes,
@@ -139,6 +141,7 @@ def _items(path: Path) -> list[dict]:
 
 def evaluate_snapshot(snapshot_dir: Path = KIND_CONCENTRATED_BASELINE) -> SnapshotEvaluation:
     start = time.perf_counter()
+    # 1. The model's input: the raw Kubernetes objects saved before the node was stopped.
     pod_objects = json.loads((snapshot_dir / "pods.json").read_text(encoding="utf-8"))["items"]
     node_objects = json.loads((snapshot_dir / "nodes.json").read_text(encoding="utf-8"))["items"]
     services = [
@@ -149,21 +152,25 @@ def evaluate_snapshot(snapshot_dir: Path = KIND_CONCENTRATED_BASELINE) -> Snapsh
     replica_sets = _items(snapshot_dir / "replicasets.json")
     deployments = _items(snapshot_dir / "deployments.json")
 
+    # 2. Run the same code the live tool runs.
     nodes = nodes_from_objects(node_objects, pod_objects)
     pods = pods_from_objects(pod_objects, namespace)
     workloads = resolve_service_ownership(pods, services, replica_sets=replica_sets, deployments=deployments, namespace=namespace)
     analyzed = analyze_replica_concentration(workloads, {n.name: n.ready for n in nodes})
     runtime_ms = round((time.perf_counter() - start) * 1000.0, 2)
 
+    # 3. The model's answers.
     predicted_pod_node = {p.name: p.node for p in pods if p.node}
     predicted_pod_service = {pod["name"]: svc["name"] for svc in analyzed for pod in svc["pods"]}
     predicted_owner = {r["name"]: r["deploymentName"] for w in workloads.values() for r in w["pods"] if r.get("deploymentName")}
     truth_owner = _owner_truth(snapshot_dir) if replica_sets and deployments else None
 
+    # 4. The answer sheet, taken from separate kubectl outputs the model never reads.
     wide = _table_rows((snapshot_dir / "pod-placement.txt").read_text(encoding="utf-8"))
     truth_pod_node = {r["NAME"]: r["NODE"] for r in wide}
     ip_to_pod = {r["IP"]: r["NAME"] for r in wide}
     truth_pod_service = {}
+    # EndpointSlices list pod IPs, so each IP is turned back into a pod name with the -o wide table.
     for row in _table_rows((snapshot_dir / "endpoints-before.txt").read_text(encoding="utf-8")):
         service_name = row["NAME"].rsplit("-", 1)[0]  # EndpointSlice name = <service>-<suffix>
         for ip in row.get("ENDPOINTS", "").split(","):
@@ -175,6 +182,7 @@ def evaluate_snapshot(snapshot_dir: Path = KIND_CONCENTRATED_BASELINE) -> Snapsh
     exposure_checks = _exposure_checks(analyzed, observations)
     exposure = (sum(c["predicted_available"] == c["observed_available"] for c in exposure_checks), len(exposure_checks))
 
+    # 5. Mark the answers: (correct, compared) for each kind of check.
     counts = {
         "service_pod": _map_counts(predicted_pod_service, truth_pod_service),
         "pod_node": _map_counts(predicted_pod_node, truth_pod_node),
@@ -238,6 +246,8 @@ class PooledEvaluation:
 
 def evaluate_recordings(dirs: list[Path]) -> PooledEvaluation:
     """Pools the recordings by counts: each measure is (all correct) / (all compared) across them."""
+    # Add the correct and compared counts of every recording, then divide once (e.g. 24 / 24),
+    # instead of averaging three percentages.
     totals: dict[str, list[int]] = {}
     recordings, checks, runtimes = [], [], []
     for d in dirs:

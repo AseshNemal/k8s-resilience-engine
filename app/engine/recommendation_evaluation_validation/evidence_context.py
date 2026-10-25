@@ -280,3 +280,6 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
         "nextActions": actions,
         "readOnly": True,
     }
+
+
+list_frozen_workflows = _frozen_workflows      # public name for the portfolio evaluation, which needs every frozen workflow too

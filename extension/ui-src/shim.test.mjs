@@ -22,20 +22,21 @@ function fakeDocument(hrefs) {
     const listeners = {};
     return {
         anchors,
-        addEventListener: (type, fn) => { listeners[type] = fn; },
+        addEventListener: (type, fn) => { (listeners[type] ||= []).push(fn); },
         querySelectorAll: () => ({ forEach: (fn) => anchors.forEach(fn) }),
-        fire: (type, event) => listeners[type](event),
+        fire: (type, event) => (listeners[type] || []).forEach((fn) => fn(event)),
         listeners,
     };
 }
 
-function load(requestImpl, { href = "ddui://resilience/index.html", timers = immediateTimers(), document } = {}) {
+function load(requestImpl, { href = "ddui://resilience/index.html", timers = immediateTimers(), document, storage } = {}) {
     const calls = [];
     const nativeCalls = [];
     const window = {
         // A real URL object (has protocol/host like window.location) with a non-http scheme, because the
         // extension UI may not be served over http(s) and url.origin is "null" for such schemes.
         location: new URL(href),
+        localStorage: storage,
         document,
         fetch: async (input) => {
             nativeCalls.push(input);
@@ -43,12 +44,44 @@ function load(requestImpl, { href = "ddui://resilience/index.html", timers = imm
         },
         ddClient: { extension: { vm: { service: { request: async (config) => { calls.push(config); return requestImpl(config); } } } } },
     };
+    const redirects = [];
+    window.location.replace = (url) => redirects.push(url);
     vm.runInNewContext(source, {
         window, URL, Response, Headers, DOMException, JSON, Promise, Object, String, Number, RegExp, Array,
         setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
     });
-    return { window, calls, nativeCalls, timers };
+    return { window, calls, nativeCalls, timers, redirects };
 }
+
+function pageStorage(initial) {
+    const data = new Map(initial ? [["resilience.extension.page.v1", initial]] : []);
+    return { getItem: (key) => data.get(key) || null, setItem: (key, value) => data.set(key, value) };
+}
+
+test("recreated Docker entry restores the last local page using the current SDK query", () => {
+    const storage = pageStorage();
+    load(() => ({}), { href: "ddui://resilience/recommendations.html?backendSocket=old", document: fakeDocument([]), storage });
+    const { redirects } = load(() => ({}), { href: ENTRY, document: fakeDocument([]), storage });
+    assert.deepEqual(redirects, ["recommendations.html" + new URL(ENTRY).search]);
+});
+
+test("an explicit Overview click is remembered instead of returning to the previous page", () => {
+    const storage = pageStorage();
+    const document = fakeDocument(["index.html"]);
+    load(() => ({}), { href: ENTRY.replace("index.html", "recommendations.html"), document, storage });
+    document.fire("DOMContentLoaded");
+    document.fire("click", { target: document.anchors[0] });
+    assert.deepEqual(load(() => ({}), { href: ENTRY, document: fakeDocument([]), storage }).redirects, []);
+});
+
+test("untrusted saved destinations and blocked storage cannot redirect or break the adapter", async () => {
+    for (const saved of ["https://evil.example/", "../connect.html", "recommendations.html?backendSocket=evil"]) {
+        assert.deepEqual(load(() => ({}), { href: ENTRY, document: fakeDocument([]), storage: pageStorage(saved) }).redirects, []);
+    }
+    const storage = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
+    const { window } = load(() => ({ healthy: true }), { href: ENTRY, document: fakeDocument([]), storage });
+    assert.equal((await window.fetch("/api/health")).status, 200);
+});
 
 test("GET /api/... goes through the SDK and returns a JSON Response", async () => {
     const { window, calls } = load(() => ({ status: "healthy" }));

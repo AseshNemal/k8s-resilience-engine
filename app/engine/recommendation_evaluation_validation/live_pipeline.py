@@ -66,7 +66,9 @@ from app.engine.recommendation_evaluation_validation.feasibility_analyzer import
     SchedulingEvidence,
     scheduling_basis,
 )
+from app.engine.recommendation_evaluation_validation.portfolio import WorkflowPortfolio, predict_portfolio_impact
 from app.engine.recommendation_evaluation_validation.ranking import (
+    CRITICALITY_WEIGHTED,
     FORMULA_VERSION,
     SINGLE_WORKFLOW,
     EvaluatedCandidate,
@@ -137,14 +139,49 @@ def _highest_cost(costs: list[str]) -> str:
     return max(costs, key=COST_ORDER.index)
 
 
-def _impact_snapshot(report) -> ImpactSnapshot:
+def _basis(workflow) -> str:
+    """What the ranking compares: one workflow's survival, or several workflows' weighted by criticality."""
+    return CRITICALITY_WEIGHTED if isinstance(workflow, WorkflowPortfolio) else SINGLE_WORKFLOW
+
+
+def _predict(workflow, deployment, failed_node: str):
+    """The failure-impact report for a workflow, or for a portfolio of them, at one assumed node failure.
+
+    Component 3's predictor is looked up here at call time (not bound at import), so it is the one thing that sizes a failure for
+    either basis.
+    """
+    if isinstance(workflow, WorkflowPortfolio):
+        return predict_portfolio_impact(workflow, deployment, failed_node, predict_failure_impact)
+    return predict_failure_impact(workflow, deployment, failed_node)
+
+
+def _candidate_source(workflow, deployment, before):
+    """The failure report the candidate generator reads its root causes from.
+
+    One workflow is protected against the failure it was assessed for. A portfolio is protected against every worker's loss, so a
+    fix for what breaks at ANOTHER node must be a candidate too, or no candidate could ever protect all the workflows. The root
+    causes of every node's failure are offered, each once; the ranking then scores them all against the one assessed failure.
+    """
+    if not isinstance(workflow, WorkflowPortfolio):
+        return before
+    causes, seen = [], set()
+    for node in sorted(n.name for n in deployment.nodes):
+        for cause in _predict(workflow, deployment, node).root_causes:
+            key = (cause.type, cause.service, cause.failure_domain)
+            if key not in seen:
+                seen.add(key)
+                causes.append(cause)
+    return before.model_copy(update={"root_causes": causes})
+
+
+def _impact_snapshot(report, basis: str = SINGLE_WORKFLOW) -> ImpactSnapshot:
     """Component 3's report for one assumed node failure, reduced to what ranking uses."""
     return ImpactSnapshot(
         failed_node=report.failed_node,
         blast_radius=report.blast_radius,
         survivability=report.survivability,
         node_blast={risk.node: risk.blast_radius for risk in report.node_risk_ranking},
-        basis=SINGLE_WORKFLOW,
+        basis=basis,
     )
 
 
@@ -181,7 +218,7 @@ def _riskiest_node(workflow, deployment) -> str:
             "The topology has no worker nodes, so there is no failure to recommend against.",
             http_status=409, component=COMPONENT,
         )
-    ranking = predict_failure_impact(workflow, deployment, deployment.nodes[0].name).node_risk_ranking
+    ranking = _predict(workflow, deployment, deployment.nodes[0].name).node_risk_ranking
     if not ranking:
         return deployment.nodes[0].name
     return max(ranking, key=lambda risk: (risk.blast_radius, tuple(-ord(ch) for ch in risk.node))).node
@@ -250,10 +287,10 @@ def _evaluate_combinations(
 
         simulation = combined_simulation(deployment, result)
         try:
-            after = predict_failure_impact(workflow, result.deployment, failed_node)
+            after = _predict(workflow, result.deployment, failed_node)
         except ValueError:      # Component 3 could not evaluate the final virtual state
             after = None
-        after_snapshot = _impact_snapshot(after) if after is not None else None
+        after_snapshot = _impact_snapshot(after, _basis(workflow)) if after is not None else None
         member_impacts = {m.service: singles_after.get(m.id) for m in (first, second)}
         redundant = redundant_members(before_snapshot, after_snapshot, member_impacts)
         entry["memberBlastAfter"] = {s: (i.blast_radius if i else None) for s, i in member_impacts.items()}
@@ -485,13 +522,14 @@ def evaluate_recommendation(
     if not failed_node:
         failed_node, chosen_by = _riskiest_node(workflow, deployment), "highest blast radius"
     try:
-        before = predict_failure_impact(workflow, deployment, failed_node)
+        before = _predict(workflow, deployment, failed_node)
     except ValueError as error:  # an unknown failed node
         raise _invalid(str(error)) from error
 
     skipped: list[str] = []
     feasibility: dict[str, Any] = {}
-    before_snapshot = _impact_snapshot(before)
+    basis = _basis(workflow)
+    before_snapshot = _impact_snapshot(before, basis)
     evaluated: list[EvaluatedCandidate] = []
     outcomes: dict[str, _Outcome] = {}
     members: list[Member] = []
@@ -510,11 +548,11 @@ def evaluate_recommendation(
         after_snapshot, predicted, reduction, predicted_impact = None, before.blast_radius, 0.0, None
         if simulated.feasible:
             try:
-                after = predict_failure_impact(workflow, simulated.simulated_deployment, failed_node)
+                after = _predict(workflow, simulated.simulated_deployment, failed_node)
             except ValueError:  # Component 3 could not evaluate the simulated deployment: no impact evidence
                 after = None
             if after is not None:
-                after_snapshot = _impact_snapshot(after)
+                after_snapshot = _impact_snapshot(after, basis)
                 predicted, reduction = after.blast_radius, round(before.blast_radius - after.blast_radius, 2)
                 predicted_impact = impact_detail(after)
         candidate_id = f"rec-{workflow_id}-{spec.service}-{spec.recommendation_type}".lower().replace("_", "-")
@@ -550,7 +588,7 @@ def evaluate_recommendation(
     # Plain topology spread for a concentrated service; a replica increase (with its spread) only for a single-replica
     # service, where no change of placement can help; required anti-affinity only for a Deployment that already asks
     # for it softly. Each rule decides from the declared facts, so a strategy is not offered where it cannot differ.
-    for spec in generate_candidates(CandidateContextBuilder.build(deployment, before)):
+    for spec in generate_candidates(CandidateContextBuilder.build(deployment, _candidate_source(workflow, deployment, before))):
         consider(spec)
 
     combos = _evaluate_combinations(
@@ -601,7 +639,7 @@ def evaluate_recommendation(
         "ranking": {
             "formulaVersion": FORMULA_VERSION,
             "weights": weights.to_dict(),
-            "basis": SINGLE_WORKFLOW,
+            "basis": basis,
             "placementChurnMeaning": PLACEMENT_CHURN_MEANING,
             "selectedCandidate": selected,
             "candidates": {entry.id: entry.to_dict() for entry in ranked},

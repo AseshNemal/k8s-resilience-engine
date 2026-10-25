@@ -24,11 +24,13 @@ def _deployment(name: str, spread: bool) -> dict:
             "name": name,
             "image": IMAGE,
             "imagePullPolicy": "IfNotPresent",
+            # Small, fixed requests, so the scheduler has a real size to place but every node has room.
             "resources": {
                 "requests": {"cpu": "50m", "memory": "16Mi"},
                 "limits": {"cpu": "50m", "memory": "16Mi"},
             },
         }],
+        # pause has nothing to shut down, so old pods disappear at once and runs stay short.
         "terminationGracePeriodSeconds": 0,
     }
     if spread:

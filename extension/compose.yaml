@@ -1,5 +1,10 @@
 # Extension backend service (runs in the Docker Desktop VM). No ports are published: the API
-# is served on a Unix socket only. SQLite and the stored read-only kubeconfig live on the volume.
+# is served on a Unix socket only. SQLite and the stored kubeconfig live on the volume.
+#
+# Two services. The backend holds the cluster credential and the research code and has NO Docker socket. The docker-proxy holds
+# the Docker socket and nothing else: it forwards only the few requests a validation run needs, and only for the kind worker
+# containers of the clusters it is configured for (app/integrations/docker/policy.py). The two meet on one Unix socket in a shared
+# volume; neither publishes a port.
 services:
   resilience-engine:
     image: ${DESKTOP_PLUGIN_IMAGE}
@@ -22,8 +27,19 @@ services:
       # development server that happens to find an admin kubeconfig cannot apply anything. Only here, where the credential is the
       # extension's own, is it set.
       RESILIENCE_ALLOW_CLUSTER_WRITES: "1"
+      # The fault-injection validation loop stops and starts kind worker containers ONLY through the proxy below. This process has no
+      # Docker socket, so without the proxy no node can be stopped.
+      RESILIENCE_DOCKER_PROXY_SOCKET: /run/docker-proxy/proxy.sock
+      # Inside this container 127.0.0.1 is the container itself. The workflow check reaches the application the developer
+      # published on this computer through the container's route to the host, and only for loopback addresses on application ports.
+      RESILIENCE_PROBE_HOST_GATEWAY: host.docker.internal
+      # Credentials and recovery records of the disposable test cluster; on the app-private data volume.
+      RESILIENCE_VALIDATION_DIR: /data/validation
     volumes:
       - resilience-engine-data:/data
+      - docker-proxy-socket:/run/docker-proxy
+    depends_on:
+      - docker-proxy
     # Measured 2026-10-20 on the built image: 62 MiB idle and an 80 MiB peak after 400 requests across the
     # pages and API routes (no cluster connected, so no large discovery responses). 512m is about six times
     # that: room for the JSON of a large local cluster, while still protecting a small Docker Desktop VM
@@ -48,5 +64,31 @@ services:
       retries: 3
       start_period: 30s
 
+  docker-proxy:
+    image: ${DESKTOP_PLUGIN_IMAGE}
+    # Same image, different process. The image entrypoint starts the backend, so it is replaced here. umask 000 lets the backend (UID
+    # 10001) connect to the socket; the volume is shared with that one container only.
+    entrypoint:
+      - sh
+      - -c
+      - umask 000 && mkdir -p /run/docker-proxy && rm -f /run/docker-proxy/proxy.sock && exec uvicorn app.integrations.docker.proxy_app:app --uds /run/docker-proxy/proxy.sock
+    environment:
+      RESILIENCE_DOCKER_SOCKET: /var/run/docker.sock
+      # The kind clusters whose WORKER containers may be stopped, started and inspected. The disposable test cluster is the default.
+      # `desktop` (the Docker Desktop cluster) is listed here on purpose: it makes that cluster reachable AT ALL. Each run must still
+      # carry an explicit acknowledgement for it, and the executor, the kind injector and the cluster's UID refuse anything else.
+      # Remove it to make the Docker Desktop cluster unreachable for node failure.
+      RESILIENCE_PROXY_ALLOWED_CLUSTERS: resilience-validation,desktop
+    volumes:
+      - /var/run/docker.sock.raw:/var/run/docker.sock
+      - docker-proxy-socket:/run/docker-proxy
+    mem_limit: 128m
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
+  docker-proxy-socket:
   resilience-engine-data:

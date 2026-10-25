@@ -104,6 +104,28 @@ This is an early-stage scaffold, not a working system yet:
 - `tests/test_sample_endpoints.py` checks that the research fixtures still validate against the
   contracts (through the research-only app in `tests/support/`, not the product).
 
+- **Fault-injection validation loop** (`validation_loop/` under Member 4, routes `/api/recommendations/validation-loop/*`, the "Prove it on a test
+  cluster" step of the Recommendations page). One run approval (a digest of the reviewed plan, no person's name) covers a bounded run: Smoke, Quick
+  (default, preliminary) or Full Research (measured baseline required). Each candidate is applied once, each authorized worker is stopped in turn
+  by `docker kill`, recovery is verified after every stop, and the Deployments are put back; a durable kill budget (`validation_loop_runs.kills_used`)
+  bounds the number of stops. It runs on a background thread with all state in the database (migration `a3c6e1f90b52`); after a backend restart
+  it only **recovers** (restores workers, reverts Deployments) and never resumes or repeats a kill. Docker is reached only through the
+  `docker-proxy` service (`app/integrations/docker/`, the only container with the Docker socket; it authorizes the CONTAINER by name, kind labels
+  and an allow-list, and trims every answer). The Docker Desktop cluster is blocked unless a run carries an explicit acknowledgement and a
+  `ResearchClusterAuthorization` for its exact UID. Runs and recovery need `RESILIENCE_ALLOW_CLUSTER_WRITES=1`. A recommendation computed on a
+  test cluster is labelled `validation-target` and can never be approved. **It has only ever run against in-memory doubles; no real node has been
+  stopped by it, the disposable kind cluster is not created by the product (a manual, separately approved step), and readiness uses bounded polling,
+  not a Kubernetes watch.** Design and decisions: the plan file of the branch `feat/fault-injection-validation`.
+
+- **Recommendations page UI** (`app/templates/components/recommendations.html`, `components/recommendations.js`, `recommendation-render.js`, `css/pages/recommendations.css`):
+  five steps shown one at a time (`data-step` on the flow root, `data-step-panel` on each panel; footers and the case line open a step with `data-go`), a
+  Simple view that is the short answer (problem, lead fix, predicted improvement, validation status, next action) and a Research view that adds a tabbed
+  workbench (ranking, reasoning, placement, every failure, post-apply validation, raw data) and the proof panel's tabbed observed data. The stepper is
+  drawn from `computeSteps`: the approval step is never "done" or "the step to do" until the server says THIS change is proven on a test cluster (`/proof`);
+  a decision recorded earlier is kept and shown as an earlier approval (state `recorded`), never as validation. Approval is still not gated by the proof:
+  that is a UI statement only, and the approval logic and routes are unchanged. A declared workflow is labelled "research approval only", never "not
+  approvable". The cluster chip says "Connected": the connection check reads what the app needs, and write permission is not checked until a change is applied.
+
 When asked to "run the app" or "add tests", check whether the relevant piece has actually
 been built yet rather than assuming the README's planned structure is already in place.
 

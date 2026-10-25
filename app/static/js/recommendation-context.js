@@ -9,7 +9,8 @@
  * recommendation" as "healthy".
  *
  * This file is pure logic over an injected environment: it reads only (GET), computes no research value, holds no state
- * outside memory (nothing is remembered between pages or clusters), and builds no workflow or recommendation.
+ * outside the optional selection store, and builds no workflow or recommendation. Saved choices are checked
+ * against the current connection and cluster fingerprint before requesting a recommendation.
  *
  * Stale protection. Every choice and every cluster change starts a new generation; an answer that arrives for an older
  * generation, or for a cluster that is no longer the connected one, is dropped. Choices belong to one cluster: when
@@ -52,11 +53,12 @@
         return query ? `${CONTEXT_URL}?${query}` : CONTEXT_URL;
     }
 
-    function detailUrl(workflowId, namespace, failedNode, declared) {
+    function detailUrl(workflowId, namespace, failedNode, declared, allWorkflows) {
         const params = new URLSearchParams();
         params.set("workflow_id", workflowId);
         params.set("namespace", namespace);
         if (failedNode) params.set("failed_node", failedNode);
+        if (allWorkflows) params.set("all_workflows", "true");
         return `${declared === true ? DECLARED_DETAIL_URL : DETAIL_URL}?${params.toString()}`;
     }
 
@@ -109,14 +111,14 @@
         };
     }
 
-    // A declared workflow in the dropdown: always labelled as declared and not approvable, and its value carries the prefix
+    // A declared workflow in the dropdown: always labelled as declared, with the one door that is open for it (research approval), and its value carries the prefix
     // that tells a choice of it apart from a frozen workflow of the same name.
     function declaredOption(workflow) {
         const by = workflow.declaredBy ? ` by ${workflow.declaredBy}` : "";
         return {
             workflowId: workflow.workflowId,
             value: DECLARED_PREFIX + workflow.workflowId, declared: true,
-            label: `${workflow.workflowId} · declared${by} · ${workflow.services.length} services — declared, not approvable`
+            label: `${workflow.workflowId} · declared${by} · ${workflow.services.length} services — declared, research approval only`
                 + (workflow.applicable ? "" : ` — not usable here: ${workflow.reason}`),
             applicable: workflow.applicable,
             reason: workflow.reason || null,
@@ -149,8 +151,10 @@
     }
 
     // env: { fetchJson(url) -> body (rejects with error.code/.details for coded errors), clusterIdentity() -> string,
-    //        onUpdate(view) }
+    //        onUpdate(view), storage? (getItem/setItem/removeItem), onClusterChange?() }
     function createController(env) {
+        const STORAGE_KEY = "resilience.recommendations.selection.v1";
+        let restored = false;
         const s = {
             identity: null, fingerprint: null, generation: 0,
             namespace: "", workflowId: "", workflowKind: "frozen", failedNode: "",
@@ -164,7 +168,10 @@
 
         function view() {
             const ctx = s.ctx;
-            const evidence = ctx ? ctx.evidence.map((e) => (e.id === "failureImpact" && (s.detail || s.error) ? failureImpactItem(s.detail, s.error) : e)) : [];
+            const evidence = ctx ? ctx.evidence
+                .filter((e) => !(env.allWorkflows && s.status === "ready" &&
+                    (s.workflowKind === "declared" ? e.id === "workflow" : e.id === "declaredWorkflow")))
+                .map((e) => (e.id === "failureImpact" && (s.detail || s.error) ? failureImpactItem(s.detail, s.error) : e)) : [];
             return {
                 status: s.status,
                 cluster: { identity: s.identity || "", fingerprint: s.fingerprint },
@@ -173,6 +180,7 @@
                 workflows: ctx ? [...ctx.workflows.map(workflowOption), ...ctx.declaredWorkflows.map(declaredOption)] : [],
                 workflowId: s.workflowId, workflowChoice: ctx ? ctx.workflowChoice : "",
                 workflowKind: s.workflowKind,
+                allWorkflows: env.allWorkflows === true,
                 workflowValue: s.workflowKind === "declared" ? DECLARED_PREFIX + s.workflowId : s.workflowId,
                 failedNodes: nodesOf(s.detail), failedNode: s.failedNode,
                 evidence,
@@ -182,7 +190,16 @@
             };
         }
 
-        function publish() { if (env.onUpdate) env.onUpdate(view()); }
+        function publish() {
+            // Only choices are remembered. Evidence, decisions and mutation forms are always read afresh.
+            if (s.ctx && s.fingerprint && s.status !== "loading") {
+                try { env.storage?.setItem(STORAGE_KEY, JSON.stringify({
+                    identity: s.identity, fingerprint: s.fingerprint, namespace: s.namespace,
+                    workflowId: s.workflowId, workflowKind: s.workflowKind, failedNode: s.failedNode,
+                })); } catch (_error) { /* Storage may be unavailable. */ }
+            }
+            if (env.onUpdate) env.onUpdate(view());
+        }
 
         // A choice or request is current only while nothing newer started and the same cluster is still connected.
         const current = (generation) => generation === s.generation;
@@ -193,7 +210,7 @@
             s.detail = null; s.error = null;
             publish();
             try {
-                const detail = await env.fetchJson(detailUrl(s.workflowId, s.namespace, s.failedNode, s.workflowKind === "declared"));
+                const detail = await env.fetchJson(detailUrl(s.workflowId, s.namespace, s.failedNode, s.workflowKind === "declared", env.allWorkflows));
                 if (!current(generation)) return;               // an older request: never shown
                 s.detail = detail;
                 s.status = "ready";
@@ -212,6 +229,19 @@
 
             const identity = text(await env.clusterIdentity(), 253);
             if (!current(generation)) return view();
+            if (!restored) {
+                restored = true;
+                try {
+                    const saved = JSON.parse(env.storage?.getItem(STORAGE_KEY) || "null");
+                    if (saved && saved.identity === identity && typeof saved.fingerprint === "string" && saved.fingerprint) {
+                        s.fingerprint = text(saved.fingerprint, 200);
+                        s.namespace = text(saved.namespace, 253);
+                        s.workflowId = text(saved.workflowId, 200);
+                        s.workflowKind = saved.workflowKind === "declared" ? "declared" : "frozen";
+                        s.failedNode = text(saved.failedNode, 253);
+                    }
+                } catch (_error) { /* Ignore malformed or inaccessible storage. */ }
+            }
             if (s.identity !== null && identity !== s.identity) {   // a different cluster than the choices were made on
                 s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; s.ctx = null;
             }
@@ -220,7 +250,7 @@
             let ctx;
             try {
                 // A declared choice is not a frozen workflow, so it is never sent to the context as one.
-                ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, s.workflowKind === "declared" ? "" : s.workflowId)));
+                ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, env.allWorkflows || s.workflowKind === "declared" ? "" : s.workflowId)));
             } catch (error) {
                 if (!current(generation)) return view();
                 s.ctx = null; s.error = error; s.status = "blocked";
@@ -239,6 +269,20 @@
             s.fingerprint = ctx.cluster.fingerprint;
             s.ctx = ctx;
             s.namespace = ctx.namespace || "";
+            if (env.allWorkflows) {
+                // Prefer observed frozen evidence; declarations stay in their separately named research tier.
+                const frozen = ctx.workflows.some((w) => w.applicable);
+                const declared = !frozen && ctx.declaredWorkflows.some((w) => w.applicable);
+                s.workflowId = frozen || declared ? "all-workflows" : "";
+                s.workflowKind = declared ? "declared" : "frozen";
+                if (!s.namespace || !s.workflowId) {
+                    s.status = ctx.namespaceChoice === "ambiguous" ? "needs-input" : "blocked";
+                    publish();
+                    return view();
+                }
+                await loadDetail(generation);
+                return view();
+            }
             if (s.workflowKind === "declared") {
                 // Kept only while that declared workflow still exists and applies here; otherwise the choice is dropped, not guessed.
                 const kept = ctx.declaredWorkflows.some((d) => d.workflowId === s.workflowId && d.applicable);
@@ -264,6 +308,30 @@
             s.generation += 1;
             s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = "";
             s.ctx = null; s.detail = null; s.error = null; s.fingerprint = null; s.identity = null;
+            try { env.storage?.removeItem(STORAGE_KEY); } catch (_error) { /* Storage is optional. */ }
+        }
+
+        async function connectionChanged() {
+            const generation = s.generation;
+            const identity = text(await env.clusterIdentity(), 253);
+            if (!current(generation)) return false;
+            let changed = s.identity !== null && identity !== s.identity;
+            // A renewal/status notification is not a new cluster. Verify the server fingerprint too:
+            // a context name can stay the same while its cluster is replaced.
+            if (identity === s.identity && s.ctx && s.fingerprint) {
+                try {
+                    const ctx = cleanContext(await env.fetchJson(contextUrl(s.namespace, env.allWorkflows || s.workflowKind === "declared" ? "" : s.workflowId)));
+                    if (!current(generation)) return false;
+                    changed = ctx.cluster.fingerprint !== s.fingerprint;
+                    if (ctx.cluster.fingerprint === s.fingerprint && s.status === "ready") return false;
+                } catch (_error) {
+                    // Surface unreadable evidence through the usual read path; never keep an old ready result.
+                }
+            }
+            if (!current(generation)) return false;
+            if (changed && env.onClusterChange) env.onClusterChange();
+            await start();
+            return true;
         }
 
         return {
@@ -280,8 +348,10 @@
             selectFailedNode(node) { s.failedNode = text(node, 253); const generation = ++s.generation; return loadDetail(generation); },
             // The connected cluster changed: nothing chosen before belongs to the new one.
             clusterChanged() { reset(); return start(); },
+            connectionChanged,
             // The inputs an approval request must send, because the server recomputes the recommendation from them.
-            selection() { return { workflowId: s.workflowId, namespace: s.namespace, failedNode: s.failedNode, workflowKind: s.workflowKind }; },
+            selection() { return { workflowId: s.workflowId, namespace: s.namespace, failedNode: s.failedNode, workflowKind: s.workflowKind,
+                                  ...(env.allWorkflows ? { allWorkflows: true } : {}) }; },
             view,
         };
     }

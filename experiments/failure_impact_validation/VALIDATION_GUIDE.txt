@@ -8,6 +8,124 @@ The scripts do not inject failures, modify Kubernetes resources, or mount HTTP
 routes in the application. `capture-prediction` performs one read-only request
 to the running backend. `record-evidence` performs no network request.
 
+## Disposable contract demonstration (not validation)
+
+Use this workflow when Components 1 and 2 cannot yet supply usable outputs but
+Component 3 still needs an integration demonstration. It creates schema-valid
+assumed `WorkflowGraph` and `DeploymentGraph` artifacts and passes them through
+Component 3's real public prediction service.
+
+Every generated artifact is labelled `SYNTHETIC_DISPOSABLE`. These results are
+not observations, accuracy evidence, or experimental validation. They must not
+be passed to the captured-evidence validation workflow below or reported as
+empirical results. They are never exposed through runtime API routes or the
+live frontend, which continue to require real evidence.
+
+### Recommended one-command viva run
+
+The shortest complete demonstration generates both assumed upstream graphs,
+runs Component 3 against every synthetic node, writes the full evidence bundle,
+and prints a compact explanation:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_disposable_demo.py `
+  --scenario-id viva-01 `
+  --output-dir .\experiments\failure_impact_validation\disposable\viva-01 `
+  --compact
+```
+
+The bundle contains:
+
+```text
+workflow-graph.json
+deployment-graph.json
+synthetic-input-metadata.json
+scenario-results.json
+```
+
+The compact terminal table is for explanation; `scenario-results.json` retains
+the complete machine-readable reports, root causes, and risk ranking. To show
+one selected failure instead, add for example:
+
+```powershell
+--failed-node synthetic-node-3
+```
+
+Repeat `--failed-node` to select several nodes. Omit it to test every node.
+The command refuses to replace any existing bundle file, so use a new scenario
+ID and output directory for every run.
+
+### Separate generation and evaluation
+
+Use the following steps when the assumed Component 1 and Component 2 outputs
+need to be inspected before Component 3 runs.
+
+#### 1. Generate one disposable input set
+
+Run from the repository root and use a new scenario ID and output directory for
+each demonstration:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\generate_disposable_inputs.py `
+  --scenario-id viva-01 `
+  --output-dir .\experiments\failure_impact_validation\disposable\viva-01
+```
+
+The command creates:
+
+```text
+workflow-graph.json
+deployment-graph.json
+synthetic-input-metadata.json
+```
+
+The generator refuses to overwrite an existing input set.
+
+#### 2. Evaluate every synthetic node
+
+Omit `--failed-node` to evaluate every node in the disposable deployment:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_disposable_scenarios.py `
+  --input-dir .\experiments\failure_impact_validation\disposable\viva-01 `
+  --output .\experiments\failure_impact_validation\disposable\viva-01\all-node-results.json
+```
+
+The summary demonstrates three different cross-layer outcomes:
+
+```text
+synthetic-node-1  cartservice fails; the mandatory checkout workflow fails
+synthetic-node-2  no service completely fails; the workflow survives
+synthetic-node-3  optional emailservice fails; the workflow survives
+```
+
+The detailed result for every node includes blast radius, survivability, failed
+services, failed workflows, root causes, and the node-risk ranking.
+
+#### 3. Evaluate one selected node
+
+Pass `--failed-node` to isolate one scenario. This is the direct Component 3
+prediction and does not require a dependency-only baseline service:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_disposable_scenarios.py `
+  --input-dir .\experiments\failure_impact_validation\disposable\viva-01 `
+  --failed-node synthetic-node-3 `
+  --output .\experiments\failure_impact_validation\disposable\viva-01\node-3-result.json
+```
+
+Repeat `--failed-node` to evaluate several selected nodes. Result files are
+write-once: use a new output name instead of replacing an earlier result.
+
+The separate `run_method_comparison.py` command still requires
+`--dependency-scenario-service` because that argument configures only its
+dependency-only research baseline. It does not restrict Component 3's proposed
+cross-layer algorithm.
+
 ## Required experiment order
 
 Use this order for every run:

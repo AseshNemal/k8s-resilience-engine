@@ -208,6 +208,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
 
     // What the run shows after the action, from its own stored status, as short sentences.
     function runVerdict(run, target) {
+        // The status is the one the run stored at T1; nothing is recomputed in the browser.
         const after = targetPlacement(run.t1, target);
         const readyNodes = Object.entries(after.nodes).filter(([, ps]) => ps.some((p) => p.ready)).map(([n]) => shortNodeName(n));
         const parts = [];

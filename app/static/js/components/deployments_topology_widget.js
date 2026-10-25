@@ -43,8 +43,10 @@ window.DeploymentsTopologyWidget = (function () {
         let unaffected = 0;
         (services || []).forEach((svc) => {
             const ready = readyPods(svc);
+            // Already down before the failure, so the failure can't change it.
             if (ready.length === 0) return;
             const onNode = ready.filter((p) => p.node === node).length;
+            // Every ready copy was on the failed node -> down. Some were -> still up, with fewer copies.
             if (onNode === ready.length) down.push(svc.name);
             else if (onNode > 0) degraded.push({ name: svc.name, left: ready.length - onNode, of: ready.length });
             else unaffected++;

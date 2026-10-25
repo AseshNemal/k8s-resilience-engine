@@ -18,6 +18,7 @@ from experiments.placement_drift.exceptions import ChaosSafetyError, ScenarioExe
 
 class Kubectl:
     def __init__(self, context: str, namespace: str, command_timeout_s: int = 180):
+        # Two safety locks: only a local kind- cluster, and never a system namespace such as kube-system.
         if not context.startswith("kind-"):
             raise ChaosSafetyError(f"Refusing context '{context}': live experiments only run on local KinD clusters.")
         if namespace in PROTECTED_NAMESPACES:
@@ -28,6 +29,7 @@ class Kubectl:
         self.log: list[list[str]] = []
 
     def run(self, *args: str, namespaced: bool = True, check: bool = True) -> str:
+        # --context on every command, so it can only reach the experiment cluster.
         cmd = ["kubectl", "--context", self.context]
         if namespaced:
             cmd += ["--namespace", self.namespace]
@@ -71,6 +73,7 @@ class Kubectl:
         self.run("rollout", "restart", f"deployment/{deployment}")
 
     def delete_pod(self, pod: str) -> None:
+        # Don't block here; the runner waits for the workload to settle afterwards.
         self.run("delete", "pod", pod, "--wait=false")
 
     # --- nodes ------------------------------------------------------------------------------
@@ -91,6 +94,8 @@ class Kubectl:
 
     def drain(self, node: str) -> None:
         self._require_worker(node)
+        # --ignore-daemonsets: per-node system pods (kube-proxy, kindnet) can't move, so they are left alone.
+        # --delete-emptydir-data: allow moving pods with a temporary emptyDir volume (Bookinfo's reviews has one).
         self.run("drain", node, "--ignore-daemonsets", "--delete-emptydir-data",
                  f"--timeout={self.command_timeout_s - 10}s", namespaced=False)
 
@@ -119,11 +124,14 @@ class Kubectl:
                 return False
             want = d["spec"].get("replicas", 1)
             status = d.get("status", {})
+            # The controller hasn't processed the latest change yet, so its status is out of date.
             if d["metadata"].get("generation") != status.get("observedGeneration"):
                 return False
+            # Every pod must be on the new version and ready, and there must be exactly as many as wanted.
             if not (status.get("replicas", 0) == status.get("updatedReplicas", 0)
                     == status.get("readyReplicas", 0) == want):
                 return False
+        # A pod with a deletionTimestamp is still shutting down ("Terminating"), so placement isn't final yet.
         pods = self.get_json("pods")["items"]
         return not any(p["metadata"].get("deletionTimestamp") for p in pods)
 
