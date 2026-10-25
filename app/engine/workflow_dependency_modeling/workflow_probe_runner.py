@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import os
 import re
@@ -10,6 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
+from .execution_models import AssertionResult
 
 from app.engine.workflow_dependency_modeling.workflow_probe_models import (
     ExtractionSource,
@@ -191,22 +193,43 @@ def _execute_probe_step(
         or not rendered_path.startswith("/") or rendered_path.startswith("//")
     ):
         raise ValueError("Rendered request path must remain relative to the application URL")
-    response = client.request(
-        method=step.method,
-        url=rendered_path,
-        params={
-            key: _render_text(value, variables) for key, value in step.query.items()
-        },
-        headers=headers,
-        json=json_body,
-        data=form_body or None,
-    )
+    try:
+        response = client.request(
+            method=step.method,
+            url=rendered_path,
+            params={
+                key: _render_text(value, variables) for key, value in step.query.items()
+            },
+            headers=headers,
+            json=json_body,
+            data=form_body or None,
+        )
+    except httpx.TransportError as error:
+        # Retain the attempt and its trace ID. A missing HTTP response is not a
+        # status code, and transport failure without trace evidence is excluded
+        # from dependency classification by the campaign's correlation gate.
+        reason = "Request timed out" if isinstance(error, httpx.TimeoutException) else "Request transport failed"
+        return WorkflowRunStepResult(
+            name=step.name, method=step.method, path=step.path,
+            status_code=None, succeeded=False, reason=reason,
+            assertions=(AssertionResult("http_response_received", False, True, False),),
+        )
+    assertions = [AssertionResult(
+        "http_status", response.status_code in step.expected_status_codes,
+        list(step.expected_status_codes), response.status_code,
+    )]
+    assertions.extend(AssertionResult(
+        f"response_marker:{index}", marker in response.text, marker, marker in response.text,
+    ) for index, marker in enumerate(step.response_contains))
     failure = _step_failure_reason(step, response)
     if failure is None:
         try:
             variables.update(_extract_variables(step, response))
+            if step.extract:
+                assertions.append(AssertionResult("required_variable_capture", True, True, True))
         except ValueError as err:
             failure = str(err)
+            assertions.append(AssertionResult("required_variable_capture", False, True, False))
     succeeded = failure is None
     return WorkflowRunStepResult(
         name=step.name,
@@ -215,6 +238,7 @@ def _execute_probe_step(
         status_code=response.status_code,
         succeeded=succeeded,
         reason="Step satisfied its reviewed assertions" if succeeded else failure,
+        assertions=tuple(assertions),
     )
 
 
@@ -229,7 +253,7 @@ def run_http_workflow_probe(
     secrets: Mapping[str, str] | None = None,
     allowed_hosts: set[str] | None = None,
 ) -> WorkflowRunResult:
-    """Trace each request and report the terminal or first failing step's trace."""
+    """Retain each attempted request's identity and the selected outcome trace."""
     approved_url = approved_application_url(base_url, allowed_hosts=allowed_hosts)
     if not 1 <= timeout_seconds <= 60:
         raise ValueError("timeoutSeconds must be between 1 and 60")
@@ -254,12 +278,17 @@ def run_http_workflow_probe(
             while step_trace_id in step_trace_ids and step.name != definition.measured_step:
                 step_trace_id = uuid4().hex
             step_trace_ids.add(step_trace_id)
+            step_started_at = datetime.now(timezone.utc)
             result = _execute_probe_step(
                 client,
                 step,
                 variables,
                 resolved_secrets[step.name],
                 step_trace_id,
+            )
+            result = replace(
+                result, trace_id=step_trace_id, started_at=step_started_at,
+                finished_at=datetime.now(timezone.utc),
             )
             results.append(result)
             if not result.succeeded:

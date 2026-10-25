@@ -13,6 +13,7 @@ from app.engine.workflow_dependency_modeling.models import (
     ComponentDataError,
     SuccessCondition,
 )
+from .execution_models import AssertionResult
 
 
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
@@ -268,9 +269,13 @@ class WorkflowRunStepResult:
     name: str
     method: str
     path: str
-    status_code: int
+    status_code: int | None
     succeeded: bool
     reason: str
+    trace_id: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    assertions: tuple[AssertionResult, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -280,6 +285,10 @@ class WorkflowRunStepResult:
             "statusCode": self.status_code,
             "succeeded": self.succeeded,
             "reason": self.reason,
+            "traceId": self.trace_id,
+            "startedAt": self.started_at.isoformat() if self.started_at else None,
+            "finishedAt": self.finished_at.isoformat() if self.finished_at else None,
+            "assertions": [item.to_mapping() for item in self.assertions],
         }
 
 

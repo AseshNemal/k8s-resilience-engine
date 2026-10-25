@@ -250,6 +250,94 @@ class AssertionResult:
 
 
 @dataclass(frozen=True)
+class WorkflowStepEvidence:
+    """One reviewed action: not attempted, or correlated to its own trace root."""
+
+    name: str
+    method: str
+    path: str
+    attempted: bool
+    trace_id: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    status_code: int | None = None
+    succeeded: bool | None = None
+    reason: str = "Not attempted"
+    correlation_status: CorrelationStatus = CorrelationStatus.NOT_ATTEMPTED
+    evidence_snapshot: TraceEvidenceSnapshot | None = None
+    assertions: tuple[AssertionResult, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.status_code is not None and (
+            isinstance(self.status_code, bool) or not isinstance(self.status_code, int)
+            or not 100 <= self.status_code <= 599
+        ):
+            raise ComponentDataError("Step statusCode must be an HTTP status or null")
+        if self.attempted:
+            if not self.trace_id or self.started_at is None or self.finished_at is None:
+                raise ComponentDataError("Attempted workflow steps require trace identity and timestamps")
+            if self.started_at.tzinfo is None or self.finished_at.tzinfo is None:
+                raise ComponentDataError("Step timestamps must include a timezone")
+            if self.finished_at < self.started_at:
+                raise ComponentDataError("Step cannot finish before it starts")
+            if not isinstance(self.succeeded, bool):
+                raise ComponentDataError("Attempted workflow steps require an assertion outcome")
+            if self.correlation_status is CorrelationStatus.NOT_ATTEMPTED:
+                raise ComponentDataError("Attempted workflow steps require a correlation result")
+        elif (
+            self.trace_id is not None or self.started_at is not None
+            or self.finished_at is not None or self.status_code is not None
+            or self.succeeded is not None or self.evidence_snapshot is not None
+            or self.correlation_status is not CorrelationStatus.NOT_ATTEMPTED
+            or self.assertions
+        ):
+            raise ComponentDataError("Unattempted steps cannot contain execution evidence")
+        if self.evidence_snapshot is not None and (
+            self.evidence_snapshot.trace_id != self.trace_id
+            or self.correlation_status is not CorrelationStatus.MATCHED
+        ):
+            raise ComponentDataError("Step snapshot requires its unique matching trace")
+        if self.correlation_status is CorrelationStatus.MATCHED and self.evidence_snapshot is None:
+            raise ComponentDataError("Matched step requires an immutable trace snapshot")
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "name": self.name, "method": self.method, "path": self.path,
+            "attempted": self.attempted, "traceId": self.trace_id,
+            "startedAt": _iso(self.started_at) if self.started_at else None,
+            "finishedAt": _iso(self.finished_at) if self.finished_at else None,
+            "statusCode": self.status_code, "succeeded": self.succeeded,
+            "reason": self.reason, "correlationStatus": self.correlation_status.value,
+            "evidenceSnapshot": self.evidence_snapshot.to_mapping() if self.evidence_snapshot else None,
+            "assertions": [item.to_mapping() for item in self.assertions],
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "WorkflowStepEvidence":
+        if not isinstance(data.get("attempted"), bool):
+            raise ComponentDataError("Step attempted must be boolean")
+        try:
+            correlation = CorrelationStatus(data.get("correlationStatus"))
+        except ValueError as err:
+            raise ComponentDataError("Invalid step correlation status") from err
+        raw_snapshot = data.get("evidenceSnapshot")
+        return cls(
+            name=_required_text(data, "name"), method=_required_text(data, "method"),
+            path=_required_text(data, "path"), attempted=data["attempted"],
+            trace_id=data.get("traceId"),
+            started_at=_timestamp(data.get("startedAt"), "startedAt", required=False),
+            finished_at=_timestamp(data.get("finishedAt"), "finishedAt", required=False),
+            status_code=data.get("statusCode"), succeeded=data.get("succeeded"),
+            reason=_required_text(data, "reason"), correlation_status=correlation,
+            evidence_snapshot=TraceEvidenceSnapshot.from_mapping(raw_snapshot) if isinstance(raw_snapshot, Mapping) else None,
+            assertions=tuple(AssertionResult(
+                name=_required_text(item, "name"), passed=item.get("passed") is True,
+                expected=item.get("expected"), observed=item.get("observed"),
+            ) for item in data.get("assertions", [])),
+        )
+
+
+@dataclass(frozen=True)
 class ExecutionOutcome:
     registration: ExecutionRegistration
     status: ExecutionOutcomeStatus
@@ -260,6 +348,16 @@ class ExecutionOutcome:
     evidence_snapshot: TraceEvidenceSnapshot | None = None
     assertions: tuple[AssertionResult, ...] = ()
     reasons: tuple[str, ...] = field(default_factory=tuple)
+    # None means historical records did not capture sequence-wide evidence.
+    step_evidence: tuple[WorkflowStepEvidence, ...] | None = None
+
+    @property
+    def trace_ids(self) -> frozenset[str]:
+        """All attempted roots, including preparation, for reuse detection."""
+        return frozenset(
+            ([self.matched_trace_id] if self.matched_trace_id else [])
+            + [step.trace_id for step in self.step_evidence or () if step.trace_id]
+        )
 
     def to_mapping(self) -> dict[str, Any]:
         result = {
@@ -274,11 +372,19 @@ class ExecutionOutcome:
         }
         if self.evidence_snapshot is not None:
             result["evidenceSnapshot"] = self.evidence_snapshot.to_mapping()
+        if self.step_evidence is not None:
+            result["stepEvidence"] = [item.to_mapping() for item in self.step_evidence]
         return result
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExecutionOutcome":
         registration = ExecutionRegistration.from_mapping(data)
+        if "stepEvidence" in data and (
+            not isinstance(data["stepEvidence"], list)
+            or not 1 <= len(data["stepEvidence"]) <= 20
+            or any(not isinstance(item, Mapping) for item in data["stepEvidence"])
+        ):
+            raise ComponentDataError("stepEvidence must contain between 1 and 20 action records")
         assertions = tuple(
             AssertionResult(
                 name=_required_text(item, "name"),
@@ -308,4 +414,8 @@ class ExecutionOutcome:
             ),
             assertions=assertions,
             reasons=tuple(str(item) for item in data.get("reasons", [])),
+            step_evidence=(
+                tuple(WorkflowStepEvidence.from_mapping(item) for item in data["stepEvidence"])
+                if "stepEvidence" in data else None
+            ),
         )
