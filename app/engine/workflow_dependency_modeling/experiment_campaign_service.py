@@ -226,12 +226,18 @@ def create_experiment_campaign(
         raise ValueError("The workflow success contract must be confirmed")
 
     analysis = get_workflow_analysis(session_id.strip(), analysis_repository)
+    if analysis.evidence_tier.value != "experimental":
+        raise ValueError("Production trace connections are observation-only; create the campaign in a separate test environment")
     excluded_traces = analysis.trace_quality.get("excludedCount")
     if excluded_traces != 0 or analysis.trace_quality.get("inputInvalidCount", 0) != 0:
         raise ValueError(
             "Dependency validation requires complete trace evidence; repair "
             "instrumentation and create a new analysis session"
         )
+    criticality = data.get("criticality")
+    if (isinstance(criticality, bool) or not isinstance(criticality, (int, float))
+            or not 0 <= criticality <= 1):
+        raise ValueError("Campaign criticality must be explicitly supplied between 0 and 1")
     setup = _campaign_setup(data, analysis, now)
     terminal_service = setup.definition.success_condition.terminal_service
     if terminal_service not in analysis.observed_services:

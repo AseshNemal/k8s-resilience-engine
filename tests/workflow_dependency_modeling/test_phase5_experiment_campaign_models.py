@@ -93,6 +93,32 @@ def test_legacy_campaign_keeps_its_manifest_snapshot_shape():
     campaign = _campaign()
     assert campaign.criticality is None
     assert "criticality" not in campaign.to_mapping()
+    with pytest.raises(ValueError, match="business importance"):
+        campaign.require_criticality()
+
+
+def test_production_observations_cannot_become_fault_campaigns():
+    from dataclasses import replace
+    analyses = InMemoryAnalysisSessionRepository()
+    analysis = _analysis()
+    from app.engine.workflow_dependency_modeling.analysis_session_models import EvidenceTier
+    analyses.create(replace(analysis, evidence_tier=EvidenceTier.PRODUCTION))
+    with pytest.raises(ValueError, match="observation-only"):
+        create_experiment_campaign({"analysisSessionId": analysis.session_id,
+            "successContractConfirmed": True, "criticality": .5,
+            "benchmarkProfile": "online_boutique_checkout_v0_10_1"}, actor="test",
+            repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses)
+
+
+def test_new_campaign_requires_explicit_business_importance():
+    analyses = InMemoryAnalysisSessionRepository()
+    analysis = _analysis()
+    analyses.create(analysis)
+    with pytest.raises(ValueError, match="criticality must be explicitly"):
+        create_experiment_campaign({"analysisSessionId": analysis.session_id,
+            "successContractConfirmed": True,
+            "benchmarkProfile": "online_boutique_checkout_v0_10_1"}, actor="test",
+            repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses)
 
 
 def test_invalid_input_traces_cannot_disappear_from_the_campaign_readiness_gate():
@@ -101,7 +127,7 @@ def test_invalid_input_traces_cannot_disappear_from_the_campaign_readiness_gate(
     analyses = InMemoryAnalysisSessionRepository()
     analyses.create(replace(analysis, trace_quality={**analysis.trace_quality, "inputInvalidCount": 1}))
     with pytest.raises(ValueError, match="complete trace evidence"):
-        create_experiment_campaign({
+        create_experiment_campaign({"criticality": 0.5,
             "analysisSessionId": analysis.session_id, "successContractConfirmed": True,
             "benchmarkProfile": "online_boutique_checkout_v0_10_1",
         }, actor="test", repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses)
@@ -241,7 +267,7 @@ def test_local_control_opt_in_rejects_unreviewed_or_nonlocal_inputs(problem):
     analyses = InMemoryAnalysisSessionRepository()
     analyses.create(analysis)
     with pytest.raises(ValueError, match="Local demo|localDemoControlConfirmed"):
-        create_experiment_campaign({
+        create_experiment_campaign({"criticality": 0.5,
             "analysisSessionId": analysis.session_id, "successContractConfirmed": True,
             "workflowName": "Test", "businessOutcome": "Test",
             "executionDefinition": definition, "localDemoControlConfirmed": confirmation,
@@ -253,7 +279,7 @@ def test_service_derives_online_boutique_plan_from_observation() -> None:
     analyses.create(_analysis())
     campaigns = InMemoryExperimentCampaignRepository()
     created = create_experiment_campaign(
-        {
+        {"criticality": 0.5,
             "analysisSessionId": "analysis:checkout",
             "successContractConfirmed": True,
             "benchmarkProfile": "online_boutique_checkout_v0_10_1",
@@ -281,7 +307,7 @@ def test_service_rejects_non_checkout_observation() -> None:
     payload["operationName"] = "GET /product/{id}"
     analyses.create(WorkflowAnalysisSession.from_mapping(payload))
     campaigns = InMemoryExperimentCampaignRepository()
-    request = {
+    request = {"criticality": 0.5,
         "analysisSessionId": "analysis:product",
         "successContractConfirmed": True,
         "benchmarkProfile": "online_boutique_checkout_v0_10_1",
@@ -306,7 +332,7 @@ def test_service_rejects_incomplete_trace_evidence() -> None:
 
     with pytest.raises(ValueError, match="complete trace evidence"):
         create_experiment_campaign(
-            {
+            {"criticality": 0.5,
                 "analysisSessionId": "analysis:partial",
                 "successContractConfirmed": True,
                 "benchmarkProfile": "online_boutique_checkout_v0_10_1",
@@ -321,7 +347,7 @@ def test_service_never_assumes_benchmark_when_setup_is_missing() -> None:
     analyses = InMemoryAnalysisSessionRepository()
     analyses.create(_analysis())
     campaigns = InMemoryExperimentCampaignRepository()
-    request = {
+    request = {"criticality": 0.5,
         "analysisSessionId": "analysis:checkout",
         "successContractConfirmed": True,
     }
@@ -350,7 +376,7 @@ def test_service_creates_generic_campaign_for_unrelated_application() -> None:
     analyses.create(WorkflowAnalysisSession.from_mapping(payload))
 
     created = create_experiment_campaign(
-        {
+        {"criticality": 0.5,
             "analysisSessionId": "analysis:orders",
             "successContractConfirmed": True,
             "workflowName": "Place customer order",
@@ -407,7 +433,7 @@ def test_service_builds_campaign_from_observed_entry_setup() -> None:
     analyses.create(WorkflowAnalysisSession.from_mapping(payload))
 
     created = create_experiment_campaign(
-        {
+        {"criticality": 0.5,
             "analysisSessionId": "analysis:create-order",
             "successContractConfirmed": True,
             "workflowName": "Create order",
@@ -474,7 +500,7 @@ def test_experiment_campaign_api(monkeypatch) -> None:
     assert preview.json()["executionDefinition"]["steps"][0]["path"] == "/cart/checkout"
     response = client.post(
         "/api/workflows/experiment-campaigns",
-        json={
+        json={"criticality": 0.5,
             "analysisSessionId": "analysis:checkout",
             "successContractConfirmed": True,
             "benchmarkProfile": "online_boutique_checkout_v0_10_1",

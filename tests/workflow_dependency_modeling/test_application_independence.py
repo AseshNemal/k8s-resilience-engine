@@ -10,6 +10,7 @@ def _generic_campaign() -> ExperimentCampaign:
     return ExperimentCampaign.from_mapping(
         {
             "campaignId": "campaign:orders:1",
+            "criticality": 0.5,
             "analysisSessionId": "analysis:orders:1",
             "environmentId": "staging-eu",
             "workflowId": "create_order",

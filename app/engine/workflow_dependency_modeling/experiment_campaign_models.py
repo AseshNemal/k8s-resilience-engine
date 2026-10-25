@@ -208,6 +208,11 @@ class ExperimentCampaign:
     created_by: str
     criticality: float | None = None
 
+    def require_criticality(self) -> float:
+        if self.criticality is None:
+            raise ValueError("Campaign business importance (criticality) is missing; create a new reviewed campaign with an explicit value between 0 and 1")
+        return self.criticality
+
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "ExperimentCampaign":
         criticality = data.get("criticality")
@@ -269,7 +274,8 @@ class ExperimentCampaign:
     def to_mapping(self) -> dict[str, Any]:
         return {
             # Preserve old manifest snapshots byte-for-byte in meaning. Legacy
-            # campaigns omitted this field and used an effective weight of 1.
+            # campaigns omitted this field. They remain readable, but execution
+            # and graph assessment require an explicitly reviewed importance.
             **({"criticality": self.criticality} if self.criticality is not None else {}),
             "campaignId": self.campaign_id,
             "analysisSessionId": self.analysis_session_id,
