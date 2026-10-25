@@ -48,23 +48,21 @@ cross-layer and portfolio algorithms but is not empirical Kubernetes evidence.
 
 ### Research frontend
 
-The same portfolio generator and failure evaluator are available through a
-standalone research UI. It is deliberately separate from `app.main`, so no
-synthetic value can appear on a live-evidence runtime page.
+The same portfolio generator and failure evaluator are mounted as an explicitly
+labelled viva page in the main application. Its data and API remain isolated
+under one synthetic-only path and never substitute values into live endpoints.
 
-Start it from the repository root on a separate port:
+Start the normal application from the repository root:
 
 ```powershell
-& .\.venv\Scripts\python.exe -m uvicorn `
-  experiments.failure_impact_validation.portfolio_demo_app:app `
-  --host 127.0.0.1 `
-  --port 8010
+& .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Open:
+Both pages use the usual application port:
 
 ```text
-http://127.0.0.1:8010
+Failure Impact: http://127.0.0.1:8000/components/failure-impacts
+Synthetic demo: http://127.0.0.1:8000/components/failure-impacts/synthetic-portfolio/
 ```
 
 The page provides three explicit actions:

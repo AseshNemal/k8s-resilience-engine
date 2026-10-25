@@ -51,6 +51,9 @@ p { color: var(--muted); line-height: 1.55; }
 }
 
 .hero-copy { max-width: 720px; margin-bottom: 0; font-size: 1.05rem; }
+.hero-actions { display: grid; justify-items: end; gap: 12px; }
+.back-link { color: var(--muted); font-size: .85rem; font-weight: 700; text-decoration: none; }
+.back-link:hover { color: var(--cyan); }
 .evidence-badge { padding: 10px 14px; border: 1px solid var(--cyan); border-radius: 999px; color: var(--cyan); font-weight: 800; white-space: nowrap; }
 
 main { padding-bottom: 80px; }
@@ -101,7 +104,7 @@ summary { padding: 15px 17px; cursor: pointer; font-weight: 750; }
 @media (max-width: 850px) {
     .hero, .controls, .section-heading, .simulation-panel { align-items: stretch; flex-direction: column; }
     .metric-grid, .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .evidence-badge { align-self: flex-start; }
+    .hero-actions { justify-items: start; }
 }
 
 @media (max-width: 520px) {

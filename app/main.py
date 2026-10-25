@@ -19,6 +19,10 @@ from app.web import (
     recommendations as web_recommendations,
     workflows as web_workflows,
 )
+from experiments.failure_impact_validation.portfolio_demo_app import (
+    SYNTHETIC_PORTFOLIO_PATH,
+    app as synthetic_portfolio_app,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -44,6 +48,14 @@ app.mount(
     "/static",
     StaticFiles(directory=str(BASE_DIR / "static")),
     name="static",
+)
+
+# Explicitly labelled, temporary viva demonstration. It remains isolated in
+# experiments/ and never substitutes its synthetic values into live endpoints.
+app.mount(
+    SYNTHETIC_PORTFOLIO_PATH,
+    synthetic_portfolio_app,
+    name="synthetic-portfolio",
 )
 
 # JSON API routers

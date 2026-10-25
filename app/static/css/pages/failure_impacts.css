@@ -11,6 +11,30 @@
     gap: var(--space-md);
 }
 
+.synthetic-portfolio-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-lg);
+    border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+    background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+}
+
+.synthetic-portfolio-link__eyebrow {
+    margin-bottom: 4px;
+    color: var(--color-primary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.synthetic-portfolio-link__note {
+    max-width: 760px;
+    margin: 6px 0 0;
+}
+
 .scenario-panel__detail {
     font-size: 13px;
 }
@@ -163,6 +187,11 @@
 }
 
 @media (max-width: 640px) {
+    .synthetic-portfolio-link {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
     .workflow-outcome {
         align-items: flex-start;
         flex-direction: column;

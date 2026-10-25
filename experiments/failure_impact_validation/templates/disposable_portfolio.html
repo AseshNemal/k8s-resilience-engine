@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ page_title }}</title>
-    <link rel="stylesheet" href="{{ url_for('assets', path='/disposable_portfolio.css') }}">
+    <link rel="stylesheet" href="assets/disposable_portfolio.css">
 </head>
 <body>
     <header class="hero">
@@ -16,7 +16,10 @@
                 workflow-to-node graph, and simulate single worker-node failures.
             </p>
         </div>
-        <div class="evidence-badge">SYNTHETIC_DISPOSABLE</div>
+        <div class="hero-actions">
+            <a class="back-link" href="/components/failure-impacts">Return to Failure Impact</a>
+            <div class="evidence-badge">SYNTHETIC_DISPOSABLE</div>
+        </div>
     </header>
 
     <main>
@@ -102,6 +105,6 @@
         </section>
     </main>
 
-    <script src="{{ url_for('assets', path='/disposable_portfolio.js') }}"></script>
+    <script src="assets/disposable_portfolio.js"></script>
 </body>
 </html>

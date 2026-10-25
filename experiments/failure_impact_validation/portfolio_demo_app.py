@@ -1,7 +1,7 @@
-"""Standalone research frontend for the synthetic Component 3 portfolio demo.
+"""Isolated research frontend for the synthetic Component 3 portfolio demo.
 
-Run this app explicitly for demonstrations. It is intentionally not imported or
-mounted by ``app.main`` and never substitutes synthetic data into runtime pages.
+The main application mounts this sub-application under an explicitly labelled
+synthetic path. Its data never substitutes for live evidence in runtime routes.
 """
 
 from datetime import datetime, timezone
@@ -25,6 +25,7 @@ from experiments.failure_impact_validation.run_disposable_portfolio_demo import 
 
 
 BASE_DIR = Path(__file__).resolve().parent
+SYNTHETIC_PORTFOLIO_PATH = "/components/failure-impacts/synthetic-portfolio"
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 app = FastAPI(

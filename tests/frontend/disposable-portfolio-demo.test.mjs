@@ -8,6 +8,13 @@ const source = readFileSync(
     "utf8",
 );
 
+test("research API requests are relative to the mounted page", () => {
+    assert.ok(source.includes('postJson("api/synthetic/generate"'));
+    assert.ok(source.includes('simulate("api/synthetic/fail-one"'));
+    assert.ok(source.includes('simulate("api/synthetic/fail-all"'));
+    assert.ok(!source.includes('postJson("/api/synthetic/'));
+});
+
 function load() {
     const window = {};
     vm.runInNewContext(source, { window, console });

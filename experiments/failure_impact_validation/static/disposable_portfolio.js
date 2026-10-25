@@ -183,7 +183,7 @@
         try {
             setBusy(true, "Generating assumed workflow and deployment inputs…");
             state.scenarioId = currentScenarioId();
-            state.generation = await postJson("/api/synthetic/generate", { scenarioId: state.scenarioId });
+            state.generation = await postJson("api/synthetic/generate", { scenarioId: state.scenarioId });
             state.results = null;
             renderGeneration(state.generation);
             document.getElementById("results-section").classList.add("hidden");
@@ -213,10 +213,10 @@
     function init() {
         document.getElementById("generate-button").addEventListener("click", generate);
         document.getElementById("fail-one-button").addEventListener("click", () => {
-            simulate("/api/synthetic/fail-one", document.getElementById("failed-node").value);
+            simulate("api/synthetic/fail-one", document.getElementById("failed-node").value);
         });
         document.getElementById("fail-all-button").addEventListener("click", () => {
-            simulate("/api/synthetic/fail-all");
+            simulate("api/synthetic/fail-all");
         });
         document.getElementById("download-workflows").addEventListener("click", () => {
             downloadJson("workflow-graphs.json", state.generation.workflowArtifact);
