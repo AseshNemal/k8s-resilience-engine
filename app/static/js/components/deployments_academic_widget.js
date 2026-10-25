@@ -194,6 +194,7 @@ window.DeploymentsAcademicWidget = (function () {
     }
 
     function proofCard(failure) {
+        // What the model said would go down, what really went down, and whether every service matched.
         const predicted = failure.checks.filter((c) => !c.predicted_available).map((c) => c.service);
         const observed = failure.checks.filter((c) => !c.observed_available).map((c) => c.service);
         const allMatch = failure.checks.every((c) => c.predicted_available === c.observed_available);
@@ -212,7 +213,7 @@ window.DeploymentsAcademicWidget = (function () {
         });
         card.append(
             make("h4", "proof-card__title", `💥 ${failure.node.split(", ").map(shortNode).join(" + ")} switched off`),
-            downList("🧩 Model said will go down", predicted),
+            downList("🧩 Predicted to go down", predicted),
             downList("🖥️ Really went down", observed),
             make("span", "proof-card__verdict", allMatch ? "✅ Prediction came true" : "❌ Prediction was wrong"),
             more,

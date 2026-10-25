@@ -45,6 +45,8 @@ def _first_container_limits(limits_by_container: List[Dict[str, str]]) -> Resour
 
 
 def _parse_deployment(item: Dict[str, Any]) -> DeclaredIntent:
+    # Placement rules live in the pod template (spec.template.spec), not in the Deployment's own spec,
+    # because they apply to every pod the Deployment creates.
     metadata = _section(item, "metadata")
     spec = _section(item, "spec")
     template = _section(spec, "template")
@@ -58,6 +60,7 @@ def _parse_deployment(item: Dict[str, Any]) -> DeclaredIntent:
     return DeclaredIntent(
         service_name=metadata.get("name", "unknown"),
         namespace=metadata.get("namespace") or "default",
+        # Kubernetes runs 1 replica when the YAML doesn't say.
         expected_replicas=spec.get("replicas", 1),
         resource_limits=_first_container_limits(limits_by_container),
         spread_constraints=[

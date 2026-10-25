@@ -19,10 +19,12 @@ from app.integrations.kubernetes.client import KubernetesApiSource
 
 
 def _selector_matches(selector: dict[str, str], labels: dict[str, str]) -> bool:
+    # Every key=value of the selector must be on the pod. Extra labels on the pod don't matter.
     return all(labels.get(key) == value for key, value in selector.items())
 
 
 def _controller_owner(obj: dict[str, Any]) -> dict[str, Any] | None:
+    # An object can list several owners; the one marked controller=true is the one that manages it.
     owners = (obj.get("metadata", {}) or {}).get("ownerReferences") or []
     return next((ref for ref in owners if ref.get("controller")), None)
 
@@ -31,6 +33,7 @@ class _OwnerIndex:
     """pod -> ReplicaSet -> Deployment lookups by controller ownerReference UID."""
 
     def __init__(self, replica_sets: list[dict[str, Any]], deployments: list[dict[str, Any]]):
+        # ownerReferences point to the owner's UID, so Deployments are looked up by UID, not by name.
         deployment_by_uid = {d["metadata"]["uid"]: d for d in deployments if d.get("metadata", {}).get("uid")}
         self.deployment_of_rs_uid: dict[str, dict[str, Any]] = {}
         self.rs_uid_by_name: dict[str, str] = {}
@@ -38,14 +41,18 @@ class _OwnerIndex:
             metadata = rs.get("metadata", {}) or {}
             if not metadata.get("uid"):
                 continue
+            # name -> uid as a fallback, for pod data that carries the owner's name but no uid
             self.rs_uid_by_name[metadata["name"]] = metadata["uid"]
             owner = _controller_owner(rs)
+            # Link the ReplicaSet to its Deployment only if that Deployment really exists here.
             if owner and owner.get("kind") == "Deployment" and owner.get("uid") in deployment_by_uid:
                 self.deployment_of_rs_uid[metadata["uid"]] = deployment_by_uid[owner["uid"]]
 
     def deployment_of(self, pod: ClusterPod) -> dict[str, Any] | None:
+        # Only a ReplicaSet pod can belong to a Deployment (StatefulSet, DaemonSet and bare pods can't).
         if pod.owner_kind != "ReplicaSet":
             return None
+        # pod -> its ReplicaSet (by uid) -> that ReplicaSet's Deployment
         rs_uid = pod.owner_uid or self.rs_uid_by_name.get(pod.owner_name or "")
         return self.deployment_of_rs_uid.get(rs_uid) if rs_uid else None
 
@@ -71,6 +78,7 @@ def _template_labels(deployment: dict[str, Any]) -> dict[str, str]:
 
 
 def _declared_replicas(deployment: dict[str, Any]) -> int:
+    # Kubernetes uses 1 when the Deployment does not set spec.replicas.
     replicas = (deployment.get("spec") or {}).get("replicas")
     return 1 if replicas is None else replicas
 
@@ -84,9 +92,11 @@ def _resolve_service(
     namespace: str,
 ) -> dict[str, Any]:
     name = service["metadata"]["name"]
+    # The Service's pods, sorted by name so every run gives the same order.
     selected = sorted((p for p in live_pods if _selector_matches(selector, p.labels)), key=lambda p: p.name)
     owning: dict[str, dict[str, Any]] = {}
     pod_records = []
+    # Find each pod's Deployment; a pod without one is still kept, because it still serves traffic.
     for pod in selected:
         deployment = owners.deployment_of(pod)
         if deployment is not None:
@@ -99,6 +109,8 @@ def _resolve_service(
         if _selector_matches(selector, _template_labels(deployment)):
             owning.setdefault(deployment["metadata"]["name"], deployment)
 
+    # declaredReplicas = what the YAML asks for; readyReplicas = what is ready right now.
+    # Comparing the two is how scale drift is found later.
     return {
         "name": name,
         "namespace": namespace,
@@ -120,6 +132,7 @@ def resolve_service_ownership(
 ) -> dict[str, dict[str, Any]]:
     """Pure resolution over Kubernetes JSON objects of one namespace."""
     owners = _OwnerIndex(replica_sets, deployments)
+    # Finished pods (Succeeded / Failed) no longer serve traffic, so they are left out.
     live_pods = [p for p in pods if p.namespace == namespace and p.phase not in TERMINAL_POD_PHASES]
 
     result: dict[str, dict[str, Any]] = {}

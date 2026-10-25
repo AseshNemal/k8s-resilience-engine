@@ -110,6 +110,7 @@ def _drain(ctx):
 
 
 def _filler_manifest(namespace: str, node: str, cpu_m: int) -> str:
+    # A pause pod pinned to one node (nodeSelector) that only books CPU. It does no work.
     name = f"capacity-filler-{node}"
     return f"""apiVersion: apps/v1
 kind: Deployment
@@ -137,15 +138,19 @@ def _constrained_resources(ctx):
     import tempfile
 
     target = ctx.workload.target_deployment
+    # 1. Remove the target's pods, so the free CPU we measure next is without them.
     ctx.kube.scale(target, 0)
     ctx.kube.wait_until_no_pods(ctx.workload.target_selector)
+    # 2. Free CPU per worker (allocatable minus what is already requested).
     nodes = ctx.observe_nodes()
     free = {n.name: float(n.cpu_available) for n in nodes}
+    # 3. Keep the roomiest node free and fill every other one.
     keep = max(free, key=lambda n: (free[n], n))
     fillers = {}
     for node, cores in free.items():
         if node == keep:
             continue
+        # Book all free CPU except 30m, which is less than one target pod needs, so none fits there.
         cpu_m = int((cores - FILLER_HEADROOM_CORES) * 1000)
         if cpu_m <= 0:
             continue
@@ -154,6 +159,7 @@ def _constrained_resources(ctx):
         ctx.kube.apply(f.name)
         fillers[node] = cpu_m
     ctx.kube.wait_until_stable([f"capacity-filler-{n}" for n in fillers])
+    # 4. Bring the target back to 3: the scheduler can only use the node that was kept free.
     ctx.kube.scale(target, ctx.workload.target_replicas)
     return {"action": "scale target to 0, fill CPU on all workers but one, scale target to 3",
             "kept_free_node": keep, "filler_cpu_millicores": fillers}
@@ -163,6 +169,7 @@ def _remove_fillers(ctx):
     ctx.kube.run("delete", "deployment", "-l", FILLER_LABEL, "--ignore-not-found", "--wait=true")
 
 
+# Each entry: id, name, disruption type, the question it answers, the action, and (if needed) its undo.
 SCENARIOS: list[LiveScenario] = [
     LiveScenario("01_initial_deployment", "Initial deployment", DisruptionType.INITIAL_DEPLOYMENT,
                  "Fresh deployment, no disruption (baseline placement and exposure).", _initial),

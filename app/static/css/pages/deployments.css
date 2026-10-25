@@ -173,6 +173,7 @@
 .tab-pane {
     animation: tab-fade-in 0.25s ease-out;
 }
+@media (prefers-reduced-motion: reduce) { .tab-pane { animation: none; } }
 
 .tab-pane[hidden] {
     display: none;
@@ -1193,7 +1194,6 @@
 .evidence-box__verify { margin: 10px 0 0 0; font-size: 12px; color: var(--color-text-muted); }
 
 /* ---- main output: DeploymentGraph ---- */
-.main-output__desc { margin: 0 0 var(--space-md) 0; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); max-width: 900px; }
 
 /* Accuracy tab: one card per real node failure, predicted outages next to the ones that really happened */
 .proof__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-md); align-items: start; }

@@ -24,15 +24,18 @@ _QUANTITY_SUFFIX = {
     "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18,
     "Ki": 2.0 ** 10, "Mi": 2.0 ** 20, "Gi": 2.0 ** 30, "Ti": 2.0 ** 40, "Pi": 2.0 ** 50, "Ei": 2.0 ** 60,
 }
-_QUANTITY = re.compile(r"([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)([A-Za-z]*)")
+# The number part only; whatever follows it must be one of the suffixes above.
+_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 
 
 def parse_quantity(value: Any) -> float:
     """A Kubernetes quantity as a float. Raises ValueError for text that is not a quantity."""
-    match = _QUANTITY.fullmatch(str(value).strip())
-    if match is None or match.group(2) not in _QUANTITY_SUFFIX:
+    text = str(value).strip()
+    match = _NUMBER.match(text)
+    suffix = text[match.end():] if match else None
+    if suffix not in _QUANTITY_SUFFIX:
         raise ValueError(f"not a Kubernetes quantity: {value!r}")
-    return float(match.group(1)) * _QUANTITY_SUFFIX[match.group(2)]
+    return float(match.group()) * _QUANTITY_SUFFIX[suffix]
 
 
 def _quantity(value: Any) -> float:
@@ -46,6 +49,8 @@ def _pod_requests(pod: dict[str, Any]) -> tuple[float, float]:
     def requests_of(container: dict[str, Any]) -> dict[str, Any]:
         return ((container.get("resources") or {}).get("requests")) or {}
 
+    # Same rule as the Kubernetes scheduler: normal containers run together (so their requests add up),
+    # init containers run one at a time before them (so only the biggest one counts).
     containers = [requests_of(c) for c in spec.get("containers", []) or []]
     inits = [requests_of(c) for c in spec.get("initContainers", []) or []]
     overhead = spec.get("overhead") or {}
@@ -63,6 +68,7 @@ def _condition(obj: dict[str, Any], condition_type: str) -> bool | None:
 
 def nodes_from_objects(node_objects: list[dict[str, Any]], pod_objects: list[dict[str, Any]]) -> List[ClusterNode]:
     """Worker nodes with remaining schedulable capacity (allocatable minus scheduled requests)."""
+    # Add up the CPU / memory already booked (requested) by the pods on each node.
     requested: dict[str, tuple[float, float]] = {}
     for pod in pod_objects:
         node_name = (pod.get("spec", {}) or {}).get("nodeName")
@@ -76,9 +82,11 @@ def nodes_from_objects(node_objects: list[dict[str, Any]], pod_objects: list[dic
     for node in node_objects:
         metadata = node.get("metadata", {}) or {}
         labels = {str(k): str(v) for k, v in (metadata.get("labels") or {}).items()}
+        # The control plane runs no application pods, so it is not a failure domain for them.
         if any(label in labels for label in CONTROL_PLANE_LABELS):
             continue
         name = metadata["name"]
+        # Free capacity = what the node offers to pods (allocatable) minus what is already requested.
         allocatable = (node.get("status", {}) or {}).get("allocatable") or {}
         used_cpu, used_mem = requested.get(name, (0.0, 0.0))
         nodes.append(ClusterNode(
@@ -106,6 +114,7 @@ def _pod_from_object(pod: dict[str, Any], namespace: str) -> ClusterPod:
     labels = {str(k): str(v) for k, v in (metadata.get("labels") or {}).items()}
     return ClusterPod(
         name=metadata["name"],
+        # spec.nodeName is set by the scheduler; it stays empty while the pod is Pending.
         node=(pod.get("spec", {}) or {}).get("nodeName"),
         ready=_condition(pod, "Ready") is True,
         owner_kind=owner.get("kind"),

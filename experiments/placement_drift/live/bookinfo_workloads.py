@@ -22,9 +22,13 @@ import yaml
 
 NAMESPACE = "bookinfo-exp"
 IMAGE_TAG = "1.20.3"
+# 3 copies, not Bookinfo's 1: with one copy a service is always exposed, so there would be no drift to see.
 REPLICAS = 3
+# The scheduler only looks at requests when it checks whether a pod fits on a node,
+# so without them a node could never be "full" (needed for the constrained-resources scenario).
 REQUESTS = {"cpu": "100m", "memory": "128Mi"}
 PORT = 9080
+# Lets the runner find and clean up its own objects.
 EXPERIMENT_LABEL = {"experiment": "placement-drift"}
 OUT_DIR = Path(__file__).resolve().parents[3] / "deploy" / "experiments" / "placement-drift-bookinfo"
 
@@ -64,6 +68,8 @@ def _deployment(service: str, spread: bool) -> dict:
     }
     if service in _VOLUMES:
         pod_spec["volumes"] = _VOLUMES[service]
+    # Config B only (the one difference between the configs): keep the copies evenly spread over nodes,
+    # at most 1 apart, and leave a pod Pending rather than break that.
     if spread:
         pod_spec["topologySpreadConstraints"] = [{
             "maxSkew": 1,

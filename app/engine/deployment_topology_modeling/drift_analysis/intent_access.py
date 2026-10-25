@@ -8,6 +8,7 @@ from typing import Any
 
 
 def get_field(intent: Any, *names: str, default: Any = None) -> Any:
+    # Try each spelling (e.g. node_selector, nodeSelector) on a dict or an object; the first one set wins.
     for name in names:
         if isinstance(intent, dict):
             if intent.get(name) is not None:
@@ -55,12 +56,14 @@ def spread_constraints(intent: Any) -> list[dict[str, Any]]:
 
 
 def required_node_terms(intent: Any) -> list[dict[str, Any]]:
+    # "required..." = a hard rule: the scheduler will not place the pod on a node that breaks it.
     node_affinity = affinity_spec(intent).get("nodeAffinity", {}) or {}
     required = node_affinity.get("requiredDuringSchedulingIgnoredDuringExecution", {}) or {}
     return required.get("nodeSelectorTerms", []) or []
 
 
 def preferred_node_terms(intent: Any) -> list[dict[str, Any]]:
+    # "preferred..." = a soft rule: the scheduler tries, but may place the pod elsewhere.
     node_affinity = affinity_spec(intent).get("nodeAffinity", {}) or {}
     preferred = node_affinity.get("preferredDuringSchedulingIgnoredDuringExecution", []) or []
     return [item.get("preference", {}) or {} for item in preferred]
@@ -91,6 +94,8 @@ def has_placement_rules(intent: Any) -> bool:
 
 
 def matches_expression(labels: dict[str, str], expression: dict[str, Any]) -> bool:
+    # The six Kubernetes match operators, e.g. {key: zone, operator: In, values: [a, b]}.
+    # An unknown operator never matches.
     key = expression.get("key")
     operator = expression.get("operator")
     values = {str(value) for value in expression.get("values", []) or []}
@@ -114,6 +119,7 @@ def matches_expression(labels: dict[str, str], expression: dict[str, Any]) -> bo
 
 
 def matches_node_term(labels: dict[str, str], term: dict[str, Any]) -> bool:
+    # Inside one term every expression must match (AND); between terms one is enough (OR, see below).
     expressions = term.get("matchExpressions", []) or []
     fields = term.get("matchFields", []) or []
     return all(matches_expression(labels, expr) for expr in [*expressions, *fields])

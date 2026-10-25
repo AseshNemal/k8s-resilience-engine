@@ -50,6 +50,7 @@ class DriftAnalyzer:
         cluster_nodes: list[dict[str, Any]],
     ) -> ServiceExposureResult:
         violations: list[DriftViolation] = []
+        # Each detector checks one kind of drift on its own; their findings are collected together.
         for detector in self.detectors:
             found = detector.detect(
                 service_name=service_name,
@@ -62,6 +63,7 @@ class DriftAnalyzer:
                 for v in found:
                     self.audit_trail.record_violation(service_name, v)
 
+        # Exposure is computed from where the ready pods are, whatever the detectors found.
         return self.exposure_engine.evaluate_service_exposure(
             service_name=service_name,
             runtime_pods=runtime_pods,
@@ -90,6 +92,8 @@ class DriftAnalyzer:
             for svc in sorted(runtime_pods_by_service)
         ]
 
+        # Cluster-level numbers, all from placement_metrics:
+        # exposure rate = exposed / evaluated services, compliance = services obeying their rules / services with rules.
         statuses = [e.exposure_status for e in exposures]
         rate = pm.exposure_rate(statuses)
         compliance = pm.compliance_rate({e.service_name: e.placement_rules_satisfied for e in exposures})
@@ -113,6 +117,7 @@ class DriftAnalyzer:
             runtime_overhead_ms=round((time.perf_counter() - start_time) * 1000.0, 2),
         )
 
+        # Baseline B2: the same services ranked by placement only, to compare against the workflow-aware ranking.
         baseline_b2 = self.baseline_engine.generate_baseline_b2(exposures)
 
         if self.config.enable_audit_logging:

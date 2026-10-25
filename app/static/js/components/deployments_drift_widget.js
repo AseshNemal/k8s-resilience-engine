@@ -103,6 +103,7 @@ window.DeploymentsDriftWidget = (function () {
         const services = deployment.services || [];
         const nodes = (deployment.nodes || []).map((n) => n.name);
         const rows = services.map((svc) => {
+            // Ready and not-ready copies of this service on each node (Pending pods get their own column).
             const cells = {};
             (svc.pods || []).forEach((pod) => {
                 const key = pod.node || PENDING;
@@ -123,6 +124,7 @@ window.DeploymentsDriftWidget = (function () {
         const extra = new Set();
         rows.forEach((r) => Object.keys(r.cells).forEach((k) => { if (!nodes.includes(k)) extra.add(k); }));
         const columns = [...nodes, ...[...extra].sort((a, b) => (a === PENDING) - (b === PENDING) || a.localeCompare(b))];
+        // Riskiest services first.
         const order = { exposed: 0, unavailable: 1, safe: 2 };
         rows.sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
         return { columns, rows };
