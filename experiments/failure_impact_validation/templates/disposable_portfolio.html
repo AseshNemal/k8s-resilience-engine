@@ -96,12 +96,39 @@
             <div class="section-heading">
                 <div>
                     <p class="section-kicker">Prediction output</p>
-                    <h2>Portfolio failure impact</h2>
+                    <h2>Node-failure impact analysis</h2>
                 </div>
                 <button id="download-results" class="secondary" type="button">Download results</button>
             </div>
-            <div class="table-wrap"><table id="result-table"></table></div>
-            <div id="workflow-outcomes" class="outcome-list"></div>
+
+            <div id="result-overview"></div>
+
+            <section class="result-block" aria-labelledby="risk-ranking-title">
+                <div class="result-block__heading">
+                    <div>
+                        <p class="section-kicker">Portfolio comparison</p>
+                        <h3 id="risk-ranking-title">Worker-node risk ranking</h3>
+                    </div>
+                    <p>Each node is removed independently from the same unchanged deployment.</p>
+                </div>
+                <div id="node-risk-ranking" class="risk-ranking"></div>
+            </section>
+
+            <section class="result-block" aria-labelledby="propagation-title">
+                <div class="result-block__heading">
+                    <div>
+                        <p class="section-kicker">Explainable output</p>
+                        <h3 id="propagation-title">Failure propagation by node</h3>
+                    </div>
+                    <p>Trace the failed node through unavailable mandatory services to workflow outcomes.</p>
+                </div>
+                <div id="workflow-outcomes" class="outcome-list"></div>
+            </section>
+
+            <details class="result-evidence">
+                <summary>View comparison evidence table</summary>
+                <div class="table-wrap"><table id="result-table"></table></div>
+            </details>
         </section>
     </main>
 

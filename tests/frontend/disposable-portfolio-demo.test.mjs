@@ -144,3 +144,22 @@ test("result rows keep single-node and all-node portfolio metrics", () => {
         },
     ]);
 });
+
+test("node risk ranking preserves the server ranking and failure evidence", () => {
+    const demo = load();
+    const ranking = demo.nodeRiskRanking({
+        results: [{
+            nodeRiskRanking: [
+                { node: "node-1", blastRadius: 50, failedWorkflows: ["checkout", "cart"] },
+                { node: "node-3", blastRadius: 25, failedWorkflows: ["email"] },
+                { node: "node-2", blastRadius: 0, failedWorkflows: [] },
+            ],
+        }],
+    });
+
+    assert.deepEqual(JSON.parse(JSON.stringify(ranking)), [
+        { rank: 1, node: "node-1", blastRadius: 50, failedWorkflows: ["checkout", "cart"] },
+        { rank: 2, node: "node-3", blastRadius: 25, failedWorkflows: ["email"] },
+        { rank: 3, node: "node-2", blastRadius: 0, failedWorkflows: [] },
+    ]);
+});

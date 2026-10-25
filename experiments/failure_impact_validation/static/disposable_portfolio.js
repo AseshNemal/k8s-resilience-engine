@@ -192,6 +192,41 @@
         }));
     }
 
+    function nodeRiskRanking(resultArtifact) {
+        const suppliedRanking = resultArtifact?.results?.[0]?.nodeRiskRanking || [];
+        if (suppliedRanking.length) {
+            return suppliedRanking.map((entry, index) => ({
+                rank: index + 1,
+                node: entry.node,
+                blastRadius: entry.blastRadius,
+                failedWorkflows: [...entry.failedWorkflows],
+            }));
+        }
+        return resultRows(resultArtifact)
+            .sort((left, right) => right.blastRadius - left.blastRadius || left.failedNode.localeCompare(right.failedNode))
+            .map((entry, index) => ({
+                rank: index + 1,
+                node: entry.failedNode,
+                blastRadius: entry.blastRadius,
+                failedWorkflows: [...entry.failedWorkflows],
+            }));
+    }
+
+    function impactTone(blastRadius) {
+        if (blastRadius >= 50) return { key: "high", label: "High impact" };
+        if (blastRadius > 0) return { key: "medium", label: "Partial impact" };
+        return { key: "none", label: "No workflow failure" };
+    }
+
+    function displayWorkflowId(workflowId, scenarioId) {
+        const prefix = `synthetic-${scenarioId}-`;
+        return String(workflowId).startsWith(prefix) ? String(workflowId).slice(prefix.length) : workflowId;
+    }
+
+    function percent(value) {
+        return Math.max(0, Math.min(100, Number(value) || 0));
+    }
+
     async function postJson(endpoint, payload) {
         const response = await fetch(endpoint, {
             method: "POST",
@@ -292,6 +327,71 @@
 
     function renderResults(resultArtifact) {
         const rows = resultRows(resultArtifact);
+        const ranking = nodeRiskRanking(resultArtifact);
+        const highestRisk = ranking[0] || { node: "none", blastRadius: 0, failedWorkflows: [] };
+        const evaluatedCount = resultArtifact.evaluatedNodes?.length || rows.length;
+        const noFailureCount = ranking.filter((entry) => entry.blastRadius === 0).length;
+        const comparisonLabel = evaluatedCount > 1
+            ? `${evaluatedCount} worker nodes compared independently`
+            : `Single-node scenario for ${highestRisk.node}`;
+
+        document.getElementById("result-overview").innerHTML = `
+            <div class="result-overview result-overview--${impactTone(highestRisk.blastRadius).key}">
+                <div class="result-overview__summary">
+                    <div class="result-overview__icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 3v6M12 15v6M3 12h6M15 12h6"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <circle cx="12" cy="3" r="2"></circle>
+                            <circle cx="12" cy="21" r="2"></circle>
+                            <circle cx="3" cy="12" r="2"></circle>
+                            <circle cx="21" cy="12" r="2"></circle>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="result-overview__labels">
+                            <span>Virtual failure complete</span>
+                            <span class="result-overview__evidence">Synthetic evidence</span>
+                        </div>
+                        <h3>${escapeHtml(comparisonLabel)}</h3>
+                        <p>
+                            Highest predicted impact occurs on <strong>${escapeHtml(highestRisk.node)}</strong>:
+                            ${escapeHtml(highestRisk.failedWorkflows.length)} of ${escapeHtml(resultArtifact.totalWorkflows)} workflows fail.
+                        </p>
+                    </div>
+                </div>
+                <div class="impact-ring" style="--impact: ${percent(highestRisk.blastRadius)}%" aria-label="Highest blast radius ${escapeHtml(highestRisk.blastRadius.toFixed(1))} percent">
+                    <div><strong>${escapeHtml(highestRisk.blastRadius.toFixed(0))}%</strong><span>highest blast radius</span></div>
+                </div>
+                <dl class="result-overview__metrics">
+                    <div><dt>Nodes evaluated</dt><dd>${escapeHtml(evaluatedCount)}</dd></div>
+                    <div><dt>Portfolio workflows</dt><dd>${escapeHtml(resultArtifact.totalWorkflows)}</dd></div>
+                    <div><dt>Zero-impact nodes</dt><dd>${escapeHtml(noFailureCount)}</dd></div>
+                </dl>
+            </div>
+        `;
+
+        document.getElementById("node-risk-ranking").innerHTML = ranking.map((entry) => {
+            const tone = impactTone(entry.blastRadius);
+            const workflowNames = entry.failedWorkflows.map((workflowId) => (
+                displayWorkflowId(workflowId, resultArtifact.scenarioId)
+            ));
+            return `
+                <article class="risk-row risk-row--${tone.key}">
+                    <span class="risk-row__rank">#${entry.rank}</span>
+                    <div class="risk-row__identity">
+                        <strong>${escapeHtml(entry.node)}</strong>
+                        <span>${escapeHtml(workflowNames.join(", ") || "All workflows survive")}</span>
+                    </div>
+                    <div class="risk-row__bar" role="img" aria-label="${escapeHtml(entry.node)} blast radius ${escapeHtml(entry.blastRadius.toFixed(1))} percent">
+                        <span style="width: ${percent(entry.blastRadius)}%"></span>
+                    </div>
+                    <strong class="risk-row__value">${escapeHtml(entry.blastRadius.toFixed(0))}%</strong>
+                    <span class="impact-badge impact-badge--${tone.key}">${tone.label}</span>
+                </article>
+            `;
+        }).join("");
+
         document.getElementById("result-table").innerHTML = `
             <thead><tr><th>Failed node</th><th>Failed workflows</th><th>Failed services</th><th>Blast radius</th><th>Survivability</th></tr></thead>
             <tbody>${rows.map((row) => `
@@ -304,19 +404,77 @@
                 </tr>
             `).join("")}</tbody>`;
 
-        document.getElementById("workflow-outcomes").innerHTML = resultArtifact.results.map((result) => `
-            <article class="outcome-card">
-                <h3>${escapeHtml(result.failedNode)}</h3>
-                ${result.workflowImpacts.map((impact) => `
-                    <p>
-                        <strong class="${impact.survives ? "good" : "bad"}">${impact.survives ? "SURVIVES" : "FAILS"}</strong>
-                        · ${escapeHtml(impact.workflowId)}
-                        · unavailable: ${escapeHtml(impact.failedServices.join(", ") || "none")}
-                        · mandatory failures: ${escapeHtml(impact.failedMandatoryServices.join(", ") || "none")}
-                    </p>
-                `).join("")}
-            </article>
-        `).join("");
+        document.getElementById("workflow-outcomes").innerHTML = resultArtifact.results.map((result) => {
+            const tone = impactTone(result.blastRadius);
+            const unavailableServices = result.failedServices.join(", ") || "None";
+            return `
+                <article class="node-impact-card node-impact-card--${tone.key}">
+                    <header class="node-impact-card__header">
+                        <div>
+                            <span class="node-impact-card__eyebrow">Assumed failed worker node</span>
+                            <h3>${escapeHtml(result.failedNode)}</h3>
+                        </div>
+                        <span class="impact-badge impact-badge--${tone.key}">${tone.label}</span>
+                    </header>
+
+                    <div class="node-impact-card__metrics">
+                        <div class="impact-meter impact-meter--danger">
+                            <div><span>Blast radius</span><strong>${escapeHtml(result.blastRadius.toFixed(1))}%</strong></div>
+                            <div class="impact-meter__track"><span style="width: ${percent(result.blastRadius)}%"></span></div>
+                        </div>
+                        <div class="impact-meter impact-meter--success">
+                            <div><span>Workflow survivability</span><strong>${escapeHtml(result.survivability.toFixed(1))}%</strong></div>
+                            <div class="impact-meter__track"><span style="width: ${percent(result.survivability)}%"></span></div>
+                        </div>
+                    </div>
+
+                    <div class="node-impact-card__facts">
+                        <span><strong>${escapeHtml(result.failedWorkflows.length)}</strong> failed workflows</span>
+                        <span><strong>${escapeHtml(result.survivingWorkflows.length)}</strong> surviving workflows</span>
+                        <span><strong>${escapeHtml(result.failedServices.length)}</strong> unavailable services</span>
+                    </div>
+
+                    <div class="unavailable-services">
+                        <span>Unavailable after failure</span>
+                        <strong>${escapeHtml(unavailableServices)}</strong>
+                    </div>
+
+                    <div class="workflow-impact-grid">
+                        ${result.workflowImpacts.map((impact) => {
+                            const workflowName = displayWorkflowId(impact.workflowId, resultArtifact.scenarioId);
+                            if (impact.survives) {
+                                return `
+                                    <div class="workflow-impact workflow-impact--survives">
+                                        <div class="workflow-impact__status" aria-hidden="true">✓</div>
+                                        <div>
+                                            <strong title="${escapeHtml(impact.workflowId)}">${escapeHtml(workflowName)}</strong>
+                                            <span>All mandatory services remain available</span>
+                                        </div>
+                                        <span class="workflow-impact__verdict">Survives</span>
+                                    </div>
+                                `;
+                            }
+                            return `
+                                <div class="workflow-impact workflow-impact--fails">
+                                    <div class="workflow-impact__status" aria-hidden="true">!</div>
+                                    <div>
+                                        <strong title="${escapeHtml(impact.workflowId)}">${escapeHtml(workflowName)}</strong>
+                                        <div class="failure-path" aria-label="Failure propagation path">
+                                            <span>${escapeHtml(result.failedNode)}</span>
+                                            <b aria-hidden="true">→</b>
+                                            <span>${escapeHtml(impact.failedMandatoryServices.join(", "))} unavailable</span>
+                                            <b aria-hidden="true">→</b>
+                                            <span>workflow fails</span>
+                                        </div>
+                                    </div>
+                                    <span class="workflow-impact__verdict">Fails</span>
+                                </div>
+                            `;
+                        }).join("")}
+                    </div>
+                </article>
+            `;
+        }).join("");
         document.getElementById("results-section").classList.remove("hidden");
         document.getElementById("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -393,6 +551,7 @@
     global.DisposablePortfolioDemo = {
         graphLayout,
         graphSummaries,
+        nodeRiskRanking,
         renderCrossLayerGraph,
         resultRows,
         init,
