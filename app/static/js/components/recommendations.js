@@ -1018,8 +1018,23 @@
     // The research tabs sit outside the re-rendered region, so what fills them is looked up on the page, not in the region.
     const tabPart = (role) => document.querySelector(`[data-role="${role}"]`);
 
+    // The workflows at risk sit above the steps in every view: the application exists to run them. Redrawn for each selected candidate.
+    function drawWorkflowRisk(detail, selected) {
+        const box = document.querySelector('[data-role="rec-workflow-risk-box"]');
+        const target = document.querySelector('[data-role="rec-workflow-risk"]');
+        if (!box || !target || !window.ResilienceWorkflowRisk) return;
+        const nodes = ((detail && detail.currentDeployment && detail.currentDeployment.nodes) || []).map((n) => n.name).filter(Boolean);
+        const model = detail && detail.workflowRisk
+            ? window.ResilienceWorkflowRisk.render(target, detail.workflowRisk, nodes, selected || null,
+                { failedNode: (detail.evidence && detail.evidence.failedNode) || null })
+            : null;
+        box.hidden = !model;
+        if (!model) target.replaceChildren();
+    }
+
     /** Empty the research tabs, so nothing from an earlier recommendation is left beside a page that has none. */
     function clearWorkbench() {
+        drawWorkflowRisk(null, null);
         view.renderRankingTable(tabPart("rec-candidate-table-body"), { recommendations: [] });
         const reasons = tabPart("rec-detail-list");
         if (reasons) reasons.replaceChildren();
@@ -1104,6 +1119,7 @@
 
         // The research tabs.
         view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
+        drawWorkflowRisk(detail, selected || null);
         // The whole topology now and after the selected change, from the same two graphs; only drawn when there is one to compare.
         const topologyBox = region.querySelector('[data-role="rec-topology-box"]');
         if (topologyBox && window.ResilienceTopologyCompare) {

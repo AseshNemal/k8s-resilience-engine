@@ -201,6 +201,17 @@ def _workflows_of(live: LiveRecommendation, candidate_id: str) -> dict[str, Any]
     return {"protected": [w for w in before if w not in still], "exposed": list(still), "exposedAt": still}
 
 
+def _workflow_risk(live: LiveRecommendation) -> list[dict[str, Any]]:
+    """Each workflow as it stands today: how much it matters and the worker nodes whose loss breaks it (empty: it survives any one).
+
+    Component 3's predictor decided this, once per worker (``_exposure``); nothing is recalculated here. Most critical first.
+    """
+    before = (live.evidence.get("workflowExposure") or {}).get("before") or {}
+    risk = [{"workflowId": w["workflowId"], "criticality": w["criticality"], "breaksAt": list(before.get(w["workflowId"]) or [])}
+            for w in live.evidence.get("workflows", [])]
+    return sorted(risk, key=lambda item: (-item["criticality"], item["workflowId"]))
+
+
 def _parts(live: LiveRecommendation, candidate: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """The changes a candidate is made of. Approval is for one change under one workflow, so a pair is reviewed part by part."""
     if candidate["type"] == "COMBINATION":
@@ -240,6 +251,9 @@ def describe_portfolio(live: LiveRecommendation) -> dict[str, Any]:
         detail["outcome"] = {"state": PORTFOLIO_NOT_APPROVABLE, "message": NOT_APPROVABLE}
     if analysis_only and detail["yaml"].get("available"):
         detail["yaml"].update(applicable=False, reason=NOT_APPROVABLE)
+    detail["workflowExposure"] = live.evidence.get("workflowExposure")
+    detail["workflowDefinitions"] = (live.details or {}).get("portfolioWorkflows")
+    detail["workflowRisk"] = _workflow_risk(live)
     detail["portfolio"] = {
         "workflows": [{"workflowId": w["workflowId"], "criticality": w["criticality"]} for w in live.evidence.get("workflows", [])],
         "notEvaluated": live.evidence.get("workflowsNotEvaluated", []),
