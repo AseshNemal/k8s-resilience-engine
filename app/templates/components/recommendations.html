@@ -46,14 +46,6 @@
     <button type="button" class="rec-link" data-go="5">View applied change</button>
 </div>
 
-<section class="card rec-panel rec-workflows" data-role="rec-workflow-risk-box" aria-labelledby="rec-workflows-title" hidden>
-    <header class="rec-panel__head">
-        <h3 class="rec-panel__title" id="rec-workflows-title">Workflows at risk</h3>
-        <p class="rec-panel__sub">What survives the loss of each worker.</p>
-    </header>
-    <div data-role="rec-workflow-risk"></div>
-</section>
-
 <section class="card rec-panel rec-context" aria-labelledby="rec-step-1" data-role="rec-context" data-step-panel="1">
     <header class="rec-panel__head">
         <h3 class="rec-panel__title" id="rec-step-1">Protect your application</h3>
@@ -177,6 +169,15 @@
 </div>
 <aside class="card rec-results-sidebar" data-role="rec-results-sidebar" aria-label="Candidate test results"></aside>
 </div>
+
+{# Last on the page, full width: which workflows survive the loss of each worker, today and after the selected fix. #}
+<section class="card rec-panel rec-workflows" data-role="rec-workflow-risk-box" aria-labelledby="rec-workflows-title" hidden>
+    <header class="rec-panel__head">
+        <h3 class="rec-panel__title" id="rec-workflows-title">Workflows at risk</h3>
+        <p class="rec-panel__sub">What survives the loss of each worker.</p>
+    </header>
+    <div data-role="rec-workflow-risk"></div>
+</section>
 
 <template data-role="operation-template">
     <div class="op" data-role="op-body">

@@ -79,17 +79,21 @@
         for (const workflow of model.workflows) {
             const tr = element(doc, "tr");
             const label = element(doc, "th", undefined, "rec-wf__name", { scope: "row" });
-            label.append(element(doc, "span", workflow.id));
+            const who = element(doc, "div", undefined, "rec-wf__who");
+            who.append(element(doc, "span", workflow.id, "rec-wf__id"));
             if (Number.isFinite(workflow.criticality)) {
-                label.append(element(doc, "span", `criticality ${workflow.criticality}`, "rec-wf__crit",
+                who.append(element(doc, "span", `criticality ${workflow.criticality}`, "rec-wf__crit",
                     { style: `--crit:${Math.max(0, Math.min(1, workflow.criticality)) * 100}%` }));
             }
+            label.append(who);
             tr.append(label);
             for (const node of model.nodes) {
                 const state = workflow[which][node];
-                const cell = element(doc, "td", undefined, "rec-wf__cell", { "data-state": state,
+                const cell = element(doc, "td", undefined, "rec-wf__td");
+                const chip = element(doc, "div", undefined, "rec-wf__cell", { "data-state": state,
                     title: `${workflow.id} ${state === "breaks" ? "breaks" : state === "survives" ? "survives" : "is not known"} if ${node} fails` });
-                cell.append(element(doc, "span", MARKS[state], "rec-wf__mark", { "aria-hidden": "true" }), element(doc, "span", WORDS[state]));
+                chip.append(element(doc, "span", MARKS[state], "rec-wf__mark", { "aria-hidden": "true" }), element(doc, "span", WORDS[state]));
+                cell.append(chip);
                 tr.append(cell);
             }
             table.append(tr);
