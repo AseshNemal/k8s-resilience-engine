@@ -379,7 +379,15 @@
         const canvas = document.createElement('div');
         renderGraph(canvas, observedGraphModel(session));
         const calls = document.createElement('ul');
-        session.edges.forEach(edge => calls.append(guidedText('li', '', `${edge.source} → ${edge.target}`)));
+        session.edges.forEach(edge => {
+            const call = guidedText('li', '', `${edge.source} → ${edge.target}`);
+            if (edge.evidence?.length) call.append(details('Trace evidence', ...edge.evidence.map(item => {
+                const record = guidedText('div', '', `${item.stepName || 'Selected request'} · trace ${item.traceId} · ${item.quality} · ${item.sha256}`);
+                (item.spans || []).forEach(span => record.append(guidedText('p', '', `${span.basis}: ${span.callerSpanId} (${span.callerOperation})${span.calleeSpanId ? ` → ${span.calleeSpanId} (${span.calleeOperation})` : ' · target identified by client peer attribute'}`)));
+                return record;
+            })));
+            calls.append(call);
+        });
         return details(`Recorded calls · ${session.observedServices.length} services · ${session.edges.length} connections`, guidedText('p', '', 'These calls were observed in traces. Service availability tests determine which dependencies affect success.'), canvas, details('List connections', calls));
     }
     function buildObservedWorkflowSetup(statusText, requestText, marker) {
@@ -467,6 +475,13 @@
         const metrics = guidedText('div', 'workspace-metrics', '');
         metrics.append(resultCard('Matching traces', String(session.traceCount)), resultCard('Services observed', String(session.observedServices.length)));
         guidedResult.append(metrics, renderObservedGraph(session));
+        guidedResult.append(details('Evidence used for this graph',
+            guidedText('p', '', 'Arrows show observed calls, not proven necessity. Service labels require controlled tests against your success checks. Missing telemetry can hide calls.'),
+            guidedText('pre', '', JSON.stringify({source: session.traceSource || session.jaegerUrl, lookback: session.lookback, traceQuality: session.traceQuality, serviceEvidence: session.serviceEvidence, edges: session.edges}, null, 2))));
+        if (session.evidenceTier === 'production') {
+            guidedResult.append(guidedText('p', 'workspace-status', 'Production connection: observation only. Run dependency experiments in a separate test environment; traces alone cannot establish mandatory, optional or supporting dependencies.'));
+            return;
+        }
         const excluded = (session.traceQuality?.excludedCount || 0) + (session.traceQuality?.inputInvalidCount || 0);
         if (excluded || !session.observedServices.some(service => service !== session.entryService)) {
             guidedResult.append(guidedText('p', 'workspace-status', excluded ? 'Some traces were incomplete or invalid. Fix trace collection and inspect the workflow again before collecting availability tests.' : 'No downstream services were recorded. Choose a different operation or collect more traces.'), button('Choose another operation', openSource, true));
@@ -696,7 +711,13 @@
             if (version !== renderVersion) return;
             const observed = guidedText('div', '', '');
             guidedResult.append(observed);
-            requestScenario(`/api/workflows/analysis-sessions/${encodeURIComponent(campaign.analysisSessionId)}`).then(session => { if (version === renderVersion) observed.replaceWith(renderObservedGraph(session)); }).catch(error => { if (version === renderVersion) message(observed, `Recorded calls unavailable: ${error.message}`, true); });
+            requestScenario(`${campaignUrl(campaign)}/observed-graph`).then(graph => {
+                if (version !== renderVersion) return;
+                const panel = renderObservedGraph(graph);
+                panel.append(guidedText('p', '', `${graph.completeSequenceRuns}/${graph.recordedRuns} runs have complete successful action traces. ${graph.legacySelectedTraceRuns} historical runs retain only the selected request.`));
+                if (graph.findings.length) panel.append(details('Evidence gaps', ...graph.findings.map(item => guidedText('p', '', `${item.executionId}: ${item.reason}`))));
+                observed.replaceWith(panel);
+            }).catch(error => { if (version === renderVersion) message(observed, `Recorded calls unavailable: ${error.message}`, true); });
         } catch (error) {
             if (version !== renderVersion) return;
             message(loading, error.message, true);
@@ -717,7 +738,19 @@
                 if (!panel.isConnected) return;
                 message(status, runs.length ? `${runs.length} recorded runs` : 'No runs have been recorded.');
                 const list = document.createElement('ul');
-                runs.forEach(run => list.append(guidedText('li', '', `${new Date(run.recordedAt).toLocaleString()} · ${run.status} · trace ${run.correlationStatus}${run.reasons.length ? ': ' + run.reasons.join(' ') : ''}`)));
+                runs.forEach(run => {
+                    const item = guidedText('li', '', `${new Date(run.recordedAt).toLocaleString()} · ${run.status} · trace ${run.correlationStatus}${run.reasons.length ? ': ' + run.reasons.join(' ') : ''}`);
+                    if (run.stepEvidence) {
+                        const actions = document.createElement('ul');
+                        run.stepEvidence.forEach(step => {
+                            const action = guidedText('li', '', `${step.name}: ${step.attempted ? `${step.succeeded ? 'assertions passed' : 'assertions failed'} · HTTP ${step.statusCode ?? 'no response'} · trace ${step.traceId} (${step.correlationStatus})` : 'not attempted'}`);
+                            if (step.assertions?.length) action.append(details('Success checks', ...step.assertions.map(check => guidedText('p', '', `${check.name}: ${check.passed ? 'passed' : 'failed'} · expected ${JSON.stringify(check.expected)} · observed ${JSON.stringify(check.observed)}`))));
+                            actions.append(action);
+                        });
+                        item.append(actions);
+                    } else item.append(guidedText('p', '', 'Historical record: per-action traces were not retained.'));
+                    list.append(item);
+                });
                 panel.append(list);
             } catch (error) { loaded = false; message(status, error.message, true); }
         });
@@ -733,7 +766,8 @@
         guidedResult.append(guidedText('h4', '', 'Ready to collect normal runs'), guidedText('p', '', 'Confirm the saved workflow settings before running the application.'), save, notice);
     }
     function applicationField(campaign) {
-        const item = field('Application base URL', 'url', stored(`workflow-application:${campaign.campaignId}`) || '', 'Enter the address of the application being tested, including http:// or https://. Use its base address, not the tracing server or a page path.');
+        const extensionHint = window.ddClient ? ' Inside Docker Desktop, a host-published application uses http://host.docker.internal:<port>; localhost points to the extension backend.' : '';
+        const item = field('Application base URL', 'url', stored(`workflow-application:${campaign.campaignId}`) || '', 'Enter the address of the application being tested, including http:// or https://. Use its base address, not the tracing server or a page path.' + extensionHint);
         item.input.required = true;
         item.input.addEventListener('change', () => { if (item.input.checkValidity()) remember(`workflow-application:${campaign.campaignId}`, item.input.value.trim()); });
         return item;
@@ -828,13 +862,13 @@
         const table = guidedText('table', 'workspace-table', '');
         const header = document.createElement('thead');
         const heading = document.createElement('tr');
-        ['Service', 'Dependency', 'Normal successes', 'Outage successes'].forEach(text => heading.append(guidedText('th', '', text)));
+        ['Service', 'Dependency', 'Normal successes', 'Outage successes', 'Success-rate drop', 'Excluded runs'].forEach(text => heading.append(guidedText('th', '', text)));
         header.append(heading);
         const body = document.createElement('tbody');
         assessment.services.forEach(service => {
             const row = document.createElement('tr');
             const count = cohort => `${cohort.succeededRecords}/${cohort.eligibleRecords}`;
-            [service.serviceName, service.classification.replaceAll('_', ' '), count(service.baseline), count(service.intervention)].forEach(text => row.append(guidedText('td', '', text)));
+            [service.serviceName, service.classification.replaceAll('_', ' '), count(service.baseline), count(service.intervention), service.failureEffect == null ? 'Unknown' : `${(service.failureEffect * 100).toFixed(1)} percentage points`, String(service.baseline.excludedRecords + service.intervention.excludedRecords)].forEach(text => row.append(guidedText('td', '', text)));
             body.append(row);
         });
         table.append(header, body);
@@ -842,9 +876,13 @@
         wrap.append(table);
         return wrap;
     }
-    function classificationKey() { return guidedText('p', 'workspace-help', 'Mandatory: needed for success. Supporting: affects some outcomes. Optional: no material effect in the recorded tests.'); }
+    function classificationKey() { return guidedText('p', 'workspace-help', 'Labels apply to these workflow inputs and success checks. Mandatory: a confirmed outage repeatedly prevented success. Supporting: an intermediate reduction in success. Optional: no material reduction in the recorded tests. Insufficient evidence remains unresolved.'); }
     function renderCampaignAssessment(campaign, assessment, target) {
         target.replaceChildren(guidedText('h4', '', 'Review dependencies'), classificationKey(), assessmentRows(assessment));
+        target.append(details('How these results are calculated',
+            guidedText('p', '', 'Success rate = successful eligible runs / eligible runs. Effect = baseline success rate − intervention success rate. Excluded or unmatched runs do not count as successes or failures. Evidence strength measures usable evidence and minimum sample coverage; it is not a statistical confidence percentage.'),
+            guidedText('p', '', 'Every service must pass the sample, baseline-stability and intervention-confirmation gates. Arrows remain observed calls unless an edge has its own intervention evidence.'),
+            guidedText('pre', '', JSON.stringify({policy: assessment.policy, services: assessment.services, edgeAssessments: assessment.edges || []}, null, 2))));
         target.append(details('Result details', ...assessment.services.map(service => guidedText('p', '', `${service.serviceName}: ${service.reasons.join(' ')}`))));
         const form = guidedText('form', 'workspace-form', '');
         const actor = field('Reviewer name');

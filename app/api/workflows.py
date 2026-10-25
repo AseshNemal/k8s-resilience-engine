@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, Resp
 
 from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
 from app.engine.workflow_dependency_modeling.service import (
+    get_campaign_observed_graph,
     analyze_workflow_evidence,
     assess_telemetry_readiness,
     approve_experiment_campaign,
@@ -830,6 +831,14 @@ def read_workflow_experiment_manifest(manifest_id: str) -> dict[str, Any]:
     try:
         return _manifest_payload(get_experiment_manifest(manifest_id))
     except ExperimentManifestNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get("/experiment-campaigns/{campaign_id}/observed-graph")
+def read_campaign_observed_graph(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_campaign_observed_graph(campaign_id)
+    except ExperimentCampaignNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 

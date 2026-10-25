@@ -41,6 +41,7 @@
                     <h3 id="source-title" data-role="source-title">
                         Choose your trace source
                     </h3>
+                    <p class="workspace-help">The connected Kubernetes cluster provides deployment inventory. Workflow calls come from your application's tracing backend. An empty cluster does not supply application traces.</p>
                     <div class="source-switch" aria-label="Trace source">
                         <button type="button" data-source="live" aria-pressed="true">
                             Connect tracing
@@ -72,7 +73,7 @@
                                     Trace query URL
                                 </label>
                                 <input id="workflow-input-2" name="traceEndpoint" type="url" required autocomplete="url" aria-describedby="trace-url-help">
-                                <small id="trace-url-help">Base URL of your tracing query service. This is different from the application you want to test.</small>
+                                <small id="trace-url-help">Base URL of your tracing query service. This is different from the application you want to test. Inside Docker Desktop, use host.docker.internal for a service published on your computer.</small>
                             </div>
                             <div>
                                 <label for="workflow-input-3">
