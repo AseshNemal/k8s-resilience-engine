@@ -1,4 +1,23 @@
 services:
+  frontend:
+    image: k8s-resilience/frontend-otel:v0.10.1
+    build:
+      context: ./instrumented-boutique/frontend
+      args:
+        UPSTREAM_COMMIT: 39efed435e697bcdcd31c5e45f4d36dc35c98a63
+
+  adservice:
+    image: k8s-resilience/adservice-otel:v0.10.1
+    build:
+      context: ./instrumented-boutique/adservice
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_PROPAGATORS: tracecontext,baggage
+
   checkoutservice:
     image: k8s-resilience/checkoutservice-context:v0.10.1
     build:
