@@ -390,3 +390,21 @@ def eligible_traces(
     if len(raw_traces) != len(summary.results):
         raise ValueError("Trace quality summary must align with input traces")
     return [dict(trace) for trace, result in zip(raw_traces, summary.results) if result.eligible and trace.get("traceID") == result.trace_id]
+
+
+def expected_outage_trace_quality(trace: dict[str, Any], target: str | None) -> bool:
+    """Accept only one verified outage's absent server identity, no other defect.
+
+    The caller must obtain target from backend-verified intervention evidence,
+    never from a trace upload or an untrusted request field.
+    """
+    if not target:
+        return False
+    result = validate_trace_quality([trace]).results[0]
+    if (result.quality is not TraceQuality.PARTIAL
+            or result.missing_service_identities != (target,)
+            or result.reasons != (f"Client spans have no server-side service identity for: {target}",)):
+        return False
+    from .trace_reader import parse_spans
+    return any(span.error and span.tags.get("net.peer.name") == target
+               for span in parse_spans([trace]))

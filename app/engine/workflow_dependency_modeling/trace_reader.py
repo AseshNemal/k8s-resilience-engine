@@ -91,6 +91,9 @@ class Span:
     links: tuple[SpanLink, ...] = ()
     """Explicit non-parent references kept separate from synchronous calls."""
 
+    start_time_us: int | None = None
+    """Original epoch microseconds, absent when the exporter did not provide them."""
+
 
 # ---------------------------------------------------------------------------
 # Public interface
@@ -183,6 +186,7 @@ def _parse_span(raw_span: dict, trace_id: str, processes: dict[str, dict]) -> Sp
         tags=tags,
         error=has_error,
         links=_span_links(raw_span, trace_id),
+        start_time_us=raw_span.get("startTime"),
     )
 
 
