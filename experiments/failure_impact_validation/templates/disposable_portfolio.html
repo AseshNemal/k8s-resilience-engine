@@ -144,6 +144,51 @@
                 <div id="workflow-outcomes" class="outcome-list"></div>
             </section>
 
+            <section class="result-block handoff" aria-labelledby="component4-handoff-title">
+                <div class="result-block__heading">
+                    <div>
+                        <p class="section-kicker">Integration output</p>
+                        <h3 id="component4-handoff-title">What Component 4 receives</h3>
+                    </div>
+                    <button id="download-component4-handoff" class="secondary" type="button">
+                        Download handoff JSON
+                    </button>
+                </div>
+                <p class="handoff__intro">
+                    This preview uses the real shared contracts. Component 4 pairs the Component 2
+                    deployment snapshot with one Component 3 failure-impact report for each evaluation.
+                </p>
+                <div class="handoff-flow" aria-label="Component 2 and Component 3 outputs flow into Component 4">
+                    <article class="handoff-flow__card handoff-flow__card--deployment">
+                        <span class="handoff-flow__component">Component 2 output</span>
+                        <strong>DeploymentGraph</strong>
+                        <small id="handoff-deployment-summary"></small>
+                    </article>
+                    <span class="handoff-flow__operator" aria-hidden="true">+</span>
+                    <article class="handoff-flow__card handoff-flow__card--impact">
+                        <span class="handoff-flow__component">Component 3 output</span>
+                        <strong>FailureImpactReport</strong>
+                        <small id="handoff-report-summary"></small>
+                    </article>
+                    <span class="handoff-flow__arrow" aria-hidden="true">→</span>
+                    <article class="handoff-flow__card handoff-flow__card--target">
+                        <span class="handoff-flow__component">Component 4 input</span>
+                        <strong>CandidateContext</strong>
+                        <small>Generates and evaluates resilience recommendations</small>
+                    </article>
+                </div>
+                <div id="component4-report-list" class="handoff-report-list"></div>
+                <details class="handoff-json">
+                    <summary>View exact JSON passed across the integration boundary</summary>
+                    <p>
+                        The envelope is demonstration metadata. The nested
+                        <code>deploymentGraph</code> and <code>failureImpactReports</code> objects use
+                        the application’s real shared schemas.
+                    </p>
+                    <pre id="component4-handoff-json"></pre>
+                </details>
+            </section>
+
             <details class="result-evidence">
                 <summary>View comparison evidence table</summary>
                 <div class="table-wrap"><table id="result-table"></table></div>

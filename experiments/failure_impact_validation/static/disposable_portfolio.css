@@ -287,6 +287,33 @@ summary { padding: 15px 17px; cursor: pointer; font-weight: 750; }
 .result-evidence { margin-top: 18px; background: #0a1728; }
 .result-evidence > summary { color: var(--muted); font-size: .8rem; }
 .result-evidence .table-wrap { margin: 0 14px 14px; }
+.handoff { padding: 22px; border: 1px solid rgba(167, 139, 250, .32); border-radius: 16px; background: linear-gradient(145deg, rgba(31, 28, 65, .56), rgba(10, 23, 40, .82)); }
+.handoff__intro { max-width: 840px; margin: 0 0 18px; font-size: .82rem; }
+.handoff-flow { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.15fr); align-items: stretch; gap: 10px; }
+.handoff-flow__card { display: grid; align-content: center; min-height: 112px; padding: 15px; border: 1px solid var(--border); border-radius: 12px; background: rgba(7, 20, 36, .72); }
+.handoff-flow__card--deployment { border-top: 3px solid var(--success); }
+.handoff-flow__card--impact { border-top: 3px solid var(--danger); }
+.handoff-flow__card--target { border-top: 3px solid #a78bfa; background: rgba(33, 29, 67, .72); }
+.handoff-flow__component { margin-bottom: 7px; color: var(--muted); font-size: .62rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.handoff-flow__card strong { font-size: .92rem; }
+.handoff-flow__card small { margin-top: 6px; color: var(--muted); font-size: .67rem; line-height: 1.4; }
+.handoff-flow__operator, .handoff-flow__arrow { align-self: center; color: #7890aa; font-size: 1.35rem; font-weight: 800; text-align: center; }
+.handoff-report-list { display: grid; gap: 7px; margin-top: 16px; }
+.handoff-report { display: grid; grid-template-columns: 34px minmax(180px, 1fr) 100px 88px 148px; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--danger); border-radius: 10px; background: rgba(7, 20, 36, .55); }
+.handoff-report--clear { border-left-color: var(--success); }
+.handoff-report__number { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 8px; background: rgba(167, 139, 250, .12); color: #c4b5fd; font-size: .65rem; font-weight: 850; }
+.handoff-report__identity { display: grid; min-width: 0; gap: 3px; }
+.handoff-report__identity strong { overflow: hidden; font-size: .79rem; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-report__identity span, .handoff-report__metric span { color: var(--muted); font-size: .62rem; }
+.handoff-report__metric { display: grid; gap: 2px; }
+.handoff-report__metric strong { font-size: .8rem; }
+.handoff-report__status { justify-self: end; padding: 5px 8px; border-radius: 999px; background: rgba(255, 107, 122, .12); color: #ffabb5; font-size: .6rem; font-weight: 800; text-align: center; }
+.handoff-report--clear .handoff-report__status { background: rgba(98, 216, 159, .11); color: #91edbd; }
+.handoff-json { margin-top: 16px; background: #081626; }
+.handoff-json > summary { color: #c4b5fd; font-size: .78rem; }
+.handoff-json > p { margin: 0 16px 12px; font-size: .72rem; }
+.handoff-json code { color: #a7f5ff; }
+.handoff-json pre { overflow: auto; max-height: 500px; margin: 0 16px 16px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: #050e19; color: #c9d8e8; font-size: .68rem; line-height: 1.5; }
 .hidden { display: none !important; }
 
 @media (max-width: 850px) {
@@ -299,6 +326,10 @@ summary { padding: 15px 17px; cursor: pointer; font-weight: 750; }
     .result-overview__metrics { grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); }
     .risk-row { grid-template-columns: 34px minmax(160px, 1fr) 48px auto; }
     .risk-row__bar { grid-column: 2 / -1; grid-row: 2; }
+    .handoff-flow { grid-template-columns: 1fr; }
+    .handoff-flow__operator, .handoff-flow__arrow { transform: rotate(90deg); }
+    .handoff-report { grid-template-columns: 34px minmax(0, 1fr) 90px 80px; }
+    .handoff-report__status { grid-column: 2 / -1; justify-self: start; }
 }
 
 @media (max-width: 520px) {
@@ -319,4 +350,6 @@ summary { padding: 15px 17px; cursor: pointer; font-weight: 750; }
     .workflow-impact__verdict { grid-column: 2; }
     .failure-path { align-items: flex-start; flex-direction: column; }
     .failure-path b { display: none; }
+    .handoff-report { grid-template-columns: 34px minmax(0, 1fr); }
+    .handoff-report__metric, .handoff-report__status { grid-column: 2; }
 }

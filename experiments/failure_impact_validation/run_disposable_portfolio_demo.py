@@ -21,6 +21,7 @@ from app.engine.failure_impact_prediction.portfolio_impact import (  # noqa: E40
 )
 from app.engine.failure_impact_prediction.service import (  # noqa: E402
     build_portfolio_failure_impact_report,
+    predict_failure_impact,
 )
 from app.shared.schemas.deployment import DeploymentGraph  # noqa: E402
 from app.shared.schemas.workflow import WorkflowEdge, WorkflowGraph  # noqa: E402
@@ -36,10 +37,14 @@ DEPLOYMENT_FILE = "deployment-graph.json"
 METADATA_FILE = "synthetic-portfolio-metadata.json"
 CROSS_LAYER_FILE = "cross-layer-graphs.json"
 RESULT_FILE = "portfolio-scenario-results.json"
+COMPONENT4_HANDOFF_FILE = "component-4-handoff.json"
 
 INPUT_ARTIFACT_TYPE = "DISPOSABLE_COMPONENT3_PORTFOLIO_INPUTS"
 CROSS_LAYER_ARTIFACT_TYPE = "DISPOSABLE_COMPONENT3_CROSS_LAYER_GRAPHS"
 RESULT_ARTIFACT_TYPE = "DISPOSABLE_COMPONENT3_PORTFOLIO_RESULTS"
+COMPONENT4_HANDOFF_ARTIFACT_TYPE = (
+    "DISPOSABLE_COMPONENT3_TO_COMPONENT4_HANDOFF"
+)
 
 
 def _timestamp(value: datetime) -> str:
@@ -300,7 +305,35 @@ def build_disposable_portfolio_artifacts(
         "evaluatedNodes": list(selected),
         "results": result_payloads,
     }
+    failure_impact_reports = [
+        predict_failure_impact(workflow, deployment, failed_node).model_dump(
+            by_alias=True,
+            mode="json",
+        )
+        for failed_node in selected
+        for workflow in workflows
+    ]
+    handoff_artifact: dict[str, object] = {
+        "artifactType": COMPONENT4_HANDOFF_ARTIFACT_TYPE,
+        "evidenceStatus": EVIDENCE_STATUS,
+        "disclaimer": DISCLAIMER,
+        "scenarioId": metadata["scenarioId"],
+        "generatedAt": timestamp,
+        "targetComponent": "recommendation_evaluation_validation",
+        "entryPoint": (
+            "app.engine.recommendation_evaluation_validation.service."
+            "evaluate_first_recommendation"
+        ),
+        "invocationModel": (
+            "Pair the shared deploymentGraph with one failureImpactReport "
+            "for each Component 4 evaluation."
+        ),
+        "invocationCount": len(failure_impact_reports),
+        "deploymentGraph": deployment.model_dump(by_alias=True, mode="json"),
+        "failureImpactReports": failure_impact_reports,
+    }
     artifacts[RESULT_FILE] = result_artifact
+    artifacts[COMPONENT4_HANDOFF_FILE] = handoff_artifact
     return artifacts
 
 
@@ -321,6 +354,7 @@ def write_disposable_portfolio_demo(
             METADATA_FILE,
             CROSS_LAYER_FILE,
             RESULT_FILE,
+            COMPONENT4_HANDOFF_FILE,
         )
     )
     existing = tuple(str(path) for path in targets if path.exists())

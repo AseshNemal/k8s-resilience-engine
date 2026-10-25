@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
 from experiments.failure_impact_validation.run_disposable_portfolio_demo import (
+    COMPONENT4_HANDOFF_FILE,
     CROSS_LAYER_FILE,
     DEPLOYMENT_FILE,
     METADATA_FILE,
@@ -108,6 +109,7 @@ def simulate_all_worker_nodes(request: ScenarioRequest) -> dict[str, object]:
     return {
         **_generation_response(artifacts),
         "resultArtifact": artifacts[RESULT_FILE],
+        "component4Handoff": artifacts[COMPONENT4_HANDOFF_FILE],
     }
 
 
@@ -126,4 +128,5 @@ def simulate_one_worker_node(request: NodeFailureRequest) -> dict[str, object]:
     return {
         **_generation_response(artifacts),
         "resultArtifact": artifacts[RESULT_FILE],
+        "component4Handoff": artifacts[COMPONENT4_HANDOFF_FILE],
     }

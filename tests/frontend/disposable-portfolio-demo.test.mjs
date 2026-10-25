@@ -177,3 +177,28 @@ test("generated-input helpers create readable workflow names and concentration s
         { key: "distributed", label: "Distributed" },
     );
 });
+
+test("Component 4 handoff summary counts exact shared-contract reports", () => {
+    const demo = load();
+    const summary = demo.component4HandoffSummary({
+        deploymentGraph: {
+            nodes: [{ name: "node-1" }, { name: "node-2" }],
+            services: [{ name: "frontend" }, { name: "cartservice" }],
+        },
+        failureImpactReports: [
+            { workflowId: "checkout", failedNode: "node-1", failedWorkflows: ["checkout"], rootCauses: [{}] },
+            { workflowId: "checkout", failedNode: "node-2", failedWorkflows: [], rootCauses: [] },
+            { workflowId: "cart", failedNode: "node-1", failedWorkflows: ["cart"], rootCauses: [{}] },
+        ],
+    });
+
+    assert.deepEqual(JSON.parse(JSON.stringify(summary)), {
+        nodeCount: 2,
+        serviceCount: 2,
+        reportCount: 3,
+        affectedReportCount: 2,
+        candidateReportCount: 2,
+        failedNodes: ["node-1", "node-2"],
+        workflowIds: ["checkout", "cart"],
+    });
+});

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from experiments.failure_impact_validation.run_disposable_portfolio_demo import (
+    COMPONENT4_HANDOFF_FILE,
     CROSS_LAYER_FILE,
     DEPLOYMENT_FILE,
     METADATA_FILE,
@@ -80,6 +81,29 @@ def test_portfolio_demo_produces_fractional_blast_radius() -> None:
     assert node_3["survivability"] == pytest.approx(75.0)
 
 
+def test_portfolio_demo_builds_the_real_component_4_input_contracts() -> None:
+    handoff = _artifacts()[COMPONENT4_HANDOFF_FILE]
+
+    assert handoff["evidenceStatus"] == "SYNTHETIC_DISPOSABLE"
+    assert handoff["targetComponent"] == "recommendation_evaluation_validation"
+    assert handoff["deploymentGraph"]["snapshotId"].startswith("synthetic-")
+    assert handoff["invocationCount"] == 12
+    assert len(handoff["failureImpactReports"]) == 12
+    assert {
+        report["failedNode"] for report in handoff["failureImpactReports"]
+    } == {
+        "synthetic-node-1",
+        "synthetic-node-2",
+        "synthetic-node-3",
+    }
+    assert all(
+        {"workflowId", "failedNode", "blastRadius", "survivability",
+         "failedServices", "failedWorkflows", "rootCauses",
+         "nodeRiskRanking"} <= set(report)
+        for report in handoff["failureImpactReports"]
+    )
+
+
 def test_portfolio_demo_writes_complete_bundle_without_overwrite(tmp_path) -> None:
     output_dir = tmp_path / "portfolio"
     artifacts = write_disposable_portfolio_demo(
@@ -96,6 +120,7 @@ def test_portfolio_demo_writes_complete_bundle_without_overwrite(tmp_path) -> No
             METADATA_FILE,
             CROSS_LAYER_FILE,
             RESULT_FILE,
+            COMPONENT4_HANDOFF_FILE,
         ]
     )
     for filename, artifact in artifacts.items():

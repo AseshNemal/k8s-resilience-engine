@@ -5,6 +5,7 @@
         scenarioId: null,
         generation: null,
         results: null,
+        component4Handoff: null,
     };
 
     function escapeHtml(value) {
@@ -210,6 +211,20 @@
                 blastRadius: entry.blastRadius,
                 failedWorkflows: [...entry.failedWorkflows],
             }));
+    }
+
+    function component4HandoffSummary(handoff) {
+        const deployment = handoff?.deploymentGraph || {};
+        const reports = handoff?.failureImpactReports || [];
+        return {
+            nodeCount: deployment.nodes?.length || 0,
+            serviceCount: deployment.services?.length || 0,
+            reportCount: reports.length,
+            affectedReportCount: reports.filter((report) => report.failedWorkflows?.length).length,
+            candidateReportCount: reports.filter((report) => report.rootCauses?.length).length,
+            failedNodes: [...new Set(reports.map((report) => report.failedNode))],
+            workflowIds: [...new Set(reports.map((report) => report.workflowId))],
+        };
     }
 
     function impactTone(blastRadius) {
@@ -547,8 +562,44 @@
                 </article>
             `;
         }).join("");
+        renderComponent4Handoff(state.component4Handoff);
         document.getElementById("results-section").classList.remove("hidden");
         document.getElementById("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function renderComponent4Handoff(handoff) {
+        if (!handoff) return;
+        const summary = component4HandoffSummary(handoff);
+        document.getElementById("handoff-deployment-summary").textContent = (
+            `${summary.serviceCount} services placed across ${summary.nodeCount} worker nodes`
+        );
+        document.getElementById("handoff-report-summary").textContent = (
+            `${summary.reportCount} contract-valid reports; ${summary.candidateReportCount} contain recommendation evidence`
+        );
+
+        document.getElementById("component4-report-list").innerHTML = handoff.failureImpactReports.map((report, index) => {
+            const candidateInput = report.rootCauses.length > 0;
+            const workflowName = displayWorkflowId(report.workflowId, handoff.scenarioId);
+            return `
+                <article class="handoff-report handoff-report--${candidateInput ? "candidate" : "clear"}">
+                    <span class="handoff-report__number">${String(index + 1).padStart(2, "0")}</span>
+                    <div class="handoff-report__identity">
+                        <strong title="${escapeHtml(report.workflowId)}">${escapeHtml(humanizeId(workflowName))}</strong>
+                        <span>Assumed failure: ${escapeHtml(report.failedNode)}</span>
+                    </div>
+                    <div class="handoff-report__metric">
+                        <span>Blast radius</span>
+                        <strong>${escapeHtml(report.blastRadius.toFixed(0))}%</strong>
+                    </div>
+                    <div class="handoff-report__metric">
+                        <span>Root causes</span>
+                        <strong>${escapeHtml(report.rootCauses.length)}</strong>
+                    </div>
+                    <span class="handoff-report__status">${candidateInput ? "Candidate evidence" : "No root cause"}</span>
+                </article>
+            `;
+        }).join("");
+        document.getElementById("component4-handoff-json").textContent = JSON.stringify(handoff, null, 2);
     }
 
     function setBusy(busy, message, error = false) {
@@ -573,6 +624,7 @@
             state.scenarioId = currentScenarioId();
             state.generation = await postJson("api/synthetic/generate", { scenarioId: state.scenarioId });
             state.results = null;
+            state.component4Handoff = null;
             renderGeneration(state.generation);
             document.getElementById("results-section").classList.add("hidden");
             setBusy(false, "Generated four workflows and four cross-layer graphs. No failure has been executed yet.");
@@ -590,6 +642,7 @@
             const payload = await postJson(endpoint, request);
             state.generation = payload;
             state.results = payload.resultArtifact;
+            state.component4Handoff = payload.component4Handoff;
             renderGeneration(payload);
             renderResults(state.results);
             setBusy(false, "Simulation complete. The Kubernetes cluster was not changed.");
@@ -618,12 +671,16 @@
         document.getElementById("download-results").addEventListener("click", () => {
             downloadJson("portfolio-scenario-results.json", state.results);
         });
+        document.getElementById("download-component4-handoff").addEventListener("click", () => {
+            downloadJson("component-4-handoff.json", state.component4Handoff);
+        });
     }
 
     global.DisposablePortfolioDemo = {
         graphLayout,
         graphSummaries,
         concentrationStatus,
+        component4HandoffSummary,
         humanizeId,
         nodeRiskRanking,
         renderCrossLayerGraph,

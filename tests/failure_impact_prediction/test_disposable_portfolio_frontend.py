@@ -60,6 +60,8 @@ def test_fail_all_returns_fractional_portfolio_results() -> None:
     assert results["synthetic-node-1"]["blastRadius"] == 50.0
     assert results["synthetic-node-2"]["blastRadius"] == 0.0
     assert results["synthetic-node-3"]["blastRadius"] == 25.0
+    assert payload["component4Handoff"]["invocationCount"] == 12
+    assert len(payload["component4Handoff"]["failureImpactReports"]) == 12
 
 
 def test_fail_one_returns_only_the_selected_worker_node() -> None:
@@ -74,6 +76,7 @@ def test_fail_one_returns_only_the_selected_worker_node() -> None:
     assert result_artifact["evaluatedNodes"] == ["synthetic-node-3"]
     assert len(result_artifact["results"]) == 1
     assert result_artifact["results"][0]["blastRadius"] == 25.0
+    assert payload["component4Handoff"]["invocationCount"] == 4
 
 
 def test_fail_one_rejects_an_unknown_worker_node() -> None:
