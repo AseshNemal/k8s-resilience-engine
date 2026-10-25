@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import json
 import os
 import re
 from typing import Any, Mapping
@@ -272,6 +274,18 @@ def discover_observed_workflow_candidates(data: Mapping[str, Any]) -> dict[str, 
     """
     trace_source = _trace_source(data)
     lookback = _lookback(data)
+    if data.get('continuous') is True:
+        from .discovery_scan_service import advance_discovery_scan
+        scan_id = data.get('scanId')
+        if scan_id is not None and (not isinstance(scan_id, str) or not re.fullmatch(r'[0-9a-f]{32}', scan_id)):
+            raise ValueError('scanId must identify a discovery scan')
+        if not isinstance(data.get('cancel', False), bool):
+            raise ValueError('cancel must be a boolean')
+        binding = hashlib.sha256(json.dumps([trace_source.to_mapping(), lookback], sort_keys=True).encode()).hexdigest()
+        return advance_discovery_scan(create_trace_source(trace_source), binding=binding,
+            endpoint=trace_source.endpoint, lookback=lookback,
+            page_size=DiscoveryLimits.from_environment().traces_per_service,
+            scan_id=scan_id, cancel=data.get('cancel', False))
     limits = DiscoveryLimits.from_environment(
         max_traces=_limit(data) if "limit" in data else None
     )

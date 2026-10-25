@@ -206,6 +206,16 @@ class JaegerTraceSource:
     """Read workflow traces from the Jaeger Query API."""
 
     client: JaegerClient
+    discovery_resolution_us = 1
+
+    def fetch_trace_window(self, service_name: str, start_us: int, end_us: int, limit: int) -> list[dict[str, Any]]:
+        """A fixed query window, in Jaeger's Unix microseconds; no offset is assumed."""
+        payload = _http_json(self.client.base_url, '/api/traces',
+            params={'service': service_name, 'start': start_us, 'end': end_us, 'limit': limit},
+            headers=self.client.headers, timeout=self.client.timeout, transport=None)
+        if not isinstance(payload, Mapping) or not isinstance(payload.get('data'), list) or payload.get('errors'):
+            raise ConnectionError('Jaeger returned an incomplete or invalid search response')
+        return payload['data']
 
     @classmethod
     def from_url(cls, base_url: str) -> "JaegerTraceSource":
@@ -308,6 +318,16 @@ class ZipkinTraceSource:
     headers: Mapping[str, str] | None = None
     timeout_seconds: float = 5.0
     transport: httpx.BaseTransport | None = None
+    discovery_resolution_us = 1_000
+
+    def fetch_trace_window(self, service_name: str, start_us: int, end_us: int, limit: int) -> list[dict[str, Any]]:
+        start_ms, end_ms = start_us // 1_000, (end_us + 999) // 1_000
+        payload = _http_json(self.base_url, '/api/v2/traces',
+            params={'serviceName': service_name, 'endTs': end_ms, 'lookback': max(1, end_ms - start_ms), 'limit': limit},
+            headers=dict(self.headers or {}), timeout=self.timeout_seconds, transport=self.transport)
+        if not isinstance(payload, list):
+            raise ConnectionError('Zipkin returned an invalid search response')
+        return normalize_zipkin_traces(payload)
 
     def get_services(self) -> list[str]:
         payload = _http_json(
@@ -379,6 +399,28 @@ class TempoTraceSource:
     headers: Mapping[str, str] | None = None
     timeout_seconds: float = 10.0
     transport: httpx.BaseTransport | None = None
+    discovery_resolution_us = 1_000_000
+
+    def fetch_trace_window(self, service_name: str, start_us: int, end_us: int, limit: int) -> list[dict[str, Any]]:
+        deadline = time.monotonic() + 10
+        payload = _http_json(self.base_url, '/api/search',
+            params={'q': '{ resource.service.name = ' + _traceql_literal(service_name) + ' }',
+                    'start': start_us // 1_000_000, 'end': (end_us + 999_999) // 1_000_000, 'limit': limit},
+            headers=dict(self.headers or {}), timeout=self.timeout_seconds, transport=self.transport)
+        if not isinstance(payload, Mapping) or not isinstance(payload.get('traces'), list):
+            raise ConnectionError('Tempo returned an invalid search response')
+        traces = []
+        for item in payload['traces']:
+            if time.monotonic() >= deadline:
+                raise ConnectionError('Tempo trace retrieval exceeded the discovery batch time budget')
+            trace_id = item.get('traceID') if isinstance(item, Mapping) else None
+            if not trace_id:
+                raise ConnectionError('Tempo search omitted a trace identity')
+            found = self.fetch_trace(str(trace_id))
+            if len(found) != 1:
+                raise ConnectionError('A Tempo search result could not be retrieved')
+            traces.extend(found)
+        return traces
 
     def get_services(self) -> list[str]:
         payload = _http_json(
