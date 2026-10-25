@@ -55,6 +55,7 @@ from app.engine.workflow_dependency_modeling.intervention_event_repository impor
 from app.engine.workflow_dependency_modeling.experiment_manifest_service import (
     require_experiment_record,
 )
+from .sequence_graph import get_campaign_observed_graph
 
 
 def _utc(value: datetime | None) -> datetime:
@@ -183,6 +184,7 @@ def assess_experiment_campaign(
 ) -> DependencyAssessment:
     """Classify every downstream candidate after all campaign gates pass."""
     campaign = get_experiment_campaign(campaign_id, campaign_repository)
+    criticality = campaign.require_criticality()
     analysis = get_workflow_analysis(campaign.analysis_session_id, analysis_repository)
     record = require_experiment_record(campaign, analysis)
     baseline_state = baseline_readiness(campaign, execution_repository_override)
@@ -266,6 +268,21 @@ def assess_experiment_campaign(
     expected = {analysis.entry_service, *campaign.candidate_services}
     if services != expected:
         raise ValueError("Campaign candidates no longer match the observed service set")
+    sequence_graph = get_campaign_observed_graph(
+        campaign_id, campaign_repository=campaign_repository,
+        repository=execution_repository_override,
+    )
+    # Preparation-only services must not disappear merely because discovery
+    # originally selected one measured request. They remain unassessed until
+    # their own intervention evidence is collected in a reviewed campaign.
+    additional = set(sequence_graph["observedServices"]) - services
+    for name in sorted(additional):
+        service_results.append(assess_service_dependency(
+            name, baseline_records, None, [], policy,
+            baseline_allowed_execution_ids=baseline_allowed,
+        ))
+    services.update(additional)
+    observed_edges = (*analysis.edges, *sequence_graph["edges"])
     assessment = DependencyAssessment.from_mapping(
         {
             "assessmentId": _assessment_id(campaign.campaign_id),
@@ -275,10 +292,10 @@ def assess_experiment_campaign(
             "source": "controlled_workflow_campaign",
             "candidateGraph": {
                 "workflowId": campaign.workflow_id,
-                "criticality": campaign.criticality if campaign.criticality is not None else 1.0,
+                "criticality": criticality,
                 "mandatoryServices": sorted(services),
                 "optionalServices": [],
-                "edges": _candidate_edges(analysis.edges, services),
+                "edges": _candidate_edges(observed_edges, services),
             },
             "structuralEntryService": analysis.entry_service,
             "baselineBatchIds": [campaign.baseline.batch_id],

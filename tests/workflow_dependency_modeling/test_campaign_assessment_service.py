@@ -119,6 +119,7 @@ def _campaign() -> ExperimentCampaign:
     return ExperimentCampaign.from_mapping(
         {
             "campaignId": "campaign:checkout1",
+            "criticality": 0.5,
             "analysisSessionId": "analysis:checkout",
             "environmentId": "boutique-local",
             "workflowId": "checkout",

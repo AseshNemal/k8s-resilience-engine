@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import time
 from typing import Any
@@ -50,8 +51,13 @@ from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
     run_http_workflow_probe,
 )
 from app.engine.workflow_dependency_modeling.trace_source import create_trace_source
-from app.engine.workflow_dependency_modeling.trace_validator import TraceQuality, validate_trace_quality
+from app.engine.workflow_dependency_modeling.trace_validator import (
+    TraceQuality, validate_trace_quality, expected_outage_trace_quality,
+)
 from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
+from .sequence_evidence import (
+    collect_run_traces, capture_step_evidence, sequence_evidence_blockers,
+)
 from app.engine.workflow_dependency_modeling.intervention_event_models import (
     InterventionEvent,
     InterventionEventType,
@@ -104,7 +110,7 @@ def _scenario(campaign: ExperimentCampaign) -> WorkflowScenario:
         {
             "workflowId": campaign.workflow_id,
             "description": campaign.workflow_name,
-            "criticality": campaign.criticality if campaign.criticality is not None else 1.0,
+            "criticality": campaign.require_criticality(),
             "entryService": campaign.entry_service,
             "successCondition": contract.condition.to_mapping(),
             "version": 1,
@@ -123,20 +129,7 @@ def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]
 
 def _expected_outage_trace_quality(trace: dict[str, Any], target: str | None) -> bool:
     """Tolerate only the missing server span caused by one verified outage."""
-    if not target:
-        return False
-    summary = validate_trace_quality([trace])
-    result = summary.results[0]
-    if (
-        result.quality is not TraceQuality.PARTIAL
-        or result.missing_service_identities != (target,)
-        or result.reasons != (f"Client spans have no server-side service identity for: {target}",)
-    ):
-        return False
-    return any(
-        span.error and span.tags.get("net.peer.name") == target
-        for span in parse_spans([trace])
-    )
+    return expected_outage_trace_quality(trace, target)
 
 
 def _verified_outage_target(outcome: ExecutionOutcome) -> str | None:
@@ -170,6 +163,8 @@ def _record_campaign_trial(
     from .experiment_campaign_models import ExperimentCampaign
     from .analysis_session_models import WorkflowAnalysisSession
     record = require_experiment_record(campaign, analysis)
+    if campaign.evidence_tier != "experimental" or analysis.evidence_tier.value != "experimental":
+        raise ValueError("Workflow experiments require a test environment; production connections are observation-only")
     # Execute the verified snapshots, not independently mutable live inputs.
     campaign = ExperimentCampaign.from_mapping(record.campaign_snapshot)
     analysis = WorkflowAnalysisSession.from_mapping(record.analysis_snapshot)
@@ -181,29 +176,13 @@ def _record_campaign_trial(
     resolved_runner = workload_runner or run_http_workflow_probe
     resolved_fetcher = trace_fetcher or _default_trace_fetcher
     resolved_sleeper = sleeper or time.sleep
-    run = resolved_runner(application_url, definition, started_at=timestamp)
     scenario = _scenario(campaign)
-    traces: list[dict[str, Any]] = []
-    for attempt in range(len(TRACE_POLL_DELAYS_SECONDS) + 1):
-        traces = resolved_fetcher(analysis, run.trace_id)
-        matching_trace = next(
-            (trace for trace in traces if trace.get("traceID") == run.trace_id),
-            None,
-        )
-        if (
-            matching_trace is not None
-            and (
-                validate_trace_quality([matching_trace]).valid_count == 1
-                or _expected_outage_trace_quality(matching_trace, verified_unavailable_service)
-            )
-            and (
-                not run.business_success
-                or trace_has_terminal_evidence(matching_trace, scenario.success_condition)
-            )
-        ):
-            break
-        if attempt < len(TRACE_POLL_DELAYS_SECONDS):
-            resolved_sleeper(TRACE_POLL_DELAYS_SECONDS[attempt])
+    run = resolved_runner(application_url, definition, started_at=timestamp)
+    collected = collect_run_traces(
+        run, definition, analysis, resolved_fetcher, resolved_sleeper,
+        TRACE_POLL_DELAYS_SECONDS, verified_unavailable_service,
+    )
+    traces = collected.get(run.trace_id, [])
 
     registration = ExecutionRegistration.from_mapping(
         {
@@ -259,7 +238,8 @@ def _record_campaign_trial(
             )
         else:
             outcome = evaluate_execution(
-                registration, scenario, traces, now=recorded_at
+                registration, scenario, traces, now=recorded_at,
+                verified_unavailable_service=verified_unavailable_service,
             )
             if verified_unavailable_service is not None and (
                 quality.results[0].eligible or expected_outage
@@ -332,6 +312,28 @@ def _record_campaign_trial(
                 run.reason,
             ),
         )
+    # Retain affirmative probe evidence too: a successful HTTP trace does not
+    # show that response-body or preparation-step assertions were checked.
+    # This assertion never overrides an indeterminate trace outcome.
+    if not any(item.name == "business_probe_success" for item in outcome.assertions):
+        outcome = replace(
+            outcome,
+            assertions=(*outcome.assertions, AssertionResult(
+                name="business_probe_success",
+                passed=run.business_success,
+                expected=True,
+                observed=run.business_success,
+            )),
+        )
+    outcome = replace(outcome, step_evidence=capture_step_evidence(
+        run, definition, analysis, collected, recorded_at,
+    ))
+    blockers = sequence_evidence_blockers(outcome, verified_unavailable_service)
+    if blockers:
+        outcome = replace(
+            outcome, status=ExecutionOutcomeStatus.INDETERMINATE,
+            reasons=(*outcome.reasons, *blockers),
+        )
     return execution_repository(repository).create(outcome)
 
 
@@ -349,7 +351,7 @@ def baseline_readiness(
         for item in records if not _eligible_campaign_outcome(item)
     })
     success_rate = successes / len(eligible) if eligible else None
-    trace_ids = [item.matched_trace_id for item in records if item.matched_trace_id]
+    trace_ids = [trace_id for item in records for trace_id in item.trace_ids]
     duplicate_trace_ids = sorted(
         {trace_id for trace_id in trace_ids if trace_id and trace_ids.count(trace_id) > 1}
     )
@@ -582,6 +584,7 @@ def _eligible_campaign_outcome(outcome: ExecutionOutcome) -> bool:
         and snapshot is not None
         and snapshot.trace_id == outcome.matched_trace_id
         and snapshot.source_locator == registration.evidence_locator
+        and not sequence_evidence_blockers(outcome, _verified_outage_target(outcome))
         and (
             validate_trace_quality([snapshot.to_mapping()["rawTrace"]]).valid_count == 1
             or _expected_outage_trace_quality(
@@ -593,6 +596,9 @@ def _eligible_campaign_outcome(outcome: ExecutionOutcome) -> bool:
 
 def _campaign_exclusion_reason(outcome: ExecutionOutcome) -> str:
     registration = outcome.registration
+    blockers = sequence_evidence_blockers(outcome, _verified_outage_target(outcome))
+    if blockers:
+        return "; ".join(blockers)
     if registration.experiment_record_id is None or registration.experiment_record_digest is None:
         return "Trial predates the frozen experiment record and cannot be used for validation"
     if outcome.correlation_status is not CorrelationStatus.MATCHED:
@@ -640,7 +646,7 @@ def intervention_status(
             if _eligible_campaign_outcome(item)
             and _trial_within_intervention(item, events)
         ]
-        trace_ids = [item.matched_trace_id for item in records if item.matched_trace_id]
+        trace_ids = [trace_id for item in records for trace_id in item.trace_ids]
         duplicate_trace_ids = sorted(
             {trace_id for trace_id in trace_ids if trace_id and trace_ids.count(trace_id) > 1}
         )
