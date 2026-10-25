@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }}</title>
+    <link rel="stylesheet" href="assets/disposable_portfolio.css">
+</head>
+<body>
+    <header class="hero">
+        <div>
+            <p class="eyebrow">Component 3 · Research demonstration</p>
+            <h1>Synthetic cross-layer failure portfolio</h1>
+            <p class="hero-copy">
+                Generate assumed Component 1 and Component 2 outputs, inspect every
+                workflow-to-node graph, and simulate single worker-node failures.
+            </p>
+        </div>
+        <div class="hero-actions">
+            <a class="back-link" href="/components/failure-impacts">Return to Failure Impact</a>
+            <div class="evidence-badge">SYNTHETIC_DISPOSABLE</div>
+        </div>
+    </header>
+
+    <main>
+        <section class="warning" aria-label="Evidence disclaimer">
+            <strong>Demonstration only.</strong>
+            These values are synthetic assumptions, not observed Kubernetes evidence
+            and not empirical validation results. No cluster resource is changed.
+        </section>
+
+        <section class="panel controls" aria-labelledby="controls-title">
+            <div>
+                <p class="section-kicker">Step 1</p>
+                <h2 id="controls-title">Generate the portfolio</h2>
+                <p>Create four workflow graphs over one shared three-node deployment.</p>
+            </div>
+            <div class="control-grid">
+                <label>
+                    Scenario ID
+                    <input id="scenario-id" value="viva-portfolio-01" maxlength="64" autocomplete="off">
+                </label>
+                <button id="generate-button" class="primary" type="button">Generate synthetic data</button>
+            </div>
+            <div id="status" class="status" role="status" aria-live="polite">Ready to generate.</div>
+        </section>
+
+        <section id="generated-section" class="stack hidden" aria-live="polite">
+            <section class="panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Generated inputs</p>
+                        <h2>Workflow portfolio and deployment</h2>
+                    </div>
+                    <div class="button-row">
+                        <button id="download-workflows" class="secondary" type="button">Download workflows</button>
+                        <button id="download-deployment" class="secondary" type="button">Download deployment</button>
+                    </div>
+                </div>
+                <div id="portfolio-summary" class="portfolio-metrics"></div>
+
+                <section class="generated-input-block" aria-labelledby="workflow-portfolio-title">
+                    <div class="generated-input-block__heading">
+                        <div>
+                            <p class="section-kicker">Component 1 assumption</p>
+                            <h3 id="workflow-portfolio-title">Workflow dependency portfolio</h3>
+                        </div>
+                        <p>Mandatory services determine survival; optional services provide supporting context.</p>
+                    </div>
+                    <div id="workflow-list" class="workflow-grid"></div>
+                </section>
+
+                <section class="generated-input-block" aria-labelledby="service-placement-title">
+                    <div class="generated-input-block__heading">
+                        <div>
+                            <p class="section-kicker">Component 2 assumption</p>
+                            <h3 id="service-placement-title">Service placement snapshot</h3>
+                        </div>
+                        <p>Replica concentration highlights services exposed to a single worker-node failure.</p>
+                    </div>
+                    <div class="table-wrap placement-table-wrap"><table id="deployment-table" class="placement-table"></table></div>
+                </section>
+            </section>
+
+            <section class="panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Cross-layer output</p>
+                        <h2>One graph for every workflow</h2>
+                    </div>
+                    <button id="download-graphs" class="secondary" type="button">Download all graphs</button>
+                </div>
+                <p>Each graph joins workflow dependencies to services, pods, nodes and failure domains.</p>
+                <div id="cross-layer-graphs" class="graph-list"></div>
+            </section>
+
+            <section class="panel simulation-panel">
+                <div>
+                    <p class="section-kicker">Step 2</p>
+                    <h2>Run virtual node failures</h2>
+                    <p>Each node is evaluated independently from the unchanged original graph.</p>
+                </div>
+                <div class="simulation-controls">
+                    <label>
+                        Worker node
+                        <select id="failed-node"></select>
+                    </label>
+                    <button id="fail-one-button" class="danger" type="button">Fail selected node</button>
+                    <button id="fail-all-button" class="primary" type="button">Fail all nodes independently</button>
+                </div>
+            </section>
+        </section>
+
+        <section id="results-section" class="panel hidden" aria-live="polite">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">Prediction output</p>
+                    <h2>Node-failure impact analysis</h2>
+                </div>
+                <button id="download-results" class="secondary" type="button">Download results</button>
+            </div>
+
+            <div id="result-overview"></div>
+
+            <section class="result-block" aria-labelledby="risk-ranking-title">
+                <div class="result-block__heading">
+                    <div>
+                        <p class="section-kicker">Portfolio comparison</p>
+                        <h3 id="risk-ranking-title">Worker-node risk ranking</h3>
+                    </div>
+                    <p>Each node is removed independently from the same unchanged deployment.</p>
+                </div>
+                <div id="node-risk-ranking" class="risk-ranking"></div>
+            </section>
+
+            <section class="result-block" aria-labelledby="propagation-title">
+                <div class="result-block__heading">
+                    <div>
+                        <p class="section-kicker">Explainable output</p>
+                        <h3 id="propagation-title">Failure propagation by node</h3>
+                    </div>
+                    <p>Trace the failed node through unavailable mandatory services to workflow outcomes.</p>
+                </div>
+                <div id="workflow-outcomes" class="outcome-list"></div>
+            </section>
+
+            <section class="result-block handoff" aria-labelledby="component4-handoff-title">
+                <div class="result-block__heading">
+                    <div>
+                        <p class="section-kicker">Integration output</p>
+                        <h3 id="component4-handoff-title">What Component 4 receives</h3>
+                    </div>
+                    <button id="download-component4-handoff" class="secondary" type="button">
+                        Download handoff JSON
+                    </button>
+                </div>
+                <p class="handoff__intro">
+                    This preview uses the real shared contracts. Component 4 pairs the Component 2
+                    deployment snapshot with one Component 3 failure-impact report for each evaluation.
+                </p>
+                <div class="handoff-flow" aria-label="Component 2 and Component 3 outputs flow into Component 4">
+                    <article class="handoff-flow__card handoff-flow__card--deployment">
+                        <span class="handoff-flow__component">Component 2 output</span>
+                        <strong>DeploymentGraph</strong>
+                        <small id="handoff-deployment-summary"></small>
+                    </article>
+                    <span class="handoff-flow__operator" aria-hidden="true">+</span>
+                    <article class="handoff-flow__card handoff-flow__card--impact">
+                        <span class="handoff-flow__component">Component 3 output</span>
+                        <strong>FailureImpactReport</strong>
+                        <small id="handoff-report-summary"></small>
+                    </article>
+                    <span class="handoff-flow__arrow" aria-hidden="true">→</span>
+                    <article class="handoff-flow__card handoff-flow__card--target">
+                        <span class="handoff-flow__component">Component 4 input</span>
+                        <strong>CandidateContext</strong>
+                        <small>Generates and evaluates resilience recommendations</small>
+                    </article>
+                </div>
+                <div id="component4-report-list" class="handoff-report-list"></div>
+                <details class="handoff-json">
+                    <summary>View exact JSON passed across the integration boundary</summary>
+                    <p>
+                        The envelope is demonstration metadata. The nested
+                        <code>deploymentGraph</code> and <code>failureImpactReports</code> objects use
+                        the application’s real shared schemas.
+                    </p>
+                    <pre id="component4-handoff-json"></pre>
+                </details>
+            </section>
+
+            <details class="result-evidence">
+                <summary>View comparison evidence table</summary>
+                <div class="table-wrap"><table id="result-table"></table></div>
+            </details>
+        </section>
+    </main>
+
+    <script src="assets/disposable_portfolio.js"></script>
+</body>
+</html>

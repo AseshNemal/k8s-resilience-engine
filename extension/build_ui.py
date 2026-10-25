@@ -184,6 +184,10 @@ def _static_paths(html: str, key: str, title: str) -> str:
         html, count = re.subn(r'<div class="page-header">', lambda _m: CLUSTER_PANEL + '<div class="page-header">', html, count=1)
         if count != 1:
             raise SystemExit("Could not find the Overview page header.")
+    if key == "failure-impacts":
+        # The synthetic-portfolio demo is a labelled sample-data page of the web app. The extension shows the connected cluster's
+        # real evidence and has no such page, so the demo's entry card (and its absolute link) is not part of the extension.
+        html = re.sub(r'\s*<section[^>]*data-role="synthetic-portfolio-link".*?</section>', "", html, count=1, flags=re.S)
     if key == "recommendations":
         marker = '<div class="card" id="approval-section">'
         if marker not in html:

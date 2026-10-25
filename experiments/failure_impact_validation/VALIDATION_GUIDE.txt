@@ -8,6 +8,73 @@ The scripts do not inject failures, modify Kubernetes resources, or mount HTTP
 routes in the application. `capture-prediction` performs one read-only request
 to the running backend. `record-evidence` performs no network request.
 
+## Disposable multi-workflow portfolio demonstration
+
+For a viva demonstration with proportional blast radius, generate four assumed
+workflow graphs over one assumed deployment and evaluate every synthetic node:
+
+```powershell
+& .\.venv\Scripts\python.exe `
+  .\experiments\failure_impact_validation\run_disposable_portfolio_demo.py `
+  --scenario-id viva-portfolio-01 `
+  --output-dir .\experiments\failure_impact_validation\disposable\viva-portfolio-01 `
+  --compact
+```
+
+The write-once bundle contains:
+
+```text
+workflow-graphs.json
+deployment-graph.json
+synthetic-portfolio-metadata.json
+cross-layer-graphs.json
+portfolio-scenario-results.json
+```
+
+`cross-layer-graphs.json` contains the complete graph for every workflow in one
+artifact. `portfolio-scenario-results.json` contains each selected node's
+portfolio-wide failed and surviving workflows, failed services, blast radius,
+survivability, per-workflow explanation, and node-risk ranking.
+
+To evaluate only one node, add for example:
+
+```powershell
+--failed-node synthetic-node-3
+```
+
+Repeat `--failed-node` to select several nodes. Omit it to evaluate every node.
+The artifacts remain labelled `SYNTHETIC_DISPOSABLE`; this demonstrates the
+cross-layer and portfolio algorithms but is not empirical Kubernetes evidence.
+
+### Research frontend
+
+The same portfolio generator and failure evaluator are mounted as an explicitly
+labelled viva page in the main application. Its data and API remain isolated
+under one synthetic-only path and never substitute values into live endpoints.
+
+Start the normal application from the repository root:
+
+```powershell
+& .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Both pages use the usual application port:
+
+```text
+Failure Impact: http://127.0.0.1:8000/components/failure-impacts
+Synthetic demo: http://127.0.0.1:8000/components/failure-impacts/synthetic-portfolio/
+```
+
+The page provides three explicit actions:
+
+1. Generate the four assumed workflows, shared deployment, and all cross-layer graphs.
+2. Fail one selected worker node virtually.
+3. Fail every worker node independently and compare portfolio blast radius.
+
+The generated workflows, deployment, combined cross-layer graph artifact, and
+portfolio results can each be downloaded as JSON. The UI performs no Kubernetes
+write and never injects a real failure.
+
 ## Disposable contract demonstration (not validation)
 
 Use this workflow when Components 1 and 2 cannot yet supply usable outputs but
