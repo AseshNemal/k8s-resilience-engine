@@ -528,7 +528,7 @@
             root.append(button(loading ? "Loading history…" : "Refresh test history", () => load(false)));
             if (error) { const message = make("p", error); message.setAttribute("role", "alert"); root.append(message); }
             if (!rows.length) root.append(make("p", loading ? "Reading saved tests…" : "No saved candidate tests yet."));
-            else root.append(grid(["Compare", "Candidate", "Started (UTC)", "Cluster / application", "Result", "Report"], rows.map((row) => {
+            else root.append(grid(["Compare", "Candidate", "Started", "Cluster / application", "Result", "Report"], rows.map((row) => {
                 const check = make("input"); check.type = "checkbox"; check.checked = selected.has(row.runId);
                 check.setAttribute("aria-label", `Compare ${label(row)} ${row.createdAt}`);
                 check.addEventListener("change", () => {
@@ -536,7 +536,12 @@
                     try { env.storage?.setItem("resilience.apply-test.compare.v1", JSON.stringify([...selected])); } catch (_error) { /* Optional storage. */ }
                     draw();
                 });
-                return [check, label(row), row.createdAt, `${row.clusterName || "Unknown cluster"} / ${row.namespace}`, outcomeLabel(row),
+                const title = candidateTitle(row, env.strategyName || plainStrategy), when = friendlyTime(row.createdAt);
+                const name = el("div", null, "cmp-head");
+                if (title.strategy) name.append(el("span", title.strategy, "cmp-strategy"));
+                name.append(el("span", title.services, "cmp-services", { title: title.id || "" }));
+                const time = el("span", when || "", null, { title: row.createdAt ? `${row.createdAt} UTC` : "" });
+                return [check, name, when ? time : none(), `${row.clusterName || "Unknown cluster"} / ${row.namespace}`, chip(outcomeLabel(row), resultLabel(row)[1]),
                     button("View saved report", () => open(row))];
             })));
             if (more) root.append(button("Load older tests", () => load(true)));

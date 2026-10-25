@@ -86,7 +86,6 @@
     <p class="ui-note" data-role="rec-selected-data-note"></p>
     <div data-role="rec-selected-data-body"></div>
 </section>
-<section class="card rec-panel test-history" data-role="rec-test-history" aria-label="Saved candidate tests"></section>
 
 {# Research view: the detail that the steps leave out, one tab at a time. Static, so it works before a recommendation exists. #}
 <section class="card rec-workbench rec-research-only" data-role="rec-workbench" aria-label="Research data">
@@ -178,6 +177,9 @@
     </header>
     <div data-role="rec-workflow-risk"></div>
 </section>
+
+{# The very last panel: every saved test, and the side-by-side comparison of the ones the person selects. #}
+<section class="card rec-panel test-history" data-role="rec-test-history" aria-label="Saved candidate tests"></section>
 
 <template data-role="operation-template">
     <div class="op" data-role="op-body">
