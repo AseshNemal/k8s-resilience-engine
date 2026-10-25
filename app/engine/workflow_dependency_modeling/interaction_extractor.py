@@ -63,6 +63,9 @@ class TraceInteraction:
     call_counts: dict[tuple[str, str], int] = field(default_factory=dict)
     """Distinct remote call attempts per edge before per-trace deduplication."""
 
+    edge_evidence: dict[tuple[str, str], list[dict[str, str]]] = field(default_factory=dict)
+    """Exact span identities and operations supporting each observed edge."""
+
 
 @dataclass
 class ObservedEdge:
@@ -159,6 +162,7 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
         edge_set: set[tuple[str, str]] = set()
         linked_edge_set: set[tuple[str, str]] = set()
         edge_call_tokens: dict[tuple[str, str], set[str]] = defaultdict(set)
+        edge_evidence: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
         broken_parent_count = 0
 
         for span in trace_spans:
@@ -172,6 +176,10 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
                 # emit a corresponding server span.
                 edge_set.add((span.service_name, peer))
                 edge_call_tokens[(span.service_name, peer)].add(span.span_id)
+                edge_evidence[(span.service_name, peer)].append({
+                    "basis": "client_peer", "callerSpanId": span.span_id,
+                    "callerOperation": span.operation_name,
+                })
 
             for link in span.links:
                 linked = global_span_index.get((link.trace_id, link.span_id))
@@ -201,6 +209,11 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
                 else span.span_id
             )
             edge_call_tokens[(parent.service_name, span.service_name)].add(token)
+            edge_evidence[(parent.service_name, span.service_name)].append({
+                "basis": "parent_child", "callerSpanId": parent.span_id,
+                "calleeSpanId": span.span_id, "callerOperation": parent.operation_name,
+                "calleeOperation": span.operation_name,
+            })
 
         edges = [
             ServiceEdge(source=src, target=tgt)
@@ -218,6 +231,7 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
                     edge: len(tokens)
                     for edge, tokens in sorted(edge_call_tokens.items())
                 },
+                edge_evidence=dict(edge_evidence),
                 observed_services=sorted(
                     {
                         service

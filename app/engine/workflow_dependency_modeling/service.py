@@ -117,6 +117,7 @@ from app.engine.workflow_dependency_modeling.scenario_service import (
     update_scenario,
 )
 from app.engine.workflow_dependency_modeling.trace_reader import parse_spans
+from app.engine.workflow_dependency_modeling.sequence_graph import get_campaign_observed_graph
 from app.engine.workflow_dependency_modeling.trace_validator import (
     eligible_traces,
     validate_trace_quality,
@@ -436,6 +437,7 @@ def get_sample_workflow() -> WorkflowGraph:
 
 
 __all__ = [
+    "get_campaign_observed_graph",
     "analyze_workflow_evidence",
     "assess_telemetry_readiness",
     "assess_experiment_campaign",
