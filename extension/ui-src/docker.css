@@ -596,3 +596,13 @@ textarea.form-input { width: 100%; resize: vertical; }
     .pipeline-stage__io-list { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Overview keeps the observed placement and predicted impact above the detail panels. */
+body[data-page="overview"] .overview-dashboard { gap: 16px; }
+body[data-page="overview"] .cluster-panel[data-state="connected"] { padding: 8px 12px; margin-bottom: 12px; font-size: 12px; }
+body[data-page="overview"] .cluster-panel[data-state="connected"] .secondary-button { padding: 4px 10px; font-size: 12px; }
+body[data-page="overview"] .overview-dashboard .page-header__title { display: none; }
+body[data-page="overview"] .overview-bar-track { background: var(--dd-bg-sunken); }
+body[data-page="overview"] .overview-bar-fill { background: var(--dd-danger); }
+body[data-page="overview"] .overview-bar-row[data-state="proposed"] .overview-bar-fill { background: var(--dd-primary); }
+body[data-page="overview"] .overview-matrix-cell[data-state="placed"] { background: var(--dd-primary-soft); }
