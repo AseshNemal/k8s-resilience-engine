@@ -44,3 +44,5 @@ deploy/kubernetes/boutique.yaml
 
 # Generated kind kubeconfig for the Docker setup (cluster credentials)
 .kube/
+/brag-output-2026-10-24-231839
+/brag-output
