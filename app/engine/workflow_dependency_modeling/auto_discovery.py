@@ -73,7 +73,12 @@ def operation_key(
     """Group requests by method and route, excluding health and telemetry traffic."""
     method = root.tags.get("http.request.method", root.tags.get("http.method"))
     route = root.tags.get("http.route") or root.tags.get("url.template")
-    target = route or root.tags.get("http.target") or root.tags.get("url.full")
+    target = (
+        route
+        or root.tags.get("http.target")
+        or root.tags.get("url.path")
+        or root.tags.get("url.full")
+    )
     if method and target:
         path = urlsplit(target).path
         if path in {"/_healthz", "/healthz", "/health", "/readyz", "/metrics"} or path.startswith("/static/"):
