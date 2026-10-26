@@ -106,6 +106,8 @@ from app.engine.workflow_dependency_modeling.interaction_extractor import (
     extract_interactions,
 )
 from app.engine.workflow_dependency_modeling.models import SuccessCondition, WorkflowScenario
+from app.engine.workflow_dependency_modeling.observed_discovery import read_trace_window
+from app.engine.workflow_dependency_modeling.observed_request_evidence import summarize_root_requests
 from app.engine.workflow_dependency_modeling.offline_analysis import analyze_workflow_evidence
 from app.engine.workflow_dependency_modeling.scenario_service import (
     configure_scenario_repository,
@@ -299,14 +301,24 @@ def get_live_evidence(
     limit: int = 1000,
     lookback: str = "1h",
     trace_source: TraceSource | None = None,
+    set_aside_trace_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
-    """Return observed calls for one candidate operation without necessity labels."""
+    """Return observed calls for one candidate operation without necessity labels.
+
+    ``set_aside_trace_ids`` are traces of recorded outage runs: their missing spans were caused on purpose,
+    so they are reported and left out instead of being judged as broken telemetry.
+    """
+    complete_read = False
     if trace_source is None:
         traces = JaegerClient(base_url=jaeger_url).fetch_traces(
             service_name=service_name,
             limit=limit,
             lookback=lookback,
         )
+    elif hasattr(trace_source, "fetch_trace_window"):
+        # Read the whole window: a single capped page would silently drop traces once traffic grows.
+        traces = read_trace_window(trace_source, service_name, lookback, page_size=limit)
+        complete_read = True
     else:
         traces = trace_source.fetch_workflow_traces(
             service_name=service_name,
@@ -314,6 +326,11 @@ def get_live_evidence(
             limit=limit,
             lookback=lookback,
         )
+    fetched = len(traces)
+    outage_runs = [trace for trace in traces if str(trace.get("traceID") or "") in set_aside_trace_ids]
+    traces = [trace for trace in traces if str(trace.get("traceID") or "") not in set_aside_trace_ids]
+    # Reported for this operation only, so the note describes what this inspection left out.
+    set_aside = len(select_workflow_traces(outage_runs, operation, service_name)) if outage_runs else 0
     input_quality = validate_trace_quality(traces)
     # Only parse structurally safe evidence; partial traces remain visible in
     # this observation view and are explicitly reported by traceQuality.
@@ -330,6 +347,8 @@ def get_live_evidence(
     quality = validate_trace_quality(selected)
     interactions = extract_interactions(spans)
     services = sorted({service for item in interactions for service in item.observed_services})
+    # Participation, not necessity: frequency = traces in which the service has a span / matching traces.
+    # A service present in every trace (frequency 1.0) can still be optional; only outage tests can tell.
     evidence = []
     for name in services:
         count = sum(name in item.observed_services for item in interactions)
@@ -352,12 +371,15 @@ def get_live_evidence(
         "traceCount": len(selected),
         "sampleTraceIds": [trace["traceID"] for trace in selected[:10]],
         "sampleLimit": limit,
-        "fetchedTraceCount": len(traces),
+        "fetchedTraceCount": fetched,
+        "completeWindowRead": complete_read,
+        "setAsideOutageTraceCount": set_aside,
         "classificationStatus": "not_classified",
         "evaluationStatus": "not_evaluated",
         "source": "live_unverified",
         "traceQuality": quality.to_mapping(),
         "inputTraceQuality": input_quality.to_mapping(),
+        "rootRequestEvidence": summarize_root_requests(selected),
         "edges": [{"source": edge.source, "target": edge.target} for edge in edges],
         "edgeEvidence": [
             {
