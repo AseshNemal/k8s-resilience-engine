@@ -175,6 +175,7 @@ def start_workflow_analysis(
     if evidence_tier not in {"experimental", "production"}:
         raise ValueError("evidenceTier must be experimental or production")
 
+    from app.engine.workflow_dependency_modeling.campaign_execution_service import controlled_outage_trace_ids
     from app.engine.workflow_dependency_modeling.service import get_live_evidence
 
     evidence = get_live_evidence(
@@ -184,6 +185,7 @@ def start_workflow_analysis(
         limit,
         lookback,
         create_trace_source(trace_source),
+        set_aside_trace_ids=controlled_outage_trace_ids(),
     )
     timestamp = _timestamp(now)
     trace_quality = dict(evidence.get("traceQuality", {}))
@@ -197,6 +199,11 @@ def start_workflow_analysis(
         "Observed calls show participation, not dependency necessity.",
         "No controlled intervention evidence has been collected.",
     ]
+    if evidence.get("setAsideOutageTraceCount"):
+        limitations.append(
+            f"{evidence['setAsideOutageTraceCount']} trace(s) from recorded outage runs were set aside; their missing "
+            "spans were caused on purpose and do not describe the application's normal behaviour."
+        )
     required_actions = [
         "Confirm the business success condition.",
         "Collect a stable baseline execution cohort.",
@@ -235,6 +242,7 @@ def start_workflow_analysis(
             "requiredActions": required_actions,
             "createdAt": timestamp.isoformat(),
             "createdBy": actor,
+            "rootRequestEvidence": evidence.get("rootRequestEvidence") or {},
         }
     )
     return _repository(repository).create(analysis)

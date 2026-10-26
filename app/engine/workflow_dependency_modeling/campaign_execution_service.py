@@ -127,7 +127,27 @@ def _default_trace_fetcher(analysis: Any, trace_id: str) -> list[dict[str, Any]]
     return create_trace_source(analysis.trace_source).fetch_trace(trace_id)
 
 
-def _expected_outage_trace_quality(trace: dict[str, Any], target: str | None) -> bool:
+def controlled_outage_trace_ids(repository: ExecutionRepository | None = None) -> frozenset[str]:
+    """Trace IDs recorded by outage runs (service cohorts and held-out pairs), preparation steps included.
+
+    Their missing spans were caused on purpose. Later inspections set them aside, so an experiment's own
+    outages are never mistaken for broken telemetry of the application.
+    """
+    ids: set[str] = set()
+    for outcome in execution_repository(repository).list():
+        batch = outcome.registration.batch_id
+        verified = any(item.name.startswith(_VERIFIED_OUTAGE_ASSERTION) for item in outcome.assertions)
+        if verified or ":intervention:" in batch or ":heldout:" in batch:
+            ids.update(outcome.trace_ids)
+    return frozenset(ids)
+
+
+def _outage_label(target: str | tuple[str, ...]) -> str:
+    """One verified service, or several taken down together joined with '+' (held-out scenarios)."""
+    return target if isinstance(target, str) else "+".join(sorted(target))
+
+
+def _expected_outage_trace_quality(trace: dict[str, Any], target: str | tuple[str, ...] | None) -> bool:
     """Tolerate only the missing server span caused by one verified outage."""
     return expected_outage_trace_quality(trace, target)
 
@@ -156,7 +176,7 @@ def _record_campaign_trial(
     trace_fetcher: TraceFetcher | None,
     sleeper: Sleeper | None,
     now: datetime | None,
-    verified_unavailable_service: str | None = None,
+    verified_unavailable_service: str | tuple[str, ...] | None = None,
 ) -> ExecutionOutcome:
     timestamp = _utc(now)
     from .experiment_manifest_service import require_experiment_record
@@ -255,10 +275,10 @@ def _record_campaign_trial(
                     assertions=(
                         *outcome.assertions,
                         AssertionResult(
-                            name=_VERIFIED_OUTAGE_ASSERTION + verified_unavailable_service,
+                            name=_VERIFIED_OUTAGE_ASSERTION + _outage_label(verified_unavailable_service),
                             passed=True,
-                            expected=verified_unavailable_service,
-                            observed=verified_unavailable_service,
+                            expected=_outage_label(verified_unavailable_service),
+                            observed=_outage_label(verified_unavailable_service),
                         ),
                     ),
                     reasons=outcome.reasons,
@@ -341,6 +361,12 @@ def baseline_readiness(
     campaign: ExperimentCampaign,
     repository: ExecutionRepository | None = None,
 ) -> dict[str, Any]:
+    """Is the normal (all services available) cohort complete and stable enough to compare against?
+
+    Ready when it has the required number of eligible runs, no trace is reused by two runs, and its failure
+    rate is at most the campaign's maximum (10%): an unstable workflow cannot show what one missing service
+    changes, because failures would occur anyway.
+    """
     records = execution_repository(repository).list(batch_id=campaign.baseline.batch_id)
     eligible = [item for item in records if _eligible_campaign_outcome(item)]
     successes = sum(item.status is ExecutionOutcomeStatus.SUCCEEDED for item in eligible)
@@ -350,6 +376,7 @@ def baseline_readiness(
         _campaign_exclusion_reason(item)
         for item in records if not _eligible_campaign_outcome(item)
     })
+    # baseline success rate = successful eligible runs / eligible runs
     success_rate = successes / len(eligible) if eligible else None
     trace_ids = [trace_id for item in records for trace_id in item.trace_ids]
     duplicate_trace_ids = sorted(
@@ -362,6 +389,7 @@ def baseline_readiness(
         )
     if duplicate_trace_ids:
         blockers.append("Baseline contains a trace reused by multiple trial records.")
+    # Stability gate: failure rate = 1 − success rate must not exceed the campaign maximum (10%)
     if success_rate is not None and 1 - success_rate > campaign.baseline.maximum_failure_rate:
         blockers.append("Baseline failure rate exceeds the campaign stability gate.")
     return {
@@ -555,11 +583,13 @@ def _trial_within_intervention(
     finished_at = outcome.registration.finished_at
     if finished_at is None:
         return False
+    # Walk the outage events in time order; each 'activated' opens a window and the next 'restored' closes it.
     activated_at: datetime | None = None
     for event in events:
         if event.event_type is InterventionEventType.ACTIVATED:
             activated_at = event.occurred_at
         elif activated_at is not None:
+            # The run counts only if it started after the outage began and finished before recovery was recorded.
             if activated_at <= outcome.registration.started_at and finished_at <= event.occurred_at:
                 return True
             activated_at = None
@@ -570,7 +600,15 @@ def _trial_within_intervention(
 
 
 def _eligible_campaign_outcome(outcome: ExecutionOutcome) -> bool:
-    """Accept only trace-backed outcomes produced by the controlled runner."""
+    """Accept only trace-backed outcomes produced by the controlled runner.
+
+    A run counts as evidence only if all of these hold:
+      - it was run by the backend under this experiment's frozen record (not recorded by hand);
+      - its outcome is certain (SUCCEEDED or FAILED), from the exact trace the run created;
+      - the stored trace snapshot is that trace, from the recorded trace backend;
+      - every step of the workflow has its own matching trace (sequence evidence);
+      - the trace is complete, or it misses spans only of the service verified to be down.
+    """
     registration = outcome.registration
     snapshot = outcome.evidence_snapshot
     return (
