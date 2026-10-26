@@ -124,6 +124,12 @@ def _trace_provenance(
     outcomes: list[ExecutionOutcome],
     eligible_execution_ids: set[str],
 ) -> tuple[tuple[str, ...], int]:
+    """Rebuild, from the stored runs, the exact traces an approved graph rests on.
+
+    The frozen graph lists the trace of every run its labels counted, so anyone can fetch those traces and
+    recompute the labels. Freezing is refused if a counted run is missing, if two runs share a trace, or if
+    the runs no longer match what the assessment counted.
+    """
     eligible_outcomes = [
         outcome for outcome in outcomes
         if outcome.registration.execution_id in eligible_execution_ids
@@ -136,6 +142,7 @@ def _trace_provenance(
         if outcome.correlation_status is CorrelationStatus.MATCHED
         and outcome.matched_trace_id
     ]
+    # Each counted run must have its own trace; a shared trace would count the same evidence twice.
     if len(matched_trace_ids) != len(set(matched_trace_ids)):
         raise ValueError(
             "An approved graph cannot be frozen when multiple executions reference "
@@ -150,6 +157,7 @@ def _trace_provenance(
         and outcome.matched_trace_id
     ]
     valid_trace_ids = tuple(sorted(eligible_trace_ids))
+    # Every run the assessment counted must still resolve to exactly one valid trace, or the freeze is refused.
     if len(valid_trace_ids) != len(eligible_execution_ids):
         raise ValueError("Assessment eligibility no longer matches correlated execution evidence")
     if not valid_trace_ids:

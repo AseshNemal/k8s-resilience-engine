@@ -166,6 +166,8 @@ def analyze_threshold_sensitivity(
     }
     sensitivity_cases: list[SensitivityCase] = []
     sensitive: set[str] = set()
+    # Threshold sensitivity: re-label every service from its frozen counts under each alternative policy
+    # (for example a mandatory threshold of 0.4 or 0.6). No run is repeated; only the thresholds change.
     for case_id, policy in cases:
         classifications = {
             result.service_name: _summary_classification(
@@ -173,6 +175,7 @@ def analyze_threshold_sensitivity(
             ).value
             for result in assessment.services
         }
+        # A service whose label changes under any case is threshold-sensitive; the others are robust.
         changed = tuple(
             sorted(
                 service
@@ -225,7 +228,9 @@ def analyze_repeatability(
     service_names = sorted({name for labels in observed for name in labels})
     services: list[ServiceRepeatability] = []
     for service_name in service_names:
+        # Repeatability: how often each label was given to this service across independent assessments.
         counts = Counter(labels.get(service_name, "missing") for labels in observed)
+        # agreement = assessments giving the most common label / all assessments (1.0 = always the same label)
         agreement = max(counts.values()) / len(assessments)
         services.append(
             ServiceRepeatability(
@@ -235,11 +240,13 @@ def analyze_repeatability(
                 stable=isclose(agreement, 1.0),
             )
         )
+    # mean agreement = average of the per-service agreement rates
     mean_agreement = (
         sum(service.agreement_rate for service in services) / len(services)
         if services
         else 0.0
     )
+    # stable share = services labelled identically in every assessment / all services
     stable_rate = (
         sum(service.stable for service in services) / len(services)
         if services

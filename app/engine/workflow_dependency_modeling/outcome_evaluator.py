@@ -145,6 +145,11 @@ def evaluate_trace_success(
 ) -> tuple[ExecutionOutcomeStatus, tuple[AssertionResult, ...], tuple[str, ...]]:
     """Evaluate trace assertions without claiming an independently registered run.
 
+    The workflow's result is read from its terminal span: the span of the success condition's service and
+    operation (for example frontend · POST /cart/checkout). It succeeds only if every assertion passes:
+      - the protocol status is one of the accepted codes (HTTP status, gRPC code or span status);
+      - the duration is within the limit, when one is set;
+      - every required span attribute has the required value.
     Callers must quality-check the trace before parsing it. Missing or ambiguous
     terminal evidence stays indeterminate rather than becoming a failed run.
     """
