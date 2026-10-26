@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -97,6 +98,49 @@ def lookback_to_ms(lookback: str) -> int:
     if match is None:
         raise ValueError("lookback must use a positive duration such as 30m, 1h, or 2d")
     return int(match.group(1)) * _UNIT_MS[match.group(2)]
+
+
+def read_trace_window(
+    source: Any,
+    service_name: str,
+    lookback: str,
+    *,
+    page_size: int,
+    max_queries: int = 64,
+    now_us: int | None = None,
+) -> list[dict[str, Any]]:
+    """Every trace of ``service_name`` in the last ``lookback``, not just the first page.
+
+    A full page means the window may hold more, so it is split in two (boundaries overlap; trace IDs
+    deduplicate) until every page comes back below the limit. Raises ``ValueError`` when that would take
+    more than ``max_queries`` queries, or when a window cannot be split any further, rather than returning
+    a partial read as if it were complete.
+    """
+    query = source.fetch_trace_window
+    end = now_us if now_us is not None else time.time_ns() // 1000
+    start = end - lookback_to_ms(lookback) * 1000
+    resolution = getattr(source, "discovery_resolution_us", 1)
+    pending = [(start, end)]
+    found: dict[str, dict[str, Any]] = {}
+    queries = 0
+    while pending:
+        if queries >= max_queries:
+            raise ValueError(f"The {lookback} window holds more traces than {max_queries} queries of {page_size} can read; choose a shorter time window")
+        window_start, window_end = pending.pop()
+        queries += 1
+        batch = query(service_name, window_start, window_end, page_size)
+        for trace in batch:
+            trace_id = str(trace.get("traceID") or "")
+            if trace_id:
+                found.setdefault(trace_id, trace)
+        if len(batch) >= page_size:
+            if window_end - window_start <= resolution:
+                raise ValueError("More traces share one timestamp than one query can return; the window cannot be read completely")
+            middle = ((window_start + window_end) // 2 // resolution) * resolution
+            if not window_start < middle < window_end:
+                middle = window_start + resolution
+            pending.extend([(window_start, middle), (middle, window_end)])
+    return list(found.values())
 
 
 @dataclass(frozen=True)

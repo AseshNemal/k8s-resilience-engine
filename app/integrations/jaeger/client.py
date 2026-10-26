@@ -6,6 +6,7 @@ to retrieve services, operations, and raw distributed traces.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -21,6 +22,23 @@ logger = logging.getLogger(__name__)
 DEFAULT_JAEGER_URL = (os.environ.get("WORKFLOW_JAEGER_URL") or "").strip() or "http://localhost:16686"
 SERVICE_NAME_KEY = "service.name"
 TRACE_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{16,32}$")
+_LOOKBACK_PATTERN = re.compile(r"^([1-9]\d*)([smhdw])$")
+_LOOKBACK_UNIT_US = {"s": 1_000_000, "m": 60_000_000, "h": 3_600_000_000, "d": 86_400_000_000, "w": 604_800_000_000}
+
+
+def _lookback_window_us(lookback: str) -> tuple[int, int]:
+    """The (start, end) window in Unix microseconds that ``lookback`` names, ending now.
+
+    Jaeger's REST API ignores a ``lookback`` parameter (only its UI reads it) and, without
+    ``start``/``end``, searches far older traces than the caller asked for.
+    """
+    import time
+
+    match = _LOOKBACK_PATTERN.fullmatch(lookback or "")
+    if match is None:
+        raise ValueError("lookback must use a positive duration such as 30m, 1h, or 2d")
+    end = time.time_ns() // 1000
+    return end - int(match.group(1)) * _LOOKBACK_UNIT_US[match.group(2)], end
 
 
 class JaegerClient:
@@ -145,15 +163,18 @@ class JaegerClient:
         Returns:
             List of raw Jaeger trace dicts (each containing 'traceID', 'spans', 'processes').
         """
+        start_us, end_us = _lookback_window_us(lookback)
         params: dict[str, Any] = {
             "service": service_name,
             "limit": limit,
             "lookback": lookback,
+            "start": start_us,
+            "end": end_us,
         }
         if operation:
             params["operation"] = operation
         if tags:
-            params["tags"] = str(tags)
+            params["tags"] = json.dumps(tags)  # Jaeger expects a JSON object, not a Python repr
 
         try:
             with httpx.Client(timeout=self.timeout, headers=self.headers) as client:

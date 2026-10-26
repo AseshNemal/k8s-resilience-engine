@@ -147,6 +147,9 @@ def _span_metrics(
         and processes.get(str(span.get("processID", "")), {}).get("serviceName")
         != processes.get(str(span_by_id.get(_parent_id(span), {}).get("processID", "")), {}).get("serviceName")
     }
+    # A client span names the service it called (server.address / net.peer.name). If no span from that
+    # service exists in the trace, the call was never answered or never recorded: the trace is incomplete
+    # for that service. This is how an outage, or missing instrumentation, shows up in a trace.
     missing_service_identities: set[str] = set()
     for span in spans:
         tags = {
@@ -235,6 +238,11 @@ def _trace_quality(
     disconnected_root_count: int,
     missing_service_identities: tuple[str, ...],
 ) -> TraceQuality:
+    # INVALID: the trace cannot be read reliably (no trace ID, no spans, missing or duplicate span IDs).
+    # PARTIAL: readable but incomplete (a parent span is missing, a span has no service, more than one root,
+    #          or a call whose target service never appears). Partial traces are excluded from evidence and
+    #          reported, so incomplete telemetry is never read as "the service was not needed".
+    # VALID:   exactly one root, every span connected and attributed, every called service present.
     if structurally_invalid:
         return TraceQuality.INVALID
     if (
@@ -392,19 +400,23 @@ def eligible_traces(
     return [dict(trace) for trace, result in zip(raw_traces, summary.results) if result.eligible and trace.get("traceID") == result.trace_id]
 
 
-def expected_outage_trace_quality(trace: dict[str, Any], target: str | None) -> bool:
-    """Accept only one verified outage's absent server identity, no other defect.
+def expected_outage_trace_quality(trace: dict[str, Any], target: str | Sequence[str] | None) -> bool:
+    """Accept only the absent server identities of verified outages, no other defect.
 
-    The caller must obtain target from backend-verified intervention evidence,
-    never from a trace upload or an untrusted request field.
+    ``target`` is one service, or several taken down together (a held-out scenario). Only services among them may
+    be missing, each with a failed client call to it. A request can stop at the first failure, so not every target
+    has to appear. The caller must obtain targets from backend-verified intervention evidence, never from a trace
+    upload or an untrusted request field.
     """
-    if not target:
+    targets = {target} if isinstance(target, str) else set(target or ())
+    if not targets:
         return False
     result = validate_trace_quality([trace]).results[0]
+    missing = result.missing_service_identities
     if (result.quality is not TraceQuality.PARTIAL
-            or result.missing_service_identities != (target,)
-            or result.reasons != (f"Client spans have no server-side service identity for: {target}",)):
+            or not missing or not set(missing) <= targets
+            or result.reasons != (f"Client spans have no server-side service identity for: {', '.join(missing)}",)):
         return False
     from .trace_reader import parse_spans
-    return any(span.error and span.tags.get("net.peer.name") == target
-               for span in parse_spans([trace]))
+    spans = parse_spans([trace])
+    return all(any(span.error and span.tags.get("net.peer.name") == name for span in spans) for name in missing)
