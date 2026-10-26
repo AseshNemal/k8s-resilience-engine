@@ -2,6 +2,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: resilience-workflow-demo
+  labels:
+    resilience.research/workflow-outages: allowed
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

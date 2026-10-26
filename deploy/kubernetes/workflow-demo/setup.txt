@@ -34,6 +34,13 @@ an explicitly reviewed workflow in the extension. Never seed synthetic spans.
 The existing Compose pilot on ports 8080/16686 is separate evidence and stays
 separate. Do not combine their cohorts or treat them as the same environment.
 
-Stopping services or changing replicas requires a separately approved experiment.
-Component 1 reads Kubernetes inventory; this plan does not change connection permissions.
-The current local Docker outage controller does not manage Kubernetes workloads.
+Service outage tests (Workflow dependencies page, "Run outage tests on the test cluster"):
+the backend scales ONE candidate Deployment of this namespace to zero, verifies through the
+Kubernetes API that no pod is left, runs the workflow trials, then restores the replica count
+and records recovery only once the Deployment is ready again. It acts only because this
+namespace carries the label resilience.research/workflow-outages=allowed (in manifest.yaml)
+and the extension sets WORKFLOW_OUTAGE_NAMESPACE and RESILIENCE_ALLOW_CLUSTER_WRITES=1.
+To withdraw consent:
+  kubectl --context kind-resilience-research label namespace resilience-workflow-demo resilience.research/workflow-outages-
+The replica count before an outage is kept on the Deployment as the annotation
+resilience.research/workflow-outage-original-replicas; "Recover" on the page puts it back.

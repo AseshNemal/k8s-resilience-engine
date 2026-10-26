@@ -27,7 +27,9 @@ def main() -> None:
         "compose", "-f", "deploy/docker-compose.boutique.yml", "-f",
         "deploy/docker-compose.boutique-instrumented.yml", "config", "--format", "json",
     )
-    documents = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NAMESPACE}}]
+    # The label opts this test namespace in to Component 1's outage tests (one Deployment scaled to zero at a time).
+    documents = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {
+        "name": NAMESPACE, "labels": {"resilience.research/workflow-outages": "allowed"}}}]
     documents.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
         "metadata": {"name": "jaeger-traces", "namespace": NAMESPACE},
         "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}}})
