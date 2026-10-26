@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -205,6 +206,49 @@ def _required_baseline_trials(data: Mapping[str, Any]) -> int:
     return value
 
 
+_STEP_VARIABLE = re.compile(r"{{\s*([A-Za-z][A-Za-z0-9_.-]{0,63})\s*}}")
+_STEP_TRACE_LIMIT = 1000  # page size; the whole window is read page by page
+
+
+def _read_step_services(analysis: WorkflowAnalysisSession, operation: str) -> set[str]:
+    """Services in the recorded traces of one HTTP operation at the analysis's entry service and window."""
+    from .campaign_execution_service import controlled_outage_trace_ids
+    from .service import get_live_evidence
+    from .trace_source import create_trace_source
+
+    evidence = get_live_evidence(analysis.entry_service, operation, analysis.trace_source.endpoint,
+                                 _STEP_TRACE_LIMIT, analysis.lookback, create_trace_source(analysis.trace_source),
+                                 set_aside_trace_ids=controlled_outage_trace_ids())
+    return set(evidence["observedServices"])
+
+
+# Replaceable in tests so campaign creation can be checked without a trace backend.
+step_services_reader = _read_step_services
+
+
+def step_services(analysis: WorkflowAnalysisSession, definition: WorkflowProbeDefinition) -> set[str]:
+    """Services observed for every preparation step; refuses a step whose services cannot be known."""
+    found: set[str] = set()
+    for step in definition.steps:
+        if step.name == definition.measured_step:
+            continue
+        path = _STEP_VARIABLE.sub(lambda match: definition.initial_variables.get(match.group(1), match.group(0)), step.path)
+        if _STEP_VARIABLE.search(path):
+            raise ValueError(
+                f"Preparation step '{step.name}' uses a value captured at run time ({step.path}); its services cannot be "
+                "read from earlier traces. Give it a fixed path or initial variable so every service of the workflow is tested."
+            )
+        operation = f"{step.method.upper()} {path}"
+        try:
+            found |= step_services_reader(analysis, operation)
+        except ValueError as err:
+            raise ValueError(
+                f"Preparation step '{step.name}' ({operation}) has no recorded traces in the {analysis.lookback} window, so the "
+                "services it uses are unknown. Run the workflow once (or widen the window), inspect again, then create the experiment."
+            ) from err
+    return found
+
+
 def create_experiment_campaign(
     data: Mapping[str, Any],
     *,
@@ -244,9 +288,10 @@ def create_experiment_campaign(
         raise ValueError(
             "The success condition terminal service was not present in observed traces"
         )
-    candidates = tuple(
-        sorted(service for service in analysis.observed_services if service != analysis.entry_service)
-    )
+    # A workflow is every step it runs, not only the measured request: services used by preparation steps (a
+    # product page before checkout) are candidates too, read from those steps' own recorded traces.
+    observed = set(analysis.observed_services) | step_services(analysis, setup.definition)
+    candidates = tuple(sorted(service for service in observed if service != analysis.entry_service))
     if not candidates:
         raise ValueError("No downstream services were observed for this workflow")
 
@@ -356,6 +401,8 @@ def get_workflow_setup_requirements(
         "entryService": analysis.entry_service,
         "operationName": analysis.operation_name,
         **workflow_setup_requirements(analysis.operation_name),
+        # Suggestions read from the inspected traces, with the counts they come from; nothing application-specific.
+        "observedRequests": dict(analysis.root_request_evidence),
         "baselineLimits": {"minimum": _MINIMUM_BASELINE_TRIALS, "maximum": _MAXIMUM_BASELINE_TRIALS},
     }
 
