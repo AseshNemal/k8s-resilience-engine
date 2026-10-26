@@ -19,6 +19,10 @@ services:
       # Explicit host access for reviewed workflow probes. localhost inside the
       # backend is the backend container, so local applications use this name.
       WORKFLOW_TARGET_ALLOWED_HOSTS: host.docker.internal
+      # The one namespace where Component 1 may scale a candidate service to zero for an outage test (and back). The
+      # namespace must also carry the label resilience.research/workflow-outages=allowed, set by the cluster owner, and
+      # writes need RESILIENCE_ALLOW_CLUSTER_WRITES below. See app/integrations/kubernetes/workflow_outage.py.
+      WORKFLOW_OUTAGE_NAMESPACE: resilience-workflow-demo
       # Member 4's own source for a workflow when Component 1 has none frozen (no traces): a JSON file a person writes, on the
       # data volume so only the app user can read it. Declared, not observed: the page labels it and nothing computed from it
       # can be approved at the production gate. If the file is absent the page says so and offers no declared workflow.
