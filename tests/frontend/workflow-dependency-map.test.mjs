@@ -23,7 +23,7 @@ test('saved service classifications populate the three separate groups and prese
     const before = JSON.stringify(input);
     const result = model(input);
     assert.deepEqual(result.groups.map(group => group.services.map(service => service.name)), [['payment'], ['recommendations'], ['email'], []]);
-    assert.equal(result.groups[1].label, 'Supportive');
+    assert.equal(result.groups[1].label, 'Supporting');
     assert.equal(result.groups[1].services[0].assessment.classification, 'supporting');
     assert.equal(JSON.stringify(input), before);
 });

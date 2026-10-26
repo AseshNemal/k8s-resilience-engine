@@ -83,8 +83,8 @@ test('an edge receives a necessity label only from its own assessment', () => {
     const email = container.querySelectorAll('.dag-node').find(node => node.dataset.service === 'email');
     email.listeners.mouseenter();
     email.listeners.mouseleave();
-    assert.equal(edges[1].attributes.stroke, '#f59e0b');
-    assert.equal(edges[2].attributes.stroke, '#0f766e');
+    assert.equal(edges[1].attributes.stroke, '#279f86');
+    assert.equal(edges[2].attributes.stroke, '#3999d8');
 });
 
 test('a supporting service remains visible even when absent from downstream graph arrays', () => {
@@ -110,7 +110,7 @@ test('the presentation groups optional and supporting without losing their disti
 test('a graph with no assessed labels invents neither mandatory dependencies nor an entry', () => {
     const env = workspace(), container = new Element('div');
     env.draw(container, {observedServices: ['a', 'b'], edges: [{source: 'a', target: 'b'}]});
-    assert.deepEqual(container.querySelectorAll('.dag-node').map(node => node.children.at(-1).textContent), ['OBSERVED', 'OBSERVED']);
+    assert.deepEqual(container.querySelectorAll('.dag-node').map(node => node.children.at(-1).textContent), ['NOT TESTED', 'NOT TESTED']);
     assert.equal(container.querySelectorAll('.dag-edge-path')[0].dataset.mandatory, 'false');
 });
 

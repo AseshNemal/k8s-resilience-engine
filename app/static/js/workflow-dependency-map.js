@@ -3,7 +3,7 @@
     'use strict';
     const groups = [
         {key: 'mandatory', label: 'Mandatory', description: 'Meets the recorded necessity decision rule.'},
-        {key: 'supporting', label: 'Supportive', description: 'Supporting in the assessment: intermediate success-rate reduction.'},
+        {key: 'supporting', label: 'Supporting', description: 'Supporting in the assessment: intermediate success-rate reduction.'},
         {key: 'optional', label: 'Optional', description: 'No material success-rate reduction in the recorded tests.'},
         {key: 'unresolved', label: 'Unresolved', description: 'No conclusive classification evidence for these services.'},
     ];
