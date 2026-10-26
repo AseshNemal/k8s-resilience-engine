@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const script = readFileSync(new URL('../../app/static/js/components/workflows.js', import.meta.url), 'utf8');
 const pollerScript = readFileSync(new URL('../../app/static/js/workflow-discovery-poller.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
-function makeEnvironment({discover, hidden = false, traceService, ddClient, campaigns = [], assessments = []} = {}) {
+function makeEnvironment({discover, hidden = false, traceService, ddClient, campaigns = [], assessments = [], sessions = [], respond = () => undefined} = {}) {
     const registry = new Map();
     const element = key => {
         if (registry.has(key)) return registry.get(key);
@@ -38,9 +38,12 @@ function makeEnvironment({discover, hidden = false, traceService, ddClient, camp
     const json = (code, body) => ({ok: code < 400, status: code, json: async () => body});
     const fetch = async (url, options = {}) => {
         calls.push([options.method || 'GET', url, options.body]);
+        const held = respond(url, options);
+        if (held) return held;
         if (url === '/api/workflows/discovery') return discover();
         if (url === '/api/workflows/experiment-campaigns') return json(200, campaigns);
         if (url === '/api/workflows/dependency-assessments') return json(200, assessments);
+        if (url === '/api/workflows/analysis-sessions') return json(200, sessions);
         if (url.endsWith('/assessment')) return assessments.length ? json(200, assessments[0]) : json(404, {detail: 'Not found'});
         return json(200, []);
     };
@@ -66,7 +69,7 @@ function makeEnvironment({discover, hidden = false, traceService, ddClient, camp
     element('[data-role="trace-stop-button"]').hidden = true;
     const maps = [];
     const window = {ddClient, WorkflowDependencyMap: {render(_, input) {maps.push(input);}}, __resilienceTraceService: traceService, addEventListener(type, fn) {windowListeners[type] = fn;}};
-    const sandbox = {window, document, fetch, console, setTimeout, clearTimeout,
+    const sandbox = {window, document, fetch, console, setTimeout, clearTimeout, AbortSignal,
         URL, location: {href: 'http://localhost/components/workflows'}, history: {replaceState() {}},
         localStorage: {getItem: () => null, setItem() {}},
         Option: class {constructor(text, value) {this.textContent = text; this.value = value;}},
@@ -98,6 +101,27 @@ test('startup loads saved workflows without inventing a connection or starting d
     assert.match(env.element('[data-role="saved-status"]').textContent, /No experiment data/);
 });
 
+test('a late failure of an earlier load does not replace the list a newer load filled', async () => {
+    // Docker Desktop can hold a request sent while the backend restarts and fail it minutes later.
+    let failFirst, first = true;
+    const campaign = {campaignId: 'campaign:a', workflowId: 'orders', workflowName: 'Order experiment', environmentId: 'compose-test'};
+    const env = makeEnvironment({campaigns: [campaign], respond: url => {
+        if (url !== '/api/workflows/experiment-campaigns' || !first) return undefined;
+        first = false;
+        return new Promise(resolve => { failFirst = () => resolve(env.json(502, {detail: 'Headers Timeout Error'})); });
+    }});
+    await flush();
+    env.element('[data-role="refresh-saved"]').listeners.click();
+    await flush(); await flush();
+    const savedStatus = env.element('[data-role="saved-status"]');
+    assert.equal(savedStatus.textContent, '');
+    assert.equal(env.element('[data-role="saved-workflows"]').children.length, 2);
+    failFirst();
+    await flush(); await flush();
+    assert.equal(savedStatus.textContent, '');
+    assert.equal(env.element('[data-role="saved-workflows"]').children.length, 2);
+});
+
 test('startup opens a real recorded assessment without trace queries or rerunning the baseline', async () => {
     const campaign = {campaignId: 'campaign:recorded', workflowId: 'orders', workflowName: 'Order experiment', environmentId: 'compose-test',
         executionDefinition: {steps: [{method: 'POST', path: '/orders'}]}};
@@ -106,9 +130,12 @@ test('startup opens a real recorded assessment without trace queries or rerunnin
         candidateGraph: {edges: [{source: 'web', target: 'payment'}]}, policy: {}};
     const env = makeEnvironment({campaigns: [campaign], assessments: [assessment]});
     await flush(); await flush();
-    assert.equal(env.maps.length, 1);
-    assert.equal(env.maps[0].assessments[0].classification, 'mandatory');
-    assert.match(env.maps[0].sourceLabel, /Historical experiment.*compose-test/);
+    // The recorded view is a dashboard: the service is listed with its label badge and the environment chip.
+    const walk = node => [node, ...(node.children || []).filter(child => child && typeof child === 'object').flatMap(walk)];
+    const texts = walk(env.element('[data-role="guided-result"]')).map(node => node.textContent);
+    assert.ok(texts.includes('payment'));
+    assert.ok(texts.includes('Mandatory'));
+    assert.ok(texts.includes('compose-test'));
     assert.equal(env.element('[data-role="saved-workflows"]').value, 'campaign:recorded');
     assert.equal(env.element('[data-role="source-panel"]').hidden, true);
     assert.equal(env.calls.every(([method]) => method === 'GET'), true);
@@ -116,29 +143,29 @@ test('startup opens a real recorded assessment without trace queries or rerunnin
     assert.equal(env.calls.some(([, url]) => url.includes('baseline-runs') || url.includes('/progress')), false);
 });
 
-test('Boutique inputs fill only on request and remain editable without making requests', async () => {
-    const env = makeEnvironment({ddClient: {}});
+test('collect new evidence opens the application recorded in the traces', async () => {
+    const opened = [];
+    const sessions = [
+        {createdAt: '2026-10-24T10:00:00Z'},
+        {createdAt: '2026-10-25T10:00:00Z', rootRequestEvidence: {suggestedApplicationUrl: {recordedUrl: 'http://host.docker.internal:9000', basis: '4 of 4 recorded requests were received at this address'}}},
+    ];
+    const env = makeEnvironment({sessions, ddClient: {host: {openExternal: url => opened.push(url)}}});
     await flush();
-    const before = env.calls.length;
-    env.element('[data-role="fill-boutique-settings"]').listeners.click();
-    assert.equal(env.field('traceEndpoint').value, 'http://host.docker.internal:17686');
-    assert.equal(env.field('environmentId').value, 'online-boutique-kind-resilience-research-20261025');
-    assert.equal(env.field('evidenceTier').value, 'experimental');
-    assert.equal(env.field('traceAuthentication').value, 'none');
-    assert.equal(env.field('operationName').value, 'POST /cart/checkout');
-    assert.equal(env.field('criticality').value, '0.9');
-    assert.equal(env.calls.length, before);
-    env.field('traceEndpoint').value = 'https://traces.example.test';
-    assert.equal(env.field('traceEndpoint').disabled, false);
-    assert.equal(env.field('traceEndpoint').value, 'https://traces.example.test');
-    assert.match(status(env), /verified from real traces/);
+    await env.element('[data-role="new-workflow"]').listeners.click();
+    await flush();
+    assert.deepEqual(opened, ['http://localhost:9000']);
+    assert.equal(env.element('[data-role="app-url"]').value, 'http://localhost:9000');
+    assert.match(env.element('[data-role="app-url-source"]').textContent, /From recorded traces/);
 });
 
-test('Boutique input shortcut uses localhost in an ordinary browser', async () => {
-    const env = makeEnvironment();
-    await flush();
-    env.element('[data-role="fill-boutique-settings"]').listeners.click();
-    assert.equal(env.field('traceEndpoint').value, 'http://localhost:17686');
+test('the page carries no application-specific preset; setup values come from the recorded traces', () => {
+    const page = readFileSync(new URL('../../app/static/js/components/workflows.js', import.meta.url), 'utf8');
+    const template = readFileSync(new URL('../../app/templates/components/workflows.html', import.meta.url), 'utf8');
+    for (const value of ['boutique', '/cart/checkout', 'OLJCESPC7Z', '17686', '18080', '4111111111111111']) {
+        assert.equal(page.toLowerCase().includes(value.toLowerCase()), false, `workflows.js contains ${value}`);
+        assert.equal(template.toLowerCase().includes(value.toLowerCase()), false, `workflows.html contains ${value}`);
+    }
+    assert.match(page, /observedRequests/);
 });
 test('automatic discovery requires the user connection and does not require an entry service', async () => {
     const env = makeEnvironment({discover: () => env.json(200, report())});

@@ -3,38 +3,33 @@
 {% set show_project_metadata = false %}
 {% set source_label = "No workflow selected" %}
 {% block page_css %}
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=recorded-results-10">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=dashboard-10">
 {% endblock %}
 {% block content %}
     <div class="workflow-workspace">
-        <header class="workspace-header">
-            <div>
-                <h2>
-                    Workflow dependencies
-                </h2>
-                <p>
-                    See which services a workflow calls and how their availability affects its result.
-                </p>
-            </div>
-            <button type="button" class="secondary-button" data-role="new-workflow">
-                Collect new evidence
-            </button>
-        </header>
         <section class="workspace-datasets" aria-label="Experiment dataset">
             <div>
                 <label for="workflow-dataset">Experiment data</label>
                 <select id="workflow-dataset" data-role="saved-workflows"><option value="">Choose an experiment</option></select>
             </div>
-            <button type="button" class="text-button" data-role="refresh-saved">Refresh datasets</button>
+            <button type="button" class="text-button" data-role="refresh-saved">Refresh</button>
+            <button type="button" class="secondary-button" data-role="new-workflow">Collect new evidence</button>
             <p data-role="saved-status" role="status">Loading experiment data…</p>
         </section>
         <div class="workspace-layout">
             <div class="workspace-main">
                 <section class="workspace-card" data-role="source-panel" aria-labelledby="source-title">
                     <h3 id="source-title" data-role="source-title">
-                        Choose your trace source
+                        Collect new evidence
                     </h3>
-                    <p class="workspace-help">The connected Kubernetes cluster provides deployment inventory. Workflow calls come from your application's tracing backend. An empty cluster does not supply application traces.</p>
+                    <div class="wd-app-row">
+                        <label for="workflow-app-url">Application address</label>
+                        <div class="wd-app-controls">
+                            <input id="workflow-app-url" type="url" data-role="app-url" placeholder="http://localhost:&lt;port&gt;">
+                            <button type="button" class="experiment-button" data-role="open-app">Open application</button>
+                        </div>
+                        <small data-role="app-url-source">Use the application, then find its workflows in the traces below.</small>
+                    </div>
                     <div class="source-switch" aria-label="Trace source">
                         <button type="button" data-source="live" aria-pressed="true">
                             Connect tracing
@@ -45,10 +40,6 @@
                     </div>
                     <div data-role="live-source">
                         <form data-role="guided-analysis-form" class="workspace-form">
-                            <div class="full-width">
-                                <button type="button" class="secondary-button" data-role="fill-boutique-settings">Use local Kubernetes Boutique settings</button>
-                                <p class="workspace-help">Fills editable connection and checkout inputs only. It does not connect, run requests, upload traces or supply dependency labels.</p>
-                            </div>
                             <div>
                                 <label for="workflow-input-1">
                                     Tracing backend
@@ -313,7 +304,7 @@
 {% endblock %}
 {% block page_js %}
     <script src="{{ url_for('static', path='/js/workflow-discovery-poller.js') }}?v=continuous-discovery-2" defer></script>
-    <script src="{{ url_for('static', path='/js/workflow-dependency-map.js') }}?v=dependency-map-1" defer></script>
-    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=recorded-results-10" defer>
+    <script src="{{ url_for('static', path='/js/workflow-dependency-map.js') }}?v=dependency-map-2" defer></script>
+    <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=dashboard-10" defer>
     </script>
 {% endblock %}

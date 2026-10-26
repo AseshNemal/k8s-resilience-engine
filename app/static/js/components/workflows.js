@@ -14,35 +14,13 @@
     const offlineStatus = $('offline-analysis-status');
     const offlineResult = $('offline-analysis-result');
     const preferencesKey = 'workflow-source-preferences-v1';
-    function boutiqueInputs() {
-        const host = window.ddClient ? 'host.docker.internal' : 'localhost';
-        return {traceSourceType: 'jaeger', traceEndpoint: `http://${host}:17686`,
-            environmentId: 'online-boutique-kind-resilience-research-20261025', evidenceTier: 'experimental',
-            lookback: '1h', traceAuthentication: 'none', traceSecretEnv: '',
-            applicationUrl: `http://${host}:18080`, workflowName: 'Kubernetes Boutique checkout',
-            entryService: 'frontend', operationName: 'POST /cart/checkout', statuses: '200', criticality: '0.9',
-            outcome: 'Customer receives the order-complete response', responseMarker: 'Your order is complete!'};
-    }
-    function fillBoutiqueSettings() {
-        resetGuidedDiscovery();
-        const preset = boutiqueInputs();
-        for (const name of ['traceSourceType', 'traceEndpoint', 'environmentId', 'evidenceTier', 'lookback', 'traceAuthentication', 'traceSecretEnv']) guidedForm.elements.namedItem(name).value = preset[name];
-        for (const name of ['workflowName', 'entryService', 'operationName', 'outcome', 'statuses', 'criticality']) offlineForm.elements.namedItem(name).value = preset[name];
-        offlineForm.elements.useDefinition.checked = false;
-        offlineForm.elements.workflowDefinition.disabled = true;
-        offlineForm.elements.workflowDefinition.required = false;
-        for (const name of ['workflowName', 'entryService', 'outcome', 'statuses', 'criticality']) offlineForm.elements.namedItem(name).disabled = false;
-        offlineForm.elements.namedItem('sourceType').value = 'offline_jaeger';
-        offlineVersion += 1;
-        offlineResult.hidden = true;
-        syncGuidedAuthentication();
-        setGuidedStatus('Local Boutique inputs filled. Edit any value, then choose Find workflows. Services and operations will be verified from real traces.');
-    }
     let guidedWorkflows = [];
     let guidedConnectionVersion = 0;
     let renderVersion = 0;
     let activeCampaign = null;
     let workflowCatalog = [];
+    let savedLoadVersion = 0;
+    const savedLoadTimeoutMs = 30000;
     let offlineVersion = 0;
     let fieldCounter = 0;
     let discoveryPoller = null;
@@ -165,22 +143,74 @@
         sourceBadge('No workflow selected');
         $('source-title').focus();
     }
+    // The application to exercise: the address last used here, else where the latest inspected traces show it was
+    // reached. Nothing about any particular application is assumed.
+    const applicationKey = 'workflow-application-last';
+    function browserAddress(url) {
+        try {
+            const parsed = new URL(url);
+            // The backend reaches the host as host.docker.internal; the person's browser reaches it as localhost.
+            if (parsed.hostname === 'host.docker.internal') parsed.hostname = 'localhost';
+            return parsed.toString().replace(/\/$/, '');
+        } catch { return ''; }
+    }
+    async function knownApplicationAddress() {
+        const saved = stored(applicationKey);
+        if (typeof saved === 'string' && saved) return {url: saved, source: 'Last address used here.'};
+        try {
+            const sessions = await requestScenario('/api/workflows/analysis-sessions');
+            const latest = [...sessions].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+                .find(item => item.rootRequestEvidence?.suggestedApplicationUrl);
+            if (latest) {
+                const suggestion = latest.rootRequestEvidence.suggestedApplicationUrl;
+                return {url: suggestion.recordedUrl, source: `From recorded traces: ${suggestion.basis}.`};
+            }
+        } catch { /* Without a suggestion the person enters the address. */ }
+        return null;
+    }
+    function openApplication(url) {
+        const address = browserAddress(url);
+        if (!address) return;
+        remember(applicationKey, address);
+        // Inside Docker Desktop the page cannot open windows itself; the SDK opens the system browser.
+        if (window.ddClient?.host?.openExternal) window.ddClient.host.openExternal(address);
+        else window.open(address, '_blank', 'noopener');
+    }
+    async function collectNewEvidence() {
+        openSource();
+        const input = $('app-url');
+        if (!input.value) {
+            const known = await knownApplicationAddress();
+            if (known) { input.value = browserAddress(known.url); message($('app-url-source'), known.source); }
+        }
+        if (input.value) openApplication(input.value);
+        else { message($('app-url-source'), 'Enter your application address and open it to record new traces.', true); input.focus(); }
+    }
     async function loadSavedWorkflows(resume = false) {
         const initialVersion = renderVersion;
+        // Only the latest load may write: a request held by Docker Desktop while the backend restarted can fail
+        // minutes later, and its error must not replace a list a newer load already filled.
+        const load = ++savedLoadVersion;
         const status = $('saved-status');
         const list = $('saved-workflows');
         message(status, 'Loading experiment data…');
         try {
+            const read = endpoint => requestScenario(endpoint, {signal: AbortSignal.timeout(savedLoadTimeoutMs)});
             const [campaigns, assessments] = await Promise.all([
-                requestScenario('/api/workflows/experiment-campaigns'),
-                requestScenario('/api/workflows/dependency-assessments'),
+                read('/api/workflows/experiment-campaigns'),
+                read('/api/workflows/dependency-assessments'),
             ]);
+            if (load !== savedLoadVersion) return;
             workflowCatalog = campaigns;
             list.replaceChildren(new Option('Choose an experiment', ''));
             const recorded = campaign => assessments.some(item => item.assessmentId === `assessment:${campaign.campaignId.split(':').at(-1)}` && item.workflowId === campaign.workflowId && item.environmentId === campaign.environmentId);
-            message(status, campaigns.length ? `${campaigns.length} datasets · ${campaigns.filter(recorded).length} with recorded classification results` : 'No experiment data yet. Collect new evidence or upload a trace export.');
+            // The options already say which datasets are classified; the line only speaks when there is nothing to choose.
+            message(status, campaigns.length ? '' : 'No experiment data yet. Collect new evidence or upload a trace export.');
             campaigns.forEach(campaign => {
-                list.append(new Option(`${campaign.workflowName} · ${campaign.environmentId} · ${recorded(campaign) ? 'classified experiment' : 'observations only'}`, campaign.campaignId));
+                // Date, run count and service count tell apart experiments of the same workflow and environment.
+                const created = campaign.createdAt ? new Date(campaign.createdAt).toLocaleString([], {dateStyle: 'medium', timeStyle: 'short'}) : '';
+                const size = `${campaign.baseline?.requiredTrials ?? '?'} runs · ${(campaign.candidateServices || []).length} services`;
+                list.append(new Option(`${campaign.workflowName} · ${created} · ${size} · ${recorded(campaign) ? 'classified' : 'observations only'}`, campaign.campaignId));
             });
             list.value = activeCampaign?.campaignId || '';
             if (resume && initialVersion === renderVersion) {
@@ -201,7 +231,11 @@
                     if (selected) await renderRecordedCampaign(selected);
                 }
             }
-        } catch (error) { message(status, `Could not load experiment data: ${error.message}`, true); }
+        } catch (error) {
+            if (load !== savedLoadVersion) return;
+            const reason = error.name === 'TimeoutError' ? 'the backend did not answer in time. Press Refresh to try again.' : error.message;
+            message(status, `Could not load experiment data: ${reason}`, true);
+        }
     }
     async function renderRecordedCampaign(campaign) {
         stopDiscoveryScan();
@@ -219,22 +253,20 @@
         const loading = guidedText('p', 'workspace-status', 'Loading recorded evidence…');
         guidedResult.append(loading);
         try {
-            let assessment;
+            let assessment, approved = false;
             try { assessment = await requestScenario(`${campaignUrl(campaign)}/assessment`); }
             catch (error) { if (error.status !== 404) throw error; }
+            // Recorded results stay read-only views: the step comes from what is stored, not from progress checks.
+            if (assessment) {
+                try { await requestScenario(`${campaignUrl(campaign)}/approval`); approved = true; }
+                catch (error) { if (error.status !== 404) throw error; }
+            }
             if (version !== renderVersion) return;
             loading.remove();
             if (assessment) {
                 if (assessment.workflowId !== campaign.workflowId || assessment.environmentId !== campaign.environmentId) throw new Error('The assessment does not belong to this workflow environment.');
-                const graph = assessmentGraph(assessment);
-                guidedResult.append(guidedText('p', 'workspace-status', `Historical experiment · assessed ${new Date(assessment.createdAt).toLocaleString()}. These are recorded results from ${assessment.environmentId}, not a live classification of the currently connected cluster.`),
-                    renderDependencyMap(graph, assessment, `Historical experiment · ${assessment.environmentId}`),
-                    guidedText('p', 'workspace-help', 'Supportive uses the stored supporting classification. An empty group means no service met that rule in this experiment. Results apply to the original workflow inputs, success checks and policy. This pilot is not an independent accuracy evaluation.'),
-                    details('Recorded trial outcomes and calculations', assessmentRows(assessment), guidedText('pre', '', JSON.stringify({successContract: campaign.successContract, policy: assessment.policy, services: assessment.services}, null, 2))),
-                    button('Download recorded assessment', () => downloadJsonArtifact(`${campaign.workflowId}-recorded-assessment.json`, assessment), true));
-                const calls = document.createElement('div');
-                renderGraph(calls, graph);
-                guidedResult.append(details('Recorded service-to-service calls', calls));
+                guidedResult.replaceChildren(resultsDashboard(campaign, assessment, approved));
+                return;
             } else {
                 const graph = await requestScenario(`${campaignUrl(campaign)}/observed-graph`);
                 if (version !== renderVersion) return;
@@ -481,7 +513,8 @@
         finally { if (version === guidedConnectionVersion) guidedInspectButton.disabled = false; }
     }
     function observedGraphModel(session) {
-        return {observedServices: [...session.observedServices], edges: session.edges.map(({source, target}) => ({source, target})), mandatoryServices: [], optionalServices: []};
+        return {observedServices: [...session.observedServices], entryService: session.entryService,
+            edges: session.edges.map(({source, target}) => ({source, target})), mandatoryServices: [], optionalServices: []};
     }
     function renderDependencyMap(graph, assessment = null, sourceLabel = 'Observed trace evidence · classifications pending') {
         const host = document.createElement('div');
@@ -495,7 +528,7 @@
         });
         return host;
     }
-    function renderObservedGraph(session, showClassificationMap = true) {
+    function renderObservedGraph(session) {
         const canvas = document.createElement('div');
         renderGraph(canvas, observedGraphModel(session));
         const calls = document.createElement('ul');
@@ -508,8 +541,8 @@
             })));
             calls.append(call);
         });
-        const callGraph = details('Service-to-service call graph', canvas, details('List connections and trace evidence', calls));
-        const panel = details(`${showClassificationMap ? 'Workflow dependency map' : 'Recorded calls'} · ${session.observedServices.length} services · ${session.edges.length} connections`, guidedText('p', '', 'These calls were observed in traces. Service availability tests determine which dependencies affect success.'), ...(showClassificationMap ? [renderDependencyMap(session)] : []), callGraph);
+        const panel = details(`Recorded calls · ${session.observedServices.length} services · ${session.edges.length} connections`,
+            guidedText('p', 'workspace-help', 'Not tested yet: labels appear after the outage tests.'), canvas, details('Connections and trace evidence', calls));
         panel.open = true;
         return panel;
     }
@@ -597,7 +630,7 @@
         sourceBadge('Workflow setup');
         const metrics = guidedText('div', 'workspace-metrics', '');
         metrics.append(resultCard('Matching traces', String(session.traceCount)), resultCard('Services observed', String(session.observedServices.length)));
-        guidedResult.append(metrics, renderObservedGraph(session));
+        guidedResult.append(metrics, renderObservedGraph(session), serviceFrequencyTable(session));
         guidedResult.append(details('Evidence used for this graph',
             guidedText('p', '', 'Arrows show observed calls, not proven necessity. Service labels require controlled tests against your success checks. Missing telemetry can hide calls.'),
             guidedText('pre', '', JSON.stringify({source: session.traceSource || session.jaegerUrl, lookback: session.lookback, traceQuality: session.traceQuality, serviceEvidence: session.serviceEvidence, edges: session.edges}, null, 2))));
@@ -727,31 +760,16 @@
             guidedResult.append(guidedText('p', 'workspace-help', 'This is an internal operation. Choose the HTTP request that starts this action, or import a reviewed execution definition.'), button('Choose another operation', openSource, true));
         }
         syncMode();
-        if (session.entryService === 'frontend' && session.operationName === 'POST /cart/checkout' && session.evidenceTier === 'experimental') {
-            form.append(button('Fill Boutique checkout inputs', () => {
-                const preset = boutiqueInputs();
-                name.input.value = preset.workflowName;
-                outcome.input.value = preset.outcome;
-                status.input.value = preset.statuses;
-                marker.input.value = preset.responseMarker;
-                criticality.input.value = preset.criticality;
-                trials.input.value = '5';
-                // This is an editable request recipe, never experimental evidence.
-                const step = (name, method, path, codes, body = {}) => ({name, method, path, expectedStatusCodes: codes, formBody: body});
-                const condition = {protocol: 'http', terminalService: 'frontend', operationName: preset.operationName, httpStatusCodes: [200]};
-                imported.input.value = JSON.stringify({runnerType: 'http_sequence', measuredStep: 'checkout',
-                    initialVariables: {product_id: 'OLJCESPC7Z', expiration_year: String(new Date().getFullYear() + 2)},
-                    successCondition: condition, steps: [
-                        step('view_product', 'GET', '/product/{{product_id}}', [200]),
-                        step('add_to_cart', 'POST', '/cart', [302, 303], {product_id: '{{product_id}}', quantity: '1'}),
-                        {...step('checkout', 'POST', '/cart/checkout', [200], {email: 'workflow-research@example.invalid', street_address: '1 Experiment Way', zip_code: '94016', city: 'Test City', state: 'CA', country: 'United States', credit_card_number: '4111111111111111', credit_card_expiration_month: '12', credit_card_expiration_year: '{{expiration_year}}', credit_card_cvv: '123'}), responseContains: [preset.responseMarker]},
-                    ]}, null, 2);
-                useImported.input.checked = true;
-                advanced.open = true;
-                syncMode();
-                message(notice, 'Boutique test inputs filled. Edit the execution definition JSON as needed. The payment fields are demo values. Check the plan and review the success checks before saving.');
-            }, true));
-        }
+        // Suggestions come only from the recorded root requests of this operation, shown with their counts.
+        const observed = requirements.observedRequests || {};
+        if (observed.suggestedSuccessStatusCodes?.length) status.input.value = observed.suggestedSuccessStatusCodes.join(', ');
+        const suggestedAddress = observed.suggestedApplicationUrl;
+        const appAddress = field('Application base URL', 'url', suggestedAddress?.url || '', suggestedAddress
+            ? `Read from the traces: ${suggestedAddress.basis} (${suggestedAddress.recordedUrl}).${suggestedAddress.note ? ` ${suggestedAddress.note}` : ''}`
+            : 'The traces do not record the address the application was reached at. Enter its base address.');
+        appAddress.input.required = true;
+        appAddress.label.classList.add('full-width');
+        actionSection.append(observedRequestEvidence(observed));
         const readSetup = () => useImported.input.checked ? {mode: 'imported_definition', executionDefinition: JSON.parse(imported.input.value)} : {mode: 'guided_sequence', successStatuses: status.input.value, actionInputs: {...action.read(), responseText: marker.input.value}, preparationSteps: preparation.map(item => item.read())};
         const check = button('Check execution plan', async () => {
             if (checking || !form.reportValidity()) return;
@@ -779,7 +797,7 @@
             else invalidate();
         });
         const title = guidedText('h4', 'full-width', 'Set up the workflow and success checks');
-        form.append(title, name.label, outcome.label, preparationSection, actionSection, criticality.label, trials.label, advanced, check, preview, confirm.label, submit, notice);
+        form.append(title, name.label, outcome.label, appAddress.label, preparationSection, actionSection, criticality.label, trials.label, advanced, check, preview, confirm.label, submit, notice);
         revealInvalidFields(form);
         form.addEventListener('submit', async event => {
             event.preventDefault();
@@ -793,6 +811,7 @@
             message(notice, 'Saving workflow…');
             try {
                 const campaign = await postCampaignAction('/api/workflows/experiment-campaigns', payload);
+                remember(`workflow-application:${campaign.campaignId}`, appAddress.input.value.trim());
                 if (version !== renderVersion) { await loadSavedWorkflows(); return; }
                 try { await postCampaignAction(`${campaignUrl(campaign)}/manifest`, {}); }
                 catch { /* The saved workflow offers a retry without creating a duplicate. */ }
@@ -809,6 +828,40 @@
         guidedResult.append(form);
         title.tabIndex = -1;
         title.focus();
+    }
+    function serviceFrequencyTable(session) {
+        const table = guidedText('table', 'workspace-table', '');
+        const head = document.createElement('tr');
+        ['Service', 'Traces containing it', 'Frequency'].forEach(text => head.append(guidedText('th', '', text)));
+        table.append(head);
+        (session.serviceEvidence || []).forEach(item => {
+            const row = document.createElement('tr');
+            [item.service, `${item.traceCount} of ${session.traceCount}`, `${item.traceCount} / ${session.traceCount} = ${Number(item.frequency).toFixed(3)}`].forEach(text => row.append(guidedText('td', '', text)));
+            table.append(row);
+        });
+        const wrap = guidedText('div', 'workspace-table-scroll', '');
+        wrap.append(table);
+        return details('How often each service appears in the matching traces', guidedText('p', 'workspace-help', 'Frequency = traces in which the service has a span / matching traces. This is observation only: it shows participation, not whether the workflow needs the service.'), wrap);
+    }
+    function observedRequestEvidence(observed) {
+        if (!observed.requestCount) return guidedText('p', 'workspace-help', 'No root-request evidence was saved with this inspection. Inspect the operation again to read status codes and the application address from its traces.');
+        const table = guidedText('table', 'workspace-table', '');
+        const head = document.createElement('tr');
+        ['HTTP status', 'Recorded requests', 'With an error span status', 'Suggested as success'].forEach(text => head.append(guidedText('th', '', text)));
+        table.append(head);
+        observed.statusCodes.forEach(item => {
+            const row = document.createElement('tr');
+            [item.code, String(item.count), String(item.withSpanError), observed.suggestedSuccessStatusCodes.includes(Number(item.code)) ? 'Yes' : 'No'].forEach(text => row.append(guidedText('td', '', text)));
+            table.append(row);
+        });
+        const wrap = guidedText('div', 'workspace-table-scroll', '');
+        wrap.append(table);
+        const duration = observed.durationMs ? `Duration of the recorded requests: min ${observed.durationMs.min} ms · median ${observed.durationMs.median} ms · max ${observed.durationMs.max} ms.` : 'Durations were not recorded.';
+        const panel = details(`What the ${observed.requestCount} recorded requests show`, wrap, guidedText('p', 'workspace-help', observed.successRule), guidedText('p', 'workspace-help', duration),
+            guidedText('p', 'workspace-help', `Addresses recorded: ${observed.observedAddresses.map(item => `${item.url} (${item.count})`).join(', ') || 'none'}.`),
+            guidedText('p', 'workspace-help', `Not recorded in traces, so you provide them: ${observed.notRecorded.join('; ')}.`));
+        panel.open = true;
+        return panel;
     }
     const stageLabels = {baseline_required: 'Normal runs needed', interventions_required: 'Service tests needed', ready_for_assessment: 'Ready to review', reviewed: 'Awaiting approval', approved: 'Approved'};
     function stageLabel(stage) { return stageLabels[stage] || 'Checking status'; }
@@ -840,7 +893,7 @@
             const refresh = button('Refresh status', () => renderCampaign(campaign), true);
             const heading = guidedText('div', 'workspace-section-heading', '');
             heading.append(state, refresh);
-            guidedResult.append(heading);
+            guidedResult.append(progressStepper(progress.stage), heading, pipelinePanel(campaign));
             const metrics = guidedText('div', 'workspace-metrics', '');
             metrics.append(resultCard('Normal runs', `${progress.baseline.eligibleTrials}/${progress.baseline.requiredTrials}`, `${progress.baseline.successfulTrials} successful · ${progress.baseline.failedTrials} failed · ${progress.baseline.excludedTrials} excluded`), resultCard(['approved', 'reviewed', 'ready_for_assessment'].includes(progress.stage) ? 'Services tested' : 'Services to test', String(campaign.candidateServices.length)));
             guidedResult.append(metrics, guidedText('p', '', `Success: ${campaign.successContract.outcome}`));
@@ -848,7 +901,7 @@
             guidedResult.append(observed);
             requestScenario(`${campaignUrl(campaign)}/observed-graph`).then(graph => {
                 if (version !== renderVersion) return;
-                const panel = renderObservedGraph({...graph, entryService: campaign.entryService}, !['reviewed', 'approved'].includes(progress.stage));
+                const panel = renderObservedGraph({...graph, entryService: campaign.entryService});
                 panel.open = true;
                 panel.append(guidedText('p', '', `${graph.completeSequenceRuns}/${graph.recordedRuns} runs have complete successful action traces. ${graph.legacySelectedTraceRuns} historical runs retain only the selected request.`));
                 if (!graph.observedServices.length) panel.append(guidedText('p', '', 'No execution trace evidence has been recorded for this workflow yet. A baseline run collects evidence; its success checks must also pass.'));
@@ -927,10 +980,6 @@
         const extensionHint = window.ddClient ? ' Inside Docker Desktop, a host-published application uses http://host.docker.internal:<port>; localhost points to the extension backend.' : '';
         const item = field('Application base URL', 'url', stored(`workflow-application:${campaign.campaignId}`) || '', 'Enter the address of the application being tested, including http:// or https://. Use its base address, not the tracing server or a page path.' + extensionHint);
         item.input.required = true;
-        item.label.append(button('Use local Boutique URL', () => {
-            item.input.value = boutiqueInputs().applicationUrl;
-            remember(`workflow-application:${campaign.campaignId}`, item.input.value);
-        }, true));
         item.input.addEventListener('change', () => { if (item.input.checkValidity()) remember(`workflow-application:${campaign.campaignId}`, item.input.value.trim()); });
         return item;
     }
@@ -957,11 +1006,78 @@
         });
         guidedResult.append(form);
     }
+    function renderKubernetesOutagePanel(campaign, applicationUrl) {
+        const panel = guidedText('section', 'request-section full-width', '');
+        const body = guidedText('div', '', '');
+        panel.append(guidedText('h5', '', 'Automatic outage tests on the test cluster'), body);
+        message(body, 'Checking whether the test cluster allows outage tests…');
+        let wasRunning = false;
+        const outageUrl = `${campaignUrl(campaign)}/kubernetes-outages`;
+        const refresh = async () => {
+            let status;
+            try { status = await requestScenario(outageUrl); }
+            catch (error) { if (panel.isConnected) message(body, error.message, true); return; }
+            if (!panel.isConnected) return;
+            const job = status.job;
+            const running = job?.state === 'running';
+            // A finished job changed the recorded evidence: redraw the whole workflow from the backend.
+            if (wasRunning && !running) { if (activeCampaign?.campaignId === campaign.campaignId) renderCampaign(campaign); return; }
+            wasRunning = running;
+            body.replaceChildren();
+            if (status.busy) {
+                body.append(guidedText('p', 'workspace-status', status.reason));
+                return;
+            }
+            if (!status.available) {
+                body.append(guidedText('p', 'workspace-help', `Not available here: ${status.reason} Use the manual controls below instead.`));
+                return;
+            }
+            if (running) {
+                body.append(guidedText('p', 'workspace-status', `Testing ${job.currentService || job.services[0]} · ${job.completedServices.length}/${job.services.length} services done. The service is scaled to zero in ${status.namespace}, the workflow runs, then the service is restored and verified ready.`));
+                setTimeout(refresh, 3000);
+                return;
+            }
+            if (job?.state === 'failed') body.append(guidedText('p', 'is-error', `The last outage test stopped: ${job.error}`));
+            if (status.interrupted.length) {
+                const notice = guidedText('p', 'workspace-status', '');
+                const recover = button('Restore services', async () => {
+                    recover.disabled = true;
+                    message(notice, 'Restoring and waiting until the services are ready…');
+                    try { await postCampaignAction(`${outageUrl}/recover`, {}); if (activeCampaign?.campaignId === campaign.campaignId) renderCampaign(campaign); }
+                    catch (error) { message(notice, error.message, true); recover.disabled = false; }
+                });
+                body.append(guidedText('p', 'is-error', `Still scaled to zero from an earlier test: ${status.interrupted.join(', ')}.`), recover, notice);
+                return;
+            }
+            const consent = field(`I approve scaling each untested candidate service in ${status.namespace} to zero, one at a time, and restoring it afterwards.`, 'checkbox');
+            consent.label.className = 'checkbox-label full-width';
+            const notice = guidedText('p', 'workspace-status', '');
+            const start = button('Run outage tests for all services', async () => {
+                if (!consent.input.checked) { consent.input.setCustomValidity('Approve the outages first.'); consent.input.reportValidity(); return; }
+                if (!applicationUrl.reportValidity()) return;
+                start.disabled = true;
+                message(notice, 'Starting…');
+                try {
+                    await requestScenario(outageUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Actor': 'workflow-ui', 'X-Outage-Confirm': 'scale-test-services-to-zero-and-restore'}, body: JSON.stringify({applicationUrl: applicationUrl.value.trim()})});
+                    remember(`workflow-application:${campaign.campaignId}`, applicationUrl.value.trim());
+                    refresh();
+                } catch (error) { message(notice, error.message, true); start.disabled = false; }
+            });
+            consent.input.addEventListener('change', () => consent.input.setCustomValidity(''));
+            body.append(guidedText('p', 'workspace-help', 'The backend takes each service down, confirms through the Kubernetes API that no pod is left, runs the workflow trials, then restores the service and confirms it is ready. These runs count as backend-verified outages.'), consent.label, start, notice);
+        };
+        refresh();
+        return panel;
+    }
     async function loadInterventionConsole(campaign, target) {
-        target.replaceChildren(guidedText('h4', '', 'Service availability tests'), guidedText('p', '', 'Record an approved service outage, run the workflow, then record recovery. These controls record evidence; they do not stop or restart services.'));
+        target.replaceChildren(guidedText('h4', '', 'Service availability tests'));
         const app = applicationField(campaign);
-        target.append(app.label);
+        target.append(app.label, renderKubernetesOutagePanel(campaign, app.input));
         try {
+            // While an automatic test runs, its outages are intentional: no manual recording controls.
+            const outages = await requestScenario(`${campaignUrl(campaign)}/kubernetes-outages`).catch(() => null);
+            if (!target.isConnected || outages?.busy) return;
+            target.append(guidedText('p', '', 'Manual alternative: record an outage you caused yourself, run the workflow, then record recovery. These controls record evidence; they do not stop or restart services.'));
             const status = await requestScenario(`${campaignUrl(campaign)}/intervention-status`);
             if (!target.isConnected) return;
             const active = status.services.find(service => service.state === 'active');
@@ -1003,7 +1119,471 @@
         if (service.excludedReasons?.length) card.append(details('Excluded runs', ...service.excludedReasons.map(text => guidedText('p', '', text))));
         return card;
     }
+    const labelNames = {mandatory: 'Mandatory', optional: 'Optional', supporting: 'Supporting', conditional: 'Conditional', insufficient_evidence: 'Unresolved'};
+    const groupOf = label => ['mandatory', 'optional', 'supporting'].includes(label) ? label : 'unresolved';
+    function badge(text, kind) { return guidedText('span', `wd-badge wd-badge-${kind}`, text); }
+    const fixed = (number, digits = 3) => number == null ? '—' : Number(number).toFixed(digits);
+    const range = interval => interval ? `${fixed(interval[0])} – ${fixed(interval[1])}` : '—';
+    // A compact calculation sheet for one service: every number the label rests on, no prose.
+    function calculationSheet(service, policy) {
+        const b = service.baseline, o = service.intervention, s = service.statistics || {};
+        const rate = cohort => `${cohort.succeededRecords} / ${cohort.eligibleRecords} = ${fixed(cohort.successRate)}`;
+        const tick = ok => ok ? '✓' : '✗';
+        const effect = service.failureEffect;
+        let rule = '—';
+        if (effect != null) {
+            if (effect >= policy.mandatoryEffectThreshold) rule = `Δ ≥ ${policy.mandatoryEffectThreshold} and outage ≤ ${policy.maxMandatorySuccessRate} → ${o.successRate <= policy.maxMandatorySuccessRate ? 'Mandatory' : 'Unresolved'}`;
+            else if (effect < -policy.optionalEffectTolerance) rule = `Δ < −${policy.optionalEffectTolerance} → Unresolved`;
+            else if (effect <= policy.optionalEffectTolerance) rule = `|Δ| ≤ ${policy.optionalEffectTolerance} → Optional`;
+            else rule = `${policy.optionalEffectTolerance} < Δ < ${policy.mandatoryEffectThreshold} → Supporting`;
+        }
+        const rows = [
+            ['Normal success', rate(b), range(s.baselineRateInterval)],
+            ['Outage success', rate(o), range(s.outageRateInterval)],
+            ['Effect Δ', effect == null ? '—' : `${fixed(b.successRate)} − ${fixed(o.successRate)} = ${fixed(effect)}`, range(s.effectInterval)],
+            ['Decision', rule, labelNames[service.classification] || service.classification],
+            ['Gates', `runs ≥ ${policy.minSamplesPerCohort}: ${tick(b.eligibleRecords >= policy.minSamplesPerCohort)} ${tick(o.eligibleRecords >= policy.minSamplesPerCohort)} · normal ≥ ${policy.minBaselineSuccessRate}: ${tick((b.successRate ?? 0) >= policy.minBaselineSuccessRate)}`, `excluded ${b.excludedRecords + o.excludedRecords}`],
+            ['Fisher p (one-sided)', s.fisherOneSidedP == null ? '—' : Number(s.fisherOneSidedP).toPrecision(3), ''],
+            ['Evidence strength', fixed(service.evidenceStrength, 2), `(eligible ÷ recorded) × min(1, n ÷ ${policy.minSamplesPerCohort})`],
+            ['Confidence', s.supportedAtConfidence == null ? '—' : s.supportedAtConfidence ? `Firm at ${Math.round(s.confidenceLevel * 100)}%` : `Not firm at ${Math.round(s.confidenceLevel * 100)}%`, s.runsNeededPerCohort ? `≈ ${s.runsNeededPerCohort} runs / group` : ''],
+        ];
+        const sheet = guidedText('dl', 'wd-sheet', '');
+        rows.forEach(([label, value, aside]) => {
+            const row = guidedText('div', 'wd-sheet-row', '');
+            row.append(guidedText('dt', '', label), guidedText('dd', '', value), guidedText('dd', 'wd-sheet-aside', aside));
+            sheet.append(row);
+        });
+        if (service.reasons?.length) sheet.append(guidedText('p', 'wd-sheet-note', service.reasons.join(' ')));
+        return sheet;
+    }
+    function servicesTable(assessment, filter) {
+        const table = guidedText('table', 'workspace-table wd-services', '');
+        const head = document.createElement('tr');
+        ['Service', 'Dependency', 'Normal', 'Outage', 'Effect Δ', '95% interval of Δ', 'p', 'Confidence'].forEach(text => head.append(guidedText('th', '', text)));
+        const thead = document.createElement('thead');
+        thead.append(head);
+        const body = document.createElement('tbody');
+        const order = {mandatory: 0, supporting: 1, optional: 2, unresolved: 3};
+        [...assessment.services].sort((a, c) => order[groupOf(a.classification)] - order[groupOf(c.classification)] || a.serviceName.localeCompare(c.serviceName)).forEach(service => {
+            const group = groupOf(service.classification);
+            const s = service.statistics || {};
+            const row = guidedText('tr', 'wd-service-row', '');
+            row.dataset.group = group;
+            row.tabIndex = 0;
+            const name = guidedText('td', 'wd-service-name', '');
+            name.append(guidedText('span', 'wd-caret', '▸'), guidedText('span', '', service.serviceName));
+            const dependency = document.createElement('td');
+            dependency.append(badge(labelNames[service.classification] || service.classification, group));
+            const confidence = document.createElement('td');
+            confidence.append(s.supportedAtConfidence == null ? badge('—', 'muted') : s.supportedAtConfidence ? badge('Firm', 'firm') : badge(`≈${s.runsNeededPerCohort ?? '?'} runs`, 'pending'));
+            row.append(name, dependency,
+                guidedText('td', 'wd-num', `${service.baseline.succeededRecords}/${service.baseline.eligibleRecords}`),
+                guidedText('td', 'wd-num', service.intervention.eligibleRecords ? `${service.intervention.succeededRecords}/${service.intervention.eligibleRecords}` : '—'),
+                guidedText('td', 'wd-num', fixed(service.failureEffect, 2)),
+                guidedText('td', 'wd-num', range(s.effectInterval)),
+                guidedText('td', 'wd-num', s.fisherOneSidedP == null ? '—' : Number(s.fisherOneSidedP).toPrecision(2)),
+                confidence);
+            const detail = guidedText('tr', 'wd-detail-row', '');
+            detail.hidden = true;
+            const cell = document.createElement('td');
+            cell.colSpan = 8;
+            cell.append(calculationSheet(service, assessment.policy));
+            detail.append(cell);
+            const toggle = () => { detail.hidden = !detail.hidden; row.classList.toggle('is-open', !detail.hidden); };
+            row.addEventListener('click', toggle);
+            row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } });
+            if (filter && filter !== group) { row.hidden = true; }
+            body.append(row, detail);
+        });
+        table.append(thead, body);
+        const wrap = guidedText('div', 'workspace-table-scroll', '');
+        wrap.append(table);
+        return wrap;
+    }
+    function tabs(panels) {
+        const root = guidedText('div', 'wd-tabs', '');
+        const bar = guidedText('div', 'wd-tab-bar', '');
+        bar.setAttribute('role', 'tablist');
+        const views = panels.map(([label, content], index) => {
+            const tab = guidedText('button', 'wd-tab', label);
+            tab.type = 'button';
+            tab.setAttribute('role', 'tab');
+            const panel = guidedText('div', 'wd-tab-panel', '');
+            panel.setAttribute('role', 'tabpanel');
+            panel.append(content);
+            const select = () => views.forEach(view => {
+                const active = view.tab === tab;
+                view.tab.setAttribute('aria-selected', String(active));
+                view.panel.hidden = !active;
+                if (active && view.onShow) view.onShow();
+            });
+            tab.addEventListener('click', select);
+            bar.append(tab);
+            return {tab, panel, select, onShow: content.onShow};
+        });
+        root.append(bar, ...views.map(view => view.panel));
+        views[0].select();
+        return root;
+    }
+    function resultsDashboard(campaign, assessment, approved) {
+        const root = guidedText('section', 'wd-dashboard', '');
+        const services = assessment.services || [];
+        const header = guidedText('div', 'wd-dash-header', '');
+        const title = guidedText('div', '', '');
+        const meta = guidedText('div', 'wd-meta', '');
+        meta.append(badge(assessment.environmentId, 'muted'), badge(`Assessed ${new Date(assessment.createdAt).toLocaleDateString()}`, 'muted'),
+            approved ? badge('Approved', 'firm') : badge('Not approved', 'pending'));
+        title.append(guidedText('h3', '', campaign.workflowName), meta);
+        const actions = guidedText('div', 'wd-actions', '');
+        const repeat = repeatPanel(campaign);
+        const approvalSlot = guidedText('span', 'wd-action-slot', '');
+        const approval = approvalPanel(campaign, assessment, approved, meta, approvalSlot);
+        actions.append(approvalSlot, button('Repeat experiment', () => { repeat.hidden = !repeat.hidden; approval.hidden = true; }, true),
+            button('Collect more evidence', () => renderCampaign(campaign), true),
+            button('Download', () => downloadJsonArtifact(`${campaign.workflowId}-recorded-assessment.json`, assessment), true));
+        header.append(title, actions);
+        root.append(header, approval, repeat);
+        // Summary tiles; the four label tiles filter the services table.
+        const kpis = guidedText('div', 'wd-kpis', '');
+        let filter = null;
+        const servicesHost = document.createElement('div');
+        const redraw = () => servicesHost.replaceChildren(servicesTable(assessment, filter));
+        [['mandatory', 'Mandatory'], ['optional', 'Optional'], ['supporting', 'Supporting'], ['unresolved', 'Unresolved']].forEach(([group, label]) => {
+            const names = services.filter(item => groupOf(item.classification) === group).map(item => item.serviceName);
+            const tile = guidedText('button', `wd-kpi wd-kpi-${group}`, '');
+            tile.type = 'button';
+            tile.title = names.join(', ') || 'none';
+            tile.append(guidedText('span', 'wd-kpi-value', String(names.length)), guidedText('span', 'wd-kpi-label', label));
+            tile.addEventListener('click', () => {
+                filter = filter === group ? null : group;
+                kpis.querySelectorAll('.wd-kpi').forEach(item => item.classList.toggle('is-active', item === tile && filter === group));
+                redraw();
+            });
+            kpis.append(tile);
+        });
+        const decided = services.filter(item => item.statistics && item.statistics.supportedAtConfidence !== null);
+        const confidence = guidedText('div', 'wd-kpi wd-kpi-static', '');
+        confidence.append(guidedText('span', 'wd-kpi-value', `${decided.filter(item => item.statistics.supportedAtConfidence).length}/${decided.length}`),
+            guidedText('span', 'wd-kpi-label', decided.length ? `Firm at ${Math.round(decided[0].statistics.confidenceLevel * 100)}%` : 'Firm'));
+        const validation = guidedText('div', 'wd-kpi wd-kpi-static', '');
+        const validationValue = guidedText('span', 'wd-kpi-value', '—');
+        validation.append(validationValue, guidedText('span', 'wd-kpi-label', 'Validation F1 · labels / baseline'));
+        const differing = (assessment.traceOnlyBaseline?.comparison || []).filter(row => !row.agrees).map(row => row.serviceName);
+        const traceOnly = guidedText('div', 'wd-kpi wd-kpi-static', '');
+        traceOnly.title = differing.length ? `The trace baseline calls these mandatory: ${differing.join(', ')}` : 'Same labels as the trace baseline';
+        traceOnly.append(guidedText('span', 'wd-kpi-value', String(differing.length)), guidedText('span', 'wd-kpi-label', 'Differ from trace baseline'));
+        kpis.append(confidence, traceOnly, validation);
+        requestScenario(`${campaignUrl(campaign)}/held-out-runs`).then(runs => {
+            const done = runs.filter(run => run.counts.decided > 0);
+            if (!done.length) return;
+            const run = done[done.length - 1];
+            validationValue.textContent = `${fixed(run.methodUncertainCountedWrong.f1, 2)} / ${fixed(run.traceOnly.f1, 2)}`;
+        }).catch(() => {});
+        redraw();
+        // One graph: observed calls, nodes coloured by label.
+        const graphPanel = document.createElement('div');
+        const legend = guidedText('div', 'wd-legend', '');
+        [['entry', 'Entry'], ['mandatory', 'Mandatory'], ['supporting', 'Supporting'], ['optional', 'Optional'], ['unresolved', 'Unresolved']].forEach(([kind, label]) => legend.append(badge(label, kind)));
+        const calls = document.createElement('div');
+        renderGraph(calls, assessmentGraph(assessment));
+        graphPanel.append(legend, calls);
+        const raw = guidedText('pre', 'wd-raw', JSON.stringify({successContract: campaign.successContract, policy: assessment.policy, traceOnlyBaseline: assessment.traceOnlyBaseline, services: assessment.services}, null, 2));
+        root.append(kpis, tabs([['Services', servicesHost], ['Graph', graphPanel], ['Validation', heldOutPanel(campaign, true)], ['Raw data', raw]]));
+        return root;
+    }
+    // Approval by a named person, then the freeze that hands the graph to failure prediction (Component 3).
+    // The backend refuses approval while any service is unresolved; the freeze re-derives the evidence record.
+    function approvalPanel(campaign, assessment, approved, meta, slot) {
+        const panel = guidedText('section', 'wd-run wd-repeat', '');
+        panel.hidden = true;
+        const freezeUrl = `/api/workflows/${encodeURIComponent(assessment.workflowId)}`;
+        const unresolved = (assessment.services || []).filter(item => groupOf(item.classification) === 'unresolved').map(item => item.serviceName);
+        const freeze = actor => postCampaignAction(`${freezeUrl}/freeze`, {assessmentId: assessment.assessmentId,
+            freezeId: `freeze-${assessment.assessmentId.split(':').pop()}`}, actor)
+            .catch(error => { if (error.status !== 409) throw error; });   // already frozen: nothing to do
+        const name = field('Your name', 'text', '');
+        const note = field('Review note', 'textarea', '');
+        const consent = field('I reviewed these results and approve this graph for failure prediction', 'checkbox');
+        consent.label.className = 'checkbox-label full-width';
+        [name.input, note.input].forEach(input => { input.required = true; });
+        const notice = guidedText('p', 'workspace-status', '');
+        const submit = button(approved ? 'Freeze' : 'Approve & freeze', async () => {
+            if (!consent.input.checked || !name.input.value.trim() || (!approved && !note.input.value.trim())) {
+                message(notice, 'Enter your name and a note, and confirm the review.', true); return;
+            }
+            submit.disabled = true;
+            try {
+                if (!approved) {
+                    message(notice, 'Recording the approval…');
+                    await postCampaignAction(`${campaignUrl(campaign)}/approval`, {rationale: note.input.value.trim(), approvalConfirmed: true}, name.input.value.trim());
+                }
+                message(notice, 'Freezing the graph with its evidence record…');
+                await freeze(name.input.value.trim());
+                renderRecordedCampaign(campaign);
+            } catch (error) { message(notice, error.message, true); submit.disabled = false; }
+        });
+        const fields = guidedText('div', 'workspace-form wd-toolbar', '');
+        fields.append(name.label);
+        if (!approved) fields.append(note.label);
+        panel.append(guidedText('h5', '', approved ? 'Freeze for failure prediction' : 'Approve and freeze'),
+            guidedText('p', 'wd-run-meta', 'The frozen graph, with the traces of every counted run, is what failure prediction reads.'),
+            fields, consent.label, submit, notice);
+        if (unresolved.length && !approved) {
+            submit.disabled = true;
+            message(notice, `Unresolved services cannot be approved: ${unresolved.join(', ')}. Repeat the experiment first.`, true);
+        }
+        // Header state: frozen chip, or the button that opens this panel.
+        requestScenario(`${freezeUrl}/frozen`).then(frozen => {
+            if (frozen?.assessmentId === assessment.assessmentId) meta.append(badge('Frozen · used by failure prediction', 'firm'));
+            else throw new Error('older graph frozen');
+        }).catch(() => {
+            const open = button(approved ? 'Freeze for failure prediction' : 'Approve & freeze', () => { panel.hidden = !panel.hidden; });
+            slot.append(open);
+        });
+        return panel;
+    }
+    // A new experiment from this one's reviewed setup, run end to end in the background.
+    function repeatPanel(campaign) {
+        const panel = guidedText('section', 'wd-run wd-repeat', '');
+        panel.hidden = true;
+        const runs = field('Runs per group', 'number', '10');
+        Object.assign(runs.input, {min: '3', max: '30', step: '1'});
+        runs.input.required = true;
+        const app = applicationField(campaign);
+        if (!app.input.value) {
+            // The address the backend used for this workflow; read from the latest inspection when nothing is stored.
+            requestScenario('/api/workflows/analysis-sessions').then(sessions => {
+                const latest = [...sessions].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+                    .find(item => item.rootRequestEvidence?.suggestedApplicationUrl);
+                if (latest && !app.input.value) app.input.value = latest.rootRequestEvidence.suggestedApplicationUrl.url;
+            }).catch(() => {});
+        }
+        const consent = field('Reuse this experiment’s reviewed request steps and success checks, and scale each service to zero in the test namespace and restore it', 'checkbox');
+        consent.label.className = 'checkbox-label full-width';
+        const notice = guidedText('p', 'workspace-status', '');
+        const start = button('Start', async () => {
+            if (!consent.input.checked || !runs.input.reportValidity() || !app.input.reportValidity()) { message(notice, 'Confirm, and enter the runs per group and the application address.', true); return; }
+            start.disabled = true;
+            message(notice, 'Inspecting the operation again and creating the new experiment…');
+            try {
+                const result = await requestScenario(`${campaignUrl(campaign)}/repeat`, {method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-Actor': 'workflow-ui', 'X-Outage-Confirm': 'scale-test-services-to-zero-and-restore'},
+                    body: JSON.stringify({requiredBaselineTrials: Number(runs.input.value), applicationUrl: app.input.value.trim()})});
+                remember(`workflow-application:${result.campaign.campaignId}`, app.input.value.trim());
+                await loadSavedWorkflows();
+                renderCampaign(result.campaign);
+            } catch (error) { message(notice, error.message, true); start.disabled = false; }
+        });
+        const controls = guidedText('div', 'workspace-form wd-toolbar', '');
+        controls.append(runs.label, app.label);
+        panel.append(guidedText('h5', '', 'Repeat with every service'), guidedText('p', 'wd-run-meta', 'New experiment · fresh inspection · all services of every step · same request steps and success checks'), controls, consent.label, start, notice);
+        return panel;
+    }
+    // Progress of an experiment running end to end; switches to its results when it finishes.
+    function pipelinePanel(campaign) {
+        const box = guidedText('div', '', '');
+        let wasRunning = false;
+        let seenStep = null;
+        const refresh = async () => {
+            let status;
+            try { status = await requestScenario(`${campaignUrl(campaign)}/pipeline`); } catch { return; }
+            const job = status.job;
+            if (!job || !box.isConnected) return;
+            // The cards above (normal runs, services) come from one progress read; redraw them when the job moves on.
+            const step = `${job.phase}|${job.baselineRuns}|${job.servicesDone}`;
+            if (job.state === 'running' && seenStep !== null && step !== seenStep && activeCampaign?.campaignId === campaign.campaignId) {
+                renderCampaign(campaign);
+                return;
+            }
+            seenStep = step;
+            const phase = {starting: 'Starting', baseline: `Normal runs ${job.baselineRuns || ''}`,
+                outages: `Outage tests · ${job.currentService || ''} (${job.servicesDone || ''} services done)`,
+                assessment: 'Calculating results', done: 'Done'}[job.phase] || job.phase;
+            if (job.state === 'running') {
+                wasRunning = true;
+                box.replaceChildren(guidedText('p', 'workspace-status', `Running end to end · ${phase}`));
+                setTimeout(refresh, 4000);
+            } else if (job.state === 'failed') {
+                box.replaceChildren(guidedText('p', 'is-error', `Stopped during ${job.phase}: ${job.error}`));
+            } else if (wasRunning && activeCampaign?.campaignId === campaign.campaignId) {
+                renderRecordedCampaign(campaign);
+            }
+        };
+        refresh();
+        return box;
+    }
+    // Where an experiment stands, from the backend's own stage; the page never infers progress itself.
+    const experimentSteps = [
+        ['defined', 'Workflow defined'], ['baseline_required', 'Normal runs'], ['interventions_required', 'Outage tests'],
+        ['ready_for_assessment', 'Results'], ['approved', 'Approved & frozen'], ['validated', 'Held-out validated'],
+    ];
+    function progressStepper(stage, validated = false) {
+        const order = ['baseline_required', 'interventions_required', 'ready_for_assessment', 'reviewed', 'approved'];
+        const reached = order.indexOf(stage);
+        const list = guidedText('ol', 'experiment-steps-tracker', '');
+        list.setAttribute('aria-label', 'Experiment progress');
+        experimentSteps.forEach(([key, label], index) => {
+            let state;
+            if (key === 'defined') state = 'done';
+            else if (key === 'validated') state = validated ? 'done' : (stage === 'approved' || stage === 'reviewed' ? 'current' : 'todo');
+            else if (key === 'ready_for_assessment') state = reached > order.indexOf('ready_for_assessment') ? 'done' : stage === 'ready_for_assessment' ? 'current' : 'todo';
+            else if (key === 'approved') state = stage === 'approved' ? 'done' : stage === 'reviewed' ? 'current' : 'todo';
+            else state = reached > order.indexOf(key) ? 'done' : stage === key ? 'current' : 'todo';
+            const item = guidedText('li', `step-${state}`, '');
+            item.append(guidedText('span', 'step-number', state === 'done' ? '✓' : String(index + 1)), guidedText('span', 'step-label', label));
+            if (state === 'current') item.setAttribute('aria-current', 'step');
+            list.append(item);
+        });
+        return list;
+    }
+    // The answer first: label groups, how firm they are, and how they compare with traces alone.
+    function resultsSummary(campaign, assessment) {
+        const services = assessment.services || [];
+        const box = guidedText('section', 'results-summary', '');
+        const groups = guidedText('div', 'results-summary-groups', '');
+        [['mandatory', 'Mandatory'], ['optional', 'Optional'], ['supporting', 'Supporting'], ['unresolved', 'Unresolved']].forEach(([key, label]) => {
+            const names = services.filter(item => key === 'unresolved'
+                ? !['mandatory', 'optional', 'supporting'].includes(item.classification) : item.classification === key).map(item => item.serviceName);
+            const card = guidedText('div', `summary-group summary-${key}`, '');
+            card.append(guidedText('span', 'summary-count', String(names.length)), guidedText('strong', '', label), guidedText('small', '', names.join(', ') || 'none'));
+            groups.append(card);
+        });
+        box.append(guidedText('h4', '', 'Result'), groups);
+        const decided = services.filter(item => item.statistics && item.statistics.supportedAtConfidence !== null);
+        if (decided.length) {
+            const firm = decided.filter(item => item.statistics.supportedAtConfidence).length;
+            const level = Math.round(decided[0].statistics.confidenceLevel * 100);
+            const needed = Math.max(0, ...decided.map(item => item.statistics.runsNeededPerCohort || 0));
+            box.append(guidedText('p', 'summary-line', `Confidence: ${firm} of ${decided.length} labels hold at ${level}% confidence${firm < decided.length && needed ? `; about ${needed} usable runs per group would support all of them if the rates stay the same` : ''}.`));
+        }
+        const baseline = assessment.traceOnlyBaseline;
+        if (baseline) {
+            const differ = baseline.comparison.filter(row => !row.agrees).map(row => row.serviceName);
+            box.append(guidedText('p', 'summary-line', `Trace baseline: treats all ${baseline.mandatoryServices.length} observed services as mandatory; the outage-tested labels differ on ${differ.length}${differ.length ? ` (${differ.join(', ')})` : ''}.`));
+        }
+        const heldOut = guidedText('p', 'summary-line', 'Held-out validation: loading…');
+        box.append(heldOut);
+        requestScenario(`${campaignUrl(campaign)}/held-out-runs`).then(runs => {
+            const done = runs.filter(run => run.counts.decided > 0);
+            if (!done.length) { heldOut.textContent = 'Held-out validation: not run yet. Use the Held-out validation section below.'; return; }
+            const run = done[done.length - 1];
+            const value = number => number == null ? 'n/a' : number.toFixed(2);
+            heldOut.textContent = `Held-out validation (${run.counts.decided} scenarios, ${run.samplingMethod || 'uniform'} sample): outage-tested labels F1 ${value(run.method.f1)} on ${run.method.scored} predictions (strict ${value(run.methodUncertainCountedWrong.f1)}) · trace baseline F1 ${value(run.traceOnly.f1)}.`;
+        }).catch(() => { heldOut.textContent = 'Held-out validation: unavailable.'; });
+        return box;
+    }
+    function scoreRow(name, metrics, hint = '') {
+        const value = number => number == null ? 'n/a' : number.toFixed(3);
+        const interval = metrics.accuracyInterval ? ` [${value(metrics.accuracyInterval[0])}, ${value(metrics.accuracyInterval[1])}]` : '';
+        const row = document.createElement('tr');
+        row.title = hint;
+        [name, String(metrics.scored), `${metrics.truePositives}/${metrics.falsePositives}/${metrics.falseNegatives}/${metrics.trueNegatives}`,
+            value(metrics.precision), value(metrics.recall), value(metrics.f1), value(metrics.accuracy) + interval].forEach(text => row.append(guidedText('td', '', text)));
+        return row;
+    }
+    function heldOutRun(campaign, run, refresh, openScenarios = new Set()) {
+        const box = guidedText('section', 'wd-run', '');
+        const counts = run.counts;
+        const head = guidedText('div', 'wd-run-head', '');
+        head.append(guidedText('h5', '', `Validation run · ${run.plannedAt ? new Date(run.plannedAt).toLocaleString() : run.runId}`),
+            guidedText('span', `wd-badge wd-badge-${counts.observed === counts.planned && counts.planned ? 'firm' : 'pending'}`, `${counts.observed}/${counts.planned} scenarios`));
+        head.title = `${run.runId} · seed ${run.seed ?? '—'} · predictions frozen before any scenario ran`;
+        box.append(head);
+        if (run.samplingGroups) box.append(guidedText('p', 'wd-run-meta', `${run.samplingMethod}: ${Object.entries(run.samplingGroups).map(([name, group]) => `${name}: ${group.drawn}/${group.available} pairs drawn`).join(' · ')}`));
+        if (run.samplingNote) box.append(guidedText('p', 'wd-run-meta', run.samplingNote));
+        const scores = guidedText('table', 'workspace-table', '');
+        const header = document.createElement('tr');
+        ['Predictor', 'Scored', 'TP/FP/FN/TN', 'Precision', 'Recall', 'F1', 'Accuracy (interval)'].forEach(text => header.append(guidedText('th', '', text)));
+        scores.append(header,
+            scoreRow('Outage-tested labels', run.method, 'Predicts failure when a mandatory service is down; pairs it cannot predict are left out'),
+            scoreRow('Outage-tested labels (strict)', run.methodUncertainCountedWrong, 'Pairs the labels cannot predict are counted as wrong'),
+            scoreRow('Trace baseline', run.traceOnly, 'Treats every service seen in traces as required, so it always predicts failure'));
+        const scoreWrap = guidedText('div', 'workspace-table-scroll', '');
+        scoreWrap.append(scores);
+        box.append(scoreWrap, guidedText('p', 'wd-run-meta', `Failure counts as positive · no prediction ${counts.methodUncertain ?? 0} · degraded ${counts.degraded ?? 0} · unresolved ${counts.unresolved ?? 0}`));
+        const table = guidedText('table', 'workspace-table', '');
+        const columns = document.createElement('tr');
+        ['#', 'Services down', 'Labels predict', 'Baseline predicts', 'Observed', 'Δ', 'Runs'].forEach(text => columns.append(guidedText('th', '', text)));
+        table.append(columns);
+        run.scenarios.forEach(row => {
+            const line = document.createElement('tr');
+            const seen = row.observation;
+            line.title = Object.entries(row.prediction.labels).map(([name, label]) => `${name}: ${label}`).join(', ');
+            [row.scenarioId, row.services.join(' + '), row.prediction.method === 'uncertain' ? 'no prediction' : row.prediction.method, row.prediction.traceOnly, seen ? seen.outcome : '—',
+                seen && seen.effect != null ? seen.effect.toFixed(2) : '—',
+                seen ? `${seen.scenario.succeededRecords}/${seen.scenario.eligibleRecords}` : '—'].forEach(text => line.append(guidedText('td', '', text)));
+            table.append(line);
+        });
+        const wrap = guidedText('div', 'workspace-table-scroll', '');
+        wrap.append(table);
+        // A running job redraws this run every few seconds; the list stays open if the viewer opened it.
+        const scenarioList = details(`Scenarios (${run.scenarios.length})`, wrap);
+        scenarioList.open = openScenarios.has(run.runId);
+        scenarioList.addEventListener('toggle', () => { if (scenarioList.open) openScenarios.add(run.runId); else openScenarios.delete(run.runId); });
+        box.append(scenarioList);
+        const job = run.job;
+        if (job?.state === 'running') {
+            box.append(guidedText('p', 'workspace-status', `Running ${job.currentScenario || ''} · ${job.completedScenarios.length}/${job.scenarios.length}`));
+            setTimeout(refresh, 4000);
+        } else if (counts.observed < counts.planned) {
+            if (job?.state === 'failed') box.append(guidedText('p', 'is-error', `Stopped: ${job.error}`));
+            const app = applicationField(campaign);
+            const consent = field('Scale each pair to zero in the test namespace and restore it', 'checkbox');
+            consent.label.className = 'checkbox-label full-width';
+            const notice = guidedText('p', 'workspace-status', '');
+            const start = button('Run scenarios', async () => {
+                if (!consent.input.checked || !app.input.reportValidity()) { message(notice, 'Confirm the outages and enter the application address.', true); return; }
+                start.disabled = true;
+                try {
+                    await requestScenario(`${campaignUrl(campaign)}/held-out-runs/${encodeURIComponent(run.runId)}/execute`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Actor': 'workflow-ui', 'X-Outage-Confirm': 'scale-test-services-to-zero-and-restore'}, body: JSON.stringify({applicationUrl: app.input.value.trim()})});
+                    refresh();
+                } catch (error) { message(notice, error.message, true); start.disabled = false; }
+            });
+            box.append(app.label, consent.label, start, notice);
+        }
+        return box;
+    }
+    // Validation runs: a toolbar to freeze a new run, then each run's scores. ``embedded`` loads at once (dashboard tab).
+    function heldOutPanel(campaign, embedded = false) {
+        const panel = embedded ? guidedText('div', 'wd-validation', '') : details('Validation');
+        const body = guidedText('div', '', '');
+        panel.append(body);
+        // Built once: a running job redraws only the runs below, so typed inputs and opened lists survive each poll.
+        const openScenarios = new Set();
+        const count = field('Pairs to test', 'number', '10');
+        Object.assign(count.input, {min: '1', max: '50', step: '1'});
+        const sampling = selectField('Sampling method', [['stratified', 'Stratified'], ['uniform', 'Uniform']]);
+        sampling.input.value = 'stratified';
+        const seed = field('Random seed (optional)', 'number', '');
+        const notice = guidedText('p', 'workspace-status', '');
+        const plan = button('Freeze predictions for a new run', async () => {
+            plan.disabled = true;
+            try {
+                await postCampaignAction(`${campaignUrl(campaign)}/held-out-runs`, {scenarioCount: Number(count.input.value), sampling: sampling.input.value, ...(seed.input.value ? {seed: Number(seed.input.value)} : {})});
+                message(notice, '');
+                refresh();
+            } catch (error) { message(notice, error.message, true); }
+            plan.disabled = false;
+        }, true);
+        const samplingControls = guidedText('div', 'workspace-form wd-toolbar', '');
+        samplingControls.append(count.label, sampling.label, seed.label, plan);
+        const runsView = guidedText('div', '', '');
+        let shown = false;
+        const refresh = async () => {
+            let runs;
+            try { runs = await requestScenario(`${campaignUrl(campaign)}/held-out-runs`); }
+            catch (error) { if (panel.isConnected) message(shown ? notice : body, error.message, true); return; }
+            if (!panel.isConnected) return;
+            if (!shown) { body.replaceChildren(samplingControls, notice, runsView); shown = true; }
+            runsView.replaceChildren(...[...runs].reverse().map(run => heldOutRun(campaign, run, refresh, openScenarios)));
+            if (!runs.length) runsView.append(guidedText('p', 'wd-empty', 'No validation runs yet.'));
+        };
+        if (embedded) refresh();
+        else panel.addEventListener('toggle', () => { if (panel.open && !panel.dataset.loaded) { panel.dataset.loaded = '1'; refresh(); } });
+        return panel;
+    }
     async function loadCampaignDecision(campaign, target, verification) {
+        target.after(heldOutPanel(campaign));
         try { const approval = await requestScenario(`${campaignUrl(campaign)}/approval`); if (target.isConnected) renderApprovedGraph(approval, target, verification); return; }
         catch (error) { if (error.status !== 404) { message(target, error.message, true); return; } }
         try { const assessment = await requestScenario(`${campaignUrl(campaign)}/assessment`); if (target.isConnected) renderCampaignAssessment(campaign, assessment, target); }
@@ -1038,6 +1618,71 @@
         wrap.append(table);
         return wrap;
     }
+    // The arithmetic behind each label, from the stored counts and the recorded policy; nothing is recomputed differently here.
+    function calculationSteps(service, policy) {
+        const rate = cohort => cohort.successRate == null ? 'undefined (no eligible runs)' : cohort.successRate.toFixed(3);
+        const b = service.baseline, o = service.intervention;
+        const steps = [
+            `Normal runs: ${b.succeededRecords} successful / ${b.eligibleRecords} eligible = ${rate(b)} (${b.totalRecords} recorded, ${b.excludedRecords} excluded).`,
+            `Runs with ${service.serviceName} unavailable: ${o.succeededRecords} successful / ${o.eligibleRecords} eligible = ${rate(o)} (${o.totalRecords} recorded, ${o.excludedRecords} excluded).`,
+        ];
+        if (service.failureEffect != null) steps.push(`Effect = ${rate(b)} − ${rate(o)} = ${service.failureEffect.toFixed(3)}.`);
+        const gate = (label, value, test, threshold) => {
+            const passed = test === '≥' ? Number(value) >= threshold : Number(value) <= threshold;
+            return `${label}: ${value} ${test} ${threshold} → ${passed ? 'passed' : 'failed'}`;
+        };
+        steps.push(gate('Normal eligible runs', b.eligibleRecords, '≥', policy.minSamplesPerCohort),
+            gate('Outage eligible runs', o.eligibleRecords, '≥', policy.minSamplesPerCohort));
+        if (b.successRate != null) steps.push(gate('Normal success rate', b.successRate.toFixed(3), '≥', policy.minBaselineSuccessRate));
+        const effect = service.failureEffect;
+        if (effect != null) {
+            let rule;
+            if (effect >= policy.mandatoryEffectThreshold) rule = `effect ${effect.toFixed(3)} ≥ ${policy.mandatoryEffectThreshold} and outage success rate ${rate(o)} ${o.successRate <= policy.maxMandatorySuccessRate ? '≤' : '>'} ${policy.maxMandatorySuccessRate} → ${o.successRate <= policy.maxMandatorySuccessRate ? 'mandatory' : 'unresolved (runs still succeeded)'}`;
+            else if (effect < -policy.optionalEffectTolerance) rule = `effect ${effect.toFixed(3)} < −${policy.optionalEffectTolerance} (success improved) → unresolved`;
+            else if (effect <= policy.optionalEffectTolerance) rule = `|effect| ${Math.abs(effect).toFixed(3)} ≤ ${policy.optionalEffectTolerance} → optional`;
+            else rule = `${policy.optionalEffectTolerance} < effect ${effect.toFixed(3)} < ${policy.mandatoryEffectThreshold} → supporting`;
+            steps.push(`Decision rule: ${rule}.`);
+        }
+        const total = b.totalRecords + o.totalRecords, eligible = b.eligibleRecords + o.eligibleRecords;
+        steps.push(`Evidence strength = (eligible ${eligible} / recorded ${total}) × min(1, min(${b.eligibleRecords}, ${o.eligibleRecords}) / ${policy.minSamplesPerCohort}) = ${service.evidenceStrength.toFixed(3)}.`);
+        steps.push(`Result: ${service.classification.replaceAll('_', ' ')}. ${service.reasons.join(' ')}`);
+        const stats = service.statistics;
+        if (stats) {
+            const range = interval => interval ? `[${interval[0].toFixed(3)}, ${interval[1].toFixed(3)}]` : 'undefined';
+            const level = `${Math.round(stats.confidenceLevel * 100)}%`;
+            steps.push(`${level} intervals (${stats.methods}): normal rate ${range(stats.baselineRateInterval)}, outage rate ${range(stats.outageRateInterval)}, effect ${range(stats.effectInterval)}.`);
+            if (stats.fisherOneSidedP != null) steps.push(`One-sided Fisher exact test (outage lowered success): p = ${stats.fisherOneSidedP.toPrecision(3)}.`);
+            stats.checks.forEach(check => steps.push(`Interval check: ${check}.`));
+            steps.push(`Confidence: ${stats.verdict}.`);
+        }
+        return steps;
+    }
+    function traceOnlyComparison(assessment) {
+        const baseline = assessment.traceOnlyBaseline;
+        if (!baseline) return guidedText('p', 'workspace-help', 'This assessment has no trace baseline comparison.');
+        const table = guidedText('table', 'workspace-table', '');
+        const head = document.createElement('tr');
+        ['Service', 'Trace baseline', 'Outage-tested label', 'Same answer'].forEach(text => head.append(guidedText('th', '', text)));
+        table.append(head);
+        baseline.comparison.forEach(row => {
+            const line = document.createElement('tr');
+            [row.serviceName, row.traceOnly, row.method.replaceAll('_', ' '), row.agrees ? 'Yes' : 'No'].forEach(text => line.append(guidedText('td', '', text)));
+            table.append(line);
+        });
+        const wrap = guidedText('div', 'workspace-table-scroll', '');
+        wrap.append(table);
+        const differ = baseline.comparison.filter(row => !row.agrees).length;
+        return details(`Trace baseline: ${baseline.mandatoryServices.length} mandatory · outage-tested labels differ on ${differ}`, guidedText('p', 'workspace-help', baseline.rule), wrap);
+    }
+    function calculationDetails(assessment) {
+        return details('Calculation for each service', ...assessment.services.map(service => {
+            const block = details(`${service.serviceName} · ${service.classification.replaceAll('_', ' ')}`);
+            const list = guidedText('ol', '', '');
+            calculationSteps(service, assessment.policy).forEach(step => list.append(guidedText('li', '', step)));
+            block.append(list);
+            return block;
+        }));
+    }
     function classificationKey() { return guidedText('p', 'workspace-help', 'Labels apply to these workflow inputs and success checks under the recorded assessment policy. Mandatory: the outage met the configured failure-effect thresholds. Optional / Supporting: no material success reduction, or an intermediate reduction, respectively. Supporting does not establish a loss of secondary functionality unless that outcome was measured. Unresolved: insufficient or condition-specific evidence. Node labels describe services; arrows require separate edge evidence.'); }
     function assessmentGraph(assessment) {
         // Project measured labels only. candidateGraph contains structural candidates,
@@ -1068,7 +1713,9 @@
         const graph = assessmentGraph(assessment);
         const canvas = document.createElement('div');
         renderGraph(canvas, graph);
-        target.replaceChildren(guidedText('h4', '', 'Review dependencies'), renderDependencyMap(graph, assessment), classificationKey(), details('Service-to-service call graph', canvas), assessmentRows(assessment));
+        target.replaceChildren(guidedText('h4', '', 'Review dependencies'), resultsSummary(campaign, assessment), renderDependencyMap(graph, assessment), classificationKey(),
+            guidedText('h4', 'section-title', 'Evidence and calculations'), details('Run outcomes and the calculation for each service', assessmentRows(assessment), calculationDetails(assessment)),
+            traceOnlyComparison(assessment), details('Service-to-service call graph', canvas));
         target.append(details('How these results are calculated',
             guidedText('p', '', 'Success rate = successful eligible runs / eligible runs. Effect = baseline success rate − intervention success rate. Excluded or unmatched runs do not count as successes or failures. Evidence strength measures usable evidence and minimum sample coverage; it is not a statistical confidence percentage.'),
             guidedText('p', '', `Recorded policy: at least ${assessment.policy.minSamplesPerCohort} eligible runs per cohort and baseline success rate ≥ ${assessment.policy.minBaselineSuccessRate}. Mandatory requires effect ≥ ${assessment.policy.mandatoryEffectThreshold} and outage success rate ≤ ${assessment.policy.maxMandatorySuccessRate}. Optional requires effect within ±${assessment.policy.optionalEffectTolerance}; supporting requires a larger reduction below the mandatory-effect threshold. Failed gates and contradictory outcomes remain unresolved. These are experimental decision thresholds, not statistical proof of necessity.`),
@@ -1101,7 +1748,7 @@
         target.replaceChildren(guidedText('h4', '', 'Approved dependency graph'));
         const canvas = document.createElement('div');
         canvas.append(guidedText('p', 'workspace-status', 'Loading complete classification evidence…'));
-        target.append(canvas, classificationKey(), guidedText('p', 'workspace-help', 'Supportive services remain visible here; the downstream graph contract excludes them. The entry service is structural, not an outage-tested dependency. Download test results for the complete classification evidence.'), button('Download graph JSON', () => downloadJsonArtifact(`${graph.workflowId}-workflow-graph.json`, graph)), guidedText('p', '', `Reviewed by ${approval.approvedBy}: ${approval.rationale}`));
+        target.append(canvas, classificationKey(), guidedText('p', 'workspace-help', 'Supporting services remain visible here; the downstream graph contract excludes them. The entry service is structural, not an outage-tested dependency. Download test results for the complete classification evidence.'), button('Download graph JSON', () => downloadJsonArtifact(`${graph.workflowId}-workflow-graph.json`, graph)), guidedText('p', '', `Reviewed by ${approval.approvedBy}: ${approval.rationale}`));
         if (verification) target.append(guidedText('p', 'workspace-help', `Outage verification: ${verification.verifiedTrials}/${verification.eligibleTrials} runs verified by the backend; ${verification.verification.replaceAll('_', ' ')}.`));
         const evidence = details('View test results', guidedText('p', '', 'Loading saved results…'));
         target.append(evidence);
@@ -1114,7 +1761,7 @@
             const calls = document.createElement('div');
             renderGraph(calls, displayGraph);
             canvas.replaceChildren(renderDependencyMap(displayGraph, assessment), details('Service-to-service call graph', calls));
-            evidence.replaceChildren(guidedText('summary', '', 'View test results'), assessmentRows(assessment), button('Download test results JSON', () => downloadJsonArtifact(`${graph.workflowId}-test-results.json`, assessment), true));
+            evidence.replaceChildren(guidedText('summary', '', 'View test results'), assessmentRows(assessment), calculationDetails(assessment), button('Download test results JSON', () => downloadJsonArtifact(`${graph.workflowId}-test-results.json`, assessment), true));
         }).catch(error => { if (target.isConnected) { canvas.replaceChildren(guidedText('p', 'is-error', `Classification evidence unavailable: ${error.message}`)); evidence.append(guidedText('p', 'is-error', error.message)); } });
     }
     function revealInvalidFields(form) {
@@ -1159,6 +1806,8 @@
         } catch (error) { if (version === offlineVersion) message(offlineStatus, error.message, true); }
         finally { submit.disabled = false; }
     }
+    const graphPalette = {mandatory: '#8471e9', optional: '#279f86', supporting: '#3999d8', unresolved: '#8191a6',
+        observed: '#8191a6', entry: 'var(--color-primary)'};
     function renderGraph(container, workflow) {
         container.innerHTML = "";
         container.className = "workflow-dag-container";
@@ -1295,10 +1944,10 @@
         const defs = document.createElementNS(ns, "defs");
         defs.innerHTML = `
             <marker id="dag-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-                <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94a3b8"></path>
+                <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8191a6"></path>
             </marker>
             <marker id="dag-arrow-mandatory" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-                <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#6366f1"></path>
+                <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8471e9"></path>
             </marker>
             <marker id="dag-arrow-active" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                 <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb"></path>
@@ -1323,7 +1972,7 @@
             const isMandatory = mandatoryEdges.has(edgeKey(edge));
             const isOptional = optionalEdges.has(edgeKey(edge));
             const isSupporting = supportingEdges.has(edgeKey(edge));
-            const strokeColor = isMandatory ? "#6366f1" : isOptional ? "#f59e0b" : isSupporting ? '#0f766e' : "#94a3b8";
+            const strokeColor = isMandatory ? graphPalette.mandatory : isOptional ? graphPalette.optional : isSupporting ? graphPalette.supporting : graphPalette.observed;
             const markerId = isMandatory ? "dag-arrow-mandatory" : "dag-arrow";
 
             const path = document.createElementNS(ns, "path");
@@ -1360,40 +2009,15 @@
             const isMandatory = mandatorySet.has(nodeName);
             const isOptional = optionalSet.has(nodeName);
 
-            let fillColor = "#eef2ff";
-            let strokeColor = "#6366f1";
-            let badgeColor = "#4f46e5";
-            let badgeText = "MANDATORY";
-            let dashed = false;
-
-            if (isEntry) {
-                fillColor = "#eff6ff";
-                strokeColor = "#3b82f6";
-                badgeColor = "#2563eb";
-                badgeText = "ENTRY";
-            } else if (supportingSet.has(nodeName)) {
-                fillColor = '#f0fdfa';
-                strokeColor = '#0f766e';
-                badgeColor = '#0f766e';
-                badgeText = 'SUPPORTING';
-                dashed = true;
-            } else if (isOptional) {
-                fillColor = "#fffbeb";
-                strokeColor = "#f59e0b";
-                badgeColor = "#b45309";
-                badgeText = "OPTIONAL";
-                dashed = true;
-            } else if (isMandatory) {
-                fillColor = "#eef2ff";
-                strokeColor = "#6366f1";
-                badgeColor = "#4f46e5";
-                badgeText = "MANDATORY";
-            } else {
-                fillColor = "#f8fafc";
-                strokeColor = "#94a3b8";
-                badgeColor = "#64748b";
-                badgeText = unresolvedSet.has(nodeName) ? 'UNRESOLVED' : 'OBSERVED';
-            }
+            // One palette for the whole page (tiles, badges, graph); fills are tinted from the theme surface.
+            let kind = 'mandatory';
+            if (isEntry) kind = 'entry';
+            else if (supportingSet.has(nodeName)) kind = 'supporting';
+            else if (isOptional) kind = 'optional';
+            else if (!isMandatory) kind = unresolvedSet.has(nodeName) ? 'unresolved' : 'observed';
+            const accent = graphPalette[kind];
+            const badgeText = kind === 'observed' ? 'NOT TESTED' : kind.toUpperCase();
+            const dashed = kind === 'optional' || kind === 'supporting';
 
             const g = document.createElementNS(ns, "g");
             g.setAttribute("class", "dag-node");
@@ -1404,8 +2028,8 @@
             rect.setAttribute("width", String(nodeW));
             rect.setAttribute("height", String(nodeH));
             rect.setAttribute("rx", "8");
-            rect.setAttribute("fill", fillColor);
-            rect.setAttribute("stroke", strokeColor);
+            rect.style.fill = `color-mix(in srgb, ${accent} 16%, var(--color-surface))`;
+            rect.style.stroke = accent;
             rect.setAttribute("stroke-width", "1.5");
             rect.setAttribute("class", "dag-node-rect");
             if (dashed) rect.setAttribute("stroke-dasharray", "4,3");
@@ -1413,7 +2037,7 @@
             const nameText = document.createElementNS(ns, "text");
             nameText.setAttribute("x", "12");
             nameText.setAttribute("y", "20");
-            nameText.setAttribute("fill", "#0f172a");
+            nameText.style.fill = 'var(--color-text)';
             nameText.setAttribute("font-size", "12");
             nameText.setAttribute("font-weight", "700");
             nameText.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
@@ -1422,7 +2046,7 @@
             const badge = document.createElementNS(ns, "text");
             badge.setAttribute("x", "12");
             badge.setAttribute("y", "36");
-            badge.setAttribute("fill", badgeColor);
+            badge.style.fill = accent;
             badge.setAttribute("font-size", "10");
             badge.setAttribute("font-weight", "700");
             badge.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
@@ -1482,7 +2106,6 @@
         stopDiscoveryScan();
         setGuidedStatus('Scan stopped. The displayed candidates are partial results. Choose Find workflows to start a new search.');
     });
-    $('fill-boutique-settings').addEventListener('click', fillBoutiqueSettings);
     guidedForm.addEventListener('submit', connectGuidedSource);
     $('guided-auto-discover').addEventListener('click', findWorkflowsAutomatically);
     $('trace-start-confirm').addEventListener('click', () => runTraceServiceAction('start'));
@@ -1508,7 +2131,13 @@
         if (help) help.textContent = selected ? describeOperation(selected.operationName).text : 'Choose the action you want to test. Prefer a request from the service that receives user traffic.';
     });
     guidedInspectButton.addEventListener('click', inspectGuidedWorkflow);
-    $('new-workflow').addEventListener('click', openSource);
+    $('new-workflow').addEventListener('click', collectNewEvidence);
+    $('open-app').addEventListener('click', () => {
+        const input = $('app-url');
+        if (!input.value.trim() || !input.checkValidity()) { message($('app-url-source'), 'Enter the address your application is served at, such as http://localhost:<port>.', true); input.focus(); return; }
+        openApplication(input.value.trim());
+    });
+    $('app-url').addEventListener('change', () => { if ($('app-url').checkValidity()) remember(applicationKey, $('app-url').value.trim()); });
     $('refresh-saved').addEventListener('click', () => loadSavedWorkflows());
     $('saved-workflows').addEventListener('change', () => {
         const selected = workflowCatalog.find(item => item.campaignId === $('saved-workflows').value);
