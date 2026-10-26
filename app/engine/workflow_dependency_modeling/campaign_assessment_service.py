@@ -88,7 +88,8 @@ def _intervention_evidence(
                                  "verifiedTrials": service_verified,
                                  "eligibleTrials": service_eligible})
     if eligible and verified == eligible and all(item["evidenceReady"] for item in services):
-        verification = "docker_verified_local_demo"
+        # Docker (Compose demo) or the Kubernetes API (test namespace) confirmed every outage.
+        verification = "backend_verified"
     elif verified:
         verification = "mixed"
     else:
@@ -266,16 +267,25 @@ def assess_experiment_campaign(
 
     services = set(analysis.observed_services)
     expected = {analysis.entry_service, *campaign.candidate_services}
-    if services != expected:
+    # Integrity of the candidate list: every service of the inspection must still be a candidate ...
+    if services - expected:
         raise ValueError("Campaign candidates no longer match the observed service set")
     sequence_graph = get_campaign_observed_graph(
         campaign_id, campaign_repository=campaign_repository,
         repository=execution_repository_override,
     )
-    # Preparation-only services must not disappear merely because discovery
-    # originally selected one measured request. They remain unassessed until
-    # their own intervention evidence is collected in a reviewed campaign.
-    additional = set(sequence_graph["observedServices"]) - services
+    run_services = set(sequence_graph["observedServices"])
+    # ... and every extra candidate (added from a preparation step's traces when the campaign was created) must
+    # appear in this campaign's own recorded runs. A candidate seen nowhere was not derived from evidence.
+    unexplained = expected - services - run_services
+    if unexplained:
+        raise ValueError("Campaign candidates no longer match the observed service set: "
+                         + ", ".join(sorted(unexplained)) + " appear in no recorded trace of this workflow")
+    services |= expected
+    # Services seen in the runs but never planned for testing must not disappear: they remain unassessed
+    # until their own intervention evidence is collected in a reviewed campaign. Planned candidates are
+    # already assessed above, so they are not added a second time.
+    additional = run_services - services
     for name in sorted(additional):
         service_results.append(assess_service_dependency(
             name, baseline_records, None, [], policy,

@@ -66,7 +66,7 @@ def test_progress_does_not_call_docker_verified_trials_operator_attested(monkeyp
     monkeypatch.setattr(service, "_eligible_campaign_outcome", lambda outcome: True)
     monkeypatch.setattr(service, "_verified_outage_target", lambda outcome: outcome.marker)
     services = [{"batchId": "batch:payment", "targetService": "paymentservice", "evidenceReady": True}]
-    assert _intervention_verification(services) == "docker_verified_local_demo"
+    assert _intervention_verification(services) == "backend_verified"
     records.append(SimpleNamespace(marker=None))
     assert _intervention_verification(services) == "mixed"
     assert _intervention_evidence(services) == {
