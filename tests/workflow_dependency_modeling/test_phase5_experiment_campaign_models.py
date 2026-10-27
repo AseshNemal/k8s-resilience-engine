@@ -85,8 +85,9 @@ def test_business_criticality_is_preserved_in_campaign_and_execution(value):
 
 @pytest.mark.parametrize("value", [True, None, "0.5", -.1, 1.1, float("nan"), float("inf")])
 def test_invalid_campaign_criticality_is_rejected(value):
+    payload = {**_campaign().to_mapping(), "criticality": value}
     with pytest.raises(ValueError, match="criticality"):
-        ExperimentCampaign.from_mapping({**_campaign().to_mapping(), "criticality": value})
+        ExperimentCampaign.from_mapping(payload)
 
 
 def test_legacy_campaign_keeps_its_manifest_snapshot_shape():
@@ -103,11 +104,12 @@ def test_production_observations_cannot_become_fault_campaigns():
     analysis = _analysis()
     from app.engine.workflow_dependency_modeling.analysis_session_models import EvidenceTier
     analyses.create(replace(analysis, evidence_tier=EvidenceTier.PRODUCTION))
+    request = {"analysisSessionId": analysis.session_id,
+               "successContractConfirmed": True, "criticality": .5,
+               "benchmarkProfile": "online_boutique_checkout_v0_10_1"}
+    campaigns = InMemoryExperimentCampaignRepository()
     with pytest.raises(ValueError, match="observation-only"):
-        create_experiment_campaign({"analysisSessionId": analysis.session_id,
-            "successContractConfirmed": True, "criticality": .5,
-            "benchmarkProfile": "online_boutique_checkout_v0_10_1"}, actor="test",
-            repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses)
+        create_experiment_campaign(request, actor="test", repository=campaigns, analysis_repository=analyses)
 
 
 def test_new_campaign_requires_explicit_business_importance():
@@ -126,11 +128,12 @@ def test_invalid_input_traces_cannot_disappear_from_the_campaign_readiness_gate(
     analysis = _analysis()
     analyses = InMemoryAnalysisSessionRepository()
     analyses.create(replace(analysis, trace_quality={**analysis.trace_quality, "inputInvalidCount": 1}))
+    request = {"criticality": 0.5,
+               "analysisSessionId": analysis.session_id, "successContractConfirmed": True,
+               "benchmarkProfile": "online_boutique_checkout_v0_10_1"}
+    campaigns = InMemoryExperimentCampaignRepository()
     with pytest.raises(ValueError, match="complete trace evidence"):
-        create_experiment_campaign({"criticality": 0.5,
-            "analysisSessionId": analysis.session_id, "successContractConfirmed": True,
-            "benchmarkProfile": "online_boutique_checkout_v0_10_1",
-        }, actor="test", repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses)
+        create_experiment_campaign(request, actor="test", repository=campaigns, analysis_repository=analyses)
 
 
 def test_campaign_requires_safe_interventions_and_exact_correlation() -> None:

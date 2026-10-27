@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isclose
 from typing import Any, Mapping, Sequence
 
@@ -96,6 +96,22 @@ class RepeatabilityReport:
         }
 
 
+def _condition_classification(
+    result: ServiceDependencyAssessment,
+    assessment: DependencyAssessment,
+    item: Any,
+    policy: AssessmentPolicy,
+) -> ValidatedDependencyType:
+    """Classify one business condition on its own cohorts."""
+    scoped_result: ServiceDependencyAssessment = replace(
+        result, baseline=item.baseline, intervention=item.intervention, condition_results=(),
+    )
+    scoped_assessment: DependencyAssessment = replace(assessment, interventions=tuple(
+        cohort for cohort in assessment.interventions if cohort.condition_id == item.condition_id
+    ))
+    return _summary_classification(scoped_result, scoped_assessment, policy)
+
+
 def _summary_classification(
     result: ServiceDependencyAssessment,
     assessment: DependencyAssessment,
@@ -104,17 +120,8 @@ def _summary_classification(
     # Do not pool business conditions: different branches can have different
     # necessity labels even if their aggregate success rate looks ordinary.
     if result.condition_results:
-        from dataclasses import replace
         labels = {
-            _summary_classification(
-                replace(result, baseline=item.baseline, intervention=item.intervention,
-                        condition_results=()),
-                replace(assessment, interventions=tuple(
-                    cohort for cohort in assessment.interventions
-                    if cohort.condition_id == item.condition_id
-                )),
-                policy,
-            )
+            _condition_classification(result, assessment, item, policy)
             for item in result.condition_results
         }
         if ValidatedDependencyType.INSUFFICIENT_EVIDENCE in labels:

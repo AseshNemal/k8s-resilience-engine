@@ -34,6 +34,38 @@ def _job_key(campaign_id: str) -> str:
     return f"pipeline:{campaign_id}"
 
 
+def _collect_baseline(job: dict[str, Any], campaign_id: str, url: str, actor: str) -> None:
+    job["phase"] = "baseline"
+    while True:
+        readiness = baseline_readiness(get_experiment_campaign(campaign_id))
+        job["baselineRuns"] = f"{readiness['eligibleTrials']}/{readiness['requiredTrials']}"
+        if readiness["ready"]:
+            return
+        if readiness["recordedTrials"] >= readiness["requiredTrials"] * 3:
+            raise ValueError("The baseline did not become stable: " + "; ".join(readiness["blockers"]))
+        run_campaign_baseline_trial(campaign_id, url, actor=actor)
+
+
+def _run_outages(job: dict[str, Any], campaign_id: str, url: str, actor: str) -> list[str]:
+    job["phase"] = "outages"
+    services = [item["targetService"] for item in intervention_status(campaign_id)["services"]]
+    for index, service in enumerate(services, start=1):
+        job.update(currentService=service, servicesDone=f"{index - 1}/{len(services)}")
+        run_kubernetes_intervention_cohort(campaign_id, service, url, actor=actor)
+    return services
+
+
+def _run_pipeline(job: dict[str, Any], campaign_id: str, url: str, actor: str) -> None:
+    _collect_baseline(job, campaign_id, url, actor)
+    services = _run_outages(job, campaign_id, url, actor)
+    incomplete = [item["targetService"] for item in intervention_status(campaign_id)["services"] if not item["evidenceReady"]]
+    if incomplete:
+        raise ValueError("Too few usable runs for: " + ", ".join(incomplete))
+    job.update(phase="assessment", currentService=None, servicesDone=f"{len(services)}/{len(services)}")
+    assess_experiment_campaign(campaign_id, actor=actor)
+    job["phase"] = "done"
+
+
 def repeat_experiment(
     campaign_id: str,
     *,
@@ -75,26 +107,7 @@ def repeat_experiment(
     url = application_url.strip()
 
     def work(job: dict[str, Any]) -> None:
-        job["phase"] = "baseline"
-        while True:
-            readiness = baseline_readiness(get_experiment_campaign(new_id))
-            job["baselineRuns"] = f"{readiness['eligibleTrials']}/{readiness['requiredTrials']}"
-            if readiness["ready"]:
-                break
-            if readiness["recordedTrials"] >= readiness["requiredTrials"] * 3:
-                raise ValueError("The baseline did not become stable: " + "; ".join(readiness["blockers"]))
-            run_campaign_baseline_trial(new_id, url, actor=actor)
-        job["phase"] = "outages"
-        services = [item["targetService"] for item in intervention_status(new_id)["services"]]
-        for index, service in enumerate(services, start=1):
-            job.update(currentService=service, servicesDone=f"{index - 1}/{len(services)}")
-            run_kubernetes_intervention_cohort(new_id, service, url, actor=actor)
-        incomplete = [item["targetService"] for item in intervention_status(new_id)["services"] if not item["evidenceReady"]]
-        if incomplete:
-            raise ValueError("Too few usable runs for: " + ", ".join(incomplete))
-        job.update(phase="assessment", currentService=None, servicesDone=f"{len(services)}/{len(services)}")
-        assess_experiment_campaign(new_id, actor=actor)
-        job["phase"] = "done"
+        _run_pipeline(job, new_id, url, actor)
 
     job = start_cluster_job(_job_key(new_id), {
         "campaignId": new_id, "repeatedFrom": campaign_id, "phase": "starting", "baselineRuns": None,
