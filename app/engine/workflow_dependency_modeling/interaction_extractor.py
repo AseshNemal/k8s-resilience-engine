@@ -119,6 +119,99 @@ def _client_peer(span: Span) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+_Edge = tuple[str, str]
+
+
+def _remote_children(trace_spans: list[Span], span_index: dict[str, Span]) -> dict[str, list[Span]]:
+    """Children whose parent belongs to a different service, keyed by the parent span."""
+    remote_children: dict[str, list[Span]] = defaultdict(list)
+    for child in trace_spans:
+        parent = span_index.get(child.parent_span_id)
+        if parent is not None and child.service_name != parent.service_name:
+            remote_children[parent.span_id].append(child)
+    return remote_children
+
+
+def _record_client_peer(
+    span: Span, peer: str, edge_set: set[_Edge], tokens: dict[_Edge, set[str]], evidence: dict[_Edge, list[dict[str, str]]],
+) -> None:
+    # A client span explicitly identifies both caller (its process) and callee (OpenTelemetry
+    # server.address/net.peer.name). This remains valid observed-call evidence when the callee does not
+    # emit a corresponding server span.
+    edge = (span.service_name, peer)
+    edge_set.add(edge)
+    tokens[edge].add(span.span_id)
+    evidence[edge].append({
+        "basis": "client_peer", "callerSpanId": span.span_id, "callerOperation": span.operation_name,
+    })
+
+
+def _record_parent_child(
+    parent: Span, span: Span, edge_set: set[_Edge], tokens: dict[_Edge, set[str]], evidence: dict[_Edge, list[dict[str, str]]],
+) -> None:
+    edge = (parent.service_name, span.service_name)
+    edge_set.add(edge)
+    token = parent.span_id if parent.tags.get("span.kind", "").lower() == "client" else span.span_id
+    tokens[edge].add(token)
+    evidence[edge].append({
+        "basis": "parent_child", "callerSpanId": parent.span_id,
+        "calleeSpanId": span.span_id, "callerOperation": parent.operation_name,
+        "calleeOperation": span.operation_name,
+    })
+
+
+def _trace_interaction(
+    trace_id: str, trace_spans: list[Span], global_span_index: dict[tuple[str, str], Span],
+) -> TraceInteraction:
+    # Build a fast span_id → Span lookup for parent resolution
+    span_index: dict[str, Span] = {s.span_id: s for s in trace_spans}
+    remote_children = _remote_children(trace_spans, span_index)
+
+    # Collect unique (source, target) pairs as a set to deduplicate
+    edge_set: set[_Edge] = set()
+    linked_edge_set: set[_Edge] = set()
+    edge_call_tokens: dict[_Edge, set[str]] = defaultdict(set)
+    edge_evidence: dict[_Edge, list[dict[str, str]]] = defaultdict(list)
+    broken_parent_count = 0
+    # Linked server instrumentation is authoritative. A DNS hostname may differ from service.name and must
+    # not create a phantom service.
+    peers = {span.span_id: None if remote_children.get(span.span_id) else _client_peer(span) for span in trace_spans}
+
+    for span in trace_spans:
+        peer = peers[span.span_id]
+        if peer is not None and peer != span.service_name.lower():
+            _record_client_peer(span, peer, edge_set, edge_call_tokens, edge_evidence)
+
+        for link in span.links:
+            linked = global_span_index.get((link.trace_id, link.span_id))
+            if linked is not None and linked.service_name != span.service_name:
+                linked_edge_set.add((linked.service_name, span.service_name))
+
+        if span.parent_span_id is None:
+            continue  # root span — has no caller
+        parent = span_index.get(span.parent_span_id)
+        if parent is None:
+            # Preserve the quality signal even though no edge can be reconstructed without inventing one.
+            broken_parent_count += 1
+        elif parent.service_name != span.service_name:  # same service: an internal call, not a cross-service edge
+            _record_parent_child(parent, span, edge_set, edge_call_tokens, edge_evidence)
+
+    return TraceInteraction(
+        trace_id=trace_id,
+        edges=[ServiceEdge(source=src, target=tgt) for src, tgt in sorted(edge_set)],
+        linked_edges=[ServiceEdge(source=src, target=tgt) for src, tgt in sorted(linked_edge_set)],
+        call_counts={edge: len(tokens) for edge, tokens in sorted(edge_call_tokens.items())},
+        edge_evidence=dict(edge_evidence),
+        observed_services=sorted({
+            service
+            for span in trace_spans
+            for service in (span.service_name, peers[span.span_id])
+            if service
+        }),
+        broken_parent_count=broken_parent_count,
+    )
+
+
 def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
     """Extract unique cross-service call edges from a flat list of spans.
 
@@ -147,105 +240,10 @@ def extract_interactions(spans: list[Span]) -> list[TraceInteraction]:
         by_trace[span.trace_id].append(span)
         global_span_index[(span.trace_id, span.span_id)] = span
 
-    interactions: list[TraceInteraction] = []
-
-    for trace_id, trace_spans in by_trace.items():
-        # Build a fast span_id → Span lookup for parent resolution -------
-        span_index: dict[str, Span] = {s.span_id: s for s in trace_spans}
-        remote_children: dict[str, list[Span]] = defaultdict(list)
-        for child in trace_spans:
-            parent = span_index.get(child.parent_span_id)
-            if parent is not None and child.service_name != parent.service_name:
-                remote_children[parent.span_id].append(child)
-
-        # Collect unique (source, target) pairs as a set to deduplicate --
-        edge_set: set[tuple[str, str]] = set()
-        linked_edge_set: set[tuple[str, str]] = set()
-        edge_call_tokens: dict[tuple[str, str], set[str]] = defaultdict(set)
-        edge_evidence: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
-        broken_parent_count = 0
-
-        for span in trace_spans:
-            # Linked server instrumentation is authoritative. A DNS hostname
-            # may differ from service.name and must not create a phantom service.
-            peer = None if remote_children.get(span.span_id) else _client_peer(span)
-            if peer is not None and peer != span.service_name.lower():
-                # A client span explicitly identifies both caller (its process)
-                # and callee (OpenTelemetry server.address/net.peer.name). This
-                # remains valid observed-call evidence when the callee does not
-                # emit a corresponding server span.
-                edge_set.add((span.service_name, peer))
-                edge_call_tokens[(span.service_name, peer)].add(span.span_id)
-                edge_evidence[(span.service_name, peer)].append({
-                    "basis": "client_peer", "callerSpanId": span.span_id,
-                    "callerOperation": span.operation_name,
-                })
-
-            for link in span.links:
-                linked = global_span_index.get((link.trace_id, link.span_id))
-                if linked is None or linked.service_name == span.service_name:
-                    continue
-                linked_edge_set.add((linked.service_name, span.service_name))
-
-            if span.parent_span_id is None:
-                continue  # root span — has no caller
-
-            parent = span_index.get(span.parent_span_id)
-            if parent is None:
-                # Preserve the quality signal even though no edge can be
-                # reconstructed without inventing a relationship.
-                broken_parent_count += 1
-                continue
-
-            if parent.service_name == span.service_name:
-                # Intra-service span (e.g. an internal library call within
-                # the same process). Not a cross-service edge; skip.
-                continue
-
-            edge_set.add((parent.service_name, span.service_name))
-            token = (
-                parent.span_id
-                if parent.tags.get("span.kind", "").lower() == "client"
-                else span.span_id
-            )
-            edge_call_tokens[(parent.service_name, span.service_name)].add(token)
-            edge_evidence[(parent.service_name, span.service_name)].append({
-                "basis": "parent_child", "callerSpanId": parent.span_id,
-                "calleeSpanId": span.span_id, "callerOperation": parent.operation_name,
-                "calleeOperation": span.operation_name,
-            })
-
-        edges = [
-            ServiceEdge(source=src, target=tgt)
-            for src, tgt in sorted(edge_set)
-        ]
-        interactions.append(
-            TraceInteraction(
-                trace_id=trace_id,
-                edges=edges,
-                linked_edges=[
-                    ServiceEdge(source=src, target=tgt)
-                    for src, tgt in sorted(linked_edge_set)
-                ],
-                call_counts={
-                    edge: len(tokens)
-                    for edge, tokens in sorted(edge_call_tokens.items())
-                },
-                edge_evidence=dict(edge_evidence),
-                observed_services=sorted(
-                    {
-                        service
-                        for span in trace_spans
-                        for service in (
-                            span.service_name,
-                            None if remote_children.get(span.span_id) else _client_peer(span),
-                        )
-                        if service
-                    }
-                ),
-                broken_parent_count=broken_parent_count,
-            )
-        )
+    interactions = [
+        _trace_interaction(trace_id, trace_spans, global_span_index)
+        for trace_id, trace_spans in by_trace.items()
+    ]
 
     # Stable output — sorted by trace_id ---------------------------------
     interactions.sort(key=lambda ti: ti.trace_id)

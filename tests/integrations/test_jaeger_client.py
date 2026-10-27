@@ -127,8 +127,9 @@ def test_jaeger_client_fetch_traces_success(mock_client_cls):
 
 
 def test_jaeger_client_rejects_an_unparseable_lookback():
+    client = JaegerClient("http://localhost:16686")
     with pytest.raises(ValueError):
-        JaegerClient("http://localhost:16686").fetch_traces("frontend", lookback="an hour")
+        client.fetch_traces("frontend", lookback="an hour")
 
 
 @patch("httpx.Client")

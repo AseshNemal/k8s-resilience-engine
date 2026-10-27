@@ -15,6 +15,51 @@ from .trace_validator import validate_trace_quality, TraceQuality
 from .sequence_evidence import sequence_evidence_blockers
 
 
+def _run_evidence(run: Any, findings: list[dict[str, Any]]) -> tuple[list[tuple[str | None, Any]], int, int]:
+    """The trace snapshots of one run, whether its sequence is complete, and whether it is a historical record."""
+    run_id = run.registration.execution_id
+    if run.step_evidence is None:
+        findings.append({"executionId": run_id, "reason": "Historical run retains selected-request evidence only"})
+        return ([(None, run.evidence_snapshot)] if run.evidence_snapshot else []), 0, 1
+    blockers = sequence_evidence_blockers(run)
+    complete = int(
+        run.status is ExecutionOutcomeStatus.SUCCEEDED and not blockers
+        and all(step.attempted and step.succeeded for step in run.step_evidence)
+    )
+    findings.extend({"executionId": run_id, "reason": reason} for reason in blockers)
+    return [(step.name, step.evidence_snapshot) for step in run.step_evidence if step.evidence_snapshot], complete, 0
+
+
+def _add_snapshot(
+    run_id: str, step_name: str | None, snapshot: Any, seen_traces: set[str], services: set[str],
+    edges: dict[tuple[str, str], dict[str, Any]], findings: list[dict[str, Any]],
+) -> None:
+    if snapshot.trace_id in seen_traces:
+        findings.append({"executionId": run_id, "reason": "Reused trace excluded from graph counts", "traceId": snapshot.trace_id})
+        return
+    seen_traces.add(snapshot.trace_id)
+    raw = snapshot.to_mapping()["rawTrace"]
+    quality = validate_trace_quality([raw]).results[0]
+    if quality.quality is TraceQuality.INVALID:
+        findings.append({"executionId": run_id, "traceId": snapshot.trace_id, "reason": "Invalid trace excluded"})
+        return
+    interaction = extract_interactions(parse_spans([raw]))[0]
+    services.update(interaction.observed_services)
+    for call in interaction.edges:
+        key = (call.source, call.target)
+        edge = edges.setdefault(key, {
+            "source": call.source, "target": call.target,
+            "classification": "unresolved", "evidence": [],
+        })
+        edge["evidence"].append({
+            "executionId": run_id, "stepName": step_name,
+            "traceId": snapshot.trace_id, "sha256": snapshot.sha256_digest,
+            "quality": quality.quality.value,
+            "callCount": interaction.call_counts.get(key, 0),
+            "spans": interaction.edge_evidence.get(key, []),
+        })
+
+
 def get_campaign_observed_graph(
     campaign_id: str, *,
     campaign_repository: ExperimentCampaignRepository | None = None,
@@ -34,44 +79,11 @@ def get_campaign_observed_graph(
     findings = []
     seen_traces: set[str] = set()
     for run in runs:
-        run_id = run.registration.execution_id
-        if run.step_evidence is None:
-            legacy += 1
-            findings.append({"executionId": run_id, "reason": "Historical run retains selected-request evidence only"})
-            evidence = [(None, run.evidence_snapshot)] if run.evidence_snapshot else []
-        else:
-            blockers = sequence_evidence_blockers(run)
-            complete += int(
-                run.status is ExecutionOutcomeStatus.SUCCEEDED and not blockers
-                and all(step.attempted and step.succeeded for step in run.step_evidence)
-            )
-            findings.extend({"executionId": run_id, "reason": reason} for reason in blockers)
-            evidence = [(step.name, step.evidence_snapshot) for step in run.step_evidence if step.evidence_snapshot]
+        evidence, run_complete, run_legacy = _run_evidence(run, findings)
+        complete += run_complete
+        legacy += run_legacy
         for step_name, snapshot in evidence:
-            if snapshot.trace_id in seen_traces:
-                findings.append({"executionId": run_id, "reason": "Reused trace excluded from graph counts", "traceId": snapshot.trace_id})
-                continue
-            seen_traces.add(snapshot.trace_id)
-            raw = snapshot.to_mapping()["rawTrace"]
-            quality = validate_trace_quality([raw]).results[0]
-            if quality.quality is TraceQuality.INVALID:
-                findings.append({"executionId": run_id, "traceId": snapshot.trace_id, "reason": "Invalid trace excluded"})
-                continue
-            interaction = extract_interactions(parse_spans([raw]))[0]
-            services.update(interaction.observed_services)
-            for call in interaction.edges:
-                key = (call.source, call.target)
-                edge = edges.setdefault(key, {
-                    "source": call.source, "target": call.target,
-                    "classification": "unresolved", "evidence": [],
-                })
-                edge["evidence"].append({
-                    "executionId": run_id, "stepName": step_name,
-                    "traceId": snapshot.trace_id, "sha256": snapshot.sha256_digest,
-                    "quality": quality.quality.value,
-                    "callCount": interaction.call_counts.get(key, 0),
-                    "spans": interaction.edge_evidence.get(key, []),
-                })
+            _add_snapshot(run.registration.execution_id, step_name, snapshot, seen_traces, services, edges, findings)
     for edge in edges.values():
         edge["observedRunCount"] = len({item["executionId"] for item in edge["evidence"]})
     return {

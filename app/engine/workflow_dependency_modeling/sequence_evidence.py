@@ -96,6 +96,21 @@ def capture_step_evidence(
     return tuple(evidence)
 
 
+def _step_blockers(step: Any, outage_target: str | None) -> list[str]:
+    blockers = []
+    snapshot = step.evidence_snapshot
+    if step.assertions and step.succeeded != all(item.passed for item in step.assertions):
+        blockers.append(f"Step '{step.name}' contradicts its recorded assertions")
+    if step.correlation_status is not CorrelationStatus.MATCHED or snapshot is None:
+        blockers.append(f"Step '{step.name}' has no unique matching trace")
+    elif (
+        validate_trace_quality([snapshot.to_mapping()["rawTrace"]]).valid_count != 1
+        and not expected_outage_trace_quality(snapshot.to_mapping()["rawTrace"], outage_target)
+    ):
+        blockers.append(f"Step '{step.name}' has incomplete or invalid trace evidence")
+    return blockers
+
+
 def sequence_evidence_blockers(
     outcome: ExecutionOutcome, outage_target: str | None = None,
 ) -> list[str]:
@@ -116,14 +131,5 @@ def sequence_evidence_blockers(
     if outcome.matched_trace_id not in ids:
         blockers.append("Selected outcome trace is absent from the workflow sequence")
     for step in attempted:
-        snapshot = step.evidence_snapshot
-        if step.assertions and step.succeeded != all(item.passed for item in step.assertions):
-            blockers.append(f"Step '{step.name}' contradicts its recorded assertions")
-        if step.correlation_status is not CorrelationStatus.MATCHED or snapshot is None:
-            blockers.append(f"Step '{step.name}' has no unique matching trace")
-        elif (
-            validate_trace_quality([snapshot.to_mapping()["rawTrace"]]).valid_count != 1
-            and not expected_outage_trace_quality(snapshot.to_mapping()["rawTrace"], outage_target)
-        ):
-            blockers.append(f"Step '{step.name}' has incomplete or invalid trace evidence")
+        blockers.extend(_step_blockers(step, outage_target))
     return blockers
