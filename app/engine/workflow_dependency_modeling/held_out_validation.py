@@ -96,6 +96,40 @@ def predict(services: tuple[str, ...], labels: dict[str, str]) -> dict[str, Any]
             "traceOnlyRule": "every observed service is a dependency", "labels": basis}
 
 
+def _stratum_allocations(groups: dict[str, list], count: int) -> dict[str, int]:
+    allocations = dict.fromkeys(groups, 0)
+    # Capped round-robin balances strata and redistributes exhausted groups' slots.
+    order = sorted(groups, key=lambda name: (-len(groups[name]), name))
+    remaining = count
+    while remaining:
+        for name in order:
+            if remaining and allocations[name] < len(groups[name]):
+                allocations[name] += 1
+                remaining -= 1
+    return allocations
+
+
+def _sample_pairs(pairs: list[tuple[str, str]], groups: dict[str, list], count: int,
+                  seed: int, sampling: str) -> tuple[list[tuple[str, str]], str]:
+    # Research sampling only: this public seed must reproduce the frozen draw.
+    # No secrets, permissions, tokens or run identities depend on this generator;
+    # those use secrets/uuid4. Cryptographic unpredictability would defeat replay.
+    rng = random.Random(seed)
+    if sampling == "uniform":
+        return sorted(rng.sample(pairs, count)), (
+            f"{count} of {len(pairs)} service pairs drawn uniformly with random.Random({seed}).sample"
+        )
+    allocations = _stratum_allocations(groups, count)
+    chosen = sorted(pair for name in sorted(groups)
+                    for pair in rng.sample(sorted(groups[name]), allocations[name]))
+    description = (
+        f"{count} of {len(pairs)} service pairs drawn by prediction stratum; slots allocated evenly in capped "
+        f"rounds (largest population first, ties by name), redistributing exhausted groups' slots; "
+        f"sorted pairs sampled within each group in name order using one random.Random({seed}).sample generator"
+    )
+    return chosen, description
+
+
 def plan_held_out_run(
     campaign_id: str,
     *,
@@ -124,29 +158,7 @@ def plan_held_out_run(
     for pair in pairs:
         groups[predict(pair, labels)["method"]].append(pair)
     count = min(scenario_count, len(pairs))
-    # One seeded generator: the same seed and labels always give the same pairs, so the draw is reproducible.
-    rng = random.Random(seed)
-    if sampling == "uniform":
-        chosen = sorted(rng.sample(pairs, count))
-        description = f"{count} of {len(pairs)} service pairs drawn uniformly with random.Random({seed}).sample"
-    else:
-        allocations = dict.fromkeys(groups, 0)
-        # Capped round-robin balances non-empty strata and redistributes exhausted groups' slots.
-        # Population size, then name, resolves any partial round deterministically.
-        order = sorted(groups, key=lambda name: (-len(groups[name]), name))
-        remaining = count
-        while remaining:
-            for name in order:
-                if remaining and allocations[name] < len(groups[name]):
-                    allocations[name] += 1
-                    remaining -= 1
-        chosen = sorted(pair for name in sorted(groups)
-                        for pair in rng.sample(sorted(groups[name]), allocations[name]))
-        description = (
-            f"{count} of {len(pairs)} service pairs drawn by prediction stratum; slots allocated evenly in capped "
-            f"rounds (largest population first, ties by name), redistributing exhausted groups' slots; "
-            f"sorted pairs sampled within each group in name order using one random.Random({seed}).sample generator"
-        )
+    chosen, description = _sample_pairs(pairs, groups, count, seed, sampling)
     group_counts = {name: {"available": len(group),
                            "drawn": sum(predict(pair, labels)["method"] == name for pair in chosen)}
                     for name, group in groups.items()}

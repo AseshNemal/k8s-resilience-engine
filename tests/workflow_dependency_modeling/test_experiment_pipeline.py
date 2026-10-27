@@ -54,7 +54,8 @@ def test_a_repeat_copies_the_reviewed_inputs_and_runs_every_stage_in_order(world
     result = pipeline.repeat_experiment("campaign:old", actor="researcher", required_trials=3, application_url="http://app.test")
     inspect = next(data for kind, data in world if kind == "inspect")
     create = next(data for kind, data in world if kind == "create")
-    assert inspect["operationName"] == "POST /checkout" and inspect["lookback"] == "24h"
+    assert inspect["operationName"] == "POST /checkout"
+    assert inspect["lookback"] == "24h"
     assert create == {"analysisSessionId": "analysis:new", "successContractConfirmed": True, "requiredBaselineTrials": 3,
                       "criticality": 0.9, "workflowName": "Checkout", "businessOutcome": "Order placed",
                       "executionDefinition": {"steps": ["reviewed"]}}

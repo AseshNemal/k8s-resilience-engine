@@ -51,7 +51,8 @@ def test_a_plan_is_frozen_with_its_seed_and_scores_against_stored_results(stored
     plan = held_out.plan_held_out_run("campaign:c1", actor="researcher", scenario_count=3, seed=7, repository=stored)
     again = held_out.plan_held_out_run("campaign:c1", actor="researcher", scenario_count=3, seed=7, repository=stored)
     assert [item["services"] for item in plan["scenarios"]] == [item["services"] for item in again["scenarios"]]
-    assert plan["pairsAvailable"] == 6 and "random.Random(7)" in plan["sampling"]
+    assert plan["pairsAvailable"] == 6
+    assert "random.Random(7)" in plan["sampling"]
 
     # Results are separate records; observe every planned pair as failing only when payment is down.
     for scenario in plan["scenarios"]:

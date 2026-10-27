@@ -189,13 +189,18 @@ def label_statistics(label: str, baseline: Any, outage: Any, policy: Any) -> dic
         return result
     ok, checks = supported
     needed = None if ok else _runs_needed(label, s1, n1, s2, n2, policy, level)
+    if ok:
+        verdict = f"{label} holds at {level:.0%} confidence"
+    else:
+        verdict = f"{label} is the point-estimate result but is not yet supported at {level:.0%} confidence"
+        if needed:
+            verdict += f"; about {needed} eligible runs per cohort would support it if the rates stay the same"
+        else:
+            verdict += "; more runs alone would not support it at these rates"
     result.update(
         supportedAtConfidence=ok,
         checks=checks,
         runsNeededPerCohort=needed,
-        verdict=(f"{label} holds at {level:.0%} confidence" if ok else
-                 f"{label} is the point-estimate result but is not yet supported at {level:.0%} confidence"
-                 + (f"; about {needed} eligible runs per cohort would support it if the rates stay the same" if needed
-                    else "; more runs alone would not support it at these rates")),
+        verdict=verdict,
     )
     return result
