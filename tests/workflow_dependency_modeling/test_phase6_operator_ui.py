@@ -57,7 +57,8 @@ def test_results_are_empty_until_the_user_selects_or_analyzes_a_workflow():
     assert 'aria-label="Selected workflow" hidden' in markup
     assert 'aria-label="Trace analysis results" hidden' in markup
     assert 'data-role="saved-workflows"' in markup
-    assert 'role="status" aria-live="polite"' in markup
+    assert "<output data-role=\"guided-analysis-status\"" in markup  # <output> is an implicit role=status live region
+    assert "aria-live=\"polite\"" in markup
 
 
 def test_research_and_demonstration_shortcuts_are_absent():

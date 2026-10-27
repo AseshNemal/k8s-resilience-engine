@@ -14,7 +14,7 @@
             </div>
             <button type="button" class="text-button" data-role="refresh-saved">Refresh</button>
             <button type="button" class="secondary-button" data-role="new-workflow">Collect new evidence</button>
-            <p data-role="saved-status" role="status">Loading experiment data…</p>
+            <output data-role="saved-status">Loading experiment data…</output>
         </section>
         <div class="workspace-layout">
             <div class="workspace-main">
@@ -187,9 +187,9 @@
                             <summary>Search coverage and unresolved windows</summary>
                             <pre data-role="discovery-coverage-details"></pre>
                         </details>
-                        <p data-role="guided-analysis-status" class="workspace-status" role="status" aria-live="polite" tabindex="-1">
+                        <output data-role="guided-analysis-status" class="workspace-status" aria-live="polite" tabindex="-1">
                             Connect to find your recorded services and operations.
-                        </p>
+                        </output>
                     </div>
                     <div data-role="upload-source" hidden>
                         <p>
@@ -289,8 +289,8 @@
                                     Analyze uploaded traces
                                 </button>
                             </div>
-                            <p data-role="offline-analysis-status" class="workspace-status full-width" role="status" aria-live="polite" tabindex="-1">
-                            </p>
+                            <output data-role="offline-analysis-status" class="workspace-status full-width" aria-live="polite" tabindex="-1">
+                            </output>
                         </form>
                     </div>
                 </section>
