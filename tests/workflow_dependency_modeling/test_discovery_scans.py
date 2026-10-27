@@ -125,15 +125,18 @@ def test_unknown_scan_and_changed_connection_cannot_reuse_scan():
     with pytest.raises(ValueError, match='expired'):
         advance(source, scan_id='missing')
     first = advance(source)
+    scan_id = first['scanId']
     with pytest.raises(ValueError, match='match'):
-        scans.advance_discovery_scan(source, binding='different', endpoint='http://other', lookback='1s', scan_id=first['scanId'])
+        scans.advance_discovery_scan(source, binding='different', endpoint='http://other', lookback='1s', scan_id=scan_id)
 
 
 def test_expired_scan_does_not_return_a_completed_search():
     first = advance(WindowSource([trace(i) for i in range(20)]))
     scans._scans[first['scanId']].touched -= scans._TTL_SECONDS + 1
+    empty_source = WindowSource([])
+    scan_id = first['scanId']
     with pytest.raises(ValueError, match='expired'):
-        advance(WindowSource([]), scan_id=first['scanId'])
+        advance(empty_source, scan_id=scan_id)
 
 
 def test_unsupported_adapter_is_explicitly_partial():

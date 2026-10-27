@@ -7,7 +7,7 @@ from enum import Enum
 import os
 import re
 import time
-from typing import Any, Mapping, Protocol
+from typing import Any, ClassVar, Mapping, Protocol
 
 import httpx
 
@@ -206,7 +206,7 @@ class JaegerTraceSource:
     """Read workflow traces from the Jaeger Query API."""
 
     client: JaegerClient
-    discovery_resolution_us = 1
+    discovery_resolution_us: ClassVar[int] = 1
 
     def fetch_trace_window(self, service_name: str, start_us: int, end_us: int, limit: int) -> list[dict[str, Any]]:
         """A fixed query window, in Jaeger's Unix microseconds; no offset is assumed."""
@@ -270,7 +270,7 @@ class JaegerTraceSource:
 
 
 def _lookback_milliseconds(value: str) -> int:
-    match = re.fullmatch(r"([1-9][0-9]*)([smhdw])", value.strip().lower())
+    match = re.fullmatch(r"([1-9]\d*)([smhdw])", value.strip().lower())
     if match is None:
         raise ComponentDataError("lookback must use s, m, h, d, or w (for example 1h)")
     amount, unit = int(match.group(1)), match.group(2)
@@ -318,7 +318,7 @@ class ZipkinTraceSource:
     headers: Mapping[str, str] | None = None
     timeout_seconds: float = 5.0
     transport: httpx.BaseTransport | None = None
-    discovery_resolution_us = 1_000
+    discovery_resolution_us: ClassVar[int] = 1_000
 
     def fetch_trace_window(self, service_name: str, start_us: int, end_us: int, limit: int) -> list[dict[str, Any]]:
         start_ms, end_ms = start_us // 1_000, (end_us + 999) // 1_000
@@ -399,7 +399,7 @@ class TempoTraceSource:
     headers: Mapping[str, str] | None = None
     timeout_seconds: float = 10.0
     transport: httpx.BaseTransport | None = None
-    discovery_resolution_us = 1_000_000
+    discovery_resolution_us: ClassVar[int] = 1_000_000
 
     def fetch_trace_window(self, service_name: str, start_us: int, end_us: int, limit: int) -> list[dict[str, Any]]:
         deadline = time.monotonic() + 10

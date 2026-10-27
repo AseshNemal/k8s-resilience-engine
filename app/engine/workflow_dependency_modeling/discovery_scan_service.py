@@ -126,9 +126,10 @@ def advance_discovery_scan(source, *, binding: str, endpoint: str, lookback: str
             if active >= _MAX_ACTIVE_SCANS:
                 raise ValueError('Other discovery scans are active; stop one before starting another')
             # Closed sessions are only useful to clients briefly; bound registry growth.
-            for key, old in list(_scans.items()):
-                if old.state != 'scanning' and old.touched < time.monotonic() - 60 and not old.lock.locked():
-                    del _scans[key]
+            expired = [key for key, old in _scans.items()
+                       if old.state != 'scanning' and old.touched < time.monotonic() - 60 and not old.lock.locked()]
+            for key in expired:
+                del _scans[key]
             scan_id = uuid4().hex
             end = now_us if now_us is not None else time.time_ns() // 1000
             start = end - lookback_to_ms(lookback) * 1000

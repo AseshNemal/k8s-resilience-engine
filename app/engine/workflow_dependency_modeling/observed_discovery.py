@@ -100,6 +100,23 @@ def lookback_to_ms(lookback: str) -> int:
     return int(match.group(1)) * _UNIT_MS[match.group(2)]
 
 
+def _keep_new_traces(found: dict[str, dict[str, Any]], batch: list[dict[str, Any]]) -> None:
+    for trace in batch:
+        trace_id = str(trace.get("traceID") or "")
+        if trace_id:
+            found.setdefault(trace_id, trace)
+
+
+def _split_window(window_start: int, window_end: int, resolution: int) -> list[tuple[int, int]]:
+    """The two halves of a window whose page came back full; boundaries overlap and trace IDs deduplicate."""
+    if window_end - window_start <= resolution:
+        raise ValueError("More traces share one timestamp than one query can return; the window cannot be read completely")
+    middle = ((window_start + window_end) // 2 // resolution) * resolution
+    if not window_start < middle < window_end:
+        middle = window_start + resolution
+    return [(window_start, middle), (middle, window_end)]
+
+
 def read_trace_window(
     source: Any,
     service_name: str,
@@ -129,17 +146,9 @@ def read_trace_window(
         window_start, window_end = pending.pop()
         queries += 1
         batch = query(service_name, window_start, window_end, page_size)
-        for trace in batch:
-            trace_id = str(trace.get("traceID") or "")
-            if trace_id:
-                found.setdefault(trace_id, trace)
+        _keep_new_traces(found, batch)
         if len(batch) >= page_size:
-            if window_end - window_start <= resolution:
-                raise ValueError("More traces share one timestamp than one query can return; the window cannot be read completely")
-            middle = ((window_start + window_end) // 2 // resolution) * resolution
-            if not window_start < middle < window_end:
-                middle = window_start + resolution
-            pending.extend([(window_start, middle), (middle, window_end)])
+            pending.extend(_split_window(window_start, window_end, resolution))
     return list(found.values())
 
 
