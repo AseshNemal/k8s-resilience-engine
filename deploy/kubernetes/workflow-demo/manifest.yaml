@@ -69,9 +69,11 @@ spec:
           requests:
             cpu: 50m
             memory: 256Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 768Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 9555
@@ -135,9 +137,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 7070
@@ -207,9 +211,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 5050
@@ -269,9 +275,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 7000
@@ -331,9 +339,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 8080
@@ -407,9 +417,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 8080
@@ -471,9 +483,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 16686
@@ -550,9 +564,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 50051
@@ -612,9 +628,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 3550
@@ -676,9 +694,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 8080
@@ -728,9 +748,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 6379
@@ -790,9 +812,11 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+            ephemeral-storage: 128Mi
           limits:
             cpu: 1000m
             memory: 512Mi
+            ephemeral-storage: 1Gi
         readinessProbe:
           tcpSocket:
             port: 50051

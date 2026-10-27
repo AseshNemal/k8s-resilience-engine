@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM gcr.io/google-samples/microservices-demo/adservice:v0.10.1@sha256:4780e3e9dacc787ebf1e338f2cb989823f92b2cf7ab9935d554bd9d0a687e444
+# adservice v0.10.1, pinned by digest
+FROM gcr.io/google-samples/microservices-demo/adservice@sha256:4780e3e9dacc787ebf1e338f2cb989823f92b2cf7ab9935d554bd9d0a687e444
 
 # Upstream v0.10.1 does not emit adservice traces. Instrument its gRPC server
 # without changing application behavior; pin and verify the official agent.
