@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping
@@ -70,6 +70,8 @@ class WorkflowAnalysisSession:
     required_actions: tuple[str, ...]
     created_at: datetime
     created_by: str
+    # Status codes, durations and addresses of the inspected root requests; empty for sessions saved before it existed.
+    root_request_evidence: dict[str, Any] = field(default_factory=dict)
 
     @property
     def jaeger_url(self) -> str:
@@ -77,6 +79,14 @@ class WorkflowAnalysisSession:
         return self.trace_source.endpoint
 
     def to_mapping(self) -> dict[str, Any]:
+        mapping = self._mapping()
+        # Experiment records freeze this mapping and compare it exactly, so a session saved before the
+        # root-request evidence existed must serialise as it did then.
+        if self.root_request_evidence:
+            mapping["rootRequestEvidence"] = dict(self.root_request_evidence)
+        return mapping
+
+    def _mapping(self) -> dict[str, Any]:
         return {
             "sessionId": self.session_id,
             "environmentId": self.environment_id,
@@ -152,4 +162,5 @@ class WorkflowAnalysisSession:
             required_actions=tuple(str(item) for item in data.get("requiredActions", [])),
             created_at=_timestamp(data.get("createdAt")),
             created_by=_text(data, "createdBy"),
+            root_request_evidence=dict(data.get("rootRequestEvidence") or {}),
         )

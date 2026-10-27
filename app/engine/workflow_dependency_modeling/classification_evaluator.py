@@ -20,11 +20,15 @@ def _metrics(
     label: ValidatedDependencyType,
     actual: dict[str, ValidatedDependencyType],
     predicted: dict[str, ValidatedDependencyType],
+    *, complete_reference: bool = False,
 ) -> ClassificationMetrics:
-    services = set(actual) & set(predicted)
-    tp = sum(actual[name] is label and predicted[name] is label for name in services)
-    fp = sum(actual[name] is not label and predicted[name] is label for name in services)
-    fn = sum(actual[name] is label and predicted[name] is not label for name in services)
+    services = set(actual) if complete_reference else set(actual) & set(predicted)
+    # One-vs-rest for one label (e.g. mandatory) against reference labels:
+    # TP = both say this label · FP = predicted it, reference says otherwise · FN = reference says it, not predicted
+    tp = sum(actual[name] is label and predicted.get(name) is label for name in services)
+    fp = sum(actual[name] is not label and predicted.get(name) is label for name in services)
+    fn = sum(actual[name] is label and predicted.get(name) is not label for name in services)
+    # precision = TP / (TP + FP); recall = TP / (TP + FN); F1 = 2PR / (P + R)
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
@@ -74,6 +78,7 @@ def evaluate_dependency_classification(
         name for name in classified_names if actual[name] is not predicted[name]
     )
 
+    # Confusion matrix: rows = reference label, columns = predicted label, one count per service
     matrix = {
         actual_label.value: {predicted_label.value: 0 for predicted_label in EVALUATED_LABELS}
         for actual_label in EVALUATED_LABELS
@@ -87,6 +92,7 @@ def evaluate_dependency_classification(
     correct = sum(actual[name] is predicted[name] for name in classified_names)
     classified_count = len(classified_names)
     expected_count = len(expected_names)
+    # Micro-average: pool TP/FP/FN over all labels before computing precision and recall
     total_tp = sum(item.true_positives for item in per_class.values())
     total_fp = sum(item.false_positives for item in per_class.values())
     total_fn = sum(item.false_negatives for item in per_class.values())
@@ -114,14 +120,19 @@ def evaluate_dependency_classification(
         accuracy=correct / classified_count if classified_count else 0.0,
         classified_count=classified_count,
         expected_count=expected_count,
-        macro_f1=sum(item.f1 for item in per_class.values()) / len(per_class),
+        macro_f1=sum(item.f1 for item in per_class.values()) / len(per_class),  # macro = mean of per-label F1
         micro_f1=micro_f1,
-        coverage=classified_count / expected_count if expected_count else 0.0,
-        abstention_rate=(len(abstained) + len(missing)) / expected_count,
+        coverage=classified_count / expected_count if expected_count else 0.0,  # labelled services / reference services
+        abstention_rate=(len(abstained) + len(missing)) / expected_count,  # unresolved or missing / reference services
         misclassified_services=tuple(misclassified),
         abstained_services=tuple(abstained),
         missing_services=tuple(missing),
         unexpected_services=tuple(unexpected),
         created_at=timestamp.astimezone(timezone.utc),
         created_by=actor,
+        complete_reference_metrics={
+            label.value: _metrics(label, actual, predicted, complete_reference=True)
+            for label in EVALUATED_LABELS
+        },
+        complete_reference_accuracy=correct / expected_count if expected_count else None,
     )

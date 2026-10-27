@@ -8,6 +8,7 @@ from enum import Enum
 import re
 from typing import Any, Mapping
 
+from app.engine.workflow_dependency_modeling.label_statistics import label_statistics
 from app.engine.workflow_dependency_modeling.models import ComponentDataError
 from app.shared.schemas.workflow import WorkflowGraph
 
@@ -78,13 +79,17 @@ def _batch_ids(value: Any, key: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class AssessmentPolicy:
-    """Conservative, reproducible thresholds for one assessment."""
+    """Conservative, reproducible thresholds for one assessment.
 
-    min_samples_per_cohort: int = 3
-    min_baseline_success_rate: float = 0.8
-    optional_effect_tolerance: float = 0.1
-    mandatory_effect_threshold: float = 0.5
-    max_mandatory_success_rate: float = 0.2
+    Stored with every assessment so a label can always be recomputed from its counts. Experiment campaigns set
+    ``min_samples_per_cohort`` to their baseline size (campaign_assessment_service.assess_experiment_campaign).
+    """
+
+    min_samples_per_cohort: int = 3            # eligible runs needed in each cohort before any label
+    min_baseline_success_rate: float = 0.8     # the normal workflow must be stable to compare against
+    optional_effect_tolerance: float = 0.1     # |Δ| up to this is "no material change" → optional
+    mandatory_effect_threshold: float = 0.5    # Δ from this on is a failure effect → mandatory candidate
+    max_mandatory_success_rate: float = 0.2    # ... and runs without the service must mostly fail
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "AssessmentPolicy":
@@ -499,7 +504,13 @@ class DependencyAssessment:
                 item.to_mapping() for item in self.edge_interventions
             ],
             "policy": self.policy.to_mapping(),
-            "services": [item.to_mapping() for item in self.services],
+            # Derived on every read from the stored counts, so earlier assessments carry them too.
+            "services": [
+                {**item.to_mapping(),
+                 "statistics": label_statistics(item.classification.value, item.baseline, item.intervention, self.policy)}
+                for item in self.services
+            ],
+            "traceOnlyBaseline": self._trace_only_baseline(),
             "edges": [item.to_mapping() for item in self.edges],
             "mandatoryServices": self._services_with_classification(
                 ValidatedDependencyType.MANDATORY
@@ -533,6 +544,22 @@ class DependencyAssessment:
             ),
             "createdAt": _iso(self.created_at),
             "createdBy": self.created_by,
+        }
+
+    def _trace_only_baseline(self) -> dict[str, Any]:
+        """B1 from the proposal: every service observed in the workflow's traces counts as mandatory."""
+        observed = set(self.candidate_graph.mandatory_services) | set(self.candidate_graph.optional_services)
+        observed.discard(self.structural_entry_service)
+        method = {item.service_name: item.classification.value for item in self.services}
+        return {
+            "rule": "Every service observed in the workflow's traces is treated as mandatory; no success condition is used.",
+            "mandatoryServices": sorted(observed),
+            "edges": [edge.model_dump(by_alias=True) for edge in self.candidate_graph.edges],
+            "comparison": [
+                {"serviceName": name, "traceOnly": "mandatory", "method": method.get(name, "not_assessed"),
+                 "agrees": method.get(name) == ValidatedDependencyType.MANDATORY.value}
+                for name in sorted(observed)
+            ],
         }
 
     @classmethod

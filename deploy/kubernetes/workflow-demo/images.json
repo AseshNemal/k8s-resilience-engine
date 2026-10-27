@@ -1,0 +1,88 @@
+[
+  {
+    "service": "adservice",
+    "image": "k8s-resilience/adservice-otel:v0.10.1",
+    "imageId": "sha256:d1af734def2476ca909d43cb7340d92010ecd79a57d13fd6fc07115588270a94",
+    "repoDigests": []
+  },
+  {
+    "service": "cartservice",
+    "image": "k8s-resilience/cartservice-otel:v0.10.1",
+    "imageId": "sha256:437485d2839f931ed129217bb9f3493391b0bc716be8cdf99776940720e270a4",
+    "repoDigests": []
+  },
+  {
+    "service": "checkoutservice",
+    "image": "k8s-resilience/checkoutservice-context:v0.10.1",
+    "imageId": "sha256:b7b206ca4f38c5528ba3b6f02cfc90fb46e88824233296ab827b78ceab8ba982",
+    "repoDigests": []
+  },
+  {
+    "service": "currencyservice",
+    "image": "gcr.io/google-samples/microservices-demo/currencyservice:v0.10.1",
+    "imageId": "sha256:fea8f3a94aa4222d2a12ce6492af546b963a8791c4f2e8a6b3328330211c6084",
+    "repoDigests": [
+      "gcr.io/google-samples/microservices-demo/currencyservice@sha256:6fd3ab6d1a33674e8ad1e113328dccfcb9f2f28b0bea27296cf0f45bcd5d183f"
+    ]
+  },
+  {
+    "service": "emailservice",
+    "image": "gcr.io/google-samples/microservices-demo/emailservice:v0.10.1",
+    "imageId": "sha256:199491db274a79cd48a5499d68efb9fcd93f5051bda661042255910ad7a3f46a",
+    "repoDigests": [
+      "gcr.io/google-samples/microservices-demo/emailservice@sha256:86cfe447a4a12770fceb64b2157af9b203b4d99bc03ad27fb26628577cba51a1"
+    ]
+  },
+  {
+    "service": "frontend",
+    "image": "k8s-resilience/frontend-otel:v0.10.1",
+    "imageId": "sha256:0b59d4ddc31cf12f0c076ab4742ba284d0e4edad05b8e6f5d28f9a99031bd8aa",
+    "repoDigests": []
+  },
+  {
+    "service": "jaeger",
+    "image": "jaegertracing/all-in-one:1.56",
+    "imageId": "sha256:854fc203f0ccc39e2bee2f340fdf3c58961fa3dd798bafb670e4125f4257dcf8",
+    "repoDigests": [
+      "jaegertracing/all-in-one@sha256:d2cd4c226624bdc116decd3106091b4df9882da8db42f8550293596cab79b8ea"
+    ]
+  },
+  {
+    "service": "paymentservice",
+    "image": "gcr.io/google-samples/microservices-demo/paymentservice:v0.10.1",
+    "imageId": "sha256:af166ffbf95acdac3d742e8d88338aa557bcd376eb85900e344675586511ec57",
+    "repoDigests": [
+      "gcr.io/google-samples/microservices-demo/paymentservice@sha256:64df556b6fb98e258e7e51f06ac0780564c34b021cc2749aa65b2eae6c9fd6ae"
+    ]
+  },
+  {
+    "service": "productcatalogservice",
+    "image": "gcr.io/google-samples/microservices-demo/productcatalogservice:v0.10.1",
+    "imageId": "sha256:5e068dd6e98199ce89407dbdba05cfd59e9f67737d740f6cf1c7165b15edfb80",
+    "repoDigests": [
+      "gcr.io/google-samples/microservices-demo/productcatalogservice@sha256:1ad7e6cd79d20e33dc5eed61c80f9cac3e6cf7e31f449902c5fdffe4066166a1"
+    ]
+  },
+  {
+    "service": "recommendationservice",
+    "image": "gcr.io/google-samples/microservices-demo/recommendationservice:v0.10.1",
+    "imageId": "sha256:0101fb442061e19dbca01468df53310e3eb8e75f7cd6f549bf4649a0c90c3365",
+    "repoDigests": [
+      "gcr.io/google-samples/microservices-demo/recommendationservice@sha256:a98960bf29d74fa3da54762321f2b058c1ac9dabe07ade815d15dbbcecec7b60"
+    ]
+  },
+  {
+    "service": "redis-cart",
+    "image": "redis:alpine",
+    "imageId": "sha256:00c30ddf0ef8074bbc7b7e5ea655bb6d359dc66694edd57d70fe95ce6ba531aa",
+    "repoDigests": [
+      "redis@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576"
+    ]
+  },
+  {
+    "service": "shippingservice",
+    "image": "k8s-resilience/shippingservice-otel:v0.10.1",
+    "imageId": "sha256:e9d1f77c940ead83231f7dc878b0182718ea828f77cbe1e0ec9ee13665310e1d",
+    "repoDigests": []
+  }
+]

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isclose
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     AssessmentPolicy,
@@ -19,6 +19,7 @@ from app.engine.workflow_dependency_modeling.dependency_assessment_repository im
 from app.engine.workflow_dependency_modeling.dependency_assessment_service import (
     get_dependency_assessment,
 )
+from .dependency_assessor import classify_cohort_effect
 
 
 @dataclass(frozen=True)
@@ -95,11 +96,37 @@ class RepeatabilityReport:
         }
 
 
+def _condition_classification(
+    result: ServiceDependencyAssessment,
+    assessment: DependencyAssessment,
+    item: Any,
+    policy: AssessmentPolicy,
+) -> ValidatedDependencyType:
+    """Classify one business condition on its own cohorts."""
+    scoped_result = cast(ServiceDependencyAssessment, replace(
+        result, baseline=item.baseline, intervention=item.intervention, condition_results=(),
+    ))
+    scoped_assessment = cast(DependencyAssessment, replace(assessment, interventions=tuple(
+        cohort for cohort in assessment.interventions if cohort.condition_id == item.condition_id
+    )))
+    return _summary_classification(scoped_result, scoped_assessment, policy)
+
+
 def _summary_classification(
     result: ServiceDependencyAssessment,
     assessment: DependencyAssessment,
     policy: AssessmentPolicy,
 ) -> ValidatedDependencyType:
+    # Do not pool business conditions: different branches can have different
+    # necessity labels even if their aggregate success rate looks ordinary.
+    if result.condition_results:
+        labels = {
+            _condition_classification(result, assessment, item, policy)
+            for item in result.condition_results
+        }
+        if ValidatedDependencyType.INSUFFICIENT_EVIDENCE in labels:
+            return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+        return next(iter(labels)) if len(labels) == 1 else ValidatedDependencyType.CONDITIONAL
     intervention = next(
         (
             cohort
@@ -109,6 +136,9 @@ def _summary_classification(
         None,
     )
     if intervention is None or not intervention.intervention_confirmed:
+        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+    if (set(result.baseline.eligible_execution_ids) & set(result.intervention.eligible_execution_ids)
+            or set(result.baseline.eligible_trace_ids) & set(result.intervention.eligible_trace_ids)):
         return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
     if result.baseline.eligible_records < policy.min_samples_per_cohort:
         return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
@@ -121,14 +151,7 @@ def _summary_classification(
     ):
         return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
 
-    effect = result.baseline.success_rate - result.intervention.success_rate
-    if effect >= policy.mandatory_effect_threshold:
-        if result.intervention.success_rate <= policy.max_mandatory_success_rate:
-            return ValidatedDependencyType.MANDATORY
-        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
-    if effect <= policy.optional_effect_tolerance:
-        return ValidatedDependencyType.OPTIONAL
-    return ValidatedDependencyType.SUPPORTING
+    return classify_cohort_effect(result.baseline, result.intervention, policy)[0]
 
 
 def analyze_threshold_sensitivity(
@@ -150,6 +173,8 @@ def analyze_threshold_sensitivity(
     }
     sensitivity_cases: list[SensitivityCase] = []
     sensitive: set[str] = set()
+    # Threshold sensitivity: re-label every service from its frozen counts under each alternative policy
+    # (for example a mandatory threshold of 0.4 or 0.6). No run is repeated; only the thresholds change.
     for case_id, policy in cases:
         classifications = {
             result.service_name: _summary_classification(
@@ -157,6 +182,7 @@ def analyze_threshold_sensitivity(
             ).value
             for result in assessment.services
         }
+        # A service whose label changes under any case is threshold-sensitive; the others are robust.
         changed = tuple(
             sorted(
                 service
@@ -209,7 +235,9 @@ def analyze_repeatability(
     service_names = sorted({name for labels in observed for name in labels})
     services: list[ServiceRepeatability] = []
     for service_name in service_names:
+        # Repeatability: how often each label was given to this service across independent assessments.
         counts = Counter(labels.get(service_name, "missing") for labels in observed)
+        # agreement = assessments giving the most common label / all assessments (1.0 = always the same label)
         agreement = max(counts.values()) / len(assessments)
         services.append(
             ServiceRepeatability(
@@ -219,11 +247,13 @@ def analyze_repeatability(
                 stable=isclose(agreement, 1.0),
             )
         )
+    # mean agreement = average of the per-service agreement rates
     mean_agreement = (
         sum(service.agreement_rate for service in services) / len(services)
         if services
         else 0.0
     )
+    # stable share = services labelled identically in every assessment / all services
     stable_rate = (
         sum(service.stable for service in services) / len(services)
         if services

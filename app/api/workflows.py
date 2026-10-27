@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, Resp
 
 from app.engine.workflow_dependency_modeling.evaluator import GraphEvaluationResult
 from app.engine.workflow_dependency_modeling.service import (
+    get_campaign_observed_graph,
     analyze_workflow_evidence,
     assess_telemetry_readiness,
     approve_experiment_campaign,
@@ -98,6 +99,19 @@ from app.engine.workflow_dependency_modeling.graph_freeze_repository import (
 from app.engine.workflow_dependency_modeling.intervention_event_repository import (
     InterventionEventConflictError,
 )
+from app.engine.workflow_dependency_modeling.experiment_pipeline import pipeline_status, repeat_experiment
+from app.engine.workflow_dependency_modeling.held_out_validation import (
+    list_held_out_runs,
+    plan_held_out_run,
+    start_held_out_run,
+)
+from app.engine.workflow_dependency_modeling.kubernetes_intervention import (
+    OutageClusterError,
+    cluster_job_running,
+    kubernetes_outage_status,
+    recover_kubernetes_outages,
+    start_kubernetes_outage_job,
+)
 from app.engine.workflow_dependency_modeling.scenario_repository import (
     ScenarioAlreadyExistsError,
     ScenarioNotFoundError,
@@ -113,13 +127,19 @@ from app.engine.workflow_dependency_modeling.offline_analysis import (
 )
 
 
+_OUTAGE_CONFIRMATION_REQUIRED = "Outage tests require explicit confirmation"
+
 router = APIRouter(
     prefix="/api/workflows",
     tags=["Workflow Dependency Modeling"],
 )
 
 
-@router.post("/analyze", response_model=WorkflowAnalysisResult, response_model_by_alias=True)
+@router.post(
+    "/analyze",
+    response_model_by_alias=True,
+    responses={422: {"description": "Workflow or trace evidence is invalid"}},
+)
 def analyze_uploaded_workflow(payload: WorkflowAnalysisRequest) -> WorkflowAnalysisResult:
     """Analyze caller-supplied workflow and traces without loading sample answers."""
     try:
@@ -546,7 +566,7 @@ def read_condition_scoped_workflow_graph(
         return graph
     except DependencyAssessmentNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
-    except (DependencyAssessmentNotApprovableError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
@@ -691,7 +711,11 @@ def discover_workflow_analysis_operations(
 def discover_observed_workflows(
     payload: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
-    """Read bounded recent traces and report what was observed; never approves or classifies anything.
+    """Read recent traces and report what was observed; never approves or classifies anything.
+
+    ``continuous: true`` advances one query of a fixed-window scan. Pass the returned
+    ``scanId`` to continue, or also ``cancel: true`` to stop. Coverage is explicit.
+    Legacy callers without this flag retain the bounded single-request behavior.
 
     An unreachable trace service is a normal answer (``state: jaeger_unavailable``) so a page can wait and retry.
     """
@@ -750,6 +774,7 @@ def preview_analysis_workflow_probe(
         404: {"description": "Analysis session was not found"},
         409: {"description": "Experiment campaign already exists"},
         422: {"description": "Experiment plan is invalid or unsafe"},
+        503: {"description": "The trace backend could not be reached"},
     },
 )
 def create_workflow_experiment_campaign(
@@ -763,6 +788,9 @@ def create_workflow_experiment_campaign(
         raise HTTPException(status_code=404, detail=str(err)) from err
     except ExperimentCampaignConflictError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
+    except ConnectionError as err:
+        # Preparation steps' services are read from the trace backend when the experiment is created.
+        raise HTTPException(status_code=503, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
@@ -833,7 +861,21 @@ def read_workflow_experiment_manifest(manifest_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
-@router.get("/experiment-campaigns/{campaign_id}/progress")
+@router.get(
+    "/experiment-campaigns/{campaign_id}/observed-graph",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_campaign_observed_graph(campaign_id: str) -> dict[str, Any]:
+    try:
+        return get_campaign_observed_graph(campaign_id)
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/progress",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
 def read_experiment_progress(campaign_id: str) -> dict[str, Any]:
     try:
         return get_experiment_progress(campaign_id)
@@ -897,6 +939,9 @@ def create_workflow_campaign_intervention_event(
     payload: dict[str, Any] = Body(...),
     actor: str = Header(..., alias="X-Actor", min_length=1),
 ) -> dict[str, Any]:
+    if cluster_job_running():
+        # A running automatic test records its own outages; a manual record now would corrupt its windows.
+        raise HTTPException(status_code=409, detail="An experiment is running on the test cluster; record outages after it finishes")
     try:
         return record_intervention_event(
             campaign_id,
@@ -956,6 +1001,186 @@ def execute_local_boutique_intervention_cohort(
         raise HTTPException(status_code=422, detail=str(err)) from err
     except (RuntimeError, ConnectionError, httpx.HTTPError) as err:
         raise HTTPException(status_code=503, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/kubernetes-outages",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_kubernetes_outage_status(campaign_id: str) -> dict[str, Any]:
+    """Whether backend-verified outage tests can run on the test namespace, and the latest job."""
+    try:
+        return kubernetes_outage_status(campaign_id)
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/kubernetes-outages",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        403: {"description": "The outage confirmation is missing"},
+        404: {"description": "Experiment campaign was not found"},
+        422: {"description": "Outage tests are not allowed or not ready"},
+        503: {"description": "The Kubernetes API is unavailable"},
+    },
+)
+def start_kubernetes_outage_tests(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    confirmation: str = Header(..., alias="X-Outage-Confirm"),
+) -> dict[str, Any]:
+    """Explicit browser action: scale candidate services of the opted-in test namespace to zero, one at a time."""
+    if confirmation != "scale-test-services-to-zero-and-restore":
+        raise HTTPException(status_code=403, detail=_OUTAGE_CONFIRMATION_REQUIRED)
+    target = payload.get("targetService")
+    if target is not None and not isinstance(target, str):
+        raise HTTPException(status_code=422, detail="targetService must be a service name")
+    try:
+        return start_kubernetes_outage_job(
+            campaign_id, _campaign_application_url(payload), actor=actor, target_service=target or None,
+        )
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except OutageClusterError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/repeat",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        403: {"description": "The outage confirmation is missing"},
+        404: {"description": "Experiment campaign or its inspection was not found"},
+        422: {"description": "The experiment cannot be repeated"},
+        503: {"description": "The trace backend or the Kubernetes API is unavailable"},
+    },
+)
+def repeat_workflow_experiment(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    confirmation: str = Header(..., alias="X-Outage-Confirm"),
+) -> dict[str, Any]:
+    """Explicit browser action: a new experiment from this one's reviewed setup, run end to end on the test cluster."""
+    if confirmation != "scale-test-services-to-zero-and-restore":
+        raise HTTPException(status_code=403, detail=_OUTAGE_CONFIRMATION_REQUIRED)
+    trials = payload.get("requiredBaselineTrials")
+    if isinstance(trials, bool) or not isinstance(trials, int):
+        raise HTTPException(status_code=422, detail="requiredBaselineTrials must be an integer")
+    try:
+        return repeat_experiment(campaign_id, actor=actor, required_trials=trials,
+                                 application_url=_campaign_application_url(payload),
+                                 lookback=payload.get("lookback") or "24h")
+    except (ExperimentCampaignNotFoundError, AnalysisSessionNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except (OutageClusterError, ConnectionError) as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/pipeline",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_experiment_pipeline(campaign_id: str) -> dict[str, Any]:
+    """Progress of a repeated experiment running end to end."""
+    try:
+        return pipeline_status(campaign_id)
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.get(
+    "/experiment-campaigns/{campaign_id}/held-out-runs",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
+def read_held_out_runs(campaign_id: str) -> list[dict[str, Any]]:
+    """Held-out runs of this campaign: frozen predictions, observations and scores for the method and B1."""
+    try:
+        return list_held_out_runs(campaign_id)
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/held-out-runs",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Campaign or its assessment was not found"},
+        422: {"description": "Plan input is invalid"},
+    },
+)
+def create_held_out_run(
+    campaign_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Sample untested service pairs and freeze both predictions before anything runs."""
+    seed = payload.get("seed")
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+        raise HTTPException(status_code=422, detail="seed must be an integer")
+    try:
+        return plan_held_out_run(campaign_id, actor=actor, scenario_count=payload.get("scenarioCount"), seed=seed,
+                                 sampling=payload.get("sampling", "stratified"))
+    except (ExperimentCampaignNotFoundError, DependencyAssessmentNotFoundError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/held-out-runs/{run_id}/execute",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        403: {"description": "The outage confirmation is missing"},
+        422: {"description": "The run cannot start"},
+        503: {"description": "The Kubernetes API is unavailable"},
+    },
+)
+def execute_held_out_run(
+    campaign_id: str,
+    run_id: str,
+    payload: dict[str, Any] = Body(...),
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+    confirmation: str = Header(..., alias="X-Outage-Confirm"),
+) -> dict[str, Any]:
+    """Explicit browser action: take each planned pair down (verified), run the workflow, restore."""
+    if confirmation != "scale-test-services-to-zero-and-restore":
+        raise HTTPException(status_code=403, detail=_OUTAGE_CONFIRMATION_REQUIRED)
+    try:
+        return start_held_out_run(campaign_id, run_id, _campaign_application_url(payload), actor=actor)
+    except OutageClusterError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@router.post(
+    "/experiment-campaigns/{campaign_id}/kubernetes-outages/recover",
+    responses={
+        404: {"description": "Experiment campaign was not found"},
+        422: {"description": "Recovery is not allowed here"},
+        503: {"description": "The Kubernetes API is unavailable or a service is not ready yet"},
+    },
+)
+def recover_kubernetes_outage_tests(
+    campaign_id: str,
+    actor: str = Header(..., alias="X-Actor", min_length=1),
+) -> dict[str, Any]:
+    """Put back every outage left on the test namespace; never takes a service down."""
+    try:
+        return recover_kubernetes_outages(campaign_id, actor=actor)
+    except ExperimentCampaignNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except OutageClusterError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
 
 @router.post(

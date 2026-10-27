@@ -73,3 +73,22 @@ def test_operation_normalization_uses_generic_identifier_shapes_only():
     assert operation_key(numeric) == "GET /orders/{id}"
     assert operation_key(named) == "GET /users/profile"
     assert operation_key(templated) == "GET /orders/{orderId}"
+
+
+def test_operation_key_reads_current_semconv_url_path():
+    # A server handler named once for the whole router (as Online Boutique's
+    # frontend does) gives every request the same span name; only url.path
+    # tells the requests apart.
+    def handler_span(trace_id, method, path):
+        return Span(
+            trace_id, "s1", None, "frontend", "frontend", 10,
+            tags={"http.request.method": method, "url.path": path, "span.kind": "server"},
+        )
+
+    checkout = handler_span("t1", "POST", "/cart/checkout")
+    product = handler_span("t2", "GET", "/product/OLJCESPC7Z")
+    health = handler_span("t3", "GET", "/_healthz")
+
+    assert operation_key(checkout) == "POST /cart/checkout"
+    assert operation_key(product) == "GET /product/OLJCESPC7Z"
+    assert operation_key(health) is None

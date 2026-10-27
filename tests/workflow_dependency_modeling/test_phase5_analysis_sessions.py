@@ -146,7 +146,7 @@ def _generic_payload() -> dict:
 def test_session_is_server_managed_and_evidence_honest(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import service
 
-    monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args, **kwargs: _evidence())
     repository = InMemoryAnalysisSessionRepository()
     result = start_workflow_analysis(
         _payload(), actor="operator", repository=repository, now=NOW
@@ -172,7 +172,7 @@ def test_incomplete_trace_evidence_requires_instrumentation_repair(monkeypatch) 
         "excludedCount": 12,
         "results": [],
     }
-    monkeypatch.setattr(service, "get_live_evidence", lambda *args: evidence)
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args, **kwargs: evidence)
 
     result = start_workflow_analysis(
         _payload(),
@@ -189,7 +189,7 @@ def test_incomplete_trace_evidence_requires_instrumentation_repair(monkeypatch) 
 def test_session_uses_generic_trace_source_contract(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import service
 
-    monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args, **kwargs: _evidence())
     result = start_workflow_analysis(
         _generic_payload(),
         actor="operator",
@@ -205,7 +205,7 @@ def test_session_uses_generic_trace_source_contract(monkeypatch) -> None:
 def test_trace_source_persists_secret_reference_without_secret(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import service
 
-    monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args, **kwargs: _evidence())
     monkeypatch.setenv("JAEGER_API_TOKEN", "private-token")
     payload = _generic_payload()
     payload["traceSource"]["authentication"] = {
@@ -227,7 +227,7 @@ def test_unapproved_jaeger_host_is_rejected_before_network_access(monkeypatch) -
 
     called = False
 
-    def fetch(*args):
+    def fetch(*args, **kwargs):
         nonlocal called
         called = True
         return _evidence()
@@ -248,7 +248,7 @@ def test_unapproved_jaeger_host_is_rejected_before_network_access(monkeypatch) -
 def test_sqlalchemy_analysis_session_round_trip(monkeypatch, tmp_path) -> None:
     from app.engine.workflow_dependency_modeling import service
 
-    monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args, **kwargs: _evidence())
     engine = create_engine(f"sqlite:///{tmp_path / 'analysis.db'}")
     Base.metadata.create_all(engine)
     repository = SqlAlchemyAnalysisSessionRepository(engine)
@@ -290,7 +290,7 @@ def test_analysis_session_api(monkeypatch) -> None:
 
     repository = InMemoryAnalysisSessionRepository()
     monkeypatch.setattr(analysis_session_service, "_default_repository", repository)
-    monkeypatch.setattr(service, "get_live_evidence", lambda *args: _evidence())
+    monkeypatch.setattr(service, "get_live_evidence", lambda *args, **kwargs: _evidence())
     monkeypatch.setattr(
         service,
         "discover_live_workflows",

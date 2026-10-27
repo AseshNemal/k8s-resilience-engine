@@ -55,6 +55,7 @@ from app.engine.workflow_dependency_modeling.intervention_event_repository impor
 from app.engine.workflow_dependency_modeling.experiment_manifest_service import (
     require_experiment_record,
 )
+from .sequence_graph import get_campaign_observed_graph
 
 
 def _utc(value: datetime | None) -> datetime:
@@ -87,7 +88,8 @@ def _intervention_evidence(
                                  "verifiedTrials": service_verified,
                                  "eligibleTrials": service_eligible})
     if eligible and verified == eligible and all(item["evidenceReady"] for item in services):
-        verification = "docker_verified_local_demo"
+        # Docker (Compose demo) or the Kubernetes API (test namespace) confirmed every outage.
+        verification = "backend_verified"
     elif verified:
         verification = "mixed"
     else:
@@ -183,6 +185,7 @@ def assess_experiment_campaign(
 ) -> DependencyAssessment:
     """Classify every downstream candidate after all campaign gates pass."""
     campaign = get_experiment_campaign(campaign_id, campaign_repository)
+    criticality = campaign.require_criticality()
     analysis = get_workflow_analysis(campaign.analysis_session_id, analysis_repository)
     record = require_experiment_record(campaign, analysis)
     baseline_state = baseline_readiness(campaign, execution_repository_override)
@@ -264,8 +267,32 @@ def assess_experiment_campaign(
 
     services = set(analysis.observed_services)
     expected = {analysis.entry_service, *campaign.candidate_services}
-    if services != expected:
+    # Integrity of the candidate list: every service of the inspection must still be a candidate ...
+    if services - expected:
         raise ValueError("Campaign candidates no longer match the observed service set")
+    sequence_graph = get_campaign_observed_graph(
+        campaign_id, campaign_repository=campaign_repository,
+        repository=execution_repository_override,
+    )
+    run_services = set(sequence_graph["observedServices"])
+    # ... and every extra candidate (added from a preparation step's traces when the campaign was created) must
+    # appear in this campaign's own recorded runs. A candidate seen nowhere was not derived from evidence.
+    unexplained = expected - services - run_services
+    if unexplained:
+        raise ValueError("Campaign candidates no longer match the observed service set: "
+                         + ", ".join(sorted(unexplained)) + " appear in no recorded trace of this workflow")
+    services |= expected
+    # Services seen in the runs but never planned for testing must not disappear: they remain unassessed
+    # until their own intervention evidence is collected in a reviewed campaign. Planned candidates are
+    # already assessed above, so they are not added a second time.
+    additional = run_services - services
+    for name in sorted(additional):
+        service_results.append(assess_service_dependency(
+            name, baseline_records, None, [], policy,
+            baseline_allowed_execution_ids=baseline_allowed,
+        ))
+    services.update(additional)
+    observed_edges = (*analysis.edges, *sequence_graph["edges"])
     assessment = DependencyAssessment.from_mapping(
         {
             "assessmentId": _assessment_id(campaign.campaign_id),
@@ -275,10 +302,10 @@ def assess_experiment_campaign(
             "source": "controlled_workflow_campaign",
             "candidateGraph": {
                 "workflowId": campaign.workflow_id,
-                "criticality": campaign.criticality if campaign.criticality is not None else 1.0,
+                "criticality": criticality,
                 "mandatoryServices": sorted(services),
                 "optionalServices": [],
-                "edges": _candidate_edges(analysis.edges, services),
+                "edges": _candidate_edges(observed_edges, services),
             },
             "structuralEntryService": analysis.entry_service,
             "baselineBatchIds": [campaign.baseline.batch_id],

@@ -66,7 +66,7 @@ def test_progress_does_not_call_docker_verified_trials_operator_attested(monkeyp
     monkeypatch.setattr(service, "_eligible_campaign_outcome", lambda outcome: True)
     monkeypatch.setattr(service, "_verified_outage_target", lambda outcome: outcome.marker)
     services = [{"batchId": "batch:payment", "targetService": "paymentservice", "evidenceReady": True}]
-    assert _intervention_verification(services) == "docker_verified_local_demo"
+    assert _intervention_verification(services) == "backend_verified"
     records.append(SimpleNamespace(marker=None))
     assert _intervention_verification(services) == "mixed"
     assert _intervention_evidence(services) == {
@@ -119,6 +119,7 @@ def _campaign() -> ExperimentCampaign:
     return ExperimentCampaign.from_mapping(
         {
             "campaignId": "campaign:checkout1",
+            "criticality": 0.5,
             "analysisSessionId": "analysis:checkout",
             "environmentId": "boutique-local",
             "workflowId": "checkout",
@@ -417,6 +418,7 @@ def test_trials_outside_confirmed_intervention_window_cannot_be_assessed() -> No
                 finished_at=NOW,
             ),
         )
+    assessments = InMemoryDependencyAssessmentRepository()
     with pytest.raises(ValueError, match="Intervention evidence is incomplete"):
         assess_experiment_campaign(
             "campaign:checkout1",
@@ -425,7 +427,7 @@ def test_trials_outside_confirmed_intervention_window_cannot_be_assessed() -> No
             analysis_repository=analyses,
             execution_repository_override=executions,
             event_repository=events,
-            repository=InMemoryDependencyAssessmentRepository(),
+            repository=assessments,
             now=NOW,
         )
 
@@ -442,6 +444,7 @@ def test_assessment_rejects_trial_from_another_experiment_record() -> None:
             experiment_record_digest="sha256:" + "0" * 64,
         ),
     )
+    assessments = InMemoryDependencyAssessmentRepository()
     with pytest.raises(ValueError, match="does not match the frozen experiment record"):
         assess_experiment_campaign(
             "campaign:checkout1",
@@ -450,7 +453,7 @@ def test_assessment_rejects_trial_from_another_experiment_record() -> None:
             analysis_repository=analyses,
             execution_repository_override=executions,
             event_repository=events,
-            repository=InMemoryDependencyAssessmentRepository(),
+            repository=assessments,
             now=NOW,
         )
 

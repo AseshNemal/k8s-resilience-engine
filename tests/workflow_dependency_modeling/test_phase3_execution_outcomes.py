@@ -28,6 +28,21 @@ from app.shared.persistence.models import Base
 NOW = datetime(2026, 10, 3, tzinfo=timezone.utc)
 
 
+def test_manual_outcome_cannot_treat_partial_terminal_trace_as_success():
+    # A valid success-looking terminal span cannot repair an absent remote peer.
+    trace = {"traceID": "trace-1", "processes": {"p": {"serviceName": "paymentservice"}},
+             "spans": [{"spanID": "terminal", "processID": "p", "duration": 10,
+                        "operationName": "PaymentService/Charge", "tags": [
+                            {"key": "http.status_code", "value": 200},
+                            {"key": "span.kind", "value": "client"},
+                            {"key": "net.peer.name", "value": "missing-service"}]}]}
+    result = evaluate_execution(registration(), scenario(), [trace], now=NOW)
+    assert result.status is ExecutionOutcomeStatus.INDETERMINATE
+    assert result.correlation_status is CorrelationStatus.MATCHED
+    assert result.evidence_snapshot is not None
+    assert "PARTIAL" in result.reasons[0]
+
+
 @pytest.mark.parametrize(
     "reserved_field",
     [

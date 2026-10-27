@@ -268,6 +268,16 @@ def test_assessment_is_immutable_and_approval_projects_validated_graph(
     assert assessment_payload["supportingServices"] == ["inventoryservice"]
     assert assessment_payload["optionalServices"] == ["emailservice"]
     assert assessment_payload["insufficientEvidenceServices"] == []
+    # B1 counts every observed service as mandatory; the method agrees only where the outage proved it.
+    baseline = assessment_payload["traceOnlyBaseline"]
+    assert baseline["mandatoryServices"] == ["emailservice", "inventoryservice", "paymentservice"]
+    assert {row["serviceName"]: row["agrees"] for row in baseline["comparison"]} == {
+        "emailservice": False, "inventoryservice": False, "paymentservice": True,
+    }
+    # Three runs per cohort: a point-estimate label, not yet supported at 95% confidence.
+    payment = next(item for item in assessment_payload["services"] if item["serviceName"] == "paymentservice")
+    assert payment["statistics"]["supportedAtConfidence"] is False
+    assert payment["statistics"]["fisherOneSidedP"] == pytest.approx(1 / 20)
     approval = approve_dependency_assessment(
         created.assessment_id,
         actor="lead-researcher",

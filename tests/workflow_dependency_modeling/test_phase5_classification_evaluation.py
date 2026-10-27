@@ -43,6 +43,20 @@ from app.shared.persistence.models import Base
 NOW = datetime(2026, 10, 3, tzinfo=timezone.utc)
 
 
+def test_sensitivity_abstains_when_intervention_improves_success_materially():
+    from dataclasses import replace
+    assessment = _assessment_with_interventions()
+    payment = assessment.services[0]
+    payment = replace(payment,
+        baseline=replace(payment.baseline, total_records=5, eligible_records=5,
+                         succeeded_records=4, failed_records=1, success_rate=.8),
+        intervention=replace(payment.intervention, succeeded_records=3,
+                             failed_records=0, success_rate=1.0))
+    assessment = replace(assessment, services=(payment,))
+    result = analyze_threshold_sensitivity(assessment, [("same-policy", AssessmentPolicy())])
+    assert result.cases[0].classifications["paymentservice"] == "insufficient_evidence"
+
+
 def _scenario() -> WorkflowScenario:
     return WorkflowScenario.from_mapping(
         {
@@ -184,10 +198,34 @@ def test_abstention_reduces_coverage_without_becoming_misclassification() -> Non
     assert result.abstained_services == ("emailservice",)
     assert result.misclassified_services == ()
     assert result.per_class["optional"].support == 0
+    # Selective scores remain available, but missed/abstained reference
+    # positives must count against complete-reference recall.
+    assert result.complete_reference_metrics["optional"].support == 1
+    assert result.complete_reference_metrics["optional"].false_negatives == 1
+    assert result.complete_reference_metrics["optional"].recall == 0
+    assert result.complete_reference_accuracy == pytest.approx(2 / 3)
     mapping = result.to_mapping()
     assert mapping["selectiveAccuracy"] == pytest.approx(1.0)
     assert mapping["classifiedCount"] == 2
     assert mapping["expectedCount"] == 3
+
+
+def test_missing_mandatory_service_remains_a_false_negative():
+    from dataclasses import replace
+    assessment = _assessment()
+    assessment = replace(assessment, services=tuple(
+        item for item in assessment.services if item.service_name != "paymentservice"
+    ))
+    result = evaluate_dependency_classification(
+        assessment, _reference(), evaluation_id="evaluation:missing-positive",
+        actor="tester", now=NOW,
+    )
+    metrics = result.complete_reference_metrics["mandatory"]
+    assert metrics.support == 1
+    assert metrics.false_negatives == 1
+    assert metrics.recall == 0
+    assert result.missing_services == ("paymentservice",)
+    assert result.complete_reference_accuracy == pytest.approx(2 / 3)
 
 
 def test_reference_versions_are_immutable_and_optimistic(monkeypatch) -> None:

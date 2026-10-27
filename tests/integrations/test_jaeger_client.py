@@ -117,15 +117,19 @@ def test_jaeger_client_fetch_traces_success(mock_client_cls):
     traces = client.fetch_traces("frontend", operation="checkout", limit=50, lookback="2h")
     assert len(traces) == 1
     assert traces[0]["traceID"] == "t1"
-    mock_client.get.assert_called_once_with(
-        "http://localhost:16686/api/traces",
-        params={
-            "service": "frontend",
-            "operation": "checkout",
-            "limit": 50,
-            "lookback": "2h",
-        },
-    )
+    mock_client.get.assert_called_once()
+    assert mock_client.get.call_args.args == ("http://localhost:16686/api/traces",)
+    params = dict(mock_client.get.call_args.kwargs["params"])
+    start, end = params.pop("start"), params.pop("end")
+    assert params == {"service": "frontend", "operation": "checkout", "limit": 50, "lookback": "2h"}
+    # Jaeger's API ignores "lookback"; the window has to be sent as start/end microseconds.
+    assert end - start == 2 * 3_600_000_000
+
+
+def test_jaeger_client_rejects_an_unparseable_lookback():
+    client = JaegerClient("http://localhost:16686")
+    with pytest.raises(ValueError):
+        client.fetch_traces("frontend", lookback="an hour")
 
 
 @patch("httpx.Client")
@@ -159,8 +163,9 @@ def test_jaeger_client_treats_missing_exact_trace_as_pending(mock_client_cls):
 
 
 def test_jaeger_client_rejects_unsafe_trace_id() -> None:
+    client = JaegerClient("http://localhost:16686")
     with pytest.raises(ValueError, match="hexadecimal"):
-        JaegerClient("http://localhost:16686").fetch_trace("../../api/services")
+        client.fetch_trace("../../api/services")
 
 
 def test_get_dependencies_returns_caller_callee_pairs_for_the_window():
@@ -181,7 +186,8 @@ def test_get_dependencies_returns_caller_callee_pairs_for_the_window():
     called_url = get.call_args.args[0]
     params = get.call_args.kwargs["params"]
     assert called_url == "http://localhost:16686/api/dependencies"
-    assert params["lookback"] == 3_600_000 and params["endTs"] > 0
+    assert params["lookback"] == 3_600_000
+    assert params["endTs"] > 0
 
 
 def test_get_dependencies_failure_is_a_connection_error():

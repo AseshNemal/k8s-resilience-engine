@@ -17,6 +17,21 @@ from app.engine.workflow_dependency_modeling.workflow_probe_runner import (
 TRACE_ID = "0123456789abcdef0123456789abcdef"
 
 
+@pytest.mark.parametrize("error", [httpx.ConnectError("offline"), httpx.ReadTimeout("slow")])
+def test_transport_failure_retains_attempt_without_inventing_http_status(error):
+    def handler(request):
+        raise error
+    result = run_http_workflow_probe(
+        "http://localhost:9000", _definition(), trace_id=TRACE_ID,
+        secrets={"SHOP_API_TOKEN": "test"}, transport=httpx.MockTransport(handler),
+    )
+    assert not result.business_success
+    assert len(result.steps) == 1
+    assert result.steps[0].status_code is None
+    assert result.steps[0].to_mapping()["statusCode"] is None
+    assert len(result.trace_id) == 32
+
+
 def _definition() -> WorkflowProbeDefinition:
     return WorkflowProbeDefinition.from_mapping(
         {

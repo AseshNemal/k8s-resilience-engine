@@ -1,0 +1,17 @@
+diff --git a/src/frontend/main.go b/src/frontend/main.go
+--- a/src/frontend/main.go
++++ b/src/frontend/main.go
+@@ -205,9 +205,11 @@
+ func initTracing(log logrus.FieldLogger, ctx context.Context, svc *frontendServer) (*sdktrace.TracerProvider, error) {
+ 	mustMapEnv(&svc.collectorAddr, "COLLECTOR_SERVICE_ADDR")
+-	mustConnGRPC(ctx, &svc.collectorConn, svc.collectorAddr)
++	// The exporter must not use the instrumented application connection helper:
++	// tracing Export creates another span to export on every batch interval.
+ 	exporter, err := otlptracegrpc.New(
+ 		ctx,
+-		otlptracegrpc.WithGRPCConn(svc.collectorConn))
++		otlptracegrpc.WithEndpoint(svc.collectorAddr),
++		otlptracegrpc.WithInsecure())
+ 	if err != nil {
+ 		log.Warnf("warn: Failed to create trace exporter: %v", err)
+ 	}

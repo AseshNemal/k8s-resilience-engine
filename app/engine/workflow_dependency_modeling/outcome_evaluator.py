@@ -145,6 +145,11 @@ def evaluate_trace_success(
 ) -> tuple[ExecutionOutcomeStatus, tuple[AssertionResult, ...], tuple[str, ...]]:
     """Evaluate trace assertions without claiming an independently registered run.
 
+    The workflow's result is read from its terminal span: the span of the success condition's service and
+    operation (for example frontend · POST /cart/checkout). It succeeds only if every assertion passes:
+      - the protocol status is one of the accepted codes (HTTP status, gRPC code or span status);
+      - the duration is within the limit, when one is set;
+      - every required span attribute has the required value.
     Callers must quality-check the trace before parsing it. Missing or ambiguous
     terminal evidence stays indeterminate rather than becoming a failed run.
     """
@@ -203,6 +208,7 @@ def evaluate_execution(
     traces: list[dict[str, Any]],
     *,
     now: datetime | None = None,
+    verified_unavailable_service: str | None = None,
 ) -> ExecutionOutcome:
     """Correlate exactly one trace and evaluate the scenario's success contract."""
     if registration.workflow_id != scenario.workflow_id:
@@ -245,5 +251,22 @@ def evaluate_execution(
             CorrelationStatus.AMBIGUOUS,
             "Multiple traces matched the registered trace ID",
             now,
+        )
+    from .trace_validator import validate_trace_quality, expected_outage_trace_quality
+    quality = validate_trace_quality(matches).results[0]
+    if not quality.eligible and not expected_outage_trace_quality(matches[0], verified_unavailable_service):
+        recorded_at = _recorded_at(now)
+        return ExecutionOutcome(
+            registration=registration,
+            status=ExecutionOutcomeStatus.INDETERMINATE,
+            correlation_status=CorrelationStatus.MATCHED,
+            recorded_at=recorded_at,
+            matched_trace_id=registration.expected_trace_id,
+            evidence_id=f"trace:{registration.expected_trace_id}",
+            evidence_snapshot=TraceEvidenceSnapshot.from_trace(
+                matches[0], trace_id=registration.expected_trace_id,
+                source_locator=registration.evidence_locator, captured_at=recorded_at,
+            ),
+            reasons=(f"Trace quality is {quality.quality.value}; incomplete telemetry cannot establish a workflow outcome", *quality.reasons),
         )
     return _matched_trace_outcome(registration, scenario, matches[0], now)

@@ -93,7 +93,7 @@ def _analysis_repository() -> InMemoryAnalysisSessionRepository:
 def _campaigns(analyses, required_trials=3):
     repository = InMemoryExperimentCampaignRepository()
     campaign = create_experiment_campaign(
-        {
+        {"criticality": 0.5,
             "analysisSessionId": "analysis:checkout",
             "successContractConfirmed": True,
             "benchmarkProfile": "online_boutique_checkout_v0_10_1",
@@ -136,10 +136,11 @@ def test_record_gate_blocks_before_workload_io(problem):
     else:
         records.list_experiment_manifests()[0].campaign_snapshot['workflowName'] = 'tampered'
     calls = []
+    executions = InMemoryExecutionRepository()
     with pytest.raises(ValueError, match='record'):
         run_campaign_baseline_trial(campaign.campaign_id, 'http://localhost:8080',
             actor='test', campaign_repository=campaigns, analysis_repository=analyses,
-            repository=InMemoryExecutionRepository(), workload_runner=lambda *a, **kw: calls.append(1))
+            repository=executions, workload_runner=lambda *a, **kw: calls.append(1))
     assert calls == []
 
 
@@ -147,8 +148,10 @@ def test_record_gate_rejects_configuration_drift():
     from dataclasses import replace
     analyses = _analysis_repository()
     _, campaign = _campaigns(analyses)
+    changed = replace(campaign, workflow_name='changed')
+    analysis = analyses.get(campaign.analysis_session_id)
     with pytest.raises(ValueError, match='differs'):
-        records.require_experiment_record(replace(campaign, workflow_name='changed'), analyses.get(campaign.analysis_session_id))
+        records.require_experiment_record(changed, analysis)
 
 
 def test_recovery_is_recordable_before_any_intervention_trials():
@@ -327,6 +330,106 @@ def test_baseline_trial_executes_correlates_and_persists() -> None:
     assert baseline_readiness(campaign, executions)["eligibleTrials"] == 1
 
 
+@pytest.mark.parametrize("missing_preparation", [False, True])
+def test_sequence_persists_preparation_and_does_not_hide_missing_traces(missing_preparation):
+    import httpx
+    from app.engine.workflow_dependency_modeling.workflow_probe_runner import run_http_workflow_probe
+    from app.engine.workflow_dependency_modeling.execution_models import ExecutionOutcome
+    from app.engine.workflow_dependency_modeling.sequence_graph import get_campaign_observed_graph
+
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    traces = {}
+    index = 0
+    first_id = None
+
+    def handler(request):
+        nonlocal index, first_id
+        step = campaign.execution_definition.steps[index]
+        trace_id = request.headers["traceparent"].split("-")[1]
+        raw = _trace(trace_id=trace_id)
+        raw["spans"][0]["operationName"] = f"{request.method} {request.url.path}"
+        if index == 0:
+            first_id = trace_id
+            raw["processes"]["p2"] = {"serviceName": "preparation-only-service"}
+            raw["spans"].append({
+                "traceID": trace_id, "spanID": "child", "processID": "p2",
+                "operationName": "prepare", "startTime": 1_000_001, "duration": 10,
+                "references": [{"refType": "CHILD_OF", "traceID": trace_id, "spanID": "span-1"}],
+            })
+        traces[trace_id] = raw
+        index += 1
+        return httpx.Response(step.expected_status_codes[0], text=" ".join(step.response_contains))
+
+    def runner(url, definition, **kwargs):
+        return run_http_workflow_probe(url, definition, transport=httpx.MockTransport(handler), **kwargs)
+
+    outcome = run_campaign_baseline_trial(
+        campaign.campaign_id, "http://localhost:8080", actor="runner",
+        campaign_repository=campaigns, analysis_repository=analyses, repository=executions,
+        workload_runner=runner,
+        trace_fetcher=lambda _, tid: [] if missing_preparation and tid == first_id else [traces[tid]],
+        sleeper=lambda _: None, now=NOW,
+    )
+    assert len(outcome.step_evidence) == len(campaign.execution_definition.steps)
+    assert len({s.trace_id for s in outcome.step_evidence}) == len(outcome.step_evidence)
+    assert all(s.started_at <= s.finished_at for s in outcome.step_evidence)
+    assert all(s.assertions for s in outcome.step_evidence)
+    assert ExecutionOutcome.from_mapping(outcome.to_mapping()) == outcome
+    if missing_preparation:
+        assert outcome.status is ExecutionOutcomeStatus.INDETERMINATE
+        assert baseline_readiness(campaign, executions)["eligibleTrials"] == 0
+        assert outcome.step_evidence[0].correlation_status is CorrelationStatus.MISSING
+    else:
+        assert outcome.status is ExecutionOutcomeStatus.SUCCEEDED
+        graph = get_campaign_observed_graph(campaign.campaign_id, campaign_repository=campaigns, repository=executions)
+        assert graph["completeSequenceRuns"] == 1
+        assert "preparation-only-service" in graph["observedServices"]
+        edge = next(e for e in graph["edges"] if e["target"] == "preparation-only-service")
+        assert edge["classification"] == "unresolved"
+        assert edge["evidence"][0]["stepName"] == campaign.execution_definition.steps[0].name
+        assert edge["evidence"][0]["traceId"] == first_id
+        assert edge["evidence"][0]["spans"] == [{
+            "basis": "parent_child", "callerSpanId": "span-1", "calleeSpanId": "child",
+            "callerOperation": "GET /product/OLJCESPC7Z", "calleeOperation": "prepare",
+        }]
+        # SQLite persists all snapshots and rejects raw-trace tampering on load.
+        import copy
+        from sqlalchemy import create_engine
+        from app.shared.persistence.models import Base
+        from app.engine.workflow_dependency_modeling.execution_repository import SqlAlchemyExecutionRepository
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        sql = SqlAlchemyExecutionRepository(engine)
+        sql.create(outcome)
+        assert sql.get(outcome.registration.execution_id) == outcome
+        tampered = copy.deepcopy(outcome.to_mapping())
+        tampered["stepEvidence"][0]["evidenceSnapshot"]["rawTrace"]["spans"][0]["duration"] += 1
+        with pytest.raises(ValueError, match="checksum"):
+            ExecutionOutcome.from_mapping(tampered)
+
+
+def test_failed_first_action_retains_unattempted_actions():
+    import httpx
+    from app.engine.workflow_dependency_modeling.workflow_probe_runner import run_http_workflow_probe
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    outcome = run_campaign_baseline_trial(
+        campaign.campaign_id, "http://localhost:8080", actor="runner",
+        campaign_repository=campaigns, analysis_repository=analyses, repository=executions,
+        workload_runner=lambda url, definition, **kw: run_http_workflow_probe(
+            url, definition, transport=httpx.MockTransport(lambda _: httpx.Response(500)), **kw),
+        trace_fetcher=lambda _, tid: [_trace(status=500, trace_id=tid)],
+        sleeper=lambda _: None, now=NOW,
+    )
+    assert outcome.status is ExecutionOutcomeStatus.FAILED
+    assert outcome.step_evidence[0].attempted
+    assert not outcome.step_evidence[0].succeeded
+    assert all(not step.attempted and step.trace_id is None for step in outcome.step_evidence[1:])
+
+
 def test_default_trace_fetcher_uses_saved_trace_source(monkeypatch) -> None:
     from app.engine.workflow_dependency_modeling import campaign_execution_service
 
@@ -467,6 +570,34 @@ def test_missing_trace_is_indeterminate_and_blocks_readiness() -> None:
     assert readiness["ready"] is False
     assert readiness["excludedTrials"] == 1
     assert "No unique matching trace was captured" in readiness["excludedReasons"]
+
+
+@pytest.mark.parametrize("probe_success,trace_present", [(True, True), (False, True), (True, False), (False, False)])
+def test_probe_assertion_is_persisted_without_bypassing_trace_gate(probe_success, trace_present):
+    analyses = _analysis_repository()
+    campaigns, campaign = _campaigns(analyses)
+    executions = InMemoryExecutionRepository()
+    outcome = run_campaign_baseline_trial(
+        campaign.campaign_id, "http://localhost:8080", actor="runner",
+        campaign_repository=campaigns, analysis_repository=analyses,
+        repository=executions,
+        workload_runner=lambda *args, **kwargs: _run(success=probe_success),
+        trace_fetcher=lambda analysis, trace_id: [_trace()] if trace_present else [],
+        sleeper=lambda seconds: None, now=NOW,
+    )
+    stored = executions.get(outcome.registration.execution_id)
+    assertions = [item for item in stored.assertions if item.name == "business_probe_success"]
+    assert len(assertions) == 1
+    assert assertions[0].passed is probe_success
+    assert assertions[0].observed is probe_success
+    assert assertions[0].expected is True
+    expected_status = (
+        ExecutionOutcomeStatus.INDETERMINATE if not trace_present
+        else ExecutionOutcomeStatus.SUCCEEDED if probe_success
+        else ExecutionOutcomeStatus.FAILED
+    )
+    assert stored.status is expected_status
+    assert baseline_readiness(campaign, executions)["eligibleTrials"] == int(trace_present)
 
 
 def test_confirmation_marker_can_fail_matched_http_trace() -> None:
@@ -762,16 +893,17 @@ def test_second_service_cannot_be_intervened_while_first_is_active() -> None:
         execution_repository_override=executions,
         now=NOW,
     )
+    activation = {
+        "targetService": "paymentservice",
+        "eventType": "activated",
+        "operatorConfirmed": True,
+        "evidence": "paymentservice unavailable",
+        "occurredAt": NOW.isoformat(),
+    }
     with pytest.raises(ValueError, match="Restore the active intervention"):
         record_intervention_event(
             campaign.campaign_id,
-            {
-                "targetService": "paymentservice",
-                "eventType": "activated",
-                "operatorConfirmed": True,
-                "evidence": "paymentservice unavailable",
-                "occurredAt": NOW.isoformat(),
-            },
+            activation,
             actor="operator",
             campaign_repository=campaigns,
             repository=events,
