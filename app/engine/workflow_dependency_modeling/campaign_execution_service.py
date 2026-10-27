@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import time
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from app.engine.workflow_dependency_modeling.analysis_session_repository import (
@@ -339,7 +339,7 @@ def _record_campaign_trial(
     # show that response-body or preparation-step assertions were checked.
     # This assertion never overrides an indeterminate trace outcome.
     if not any(item.name == "business_probe_success" for item in outcome.assertions):
-        outcome = replace(
+        outcome = cast(ExecutionOutcome, replace(
             outcome,
             assertions=(*outcome.assertions, AssertionResult(
                 name="business_probe_success",
@@ -347,16 +347,16 @@ def _record_campaign_trial(
                 expected=True,
                 observed=run.business_success,
             )),
-        )
-    outcome = replace(outcome, step_evidence=capture_step_evidence(
+        ))
+    outcome = cast(ExecutionOutcome, replace(outcome, step_evidence=capture_step_evidence(
         run, definition, analysis, collected, recorded_at,
-    ))
+    )))
     blockers = sequence_evidence_blockers(outcome, verified_unavailable_service)
     if blockers:
-        outcome = replace(
+        outcome = cast(ExecutionOutcome, replace(
             outcome, status=ExecutionOutcomeStatus.INDETERMINATE,
             reasons=(*outcome.reasons, *blockers),
-        )
+        ))
     return execution_repository(repository).create(outcome)
 
 
@@ -500,6 +500,27 @@ def run_campaign_intervention_trial(
     )
 
 
+def _require_intervention_activation(
+    campaign: ExperimentCampaign, target_service: str, active: bool,
+    event_repository: InterventionEventRepository,
+    execution_repository_override: ExecutionRepository | None,
+) -> None:
+    if active:
+        raise ValueError("This service already has an active intervention")
+    if not baseline_readiness(campaign, execution_repository_override)["ready"]:
+        raise ValueError("Baseline readiness must pass before an intervention is activated")
+    for other_plan in campaign.interventions:
+        if other_plan.target_service == target_service:
+            continue
+        other_events = event_repository.list(campaign.campaign_id, other_plan.target_service)
+        if other_events and other_events[-1].event_type is InterventionEventType.ACTIVATED:
+            raise ValueError(
+                "Restore the active intervention for "
+                + other_plan.target_service
+                + " before activating another service"
+            )
+
+
 def record_intervention_event(
     campaign_id: str,
     data: dict[str, Any],
@@ -541,20 +562,9 @@ def record_intervention_event(
     existing = event_repository.list(campaign_id, plan.target_service)
     active = bool(existing and existing[-1].event_type is InterventionEventType.ACTIVATED)
     if event_type is InterventionEventType.ACTIVATED:
-        if active:
-            raise ValueError("This service already has an active intervention")
-        if not baseline_readiness(campaign, execution_repository_override)["ready"]:
-            raise ValueError("Baseline readiness must pass before an intervention is activated")
-        for other_plan in campaign.interventions:
-            if other_plan.target_service == plan.target_service:
-                continue
-            other_events = event_repository.list(campaign_id, other_plan.target_service)
-            if other_events and other_events[-1].event_type is InterventionEventType.ACTIVATED:
-                raise ValueError(
-                    "Restore the active intervention for "
-                    + other_plan.target_service
-                    + " before activating another service"
-                )
+        _require_intervention_activation(
+            campaign, plan.target_service, active, event_repository, execution_repository_override,
+        )
     elif not active:
         raise ValueError("A restoration requires an active intervention")
 

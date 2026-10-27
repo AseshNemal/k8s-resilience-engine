@@ -127,6 +127,8 @@ from app.engine.workflow_dependency_modeling.offline_analysis import (
 )
 
 
+_OUTAGE_CONFIRMATION_REQUIRED = "Outage tests require explicit confirmation"
+
 router = APIRouter(
     prefix="/api/workflows",
     tags=["Workflow Dependency Modeling"],
@@ -135,7 +137,6 @@ router = APIRouter(
 
 @router.post(
     "/analyze",
-    response_model=WorkflowAnalysisResult,
     response_model_by_alias=True,
     responses={422: {"description": "Workflow or trace evidence is invalid"}},
 )
@@ -871,7 +872,10 @@ def read_campaign_observed_graph(campaign_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
-@router.get("/experiment-campaigns/{campaign_id}/progress")
+@router.get(
+    "/experiment-campaigns/{campaign_id}/progress",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
 def read_experiment_progress(campaign_id: str) -> dict[str, Any]:
     try:
         return get_experiment_progress(campaign_id)
@@ -1029,7 +1033,7 @@ def start_kubernetes_outage_tests(
 ) -> dict[str, Any]:
     """Explicit browser action: scale candidate services of the opted-in test namespace to zero, one at a time."""
     if confirmation != "scale-test-services-to-zero-and-restore":
-        raise HTTPException(status_code=403, detail="Outage tests require explicit confirmation")
+        raise HTTPException(status_code=403, detail=_OUTAGE_CONFIRMATION_REQUIRED)
     target = payload.get("targetService")
     if target is not None and not isinstance(target, str):
         raise HTTPException(status_code=422, detail="targetService must be a service name")
@@ -1063,7 +1067,7 @@ def repeat_workflow_experiment(
 ) -> dict[str, Any]:
     """Explicit browser action: a new experiment from this one's reviewed setup, run end to end on the test cluster."""
     if confirmation != "scale-test-services-to-zero-and-restore":
-        raise HTTPException(status_code=403, detail="Outage tests require explicit confirmation")
+        raise HTTPException(status_code=403, detail=_OUTAGE_CONFIRMATION_REQUIRED)
     trials = payload.get("requiredBaselineTrials")
     if isinstance(trials, bool) or not isinstance(trials, int):
         raise HTTPException(status_code=422, detail="requiredBaselineTrials must be an integer")
@@ -1147,7 +1151,7 @@ def execute_held_out_run(
 ) -> dict[str, Any]:
     """Explicit browser action: take each planned pair down (verified), run the workflow, restore."""
     if confirmation != "scale-test-services-to-zero-and-restore":
-        raise HTTPException(status_code=403, detail="Outage tests require explicit confirmation")
+        raise HTTPException(status_code=403, detail=_OUTAGE_CONFIRMATION_REQUIRED)
     try:
         return start_held_out_run(campaign_id, run_id, _campaign_application_url(payload), actor=actor)
     except OutageClusterError as err:

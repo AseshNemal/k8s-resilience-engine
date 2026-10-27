@@ -136,10 +136,11 @@ def test_record_gate_blocks_before_workload_io(problem):
     else:
         records.list_experiment_manifests()[0].campaign_snapshot['workflowName'] = 'tampered'
     calls = []
+    executions = InMemoryExecutionRepository()
     with pytest.raises(ValueError, match='record'):
         run_campaign_baseline_trial(campaign.campaign_id, 'http://localhost:8080',
             actor='test', campaign_repository=campaigns, analysis_repository=analyses,
-            repository=InMemoryExecutionRepository(), workload_runner=lambda *a, **kw: calls.append(1))
+            repository=executions, workload_runner=lambda *a, **kw: calls.append(1))
     assert calls == []
 
 
@@ -147,8 +148,10 @@ def test_record_gate_rejects_configuration_drift():
     from dataclasses import replace
     analyses = _analysis_repository()
     _, campaign = _campaigns(analyses)
+    changed = replace(campaign, workflow_name='changed')
+    analysis = analyses.get(campaign.analysis_session_id)
     with pytest.raises(ValueError, match='differs'):
-        records.require_experiment_record(replace(campaign, workflow_name='changed'), analyses.get(campaign.analysis_session_id))
+        records.require_experiment_record(changed, analysis)
 
 
 def test_recovery_is_recordable_before_any_intervention_trials():
@@ -890,16 +893,17 @@ def test_second_service_cannot_be_intervened_while_first_is_active() -> None:
         execution_repository_override=executions,
         now=NOW,
     )
+    activation = {
+        "targetService": "paymentservice",
+        "eventType": "activated",
+        "operatorConfirmed": True,
+        "evidence": "paymentservice unavailable",
+        "occurredAt": NOW.isoformat(),
+    }
     with pytest.raises(ValueError, match="Restore the active intervention"):
         record_intervention_event(
             campaign.campaign_id,
-            {
-                "targetService": "paymentservice",
-                "eventType": "activated",
-                "operatorConfirmed": True,
-                "evidence": "paymentservice unavailable",
-                "occurredAt": NOW.isoformat(),
-            },
+            activation,
             actor="operator",
             campaign_repository=campaigns,
             repository=events,

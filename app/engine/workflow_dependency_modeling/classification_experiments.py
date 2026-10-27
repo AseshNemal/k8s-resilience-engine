@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, replace
 from math import isclose
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 from app.engine.workflow_dependency_modeling.dependency_assessment_models import (
     AssessmentPolicy,
@@ -103,12 +103,12 @@ def _condition_classification(
     policy: AssessmentPolicy,
 ) -> ValidatedDependencyType:
     """Classify one business condition on its own cohorts."""
-    scoped_result: ServiceDependencyAssessment = replace(
+    scoped_result = cast(ServiceDependencyAssessment, replace(
         result, baseline=item.baseline, intervention=item.intervention, condition_results=(),
-    )
-    scoped_assessment: DependencyAssessment = replace(assessment, interventions=tuple(
-        cohort for cohort in assessment.interventions if cohort.condition_id == item.condition_id
     ))
+    scoped_assessment = cast(DependencyAssessment, replace(assessment, interventions=tuple(
+        cohort for cohort in assessment.interventions if cohort.condition_id == item.condition_id
+    )))
     return _summary_classification(scoped_result, scoped_assessment, policy)
 
 
