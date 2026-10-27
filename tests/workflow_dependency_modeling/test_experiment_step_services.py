@@ -35,13 +35,15 @@ def test_a_step_without_recorded_traces_refuses_the_experiment(monkeypatch):
         raise ValueError("No matching traces in this window.")
 
     monkeypatch.setattr(campaigns, "step_services_reader", reader)
+    probe = definition(("view", "GET", "/item/A1"), ("buy", "POST", "/checkout"))
     with pytest.raises(ValueError, match="'view'.*no recorded traces in the 24h window"):
-        campaigns.step_services(ANALYSIS, definition(("view", "GET", "/item/A1"), ("buy", "POST", "/checkout")))
+        campaigns.step_services(ANALYSIS, probe)
 
 
 def test_a_step_whose_path_needs_a_runtime_value_is_refused():
+    probe = definition(("open", "GET", "/order/{{order_id}}"), ("buy", "POST", "/checkout"))
     with pytest.raises(ValueError, match="captured at run time"):
-        campaigns.step_services(ANALYSIS, definition(("open", "GET", "/order/{{order_id}}"), ("buy", "POST", "/checkout")))
+        campaigns.step_services(ANALYSIS, probe)
 
 
 def test_a_single_step_workflow_needs_no_extra_queries(monkeypatch):

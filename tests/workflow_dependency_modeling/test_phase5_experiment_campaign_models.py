@@ -116,11 +116,12 @@ def test_new_campaign_requires_explicit_business_importance():
     analyses = InMemoryAnalysisSessionRepository()
     analysis = _analysis()
     analyses.create(analysis)
+    campaigns = InMemoryExperimentCampaignRepository()
     with pytest.raises(ValueError, match="criticality must be explicitly"):
         create_experiment_campaign({"analysisSessionId": analysis.session_id,
             "successContractConfirmed": True,
             "benchmarkProfile": "online_boutique_checkout_v0_10_1"}, actor="test",
-            repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses)
+            repository=campaigns, analysis_repository=analyses)
 
 
 def test_invalid_input_traces_cannot_disappear_from_the_campaign_readiness_gate():
@@ -269,12 +270,13 @@ def test_local_control_opt_in_rejects_unreviewed_or_nonlocal_inputs(problem):
         confirmation = "true"
     analyses = InMemoryAnalysisSessionRepository()
     analyses.create(analysis)
+    campaigns = InMemoryExperimentCampaignRepository()
     with pytest.raises(ValueError, match="Local demo|localDemoControlConfirmed"):
         create_experiment_campaign({"criticality": 0.5,
             "analysisSessionId": analysis.session_id, "successContractConfirmed": True,
             "workflowName": "Test", "businessOutcome": "Test",
             "executionDefinition": definition, "localDemoControlConfirmed": confirmation,
-        }, actor="test", repository=InMemoryExperimentCampaignRepository(), analysis_repository=analyses, now=now)
+        }, actor="test", repository=campaigns, analysis_repository=analyses, now=now)
 
 
 def test_service_derives_online_boutique_plan_from_observation() -> None:
@@ -333,6 +335,7 @@ def test_service_rejects_incomplete_trace_evidence() -> None:
     payload["traceQuality"]["excludedCount"] = 12
     analyses.create(WorkflowAnalysisSession.from_mapping(payload))
 
+    campaigns = InMemoryExperimentCampaignRepository()
     with pytest.raises(ValueError, match="complete trace evidence"):
         create_experiment_campaign(
             {"criticality": 0.5,
@@ -341,7 +344,7 @@ def test_service_rejects_incomplete_trace_evidence() -> None:
                 "benchmarkProfile": "online_boutique_checkout_v0_10_1",
             },
             actor="researcher",
-            repository=InMemoryExperimentCampaignRepository(),
+            repository=campaigns,
             analysis_repository=analyses,
         )
 

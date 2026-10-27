@@ -418,6 +418,7 @@ def test_trials_outside_confirmed_intervention_window_cannot_be_assessed() -> No
                 finished_at=NOW,
             ),
         )
+    assessments = InMemoryDependencyAssessmentRepository()
     with pytest.raises(ValueError, match="Intervention evidence is incomplete"):
         assess_experiment_campaign(
             "campaign:checkout1",
@@ -426,7 +427,7 @@ def test_trials_outside_confirmed_intervention_window_cannot_be_assessed() -> No
             analysis_repository=analyses,
             execution_repository_override=executions,
             event_repository=events,
-            repository=InMemoryDependencyAssessmentRepository(),
+            repository=assessments,
             now=NOW,
         )
 
@@ -443,6 +444,7 @@ def test_assessment_rejects_trial_from_another_experiment_record() -> None:
             experiment_record_digest="sha256:" + "0" * 64,
         ),
     )
+    assessments = InMemoryDependencyAssessmentRepository()
     with pytest.raises(ValueError, match="does not match the frozen experiment record"):
         assess_experiment_campaign(
             "campaign:checkout1",
@@ -451,7 +453,7 @@ def test_assessment_rejects_trial_from_another_experiment_record() -> None:
             analysis_repository=analyses,
             execution_repository_override=executions,
             event_repository=events,
-            repository=InMemoryDependencyAssessmentRepository(),
+            repository=assessments,
             now=NOW,
         )
 
