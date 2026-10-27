@@ -19,10 +19,27 @@ def trace_locator(analysis: Any, trace_id: str) -> str:
     return analysis.trace_source.endpoint.rstrip("/") + path[analysis.trace_source.kind.value] + trace_id
 
 
+def _trace_ready(
+    matches: list[dict[str, Any]], run: WorkflowRunResult, definition: WorkflowProbeDefinition,
+    trace_id: str, outage_target: str | tuple[str, ...] | None,
+) -> bool:
+    if len(matches) != 1:
+        return False
+    quality_ok = (
+        validate_trace_quality(matches).valid_count == 1
+        or expected_outage_trace_quality(matches[0], outage_target)
+    )
+    terminal_ok = (
+        trace_id != run.trace_id or not run.business_success
+        or trace_has_terminal_evidence(matches[0], definition.success_condition)
+    )
+    return quality_ok and terminal_ok
+
+
 def collect_run_traces(
     run: WorkflowRunResult, definition: WorkflowProbeDefinition, analysis: Any,
     fetcher: Callable, sleeper: Callable, delays: tuple[float, ...],
-    outage_target: str | None,
+    outage_target: str | tuple[str, ...] | None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Poll pending action traces within one shared collection budget.
 
@@ -41,18 +58,7 @@ def collect_run_traces(
         for trace_id in sorted(pending):
             matches = [t for t in fetcher(analysis, trace_id) if t.get("traceID") == trace_id]
             collected[trace_id] = matches
-            if len(matches) != 1:
-                continue
-            trace = matches[0]
-            quality_ok = (
-                validate_trace_quality(matches).valid_count == 1
-                or expected_outage_trace_quality(trace, outage_target)
-            )
-            terminal_ok = (
-                trace_id != run.trace_id or not run.business_success
-                or trace_has_terminal_evidence(trace, definition.success_condition)
-            )
-            if quality_ok and terminal_ok:
+            if _trace_ready(matches, run, definition, trace_id, outage_target):
                 pending.remove(trace_id)
         if not pending:
             break
@@ -78,10 +84,11 @@ def capture_step_evidence(
             evidence.append(WorkflowStepEvidence(step.name, step.method, step.path, False))
             continue
         matches = collected.get(result.trace_id, [])
-        correlation = (
-            CorrelationStatus.MATCHED if len(matches) == 1
-            else CorrelationStatus.AMBIGUOUS if matches else CorrelationStatus.MISSING
-        )
+        correlation = CorrelationStatus.MISSING
+        if len(matches) == 1:
+            correlation = CorrelationStatus.MATCHED
+        elif matches:
+            correlation = CorrelationStatus.AMBIGUOUS
         snapshot = TraceEvidenceSnapshot.from_trace(
             matches[0], trace_id=result.trace_id,
             source_locator=trace_locator(analysis, result.trace_id), captured_at=captured_at,
@@ -96,7 +103,7 @@ def capture_step_evidence(
     return tuple(evidence)
 
 
-def _step_blockers(step: Any, outage_target: str | None) -> list[str]:
+def _step_blockers(step: Any, outage_target: str | tuple[str, ...] | None) -> list[str]:
     blockers = []
     snapshot = step.evidence_snapshot
     if step.assertions and step.succeeded != all(item.passed for item in step.assertions):
@@ -112,7 +119,7 @@ def _step_blockers(step: Any, outage_target: str | None) -> list[str]:
 
 
 def sequence_evidence_blockers(
-    outcome: ExecutionOutcome, outage_target: str | None = None,
+    outcome: ExecutionOutcome, outage_target: str | tuple[str, ...] | None = None,
 ) -> list[str]:
     """Legacy absence stays explicit; captured sequences must pass every action gate."""
     if outcome.step_evidence is None:

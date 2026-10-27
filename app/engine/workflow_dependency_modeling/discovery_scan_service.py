@@ -77,7 +77,7 @@ class DiscoveryScan:
                 'truncated': self.state != 'complete', 'workflows': workflows}
 
 
-def _merge(scan: DiscoveryScan, batch: list[dict]) -> None:
+def _fresh_scan_traces(scan: DiscoveryScan, batch: list[dict]) -> tuple[list[dict], set[str]]:
     fresh = []
     batch_ids = set()
     for trace in batch:
@@ -87,6 +87,11 @@ def _merge(scan: DiscoveryScan, batch: list[dict]) -> None:
         if trace_id not in scan.seen and trace_id not in batch_ids:
             batch_ids.add(trace_id)
             fresh.append(trace)
+    return fresh, batch_ids
+
+
+def _merge(scan: DiscoveryScan, batch: list[dict]) -> None:
+    fresh, batch_ids = _fresh_scan_traces(scan, batch)
     candidates = _candidates(fresh)
     scan.seen.update(batch_ids)
     for candidate in candidates:
@@ -101,7 +106,98 @@ def _merge(scan: DiscoveryScan, batch: list[dict]) -> None:
         for name in ('validCount', 'partialCount', 'invalidCount'):
             old['traceQuality'][name] += candidate['traceQuality'][name]
         valid = old['traceQuality']['validCount']
-        old['evidenceStatus'] = 'complete' if valid == old['traceCount'] else 'incomplete' if valid else 'unusable'
+        status = 'unusable'
+        if valid == old['traceCount']:
+            status = 'complete'
+        elif valid:
+            status = 'incomplete'
+        old['evidenceStatus'] = status
+
+
+def _expire_scans() -> None:
+    cutoff = time.monotonic() - _TTL_SECONDS
+    expired = [key for key, old in _scans.items() if old.touched < cutoff and not old.lock.locked()]
+    for key in expired:
+        del _scans[key]
+
+
+def _registered_scan(source, binding: str, endpoint: str, lookback: str,
+                     page_size: int, scan_id: str | None, cancel: bool,
+                     now_us: int | None) -> tuple[str, DiscoveryScan]:
+    with _registry_lock:
+        _expire_scans()
+        if scan_id is not None:
+            scan = _scans.get(scan_id)
+            if scan is None or scan.binding != binding:
+                raise ValueError('Discovery scan expired or does not match these connection settings; start a new scan')
+            return scan_id, scan
+        if cancel:
+            raise ValueError('Cancelling discovery requires a scanId')
+        active = sum(item.state == 'scanning' for item in _scans.values())
+        if active >= _MAX_ACTIVE_SCANS:
+            raise ValueError('Other discovery scans are active; stop one before starting another')
+        # Closed sessions are only useful to clients briefly; bound registry growth.
+        expired = [key for key, old in _scans.items()
+                   if old.state != 'scanning' and old.touched < time.monotonic() - 60 and not old.lock.locked()]
+        for key in expired:
+            del _scans[key]
+        scan_id = uuid4().hex
+        end = now_us if now_us is not None else time.time_ns() // 1000
+        start = end - lookback_to_ms(lookback) * 1000
+        scan = DiscoveryScan(binding, endpoint, lookback, page_size, start, end, [])
+        scan.resolution_us = getattr(source, 'discovery_resolution_us', 1)
+        _scans[scan_id] = scan
+        return scan_id, scan
+
+
+def _load_scan_services(scan: DiscoveryScan, source) -> bool:
+    if scan.services or scan.requests:
+        return True
+    try:
+        excluded = _excluded_services(None)
+        scan.services = sorted({name for name in source.list_services() if isinstance(name, str) and name.strip() and name.lower() not in excluded})
+        scan.pending.extend((name, scan.start_us, scan.end_us) for name in scan.services)
+    except ConnectionError:
+        scan.gaps.append({'service': '*', 'reason': 'service_listing_failed'})
+        scan.state = 'partial'
+        return False
+    return True
+
+
+def _split_full_window(scan: DiscoveryScan, service: str, start: int, end: int, resolution: int) -> None:
+    if end - start <= resolution:
+        scan.gaps.append({'service': service, 'startMicros': start, 'endMicros': end, 'reason': 'full_batch_at_backend_time_resolution'})
+        return
+    # Align the split to the backend's resolution and overlap the boundary.
+    middle = ((start + end) // 2 // resolution) * resolution
+    if not start < middle < end:
+        middle = start + resolution
+    scan.pending.appendleft((service, middle, end))
+    scan.pending.appendleft((service, start, middle))
+
+
+def _query_scan_window(scan: DiscoveryScan, source) -> None:
+    service, start, end = scan.pending.popleft()
+    query = getattr(source, 'fetch_trace_window', None)
+    if query is None:
+        scan.gaps.append({'service': service, 'startMicros': start, 'endMicros': end, 'reason': 'fixed_window_search_unsupported'})
+        scan.state = 'partial'
+        return
+    scan.requests += 1
+    scan.scanned.add(service)
+    try:
+        batch = query(service, start, end, scan.page_size)
+        if not isinstance(batch, list):
+            raise ConnectionError('Invalid trace search response')
+        _merge(scan, batch)
+    except (ConnectionError, ValueError, TypeError):
+        scan.gaps.append({'service': service, 'startMicros': start, 'endMicros': end, 'reason': 'trace_query_failed'})
+        scan.state = 'partial'
+        return
+    if len(batch) >= scan.page_size:
+        _split_full_window(scan, service, start, end, getattr(source, 'discovery_resolution_us', 1))
+    if not scan.pending:
+        scan.state = 'partial' if scan.gaps else 'complete'
 
 
 def advance_discovery_scan(source, *, binding: str, endpoint: str, lookback: str,
@@ -110,32 +206,7 @@ def advance_discovery_scan(source, *, binding: str, endpoint: str, lookback: str
     """Start/advance/cancel an opaque scan bound to its approved connection inputs."""
     if not isinstance(page_size, int) or isinstance(page_size, bool) or not 1 <= page_size <= 1000:
         raise ValueError('Discovery query batch size must be between 1 and 1000')
-    with _registry_lock:
-        cutoff = time.monotonic() - _TTL_SECONDS
-        for key, old in list(_scans.items()):
-            if old.touched < cutoff and not old.lock.locked():
-                del _scans[key]
-        if scan_id is not None:
-            scan = _scans.get(scan_id)
-            if scan is None or scan.binding != binding:
-                raise ValueError('Discovery scan expired or does not match these connection settings; start a new scan')
-        else:
-            if cancel:
-                raise ValueError('Cancelling discovery requires a scanId')
-            active = sum(item.state == 'scanning' for item in _scans.values())
-            if active >= _MAX_ACTIVE_SCANS:
-                raise ValueError('Other discovery scans are active; stop one before starting another')
-            # Closed sessions are only useful to clients briefly; bound registry growth.
-            expired = [key for key, old in _scans.items()
-                       if old.state != 'scanning' and old.touched < time.monotonic() - 60 and not old.lock.locked()]
-            for key in expired:
-                del _scans[key]
-            scan_id = uuid4().hex
-            end = now_us if now_us is not None else time.time_ns() // 1000
-            start = end - lookback_to_ms(lookback) * 1000
-            scan = DiscoveryScan(binding, endpoint, lookback, page_size, start, end, [])
-            scan.resolution_us = getattr(source, 'discovery_resolution_us', 1)
-            _scans[scan_id] = scan
+    scan_id, scan = _registered_scan(source, binding, endpoint, lookback, page_size, scan_id, cancel, now_us)
     if not scan.lock.acquire(blocking=False):
         raise ValueError('A discovery batch is already running; wait for it before continuing')
     try:
@@ -144,50 +215,11 @@ def advance_discovery_scan(source, *, binding: str, endpoint: str, lookback: str
             if scan.state == 'scanning':
                 scan.state = 'cancelled'
             return scan.report(scan_id)
-        if scan.state != 'scanning':
+        if scan.state != 'scanning' or not _load_scan_services(scan, source):
             return scan.report(scan_id)
-        if not scan.services and not scan.requests:
-            try:
-                excluded = _excluded_services(None)
-                scan.services = sorted({name for name in source.list_services() if isinstance(name, str) and name.strip() and name.lower() not in excluded})
-                scan.pending.extend((name, scan.start_us, scan.end_us) for name in scan.services)
-            except ConnectionError:
-                scan.gaps.append({'service': '*', 'reason': 'service_listing_failed'})
-                scan.state = 'partial'
-                return scan.report(scan_id)
-        if not scan.pending:
-            scan.state = 'partial' if scan.gaps else 'complete'
-            return scan.report(scan_id)
-        service, start, end = scan.pending.popleft()
-        query = getattr(source, 'fetch_trace_window', None)
-        if query is None:
-            scan.gaps.append({'service': service, 'startMicros': start, 'endMicros': end, 'reason': 'fixed_window_search_unsupported'})
-            scan.state = 'partial'
-            return scan.report(scan_id)
-        scan.requests += 1
-        scan.scanned.add(service)
-        try:
-            batch = query(service, start, end, scan.page_size)
-            if not isinstance(batch, list):
-                raise ConnectionError('Invalid trace search response')
-            _merge(scan, batch)
-        except (ConnectionError, ValueError, TypeError):
-            scan.gaps.append({'service': service, 'startMicros': start, 'endMicros': end, 'reason': 'trace_query_failed'})
-            scan.state = 'partial'
-            return scan.report(scan_id)
-        if len(batch) >= scan.page_size:
-            resolution = getattr(source, 'discovery_resolution_us', 1)
-            if end - start <= resolution:
-                scan.gaps.append({'service': service, 'startMicros': start, 'endMicros': end, 'reason': 'full_batch_at_backend_time_resolution'})
-            else:
-                # Align the split to the backend's resolution, and overlap at the
-                # boundary. Never skip timestamps; seen IDs remove duplicates.
-                middle = ((start + end) // 2 // resolution) * resolution
-                if not start < middle < end:
-                    middle = start + resolution
-                scan.pending.appendleft((service, middle, end))
-                scan.pending.appendleft((service, start, middle))
-        if not scan.pending:
+        if scan.pending:
+            _query_scan_window(scan, source)
+        else:
             scan.state = 'partial' if scan.gaps else 'complete'
         return scan.report(scan_id)
     finally:

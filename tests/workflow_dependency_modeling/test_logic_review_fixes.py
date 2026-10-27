@@ -32,13 +32,15 @@ def test_a_full_page_is_split_until_every_trace_in_the_window_is_read():
     now = 10_000_000_000
     source = WindowSource([now - offset for offset in range(1, 2500)])
     traces = read_trace_window(source, "web", "1h", page_size=1000, now_us=now)
-    assert len(traces) == 2499 and source.queries > 1
+    assert len(traces) == 2499
+    assert source.queries > 1
 
 
 def test_a_window_that_cannot_be_read_completely_is_refused():
     now = 10_000_000_000
+    source = WindowSource([now - offset for offset in range(1, 5000)])
     with pytest.raises(ValueError, match="shorter time window"):
-        read_trace_window(WindowSource([now - offset for offset in range(1, 5000)]), "web", "1h", page_size=10,
+        read_trace_window(source, "web", "1h", page_size=10,
                           max_queries=4, now_us=now)
 
 

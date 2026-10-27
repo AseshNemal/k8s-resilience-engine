@@ -274,24 +274,33 @@ class WorkflowStepEvidence:
         ):
             raise ComponentDataError("Step statusCode must be an HTTP status or null")
         if self.attempted:
-            if not self.trace_id or self.started_at is None or self.finished_at is None:
-                raise ComponentDataError("Attempted workflow steps require trace identity and timestamps")
-            if self.started_at.tzinfo is None or self.finished_at.tzinfo is None:
-                raise ComponentDataError("Step timestamps must include a timezone")
-            if self.finished_at < self.started_at:
-                raise ComponentDataError("Step cannot finish before it starts")
-            if not isinstance(self.succeeded, bool):
-                raise ComponentDataError("Attempted workflow steps require an assertion outcome")
-            if self.correlation_status is CorrelationStatus.NOT_ATTEMPTED:
-                raise ComponentDataError("Attempted workflow steps require a correlation result")
-        elif (
+            self._validate_attempted_step()
+        elif self._contains_execution_evidence():
+            raise ComponentDataError("Unattempted steps cannot contain execution evidence")
+        self._validate_snapshot()
+
+    def _validate_attempted_step(self) -> None:
+        if not self.trace_id or self.started_at is None or self.finished_at is None:
+            raise ComponentDataError("Attempted workflow steps require trace identity and timestamps")
+        if self.started_at.tzinfo is None or self.finished_at.tzinfo is None:
+            raise ComponentDataError("Step timestamps must include a timezone")
+        if self.finished_at < self.started_at:
+            raise ComponentDataError("Step cannot finish before it starts")
+        if not isinstance(self.succeeded, bool):
+            raise ComponentDataError("Attempted workflow steps require an assertion outcome")
+        if self.correlation_status is CorrelationStatus.NOT_ATTEMPTED:
+            raise ComponentDataError("Attempted workflow steps require a correlation result")
+
+    def _contains_execution_evidence(self) -> bool:
+        return bool(
             self.trace_id is not None or self.started_at is not None
             or self.finished_at is not None or self.status_code is not None
             or self.succeeded is not None or self.evidence_snapshot is not None
             or self.correlation_status is not CorrelationStatus.NOT_ATTEMPTED
             or self.assertions
-        ):
-            raise ComponentDataError("Unattempted steps cannot contain execution evidence")
+        )
+
+    def _validate_snapshot(self) -> None:
         if self.evidence_snapshot is not None and (
             self.evidence_snapshot.trace_id != self.trace_id
             or self.correlation_status is not CorrelationStatus.MATCHED
