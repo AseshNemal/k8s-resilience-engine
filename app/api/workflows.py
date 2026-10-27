@@ -133,7 +133,12 @@ router = APIRouter(
 )
 
 
-@router.post("/analyze", response_model=WorkflowAnalysisResult, response_model_by_alias=True)
+@router.post(
+    "/analyze",
+    response_model=WorkflowAnalysisResult,
+    response_model_by_alias=True,
+    responses={422: {"description": "Workflow or trace evidence is invalid"}},
+)
 def analyze_uploaded_workflow(payload: WorkflowAnalysisRequest) -> WorkflowAnalysisResult:
     """Analyze caller-supplied workflow and traces without loading sample answers."""
     try:
@@ -560,7 +565,7 @@ def read_condition_scoped_workflow_graph(
         return graph
     except DependencyAssessmentNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
-    except (DependencyAssessmentNotApprovableError, ValueError) as err:
+    except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
 
 
@@ -768,6 +773,7 @@ def preview_analysis_workflow_probe(
         404: {"description": "Analysis session was not found"},
         409: {"description": "Experiment campaign already exists"},
         422: {"description": "Experiment plan is invalid or unsafe"},
+        503: {"description": "The trace backend could not be reached"},
     },
 )
 def create_workflow_experiment_campaign(
@@ -854,7 +860,10 @@ def read_workflow_experiment_manifest(manifest_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
-@router.get("/experiment-campaigns/{campaign_id}/observed-graph")
+@router.get(
+    "/experiment-campaigns/{campaign_id}/observed-graph",
+    responses={404: {"description": "Experiment campaign was not found"}},
+)
 def read_campaign_observed_graph(campaign_id: str) -> dict[str, Any]:
     try:
         return get_campaign_observed_graph(campaign_id)

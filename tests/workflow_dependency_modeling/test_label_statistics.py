@@ -45,7 +45,8 @@ def test_enough_runs_support_the_label():
 
 def test_unresolved_labels_get_intervals_but_no_verdict():
     result = stats.label_statistics("insufficient_evidence", cohort(3, 5), cohort(2, 5), AssessmentPolicy())
-    assert result["supportedAtConfidence"] is None and result["effectInterval"] is not None
+    assert result["supportedAtConfidence"] is None
+    assert result["effectInterval"] is not None
 
 
 def test_the_confidence_level_is_a_backend_setting(monkeypatch):

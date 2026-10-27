@@ -167,6 +167,34 @@ def classify_cohort_effect(
     return label, effect
 
 
+def _apply_decision(
+    effect: float,
+    effect_label: ValidatedDependencyType,
+    policy: AssessmentPolicy,
+    reasons: list[str],
+    noun: str,
+) -> ValidatedDependencyType:
+    """Turn a computed effect into the final label once every gate has passed, recording why.
+
+    ``noun`` is "intervention" for a service and "edge intervention" for a directed call.
+    """
+    scope = noun.removesuffix("intervention")
+    if effect >= policy.mandatory_effect_threshold:
+        if effect_label is ValidatedDependencyType.MANDATORY:
+            reasons.append(f"Confirmed {noun} produced a repeatable workflow failure effect")
+            return effect_label
+        reasons.append(f"Large {scope}failure effect conflicts with successful intervention executions")
+        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+    if effect < -policy.optional_effect_tolerance:
+        reasons.append("Intervention improved success materially; investigate confounding before classification")
+        return ValidatedDependencyType.INSUFFICIENT_EVIDENCE
+    if effect <= policy.optional_effect_tolerance:
+        reasons.append(f"Confirmed {noun} did not materially change workflow success")
+    else:
+        reasons.append(f"{noun.capitalize()} caused partial degradation below the mandatory threshold")
+    return effect_label
+
+
 def assess_service_dependency(
     service_name: str,
     baseline_records: list[ExecutionOutcome],
@@ -218,28 +246,7 @@ def assess_service_dependency(
 
     classification = ValidatedDependencyType.INSUFFICIENT_EVIDENCE
     if not gate_failed and effect is not None:
-        if effect >= policy.mandatory_effect_threshold:
-            if effect_label is ValidatedDependencyType.MANDATORY:
-                classification = effect_label
-                reasons.append(
-                    "Confirmed intervention produced a repeatable workflow failure effect"
-                )
-            else:
-                reasons.append(
-                    "Large failure effect conflicts with successful intervention executions"
-                )
-        elif effect < -policy.optional_effect_tolerance:
-            reasons.append("Intervention improved success materially; investigate confounding before classification")
-        elif effect <= policy.optional_effect_tolerance:
-            classification = effect_label
-            reasons.append(
-                "Confirmed intervention did not materially change workflow success"
-            )
-        else:
-            classification = effect_label
-            reasons.append(
-                "Intervention caused partial degradation below the mandatory threshold"
-            )
+        classification = _apply_decision(effect, effect_label, policy, reasons, "intervention")
 
     return ServiceDependencyAssessment(
         service_name=service_name,
@@ -301,28 +308,7 @@ def assess_edge_dependency(
 
     classification = ValidatedDependencyType.INSUFFICIENT_EVIDENCE
     if not reasons and effect is not None:
-        if effect >= policy.mandatory_effect_threshold:
-            if effect_label is ValidatedDependencyType.MANDATORY:
-                classification = effect_label
-                reasons.append(
-                    "Confirmed edge intervention produced a repeatable workflow failure effect"
-                )
-            else:
-                reasons.append(
-                    "Large edge failure effect conflicts with successful intervention executions"
-                )
-        elif effect < -policy.optional_effect_tolerance:
-            reasons.append("Intervention improved success materially; investigate confounding before classification")
-        elif effect <= policy.optional_effect_tolerance:
-            classification = effect_label
-            reasons.append(
-                "Confirmed edge intervention did not materially change workflow success"
-            )
-        else:
-            classification = effect_label
-            reasons.append(
-                "Edge intervention caused partial degradation below the mandatory threshold"
-            )
+        classification = _apply_decision(effect, effect_label, policy, reasons, "edge intervention")
 
     return EdgeDependencyAssessment(
         source_service=source_service,

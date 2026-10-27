@@ -72,7 +72,8 @@ def test_traces_of_recorded_outage_runs_are_set_aside_not_judged_broken():
     evidence = get_live_evidence("web", "POST /orders", "http://jaeger.test", 1000, "1h", ListSource(traces),
                                  set_aside_trace_ids=frozenset({"outage1"}))
     assert evidence["setAsideOutageTraceCount"] == 1
-    assert evidence["traceCount"] == 2 and evidence["traceQuality"]["excludedCount"] == 0
+    assert evidence["traceCount"] == 2
+    assert evidence["traceQuality"]["excludedCount"] == 0
     unfiltered = get_live_evidence("web", "POST /orders", "http://jaeger.test", 1000, "1h", ListSource(traces))
     assert unfiltered["traceQuality"]["excludedCount"] == 1
 
