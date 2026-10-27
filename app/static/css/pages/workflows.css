@@ -74,7 +74,7 @@
 .workflow-workspace .checkbox-label { display: flex; align-items: flex-start; font-weight: 400; line-height: 1.5; }
 .workflow-workspace .checkbox-label input { order: -1; }
 .workflow-workspace button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-small); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; line-height: 1.4; }
-.workflow-workspace button:disabled { cursor: wait; opacity: .55; }
+.workflow-workspace button:disabled { cursor: default; opacity: .55; }
 .workflow-workspace .experiment-button { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
 .workflow-workspace .experiment-button:hover:not(:disabled) { background: var(--color-primary-dark); }
 .workflow-workspace .secondary-button { background: var(--color-surface); color: var(--color-text); }
@@ -97,7 +97,7 @@
 .workflow-workspace .workspace-eyebrow { color: var(--color-text-muted); font-size: 13px; margin-top: 0; }
 .workspace-state { display: inline-block; font-size: 13px; font-weight: 600; border-radius: 4px; padding: 6px 10px; color: var(--tint-teal-fg); background: var(--tint-teal-bg); }
 .saved-workflows { display: grid; gap: 10px; max-height: 65vh; overflow-y: auto; padding: 3px; }
-.saved-workflows button { display: block; text-align: left; width: 100%; padding: 14px !important; overflow-wrap: anywhere; }
+.workflow-workspace .saved-workflows button { display: block; text-align: left; width: 100%; padding: 14px; overflow-wrap: anywhere; }
 .saved-workflows button > * { display: block; }
 .saved-workflows button span { margin: 5px 0; font-weight: 400; font-size: 13px; }
 .saved-workflows button small { color: var(--color-text-muted); font-weight: 400; font-size: 12px; }
@@ -105,18 +105,16 @@
 .workspace-table-scroll { max-width: 100%; overflow-x: auto; margin: 20px 0; }
 .workspace-table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
 .workspace-table th, .workspace-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border); overflow-wrap: normal; word-break: normal; vertical-align: top; }
-.workspace-table th { background: var(--color-surface-soft); font-weight: 600; }
+.workspace-table th { background: var(--color-surface-soft); font-weight: 600; white-space: nowrap; font-size: 13px; color: var(--color-text); }
 .intervention-service summary > strong { margin-right: 12px; }
 .intervention-service .workspace-actions { margin-top: 16px; }
 .workflow-workspace ul { padding-left: 24px; line-height: 1.7; font-size: 14px; }
 .workflow-workspace pre { max-height: 400px; overflow: auto; font-size: 12px; padding: 16px; background: var(--color-surface-soft); }
 .workflow-workspace .is-error { color: var(--tint-red-fg); }
 .workflow-workspace :is(button, input, select, textarea, summary):focus-visible { outline: 3px solid var(--color-primary); outline-offset: 3px; }
-.workflow-workspace [hidden] { display: none !important; }
 .workflow-workspace output { display: block; }
 @media (max-width: 1100px) { .workspace-layout { grid-template-columns: 1fr; } .saved-workflows { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); max-height: 220px; } }
 @media (max-width: 650px) { .workspace-header { align-items: flex-start; flex-direction: column; } .workspace-card { padding: 20px 16px; } .workspace-form { grid-template-columns: 1fr; } .workflow-workspace :is(input, select, textarea) { font-size: 16px; } .workspace-section-heading { flex-wrap: wrap; } .workspace-table th, .workspace-table td { padding: 10px 8px; } .topbar__title { max-width: 50vw; } }
-@media (prefers-reduced-motion: reduce) { .workflow-workspace * { transition: none !important; } }
 
 .workflow-dag-container {
     width: 100%;
@@ -156,8 +154,8 @@
 }
 
 .dag-edge-path.is-highlighted {
-    stroke: var(--color-primary) !important;
-    stroke-width: 3.5 !important;
+    stroke: var(--color-primary);
+    stroke-width: 3.5;
 }
 
 .dag-edge-path.is-dimmed {
@@ -253,7 +251,6 @@
 .execution-preview { background: var(--color-surface-soft); }
 .execution-steps { padding-left: 24px; }
 .execution-steps li { margin-block: 12px; overflow-wrap: anywhere; line-height: 1.6; }
-.workflow-workspace button:disabled { cursor: default; }
 @media (max-width: 600px) { .request-section, .execution-preview { padding: 16px; } .request-row { grid-template-columns: minmax(0, 1fr); } }
 
 /* "Find workflows": one button that checks the trace service, offers to start it, and lists what it recorded. */
@@ -299,12 +296,7 @@
     font-size: 12px;
 }
 
-.guided-find [hidden] {
-    display: none !important;
-}
-
 /* Readable tables: headers never break inside a word; numbers line up. */
-.workspace-table th { white-space: nowrap; font-size: 13px; color: var(--color-text); }
 .workspace-table td { font-variant-numeric: tabular-nums; }
 .workspace-table tbody tr:hover td, .workspace-table tr:hover td { background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
 
@@ -393,8 +385,12 @@ button.wd-kpi:hover, button.wd-kpi.is-active { background: color-mix(in srgb, va
 .wd-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .wd-app-row { margin: 12px 0 18px; padding-bottom: 18px; border-bottom: 1px solid var(--color-border); }
 .wd-app-controls { display: flex; gap: 12px; align-items: stretch; margin-top: 8px; }
-.wd-app-controls input { flex: 1 1 auto; margin-top: 0 !important; }
+.workflow-workspace .wd-app-controls input { flex: 1 1 auto; margin-top: 0; }
 .wd-app-controls button { flex: 0 0 auto; white-space: nowrap; }
 .wd-app-row small { display: block; margin-top: 6px; color: var(--color-text-muted); font-size: 13px; }
 @media (max-width: 650px) { .wd-app-controls { flex-direction: column; } }
 .wd-action-slot { display: contents; }
+
+/* Workspace state and motion preferences outrank component display/transition rules. */
+#workflow-workspace [hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { #workflow-workspace * { transition: none; } }

@@ -10,7 +10,8 @@ COPY exporter-connection.patch /tmp/exporter-connection.patch
 RUN git apply --check /tmp/exporter-connection.patch \
     && git apply /tmp/exporter-connection.patch
 
-FROM golang:1.22.5-alpine@sha256:8c9183f715b0b4eca05b8b3dbf59766aaedb41ec07477b132ee2891ac0110a07 AS builder
+# Go 1.22.5 on Alpine, pinned by digest.
+FROM golang@sha256:8c9183f715b0b4eca05b8b3dbf59766aaedb41ec07477b132ee2891ac0110a07 AS builder
 WORKDIR /src
 COPY --from=source /source/src/frontend/ ./
 RUN go mod download && go mod verify
