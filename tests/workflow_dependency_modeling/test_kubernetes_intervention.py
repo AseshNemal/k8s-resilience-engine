@@ -102,7 +102,8 @@ def test_a_cohort_takes_the_service_down_verifies_it_runs_trials_then_restores(c
 
     assert scaler.log == ["opt-in", "take_down", "restore"]
     assert [kind for kind, _ in events] == ["activated", "restored"]
-    assert "specReplicas=0" in events[0][1] and "matchingPods=0" in events[0][1]
+    assert "specReplicas=0" in events[0][1]
+    assert "matchingPods=0" in events[0][1]
     assert "readyReplicas=1" in events[1][1]
     # Every trial carries the backend-verified outage marker for exactly this service.
     assert trials == ["emailservice", "emailservice"]
@@ -126,8 +127,10 @@ def test_a_service_that_never_goes_down_is_restored_and_no_trial_runs(campaign):
     with pytest.raises(OutageClusterError, match="did not go down"):
         run(scaler)
 
-    assert trials == [] and [kind for kind, _ in events] == []
-    assert scaler.log[-1] == "restore" and scaler.state.restored
+    assert trials == []
+    assert [kind for kind, _ in events] == []
+    assert scaler.log[-1] == "restore"
+    assert scaler.state.restored
 
 
 def test_a_failing_trial_still_restores_the_service_and_records_recovery(campaign, monkeypatch):

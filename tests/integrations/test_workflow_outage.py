@@ -78,8 +78,9 @@ def scaler(tmp_path, api):
 
 
 def test_a_namespace_without_the_opt_in_label_is_refused(tmp_path):
+    cluster = scaler(tmp_path, FakeApi(opted_in=False))
     with pytest.raises(OutageNotPermittedError, match="has not opted in"):
-        scaler(tmp_path, FakeApi(opted_in=False)).require_opt_in()
+        cluster.require_opt_in()
 
 
 def test_take_down_records_the_replica_count_and_is_conditional_on_the_version_read(tmp_path):
@@ -87,15 +88,19 @@ def test_take_down_records_the_replica_count_and_is_conditional_on_the_version_r
     cluster = scaler(tmp_path, api)
     cluster.require_opt_in()
     before = cluster.inspect("emailservice")
-    assert before.restored and not before.down and before.pod_count == 2
+    assert before.restored
+    assert not before.down
+    assert before.pod_count == 2
 
     cluster.take_down(before)
 
     assert api.patches == [{"metadata": {"resourceVersion": "7", "annotations": {ORIGINAL_REPLICAS_ANNOTATION: "2"}},
                             "spec": {"replicas": 0}}]
     after = cluster.inspect("emailservice")
-    assert after.down and after.original_replicas == 2
-    assert "specReplicas=0" in after.evidence() and "matchingPods=0" in after.evidence()
+    assert after.down
+    assert after.original_replicas == 2
+    assert "specReplicas=0" in after.evidence()
+    assert "matchingPods=0" in after.evidence()
     assert cluster.interrupted() == ["emailservice"]
 
 

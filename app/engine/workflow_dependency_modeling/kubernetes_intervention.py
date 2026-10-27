@@ -80,13 +80,11 @@ def outage_scaler() -> KubernetesDeploymentScaler:
 def _wait(scaler: KubernetesDeploymentScaler, service: str, condition: Callable[[DeploymentState], bool],
           timeout: float, sleeper: Callable[[float], None], clock: Callable[[], float]) -> DeploymentState:
     deadline = clock() + timeout
-    while True:
-        state = scaler.inspect(service)
-        if condition(state):
-            return state
-        if clock() >= deadline:
-            return state
+    state = scaler.inspect(service)
+    while not condition(state) and clock() < deadline:
         sleeper(_POLL_SECONDS)
+        state = scaler.inspect(service)
+    return state
 
 
 def _now() -> str:

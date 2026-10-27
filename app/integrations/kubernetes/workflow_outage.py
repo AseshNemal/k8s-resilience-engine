@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import ssl
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import quote, urlencode
@@ -77,7 +76,7 @@ class _Client(rest.RestClient):
         try:
             response = self._http.request("PATCH", path, content=json.dumps(body), extensions=extensions,
                                           headers={"Content-Type": STRATEGIC_MERGE})
-        except (httpx.TransportError, ssl.SSLError, OSError) as error:
+        except (httpx.TransportError, OSError) as error:  # ssl.SSLError is an OSError
             raise rest.TransportFailure(type(error).__name__) from None
         if not 200 <= response.status_code < 300:
             raise rest.HttpStatusError(response.status_code)
@@ -85,6 +84,20 @@ class _Client(rest.RestClient):
             return response.json()
         except ValueError:
             raise rest.TransportFailure("InvalidResponse") from None
+
+
+def _plain_selector(name: str, spec: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw = spec.get("selector") or {}
+    selector = raw.get("matchLabels") or {}
+    if not isinstance(selector, Mapping) or not selector or raw.get("matchExpressions"):
+        # Without a plain label selector the pods cannot be counted reliably, so the outage could not be verified.
+        raise OutageNotPermittedError(f"Deployment {name} has no plain label selector; its pods cannot be verified")
+    return selector
+
+
+def _recorded_original(meta: Mapping[str, Any]) -> int | None:
+    raw = (meta.get("annotations") or {}).get(ORIGINAL_REPLICAS_ANNOTATION)
+    return int(raw) if isinstance(raw, str) and raw.isdigit() else None
 
 
 def _int(value: Any) -> int:
@@ -154,14 +167,10 @@ class KubernetesDeploymentScaler:
         body = self._call("GET", self._deployment_path(name)) or {}
         meta = body.get("metadata") or {}
         spec = body.get("spec") or {}
-        selector = (spec.get("selector") or {}).get("matchLabels") or {}
-        if not isinstance(selector, Mapping) or not selector or (spec.get("selector") or {}).get("matchExpressions"):
-            # Without a plain label selector the pods cannot be counted reliably, so the outage could not be verified.
-            raise OutageNotPermittedError(f"Deployment {name} has no plain label selector; its pods cannot be verified")
+        selector = _plain_selector(name, spec)
         query = urlencode({"labelSelector": ",".join(f"{key}={value}" for key, value in sorted(selector.items()))})
         pods = self._call("GET", f"/api/v1/namespaces/{quote(self.namespace, safe='')}/pods?{query}") or {}
-        raw_original = (meta.get("annotations") or {}).get(ORIGINAL_REPLICAS_ANNOTATION)
-        original = int(raw_original) if isinstance(raw_original, str) and raw_original.isdigit() else None
+        original = _recorded_original(meta)
         return DeploymentState(
             name=str(meta.get("name") or name),
             namespace=self.namespace,
