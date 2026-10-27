@@ -166,7 +166,8 @@ def test_recovery_only_restores(campaign, monkeypatch):
                                             sleeper=lambda _s: None, clock=iter(range(0, 10_000, 2)).__next__)
 
     assert result["recovered"] == ["emailservice"]
-    assert scaler.log == ["restore"] and scaler.state.restored
+    assert scaler.log == ["restore"]
+    assert scaler.state.restored
     assert [kind for kind, _ in events] == ["restored"]
 
 
@@ -185,7 +186,9 @@ def test_while_a_test_runs_its_outage_is_not_offered_for_restore(monkeypatch):
     monkeypatch.setattr(k8s, "cluster_job_running", lambda: True)
     monkeypatch.setattr(k8s, "get_experiment_campaign", lambda campaign_id: object())
     status = k8s.kubernetes_outage_status(CAMPAIGN)
-    assert status["busy"] is True and status["interrupted"] == [] and not status["available"]
+    assert status["busy"] is True
+    assert status["interrupted"] == []
+    assert not status["available"]
     scaler = FakeScaler()
     with pytest.raises(ValueError, match="intentional"):
         k8s.recover_kubernetes_outages(CAMPAIGN, actor="tester", scaler=scaler)

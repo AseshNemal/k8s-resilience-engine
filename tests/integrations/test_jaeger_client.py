@@ -163,8 +163,9 @@ def test_jaeger_client_treats_missing_exact_trace_as_pending(mock_client_cls):
 
 
 def test_jaeger_client_rejects_unsafe_trace_id() -> None:
+    client = JaegerClient("http://localhost:16686")
     with pytest.raises(ValueError, match="hexadecimal"):
-        JaegerClient("http://localhost:16686").fetch_trace("../../api/services")
+        client.fetch_trace("../../api/services")
 
 
 def test_get_dependencies_returns_caller_callee_pairs_for_the_window():
@@ -185,7 +186,8 @@ def test_get_dependencies_returns_caller_callee_pairs_for_the_window():
     called_url = get.call_args.args[0]
     params = get.call_args.kwargs["params"]
     assert called_url == "http://localhost:16686/api/dependencies"
-    assert params["lookback"] == 3_600_000 and params["endTs"] > 0
+    assert params["lookback"] == 3_600_000
+    assert params["endTs"] > 0
 
 
 def test_get_dependencies_failure_is_a_connection_error():

@@ -130,8 +130,9 @@ def test_a_deployment_changed_since_it_was_read_is_not_overwritten(tmp_path):
 def test_an_unrecovered_outage_cannot_be_started_twice_and_a_missing_deployment_is_refused(tmp_path):
     cluster = scaler(tmp_path, FakeApi())
     cluster.take_down(cluster.inspect("emailservice"))
+    unavailable = cluster.inspect("emailservice")
     with pytest.raises(OutageNotPermittedError, match="unrecovered"):
-        cluster.take_down(cluster.inspect("emailservice"))
+        cluster.take_down(unavailable)
     with pytest.raises(OutageNotPermittedError, match="does not exist"):
         cluster.inspect("not-a-service")
 
