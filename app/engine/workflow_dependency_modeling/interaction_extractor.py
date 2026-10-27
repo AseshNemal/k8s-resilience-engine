@@ -160,6 +160,17 @@ def _record_parent_child(
     })
 
 
+def _linked_service_edges(
+    span: Span, global_span_index: dict[tuple[str, str], Span],
+) -> set[_Edge]:
+    edges = set()
+    for link in span.links:
+        linked = global_span_index.get((link.trace_id, link.span_id))
+        if linked is not None and linked.service_name != span.service_name:
+            edges.add((linked.service_name, span.service_name))
+    return edges
+
+
 def _trace_interaction(
     trace_id: str, trace_spans: list[Span], global_span_index: dict[tuple[str, str], Span],
 ) -> TraceInteraction:
@@ -182,10 +193,7 @@ def _trace_interaction(
         if peer is not None and peer != span.service_name.lower():
             _record_client_peer(span, peer, edge_set, edge_call_tokens, edge_evidence)
 
-        for link in span.links:
-            linked = global_span_index.get((link.trace_id, link.span_id))
-            if linked is not None and linked.service_name != span.service_name:
-                linked_edge_set.add((linked.service_name, span.service_name))
+        linked_edge_set.update(_linked_service_edges(span, global_span_index))
 
         if span.parent_span_id is None:
             continue  # root span — has no caller

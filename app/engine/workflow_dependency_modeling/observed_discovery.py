@@ -206,6 +206,13 @@ def _entry_order(
     return entries, tuple(sorted(callees)), "call_graph"
 
 
+def _merge_unique_traces(by_id: dict[str, dict[str, Any]], batch: list[dict[str, Any]]) -> None:
+    for trace in batch:
+        trace_id = str(trace.get("traceID") or "")
+        if trace_id and trace_id not in by_id:
+            by_id[trace_id] = trace
+
+
 def collect_traces(
     source: ServiceListingTraceSource,
     *,
@@ -237,10 +244,7 @@ def collect_traces(
         scanned.append(name)
         # A full page means the service has more traces in the window than were read.
         truncated = truncated or len(batch) >= limits.traces_per_service
-        for trace in batch:
-            trace_id = str(trace.get("traceID") or "")
-            if trace_id and trace_id not in by_id:
-                by_id[trace_id] = trace
+        _merge_unique_traces(by_id, batch)
     traces = list(by_id.values())
     if len(traces) > limits.max_traces:
         traces = traces[: limits.max_traces]

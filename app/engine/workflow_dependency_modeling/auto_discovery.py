@@ -67,6 +67,17 @@ def _normalized_http_path(path: str) -> str:
     )
 
 
+def _grouped_http_path(
+    path: str, route: str | None,
+    route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None,
+) -> str:
+    if route_patterns is None:
+        return path if route else _normalized_http_path(path)
+    for pattern, template in route_patterns:
+        path = pattern.sub(template, path)
+    return path
+
+
 def operation_key(
     root: Span, route_patterns: tuple[tuple[re.Pattern[str], str], ...] | None = None,
 ) -> str | None:
@@ -83,11 +94,7 @@ def operation_key(
         path = urlsplit(target).path
         if path in {"/_healthz", "/healthz", "/health", "/readyz", "/metrics"} or path.startswith("/static/"):
             return None
-        if route_patterns is None and not route:
-            path = _normalized_http_path(path)
-        elif route_patterns is not None:
-            for pattern, template in route_patterns:
-                path = pattern.sub(template, path)
+        path = _grouped_http_path(path, route, route_patterns)
         return f"{method.upper()} {path}"
     if "TraceService/Export" in root.operation_name or root.tags.get("span.kind") == "client":
         return None

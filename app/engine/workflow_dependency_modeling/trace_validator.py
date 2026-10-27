@@ -102,6 +102,90 @@ def _trace_parts(
     return raw_trace_id or f"missing-trace-id:{index}", bool(raw_trace_id), spans, processes
 
 
+def _span_tags(span: Mapping[str, Any]) -> dict[str, Any]:
+    tags = span.get("tags")
+    return {
+        str(tag.get("key", "")): tag.get("value")
+        for tag in (tags if isinstance(tags, list) else [])
+        if isinstance(tag, Mapping)
+    }
+
+
+def _service_name(span: Mapping[str, Any], processes: Mapping[str, Any]) -> Any:
+    return processes.get(str(span.get("processID", "")), {}).get("serviceName", "")
+
+
+def _resolved_client_ids(
+    spans: list[Mapping[str, Any]], processes: Mapping[str, Any]
+) -> set[str | None]:
+    span_by_id = {str(span.get("spanID", "")): span for span in spans}
+    # An address is not a service name. For IP peers, use an actual linked
+    # server span as identity evidence; otherwise retain the unresolved address.
+    resolved = set()
+    for span in spans:
+        tags = span.get("tags")
+        is_server = any(
+            isinstance(tag, Mapping)
+            and tag.get("key") == "span.kind"
+            and str(tag.get("value", "")).lower() == "server"
+            for tag in (tags if isinstance(tags, list) else [])
+        )
+        if not is_server or not str(_service_name(span, processes)).strip():
+            continue
+        parent_id = _parent_id(span)
+        parent = span_by_id.get(parent_id, {})
+        # Preserve absence as None when comparing identities.
+        service = processes.get(str(span.get("processID", "")), {}).get("serviceName")
+        parent_service = processes.get(str(parent.get("processID", "")), {}).get("serviceName")
+        if service != parent_service:
+            resolved.add(parent_id)
+    return resolved
+
+
+def _unresolved_client_target(raw_target: str, observed_services: set[str]) -> str | None:
+    address = raw_target.strip().lower()
+    if address.startswith("[") and "]" in address:
+        address = address[1:address.index("]")]
+    elif address.count(":") == 1:
+        address = address.split(":", 1)[0]
+    try:
+        ip_address(address)
+    except ValueError:
+        target = raw_target.strip().lower().split(".", 1)[0].split(":", 1)[0]
+        if target and target not in observed_services and target != "localhost":
+            return target
+        return None
+    return address
+
+
+def _missing_service_identities(
+    spans: list[Mapping[str, Any]], processes: Mapping[str, Any]
+) -> tuple[str, ...]:
+    observed_services = {
+        str(process.get("serviceName", "")).strip().lower()
+        for process in processes.values()
+        if isinstance(process, Mapping)
+    }
+    resolved_client_ids = _resolved_client_ids(spans, processes)
+    # A client span names the service it called (server.address / net.peer.name). If no span from that
+    # service exists in the trace, the call was never answered or never recorded: the trace is incomplete
+    # for that service. This is how an outage, or missing instrumentation, shows up in a trace.
+    missing_service_identities: set[str] = set()
+    for span in spans:
+        tags = _span_tags(span)
+        if str(tags.get("span.kind", "")).lower() != "client":
+            continue
+        raw_target = tags.get("server.address") or tags.get("net.peer.name")
+        if not isinstance(raw_target, str):
+            continue
+        if str(span.get("spanID", "")).strip() in resolved_client_ids:
+            continue
+        target = _unresolved_client_target(raw_target, observed_services)
+        if target:
+            missing_service_identities.add(target)
+    return tuple(sorted(missing_service_identities))
+
+
 def _span_metrics(
     spans: list[Mapping[str, Any]], processes: Mapping[str, Any]
 ) -> tuple[int, bool, int, int, int, int, tuple[str, ...]]:
@@ -116,70 +200,9 @@ def _span_metrics(
     )
     # Span links are associations, not parent-child connectivity evidence.
     disconnected_root_count = root_count
-    # A single missing parent is the normal W3C remote-parent boundary for an
-    # externally initiated trace. Additional local roots expose partial data.
+    # One external parent is a normal W3C boundary; additional roots expose partial data.
     broken_parent_count = max(disconnected_root_count - 1, 0)
-    unknown_service_count = sum(
-        1
-        for span in spans
-        if not str(
-            processes.get(str(span.get("processID", "")), {}).get("serviceName", "")
-        ).strip()
-    )
-    observed_services = {
-        str(process.get("serviceName", "")).strip().lower()
-        for process in processes.values()
-        if isinstance(process, Mapping)
-    }
-    span_by_id = {str(span.get("spanID", "")): span for span in spans}
-    # An address is not a service name. For IP peers, use an actual linked
-    # server span as identity evidence; otherwise retain the unresolved address.
-    resolved_client_ids = {
-        _parent_id(span)
-        for span in spans
-        if any(
-            isinstance(tag, Mapping)
-            and tag.get("key") == "span.kind"
-            and str(tag.get("value", "")).lower() == "server"
-            for tag in (span.get("tags") if isinstance(span.get("tags"), list) else [])
-        )
-        and str(processes.get(str(span.get("processID", "")), {}).get("serviceName", "")).strip()
-        and processes.get(str(span.get("processID", "")), {}).get("serviceName")
-        != processes.get(str(span_by_id.get(_parent_id(span), {}).get("processID", "")), {}).get("serviceName")
-    }
-    # A client span names the service it called (server.address / net.peer.name). If no span from that
-    # service exists in the trace, the call was never answered or never recorded: the trace is incomplete
-    # for that service. This is how an outage, or missing instrumentation, shows up in a trace.
-    missing_service_identities: set[str] = set()
-    for span in spans:
-        tags = {
-            str(tag.get("key", "")): tag.get("value")
-            for tag in (span.get("tags") if isinstance(span.get("tags"), list) else [])
-            if isinstance(tag, Mapping)
-        }
-        if str(tags.get("span.kind", "")).lower() != "client":
-            continue
-        raw_target = tags.get("server.address") or tags.get("net.peer.name")
-        if not isinstance(raw_target, str):
-            continue
-        if str(span.get("spanID", "")).strip() in resolved_client_ids:
-            continue
-        address = raw_target.strip().lower()
-        if address.startswith("[") and "]" in address:
-            address = address[1:address.index("]")]
-        elif address.count(":") == 1:
-            address = address.split(":", 1)[0]
-        try:
-            ip_address(address)
-        except ValueError:
-            pass
-        else:
-            if str(span.get("spanID", "")).strip() not in resolved_client_ids:
-                missing_service_identities.add(address)
-            continue
-        target = raw_target.strip().lower().split(".", 1)[0].split(":", 1)[0]
-        if target and target not in observed_services and target != "localhost":
-            missing_service_identities.add(target)
+    unknown_service_count = sum(not str(_service_name(span, processes)).strip() for span in spans)
     return (
         missing_span_ids,
         duplicate_ids,
@@ -187,7 +210,7 @@ def _span_metrics(
         disconnected_root_count,
         broken_parent_count,
         unknown_service_count,
-        tuple(sorted(missing_service_identities)),
+        _missing_service_identities(spans, processes),
     )
 
 
@@ -255,140 +278,137 @@ def _trace_quality(
     return TraceQuality.VALID
 
 
+def _is_nonempty_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _checked_objects(span: Mapping[str, Any], key: str, reasons: list[str]) -> list[Mapping[str, Any]]:
+    values = span.get(key, [])
+    if not isinstance(values, list):
+        reasons.append(f"Span {key} must be a list")
+        values = []
+    if any(not isinstance(value, Mapping) for value in values):
+        reasons.append(f"Span {key} must contain objects")
+    return [value for value in values if isinstance(value, Mapping)]
+
+
+def _checked_span(span: Mapping[str, Any], reasons: list[str]) -> dict[str, Any]:
+    # Sanitize only the local copy: malformed values are exclusions, never invented IDs.
+    checked = dict(span)
+    for key in ("spanID", "processID"):
+        if not _is_nonempty_text(span.get(key)):
+            reasons.append(f"Span {key} must be a non-empty string")
+    duration = span.get("duration", 0)
+    if isinstance(duration, bool) or not isinstance(duration, int) or duration < 0:
+        reasons.append("Span duration must be a non-negative integer")
+    if "operationName" in span and not isinstance(span["operationName"], str):
+        reasons.append("Span operationName must be a string")
+    for key in ("references", "tags"):
+        checked[key] = _checked_objects(span, key, reasons)
+    for reference in checked["references"]:
+        if not _is_nonempty_text(reference.get("spanID")):
+            reasons.append("Reference spanID must be a non-empty string")
+    for tag in checked["tags"]:
+        if not _is_nonempty_text(tag.get("key")):
+            reasons.append("Tag key must be a non-empty string")
+    return checked
+
+
+def _checked_processes(
+    processes: Mapping[str, Any], spans: list[Mapping[str, Any]], reasons: list[str]
+) -> Mapping[str, Any]:
+    if any(not isinstance(process, Mapping) for process in processes.values()):
+        reasons.append("Trace contains a non-object process")
+        processes = {key: value for key, value in processes.items() if isinstance(value, Mapping)}
+    if any(
+        "serviceName" in processes.get(str(span.get("processID", "")), {})
+        and not isinstance(_service_name(span, processes), str)
+        for span in spans
+    ):
+        reasons.append("Process serviceName must be a string")
+    return processes
+
+
+def _parent_cycle_reasons(spans: list[Mapping[str, Any]]) -> list[str]:
+    parents = {str(span.get("spanID", "")): _parent_id(span) for span in spans}
+    visited: set[str] = set()
+    reasons = []
+    for span_id in parents:
+        path: set[str] = set()
+        current = span_id
+        while current in parents and current not in visited:
+            if current in path:
+                reasons.append("Trace contains a parent cycle")
+                break
+            path.add(current)
+            current = parents[current]
+        visited.update(path)
+    return reasons
+
+
+def _span_trace_reasons(span: Mapping[str, Any], trace_id: str) -> list[str]:
+    reasons = []
+    if span.get("traceID", trace_id) != trace_id:
+        reasons.append("Span belongs to a different trace")
+    parent_refs = [ref for ref in span["references"] if ref.get("refType") == "CHILD_OF"]
+    if len(parent_refs) > 1:
+        reasons.append("Span has multiple parents")
+    if any(ref.get("traceID", trace_id) != trace_id for ref in parent_refs):
+        reasons.append("Parent reference belongs to a different trace")
+    return reasons
+
+
+def _validate_one_trace(trace: Mapping[str, Any], index: int, trace_counts: Counter[str]) -> TraceQualityResult:
+    trace_id, has_trace_id, raw_spans, process_map = _trace_parts(trace, index)
+    malformed = any(not isinstance(span, Mapping) for span in raw_spans)
+    structural_reasons: list[str] = []
+    if not _is_nonempty_text(trace.get("traceID")):
+        structural_reasons.append("Trace ID must be a non-empty string")
+    spans: list[Mapping[str, Any]] = [
+        _checked_span(span, structural_reasons) for span in raw_spans if isinstance(span, Mapping)
+    ]
+    process_map = _checked_processes(process_map, spans, structural_reasons)
+    if malformed:
+        structural_reasons.append("Trace contains a non-object span")
+    if trace_counts[trace_id] > 1:
+        structural_reasons.append("Input contains duplicate trace IDs")
+    structural_reasons.extend(_parent_cycle_reasons(spans))
+    for span in spans:
+        structural_reasons.extend(_span_trace_reasons(span, trace_id))
+    (
+        missing_span_ids, duplicate_ids, root_count, disconnected_roots,
+        broken_parents, unknown_services, missing_service_identities,
+    ) = _span_metrics(spans, process_map)
+    structurally_invalid = bool(
+        not has_trace_id or not spans or missing_span_ids or duplicate_ids
+        or (spans and disconnected_roots == 0) or structural_reasons
+    )
+    return TraceQualityResult(
+        trace_id=trace_id,
+        quality=_trace_quality(
+            structurally_invalid, broken_parents, unknown_services,
+            disconnected_roots, missing_service_identities,
+        ),
+        span_count=len(spans), root_span_count=root_count,
+        disconnected_root_count=disconnected_roots, broken_parent_count=broken_parents,
+        unknown_service_count=unknown_services, missing_service_identities=missing_service_identities,
+        reasons=tuple(structural_reasons + _quality_reasons(
+            has_trace_id, spans, missing_span_ids, duplicate_ids, root_count,
+            disconnected_roots, broken_parents, unknown_services, missing_service_identities,
+        )),
+    )
+
+
 def validate_trace_quality(raw_traces: Sequence[Mapping[str, Any]]) -> TraceQualitySummary:
     """Classify raw Jaeger traces without inventing missing relationships."""
     if not isinstance(raw_traces, (list, tuple)) or any(
         not isinstance(trace, Mapping) for trace in raw_traces
     ):
         raise ValueError("traces must be a list of trace objects")
-    results: list[TraceQualityResult] = []
     trace_counts = Counter(str(trace.get("traceID", "")).strip() for trace in raw_traces)
-    for index, trace in enumerate(raw_traces):
-        trace_id, has_trace_id, spans, process_map = _trace_parts(trace, index)
-        malformed = any(not isinstance(span, Mapping) for span in spans)
-        spans = [span for span in spans if isinstance(span, Mapping)]
-        structural_reasons: list[str] = []
-        if not isinstance(trace.get("traceID"), str) or not trace["traceID"].strip():
-            structural_reasons.append("Trace ID must be a non-empty string")
-        # Sanitize only the local inspection copy. Malformed nested values must
-        # become reported exclusions, never parser exceptions or invented IDs.
-        checked_spans = []
-        for span in spans:
-            checked = dict(span)
-            for key in ("spanID", "processID"):
-                if not isinstance(span.get(key), str) or not span[key].strip():
-                    structural_reasons.append(f"Span {key} must be a non-empty string")
-            duration = span.get("duration", 0)
-            if isinstance(duration, bool) or not isinstance(duration, int) or duration < 0:
-                structural_reasons.append("Span duration must be a non-negative integer")
-            if "operationName" in span and not isinstance(span["operationName"], str):
-                structural_reasons.append("Span operationName must be a string")
-            for key in ("references", "tags"):
-                values = span.get(key, [])
-                if not isinstance(values, list):
-                    structural_reasons.append(f"Span {key} must be a list")
-                    values = []
-                if any(not isinstance(value, Mapping) for value in values):
-                    structural_reasons.append(f"Span {key} must contain objects")
-                checked[key] = [value for value in values if isinstance(value, Mapping)]
-            for reference in checked["references"]:
-                if not isinstance(reference.get("spanID"), str) or not reference["spanID"].strip():
-                    structural_reasons.append("Reference spanID must be a non-empty string")
-            for tag in checked["tags"]:
-                if not isinstance(tag.get("key"), str) or not tag["key"].strip():
-                    structural_reasons.append("Tag key must be a non-empty string")
-            checked_spans.append(checked)
-        spans = checked_spans
-        if any(not isinstance(process, Mapping) for process in process_map.values()):
-            structural_reasons.append("Trace contains a non-object process")
-            process_map = {key: value for key, value in process_map.items() if isinstance(value, Mapping)}
-        if any(
-            "serviceName" in process_map.get(str(span.get("processID", "")), {})
-            and not isinstance(process_map[str(span.get("processID", ""))]["serviceName"], str)
-            for span in spans
-        ):
-            structural_reasons.append("Process serviceName must be a string")
-        if malformed:
-            structural_reasons.append("Trace contains a non-object span")
-        if trace_counts[trace_id] > 1:
-            structural_reasons.append("Input contains duplicate trace IDs")
-        parents = {str(span.get("spanID", "")): _parent_id(span) for span in spans}
-        visited: set[str] = set()
-        for span_id in parents:
-            path: set[str] = set()
-            current = span_id
-            while current in parents and current not in visited:
-                if current in path:
-                    structural_reasons.append("Trace contains a parent cycle")
-                    break
-                path.add(current)
-                current = parents[current]
-            visited.update(path)
-        for span in spans:
-            if span.get("traceID", trace_id) != trace_id:
-                structural_reasons.append("Span belongs to a different trace")
-            references = span.get("references", [])
-            if not isinstance(references, list):
-                structural_reasons.append("Span references must be a list")
-                references = []
-            if not isinstance(span.get("tags", []), list):
-                structural_reasons.append("Span tags must be a list")
-            parent_refs = [ref for ref in references if isinstance(ref, Mapping) and ref.get("refType") == "CHILD_OF"]
-            if len(parent_refs) > 1:
-                structural_reasons.append("Span has multiple parents")
-            if any(ref.get("traceID", trace_id) != trace_id for ref in parent_refs):
-                structural_reasons.append("Parent reference belongs to a different trace")
-        metrics = _span_metrics(spans, process_map)
-        (
-            missing_span_ids,
-            duplicate_ids,
-            root_count,
-            disconnected_roots,
-            broken_parents,
-            unknown_services,
-            missing_service_identities,
-        ) = metrics
-        structurally_invalid = bool(
-            not has_trace_id
-            or not spans
-            or missing_span_ids
-            or duplicate_ids
-            or (spans and disconnected_roots == 0)
-            or structural_reasons
-        )
-        results.append(
-            TraceQualityResult(
-                trace_id=trace_id,
-                quality=_trace_quality(
-                    structurally_invalid,
-                    broken_parents,
-                    unknown_services,
-                    disconnected_roots,
-                    missing_service_identities,
-                ),
-                span_count=len(spans),
-                root_span_count=root_count,
-                disconnected_root_count=disconnected_roots,
-                broken_parent_count=broken_parents,
-                unknown_service_count=unknown_services,
-                missing_service_identities=missing_service_identities,
-                reasons=tuple(
-                    structural_reasons + _quality_reasons(
-                        has_trace_id,
-                        spans,
-                        missing_span_ids,
-                        duplicate_ids,
-                        root_count,
-                        disconnected_roots,
-                        broken_parents,
-                        unknown_services,
-                        missing_service_identities,
-                    )
-                ),
-            )
-        )
-
-    return TraceQualitySummary(tuple(results))
+    return TraceQualitySummary(tuple(
+        _validate_one_trace(trace, index, trace_counts) for index, trace in enumerate(raw_traces)
+    ))
 
 
 def eligible_traces(
