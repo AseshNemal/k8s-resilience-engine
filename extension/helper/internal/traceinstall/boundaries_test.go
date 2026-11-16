@@ -21,7 +21,9 @@ func productionSources(t *testing.T) map[string]string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out[f] = regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(string(raw), "")
+		// Windows checks files out with CRLF; the tests below look for "\n}\n", so compare with LF endings everywhere.
+		text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+		out[f] = regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(text, "")
 	}
 	if len(out) < 10 {
 		t.Fatalf("expected the package's files, found %d", len(out))
@@ -120,6 +122,9 @@ func TestTheVerifyFunctionContainsNoWriteAndNoDialog(t *testing.T) {
 			t.Fatalf("func %s not found", name)
 		}
 		end := strings.Index(code[start:], "\n}\n")
+		if end < 0 {
+			t.Fatalf("the end of func %s was not found", name)
+		}
 		body := code[start : start+end]
 		for _, forbidden := range []string{".create(", ".remove(", ".log(", ".save(", "approval(", "newRun(", "guard", "Store.Save", "Prompter"} {
 			if name == "check" && forbidden == "newRun(" { // check builds a run only to read Pods through it
