@@ -1291,7 +1291,7 @@
         root.append(kpis, tabs([['Services', servicesHost], ['Graph', graphPanel], ['Validation', heldOutPanel(campaign, true)], ['Raw data', raw]]));
         return root;
     }
-    // Approval by a named person, then the freeze that hands the graph to failure prediction (Component 3).
+    // Approval by a named person, then the freeze that hands the graph to failure prediction.
     // The backend refuses approval while any service is unresolved; the freeze re-derives the evidence record.
     function approvalPanel(campaign, assessment, approved, meta, slot) {
         const panel = guidedText('section', 'wd-run wd-repeat', '');
