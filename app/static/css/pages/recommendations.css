@@ -1018,3 +1018,101 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 [data-role="rec-deployment-findings"] .rx-lead { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; border-color: var(--color-border); border-left-width: 1px; }
 [data-role="rec-deployment-findings"] .rx-lead h4 { font-size: 15px; }
 [data-role="rec-deployment-findings"] .rx-lead[data-selected="true"] { border-color: var(--color-primary); border-left-width: 4px; }
+
+/* Service-level view with the placement map: the options are selectable and preview on the map. */
+[data-role="rec-deployment-findings"] .rx-map { padding: 14px 16px 12px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); }
+[data-role="rec-deployment-findings"] .rx-map__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+[data-role="rec-deployment-findings"] .rx-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--color-surface-soft); border: 1px solid var(--color-border); flex: none; }
+[data-role="rec-deployment-findings"] .rx-seg__btn { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--color-text-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+[data-role="rec-deployment-findings"] .rx-seg__btn[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border); }
+[data-role="rec-deployment-findings"] .rx-lead[role="button"] { cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+[data-role="rec-deployment-findings"] .rx-lead[role="button"]:hover { border-color: var(--color-text-muted); }
+[data-role="rec-deployment-findings"] .rx-lead[role="button"]:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-role="rec-deployment-findings"] .rx-lead[data-picked] { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface)); }
+[data-role="rec-deployment-findings"] .rx-lead__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+[data-role="rec-deployment-findings"] .rx-pill { padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 650; background: var(--color-surface-soft); border: 1px solid var(--color-border); white-space: nowrap; }
+/* Only the previewed option shows its bars and detail; the others stay one line. */
+[data-role="rec-deployment-findings"] .rx-lead__sum { font-size: 13px; color: var(--color-text-muted); }
+[data-role="rec-deployment-findings"] .rx-lead[data-picked] .rx-lead__sum { display: none; }
+[data-role="rec-deployment-findings"] .rx-lead[role="button"]:not([data-picked]) .pm-meter,
+[data-role="rec-deployment-findings"] .rx-lead[role="button"]:not([data-picked]) .ui-note,
+[data-role="rec-deployment-findings"] .rx-lead[role="button"]:not([data-picked]) details { display: none; }
+[data-role="rec-deployment-findings"] .rx-tags { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+[data-role="rec-deployment-findings"] .rx-pill--lead { background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface)); border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border)); color: var(--color-primary); }
+
+/* ---- The action dock: the selected change and the one next step ---- */
+.rx-dock { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; margin: 0 0 16px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface); box-shadow: var(--shadow-card); }
+.rx-dock[hidden] { display: none; }
+.rx-dock[data-phase="needs-workflow"], .rx-dock[data-phase="blocked"], .rx-dock[data-phase="not-approvable"] { border-color: color-mix(in srgb, var(--color-warning) 55%, var(--color-border)); }
+.rx-dock[data-phase="decide"] { border-color: var(--color-primary); }
+.rx-dock__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+.rx-dock__kicker { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-text-muted); }
+.rx-dock__title { margin: 2px 0 0; font-size: 20px; line-height: 1.3; }
+.rx-dock__target { margin: 2px 0 0; color: var(--color-text-muted); font-size: 14px; }
+.rx-dock__facts { margin: 6px 0 0; font-size: 13px; color: var(--color-text-muted); }
+.rx-dock__figure { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.rx-dock__scope, .rx-dock__caveat { font-size: 12px; color: var(--color-text-muted); }
+.rx-dock__numbers { font-size: 30px; font-weight: 700; line-height: 1.15; }
+.rx-dock__figure[data-gain="true"] .rx-dock__numbers { color: var(--color-success); }
+.rx-dock__rail { padding: 10px 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.rx-dock__map > summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 2px 0; }
+.rx-dock__map-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.rx-dock__map-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rx-dock__act { display: flex; flex-direction: column; gap: 8px; }
+.rx-dock__state { margin: 0; font-size: 16px; }
+.rx-dock__text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-text-muted); max-width: 70ch; }
+.rx-dock__buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.rx-dock__buttons .primary-button, .rx-dock__buttons .secondary-button { display: inline-flex; align-items: center; justify-content: center; height: 38px; padding: 0 18px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; }
+.rx-dock__buttons a.primary-button { background: var(--color-primary); border: 1px solid var(--color-primary); color: #fff; }
+.rx-dock__buttons a.secondary-button { background: transparent; border: 1px solid var(--color-border); color: var(--color-text); }
+.rx-dock__buttons button:disabled { opacity: 0.55; cursor: not-allowed; }
+.rx-dock__why, .rx-dock__fine { margin: 0; font-size: 12.5px; color: var(--color-text-muted); }
+.rx-dock__alert { margin: 0; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface)); border: 1px solid color-mix(in srgb, var(--color-danger) 40%, var(--color-border)); }
+.rx-dock__checks { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; }
+.rx-dock__check { display: flex; gap: 8px; align-items: baseline; }
+.rx-dock__check[data-state="ok"] .rx-dock__mark { color: var(--color-success); }
+.rx-dock__check[data-state="no"] .rx-dock__mark { color: var(--color-warning); }
+.rx-dock__check[data-state="wait"] { color: var(--color-text-muted); }
+.rx-dock__mark { width: 14px; font-weight: 700; flex: none; }
+.rx-dock__who { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; font-size: 13px; color: var(--color-text-muted); }
+.rx-dock__chip-label { font-size: 12.5px; }
+.rx-dock__chip { display: inline-flex; gap: 4px; align-items: baseline; padding: 3px 10px; border-radius: 99px; background: var(--color-surface-soft); border: 1px solid var(--color-border); color: var(--color-text); }
+.rx-dock__link { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: 12.5px; cursor: pointer; padding: 0; }
+.rx-dock__input { width: 200px; height: 32px; }
+.rx-dock .rx-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--color-surface-soft); border: 1px solid var(--color-border); }
+.rx-dock .rx-seg__btn { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--color-text-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.rx-dock .rx-seg__btn[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border); }
+.rx-dock .rx-rail__list { flex-wrap: nowrap; overflow-x: auto; }
+.rx-dock .rx-rail__item { flex: 1 1 0; min-width: 110px; }
+.rx-dock .rx-rail__item:not([data-state="current"]):not([data-state="blocked"]) .rx-rail__note { display: none; }
+
+/* The dock owns the actions: the sections below keep records and explanations, not duplicate buttons. */
+[data-role="rec-apply-test"] .apply-test__decide--choice { display: none; }
+.rx-section--action .rx-after, .rx-section--action .rx-action__buttons:empty { display: none; }
+
+/* The confirmation dialog */
+.rx-dialog { max-width: 620px; max-height: 88vh; overflow: auto; }
+.rx-dialog__lead { margin: 0; font-weight: 650; font-size: 15px; }
+.rx-dialog__label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
+.rx-dialog__facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 14px; }
+.rx-dialog__facts dt { color: var(--color-text-muted); }
+.rx-dialog__facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.rx-dock__body { display: flex; flex-direction: column; gap: 14px; }
+/* The standalone stylesheet only defines .action-button, so the dock and its dialog carry their own button looks (tokens, so Docker's theme still wins). */
+.rx-dock .primary-button, .rx-dialog .primary-button { background: var(--color-primary); border: 1px solid var(--color-primary); color: var(--dd-on-primary, #fff); }
+.rx-dock .primary-button:hover:not(:disabled), .rx-dialog .primary-button:hover:not(:disabled) { background: var(--color-primary-dark); border-color: var(--color-primary-dark); }
+.rx-dialog .danger-button { background: var(--color-danger); border: 1px solid var(--color-danger); color: #fff; }
+.rx-dialog .primary-button, .rx-dialog .secondary-button, .rx-dialog .danger-button { display: inline-flex; align-items: center; justify-content: center; height: 38px; padding: 0 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.rx-dialog .secondary-button { background: transparent; border: 1px solid var(--color-border); color: var(--color-text); }
+.rx-dialog button:disabled { opacity: 0.55; cursor: not-allowed; }
+/* The dock's confirmation dialog (the older #approval-modal keeps its own rules above). */
+[data-role="action-dialog"] { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: var(--space-lg); background: rgba(15, 23, 42, 0.55); }
+[data-role="action-dialog"] .modal { display: flex; flex-direction: column; width: 100%; max-width: 38rem; background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25); }
+[data-role="action-dialog"] .modal__header { padding: var(--space-md) var(--space-lg); border-bottom: 1px solid var(--color-border); }
+[data-role="action-dialog"] .modal__title { margin: 0; font-size: 17px; font-weight: 700; }
+[data-role="action-dialog"] .modal__body { padding: var(--space-lg); font-size: 14px; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+[data-role="action-dialog"] .modal__footer { display: flex; justify-content: flex-end; gap: var(--space-sm); padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--color-border); }
+[data-role="action-dialog"] .rx-diff { grid-template-columns: 1fr; }
+.rx-dock__validation { margin: 0; padding: 8px 12px; border-radius: 8px; font-size: 13.5px; background: var(--color-surface-soft); border: 1px solid var(--color-border); }
+.rx-dock__validation[data-tone="ok"] { border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border)); background: color-mix(in srgb, var(--color-success) 8%, var(--color-surface)); }
+.rx-dock__validation[data-tone="warn"] { border-color: color-mix(in srgb, var(--color-warning) 50%, var(--color-border)); background: color-mix(in srgb, var(--color-warning) 9%, var(--color-surface)); }

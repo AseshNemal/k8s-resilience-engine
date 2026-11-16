@@ -274,6 +274,8 @@ class ApplyTestService:
                 # decision that writes nothing). Only a change that settled as applied can be kept.
                 run["canKeep"] = (change.status == "APPLIED" and run["status"] in TERMINAL and match == "same"
                                   and (change.rollout or {}).get("state") == "completed")
+                # A kept change stays on the cluster and stays resettable: the person can still put it back.
+                run["canResetKept"] = change.status == "KEPT" and run["status"] in TERMINAL and match != "other"
                 run["kept"] = (change.detail or {}).get("kept") if change.status == "KEPT" else None
         return run
 

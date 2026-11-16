@@ -53,6 +53,8 @@ def test_script_selectors_exist_in_the_template(page):
                   "rec-candidate-list", "rec-case", "rec-case-line", "rec-impact", "rec-proof-slot", "rec-proposal-summary",
                   "rec-results-sidebar", "rec-stepper", "rec-validation-callout", "rec-validation-go", "rec-workflow-risk",
                   "rec-workflow-risk-box", "rec-selected"}
+        # The research decision's name comes from the configured attribution in the dock; the older dialog field is a null-guarded hook.
+        ids -= {"research-decider", "research-decider-group"}
 
     missing_roles = sorted(r for r in roles if r not in markup)
     missing_ids = sorted(i for i in ids if i not in markup)

@@ -6,7 +6,7 @@ This repository is a four-member research prototype for dependency-aware workflo
 
 ## Required Reading
 
-Read `docs/PROJECT_CONTEXT.md` before editing.
+Read `docs/PROJECT_CONTEXT.md` before editing, and `docs/CHANGES.md` for what changed recently and in whose area.
 
 ## Final Component Folders
 
@@ -33,6 +33,7 @@ Do not rename these folders without explicit approval.
 - Never auto-apply Kubernetes YAML. Apply and Reset are explicit, named-person steps (`application/`); a status request reads the cluster and advances the stored rollout and post-change analysis but never patches (`docs/MEMBER4_APPLY_ROLLOUT_ANALYSIS.md`). That analysis is a model recalculation over observed placement, not an experiment.
 - An applied change belongs to the cluster it was applied to. `ApplicationService.status()` and `ApplyTestService.read()` return `clusterMatch` (`same` | `other` | `unknown`); a change on another cluster blocks nothing and offers no Reset here (each cluster is independent), and an unreadable cluster UID is `unknown` with a retryable `CLUSTER_IDENTITY_UNKNOWN`, never `CLUSTER_CHANGED`. While an Apply-and-test run is busy its panel reads the read-only `GET /api/recommendations/apply-tests/{run_id}/live` (replicas, each pod's node, state and version, node status and usage, recent steps); it never writes.
 - Developer approval is required before cluster changes.
+- "Watch a real failure" (`observation/`) is read-only: the developer causes the failure, this app stops nothing, and workflow outcomes are never reported as observed.
 
 ## Validation
 

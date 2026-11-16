@@ -114,3 +114,26 @@ def test_service_level_answer_is_consistent_across_the_page_and_the_recommendati
     # The map can be drawn from the same payload.
     assert {row["service"] for row in body["placement"]} == {"details", "ratings", "page", "reviews"}
     assert best["metric"]["before"] > best["metric"]["after"]
+    # The after-change map is a SIMULATED placement of the same services: the changed service gains a replica on a
+    # worker that did not host it, every other service is unchanged, and no failure is drawn from invented pods.
+    today = {row["service"]: row for row in body["placement"]}
+    after = {row["service"]: row for row in best["afterPlacement"]}
+    assert set(after) == set(today)
+    assert after[best["service"]]["readyReplicas"] == today[best["service"]]["readyReplicas"] + 1
+    assert {entry["node"] for entry in after[best["service"]]["nodes"]} > {entry["node"] for entry in today[best["service"]]["nodes"]}
+    assert all(after[name]["nodes"] == today[name]["nodes"] for name in today if name != best["service"])
+    assert all(option["afterPlacement"] for option in recommendation["alternatives"])
+
+
+def test_placement_view_counts_only_ready_pods_per_node():
+    from app.engine.recommendation_evaluation_validation.placement_view import placement_view
+
+    deployment = {"services": [
+        {"name": "b", "pods": [{"node": "n1", "ready": True}, {"node": "n1", "ready": True}, {"node": "n2", "ready": False}]},
+        {"name": "a", "pods": []},
+    ]}
+    assert placement_view(deployment) == [
+        {"service": "a", "readyReplicas": 0, "nodes": []},
+        {"service": "b", "readyReplicas": 2, "nodes": [{"node": "n1", "readyPods": 2}]},
+    ]
+    assert placement_view(None) is None

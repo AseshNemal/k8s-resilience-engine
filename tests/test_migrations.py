@@ -9,7 +9,7 @@ from sqlalchemy import inspect
 from app.core.database import get_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "d4e8b1f60a23"
+HEAD_REVISION = "e5f7a2c91b36"
 
 
 def _alembic_config() -> Config:

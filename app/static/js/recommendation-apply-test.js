@@ -226,7 +226,7 @@
             if (run?.report && (run.report.before || TERMINAL.has(run.status))) root.append(drawReport(run.report));
             if (!env.readOnly && run?.canReset && !busy()) {
                 // The test is over and its change is still on the cluster: it is neither put back nor left there without the person saying which.
-                const decide = make("section", null, "apply-test__decide");
+                const decide = make("section", null, "apply-test__decide apply-test__decide--choice");
                 decide.append(make("h4", "This test changed the cluster. Reset it now, or keep the changes?"),
                     make("p", run.canKeep
                         ? "Reset now puts the saved configuration back. Keep changes leaves the cluster as it is, records that you kept it, and lets you test another candidate on top. The results stay in Test history either way."
@@ -317,7 +317,7 @@
         }
 
         async function resetChanges(external = "refuse") {
-            if (env.readOnly || busy() || !run?.canReset) return;
+            if (env.readOnly || busy() || !(run?.canReset || run?.canResetKept)) return;
             resetting = true; error = null; resetFailure = null; draw(); notify();
             try {
                 const base = run.declared ? "/api/recommendations/declared" : "/api/recommendations";
@@ -343,6 +343,7 @@
                 await request(`${base}/${encodeURIComponent(run.candidateId)}/keep`, { method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ keptBy: auditActor("Explicit Keep action"), expectedApplicationId: run.application?.applicationId }) });
                 if (env.onReset) env.onReset();       // the same refresh a reset triggers: the change no longer blocks another candidate
+                env.onReadyForNext?.();               // the cluster now holds this change: recalculate risks and changes from it
             } catch (e) {
                 error = e.message;
             }

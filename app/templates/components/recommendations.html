@@ -3,6 +3,7 @@
 {% from "partials/loading_state.html" import loading_state %}
 
 {% block page_css %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/recommendations.css') }}">
 {% endblock %}
 
@@ -35,6 +36,13 @@
 
 <div class="rx-pane" role="tabpanel" id="rec-pane-current" aria-labelledby="rec-tab-current" data-pane-panel="current">
 
+    {# The selected change and the ONE next thing to do with it: approve, apply, keep or reset, or why none of that is possible yet. #}
+    <section class="rx-dock" data-role="rec-dock" aria-label="Selected change and next step" aria-live="polite" hidden>
+        <div data-role="rec-dock-head"></div>
+        <ol class="rx-rail__list rx-dock__rail" data-role="rec-rail" aria-label="Progress"></ol>
+        <div class="rx-dock__body" data-role="rec-dock-body"></div>
+    </section>
+
     <p class="rx-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
     <div data-role="rec-deployment-findings" hidden aria-live="polite"></div>
     <details class="rx-fold rx-evidence" data-role="rec-evidence-details">
@@ -42,12 +50,6 @@
         <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
     </details>
     <p class="rx-basis" data-role="declared-note" hidden></p>
-
-    {# Where the work stands, and the one next thing to do. It follows the page as it scrolls. #}
-    <nav class="rx-rail" aria-label="Progress">
-        <ol class="rx-rail__list" data-role="rec-rail"></ol>
-        <button type="button" class="primary-button rx-rail__next" data-role="rec-next" hidden></button>
-    </nav>
 
     <div class="rx-sections" data-role="page-region">
         {{ loading_state("Asking for the current live recommendation…") }}
@@ -250,8 +252,8 @@
         {# The extension build patches this exact opening tag to add its own note, so it must stay as written (tests/test_page_contracts.py). #}
         <div class="card" id="approval-section">
         <header class="rx-section__head">
-            <h3 class="rx-section__title" id="rec-h-approve">Approve and apply</h3>
-            <p class="rx-section__sub" data-role="rec-validation-note">Approval authorises this exact change. Nothing is applied until a named person clicks Apply.</p>
+            <h3 class="rx-section__title" id="rec-h-approve">Approval record</h3>
+            <p class="rx-section__sub" data-role="rec-validation-note">Who decided, and when. Approval authorises this exact change. Nothing is applied until a named person clicks Apply.</p>
         </header>
         <div class="rx-action">
             <div class="rx-action__state" data-role="approval-state-container"></div>
@@ -283,10 +285,6 @@
                 <div><strong>Recommendation Type:</strong> <span id="modal-context-type"></span></div>
                 <div><strong>Proposal Version:</strong> <span id="modal-context-version">v1.0</span></div>
             </div>
-            <div class="form-group" style="margin-top: var(--space-md);" id="research-decider-group" hidden>
-                <label for="research-decider">Your name (a research decision is made by a named person)</label>
-                <input type="text" id="research-decider" class="form-input" autocomplete="off">
-            </div>
             <div class="form-group" style="margin-top: var(--space-md);">
                 <label for="approval-note">Decision Note (Optional)</label>
                 <textarea id="approval-note" rows="3" class="form-input"></textarea>
@@ -303,7 +301,9 @@
 
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/workflow-names.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/placement-map.js') }}?v=placement-20261117" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-action.js') }}?v=action-20261118" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-topology.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-journey.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-proof.js') }}" defer></script>

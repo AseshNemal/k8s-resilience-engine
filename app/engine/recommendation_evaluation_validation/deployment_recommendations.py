@@ -12,6 +12,7 @@ from app.engine.recommendation_evaluation_validation.live_pipeline import enrich
 from app.engine.recommendation_evaluation_validation.ranking import (
     ImpactSnapshot, EvaluatedCandidate, rank_candidates, RankingWeights, RESOURCE_FRACTION,
 )
+from app.engine.recommendation_evaluation_validation.placement_view import placement_view
 from app.engine.recommendation_evaluation_validation.service import evaluate_candidate
 from app.shared.schemas.failure_impact import RootCause
 from app.shared.evidence_errors import EvidenceError
@@ -89,6 +90,7 @@ def build_deployment_recommendations(discovery, failed_node=None):
             "predictedServiceFailureRateAfter": after.service_failure_rate if after else None,
             "worstCaseBefore": max((n.service_failure_rate for n in report.node_risk_ranking if n.service_failure_rate is not None), default=None),
             "worstCaseAfter": max((n.service_failure_rate for n in after.node_risk_ranking if n.service_failure_rate is not None), default=None) if after else None,
+            "afterPlacement": placement_view(simulated.simulated_deployment.model_dump(by_alias=True)) if simulated.feasible and simulated.simulated_deployment else None,
             "approvalAllowed": False, "workflowSurvival": None, "workflowBlastRadius": None}
     ranking = rank_candidates(evaluated, RankingWeights())
     lead, lead_note = _cheaper_equal(ranking, rows)

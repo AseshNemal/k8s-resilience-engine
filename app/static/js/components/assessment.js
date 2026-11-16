@@ -98,71 +98,61 @@
 
     /* ---------- map ---------- */
 
-    function hostedOn(placement, node) {
-        const hosted = [];
-        for (const row of placement) {
-            const here = (row.nodes || []).find((entry) => entry.node === node);
-            if (here) hosted.push({ service: row.service, pods: here.readyPods, total: row.readyReplicas });
-        }
-        return hosted;
+    const Placement = window.ResiliencePlacement;
+    let view = "today";
+
+    function afterPlacement(body) {
+        const best = body.recommendation && body.recommendation.best;
+        return best && Array.isArray(best.afterPlacement) ? best.afterPlacement : null;
     }
 
     function drawNodes(body) {
         const holder = $("assess-nodes");
-        holder.replaceChildren();
-        const placement = body.placement || [];
         const rows = body.nodes || [];
         if (!rows.length) {
-            holder.append(el("p", "assess-hint", "No worker node was assessed."));
+            holder.replaceChildren(el("p", "assess-hint", "No worker node was assessed."));
             return;
         }
-        const ordered = [...rows].sort((a, b) => a.node.localeCompare(b.node));
-        const picked = rows.find((row) => row.node === selectedNode) || rows[0];
-        selectedNode = picked.node;
-        for (const row of ordered) {
-            const failing = row.node === selectedNode;
-            const column = el("button", "assess-node", undefined);
-            column.type = "button";
-            column.setAttribute("aria-pressed", failing ? "true" : "false");
-            column.dataset.failing = failing ? "true" : "false";
-            const head = el("span", "assess-node__head");
-            head.append(el("strong", "", row.node), el("span", "assess-node__state", failing ? "Stopped (simulated)" : "Running"));
-            column.append(head);
-            const list = el("span", "assess-node__list");
-            for (const item of hostedOn(placement, row.node)) {
-                let state = "ok";
-                if (failing) state = row.servicesDown.includes(item.service) ? "bad" : row.servicesDegraded.includes(item.service) ? "warn" : "ok";
-                const chip = el("span", "assess-chip");
-                chip.dataset.state = state;
-                chip.append(el("span", "assess-chip__name", item.service));
-                const replicas = item.total > 1 ? `${item.pods} of ${item.total}` : "1 replica";
-                chip.append(el("span", "assess-chip__meta", failing && state === "bad" ? "offline" : replicas));
-                list.append(chip);
-            }
-            if (!list.childNodes.length) list.append(el("span", "assess-hint", "Nothing scheduled here"));
-            column.append(list);
-            column.addEventListener("click", () => {
-                selectedNode = row.node;
-                drawNodes(body);
-                drawConsequence(body);
-            });
-            holder.append(column);
+        if (!rows.some((row) => row.node === selectedNode)) selectedNode = rows[0].node;
+        const after = afterPlacement(body);
+        if (!after) view = "today";
+        const switcher = $("assess-view");
+        switcher.hidden = !after;
+        switcher.querySelectorAll("button").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.view === view)));
+        $("assess-map-hint").textContent = view === "after"
+            ? "Simulated placement after the change. The scheduler decides where a new replica really lands."
+            : "Observed placement. Pick a worker to see what stops if it fails; this is a prediction, nothing is stopped.";
+        Placement.draw(holder, {
+            nodes: rows, placement: body.placement || [], after, view, failedNode: selectedNode,
+            onSelect(node) { selectedNode = node; drawNodes(body); drawConsequence(body); },
+        });
+        const picked = rows.find((row) => row.node === selectedNode);
+        Placement.drawWorkflows($("assess-workflows"), view === "today" ? picked && picked.workflows : null);
+    }
+
+    function describe(node, down, degraded, placement) {
+        const parts = [];
+        if (down.length) parts.push(`${down.join(", ")} would go offline`);
+        for (const name of degraded) {
+            const row = placement.find((item) => item.service === name);
+            const outcome = row ? Placement.outcome(row, node) : null;
+            parts.push(outcome ? `${name} would keep ${outcome.left} of ${outcome.of} replicas` : `${name} would lose replicas`);
         }
+        return parts;
     }
 
     function drawConsequence(body) {
         const row = (body.nodes || []).find((item) => item.node === selectedNode);
         const line = $("assess-consequence");
         if (!row) { line.textContent = ""; return; }
-        const parts = [];
-        if (row.servicesDown.length) parts.push(`${row.servicesDown.join(", ")} would go offline`);
-        for (const name of row.servicesDegraded) {
-            const place = (body.placement || []).find((item) => item.service === name);
-            parts.push(place && place.readyReplicas ? `${name} would keep ${place.readyReplicas - ((place.nodes.find((n) => n.node === row.node) || {}).readyPods || 0)} of ${place.readyReplicas} replicas` : `${name} would lose replicas`);
-        }
-        let text = parts.length ? `If ${row.node} stops, ${parts.join("; ")}.` : `If ${row.node} stops, every service keeps running.`;
-        if (typeof row.blastRadius === "number") text += ` Weighted workflow loss: ${percent(row.blastRadius)}.`;
-        else if (body.risk.scope !== "workflow") text += " Workflow impact is not scored without a reviewed workflow.";
+        const after = view === "after" ? afterPlacement(body) : null;
+        const placement = after || body.placement || [];
+        const effect = after ? Placement.impact(after, row.node) : { down: row.servicesDown, degraded: row.servicesDegraded };
+        const parts = describe(row.node, effect.down, effect.degraded, placement);
+        const lead = after ? `After the change (simulated), if ${row.node} stops` : `If ${row.node} stops`;
+        let text = parts.length ? `${lead}, ${parts.join("; ")}.` : `${lead}, every service keeps running.`;
+        if (!after && typeof row.blastRadius === "number") text += ` Weighted workflow loss: ${percent(row.blastRadius)}.`;
+        else if (!after && body.risk.scope !== "workflow") text += " Workflow impact is not scored without a reviewed workflow.";
         line.textContent = text;
     }
 
@@ -298,6 +288,7 @@
         result.hidden = false;
         const risk = body.risk;
         selectedNode = risk.worstNode || null;
+        view = "today";
         $("assess-verdict").dataset.level = risk.level || "unknown";
         $("assess-level").textContent = LEVEL[risk.level] || "Unknown";
         $("assess-kicker").textContent = risk.scope === "workflow" ? "Workflow impact" : "Service-level view";
@@ -311,6 +302,14 @@
         drawFix(body);
         drawEvidence(body);
     }
+
+    $("assess-view").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-view]");
+        if (!button || !current) return;
+        view = button.dataset.view;
+        drawNodes(current);
+        drawConsequence(current);
+    });
 
     async function fetchAssessment(url) {
         let lastError;

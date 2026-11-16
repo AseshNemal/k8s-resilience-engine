@@ -3,6 +3,7 @@
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/failure_impacts.css') }}">
 {% endblock %}
 
@@ -47,6 +48,14 @@
         <div class="fi-nodes" data-role="node-list" role="group" aria-label="Worker nodes"></div>
     </section>
 
+    <section class="card fi-map" aria-labelledby="fi-map-title">
+        <div class="section-header">
+            <h3 class="section-header__title" id="fi-map-title">Where it runs</h3>
+            <span class="section-header__note">Observed placement. Selecting a node simulates stopping it; nothing is stopped.</span>
+        </div>
+        <div data-role="placement-map"></div>
+    </section>
+
     <section class="card fi-detail" data-role="detail" aria-live="polite">
         <h3 class="fi-detail__headline" data-role="detail-headline"></h3>
         <div class="fi-stats" data-role="detail-stats"></div>
@@ -72,22 +81,24 @@
     </details>
 
     <details class="card fi-more">
-        <summary>Where each service runs</summary>
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead><tr><th scope="col">Service</th><th scope="col">Ready replicas</th><th scope="col">Nodes</th></tr></thead>
-                <tbody data-role="placement-body"></tbody>
-            </table>
-        </div>
-    </details>
-
-    <details class="card fi-more">
         <summary>How this was calculated</summary>
         <ul class="fi-assumptions" data-role="assumptions"></ul>
         <p class="ui-note" data-role="evidence-note"></p>
         {{ raw_json_panel("fi-raw-json", "View raw answer") }}
     </details>
 </template>
+
+<section class="card fo-card" aria-labelledby="fo-title">
+    <div class="section-header">
+        <h3 class="section-header__title" id="fo-title">Watch a real failure</h3>
+        <span class="section-header__note">Observed, not predicted. This app stops nothing.</span>
+    </div>
+    <p class="ui-note">
+        Stop a worker yourself, on a cluster you chose for it. Start watching first: the prediction for every worker is recorded before
+        anything fails, then compared with what the cluster does. Never do this on a production cluster.
+    </p>
+    <div data-role="observation-panel"></div>
+</section>
 
 <section class="card synthetic-portfolio-link fi-synthetic" data-role="synthetic-portfolio-link" aria-labelledby="synthetic-portfolio-title">
     <div class="synthetic-portfolio-link__content">
@@ -108,6 +119,8 @@
 {% endblock %}
 
 {% block page_js %}
+<script src="{{ url_for('static', path='/js/placement-map.js') }}?v=placement-20261117" defer></script>
 <script src="{{ url_for('static', path='/js/failure-impact-view.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/failure-observation.js') }}?v=observation-20261117" defer></script>
 <script src="{{ url_for('static', path='/js/components/failure_impacts.js') }}" defer></script>
 {% endblock %}

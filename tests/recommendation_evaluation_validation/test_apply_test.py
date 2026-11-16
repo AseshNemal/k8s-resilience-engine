@@ -429,3 +429,19 @@ def test_multi_deployment_reset_retries_only_unfinished_targets(world):
         reset = service.application_factory(db, True).reset(selection["candidate_id"], "asesh")
     assert reset.status == "RESET" and gateway.restores.count(first_restored) == 1
     assert set(gateway.restores) == {"db", "cache"}
+
+
+def test_a_kept_change_is_still_resettable_from_the_run_view(world):
+    """Keeping writes nothing and leaves the change in the ledger; the run view must still offer to put it back."""
+    service, gateway, selection = world
+    run = service.start(**selection, background=False)
+    assert run["canKeep"] is True and run["canResetKept"] is False and run["canReset"] is True
+
+    with Session(service.engine) as db:
+        application = get_research_application_service(db, lambda: gateway, ResearchAnalyser())
+        application.keep(run["candidateId"], "asesh", expected_application_id=run["application"]["applicationId"])
+    kept = service.read(run["runId"])
+
+    assert kept["application"]["status"] == "KEPT"
+    assert kept["canKeep"] is False and kept["canReset"] is False and kept["canResetKept"] is True
+    assert gateway.restores == [], "keeping restored nothing"

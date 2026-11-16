@@ -198,6 +198,7 @@
             button.setAttribute("aria-pressed", String(button.getAttribute("data-node") === name));
         }
         renderDetail(root, state.data);
+        renderPlacement(root, state.data);
     }
 
     // ---- secondary panels --------------------------------------------------------------------------------------------
@@ -237,18 +238,12 @@
         };
     }
 
+    // The shared placement map: observed placement, with the selected node drawn as stopped.
     function renderPlacement(root, data) {
-        const body = $("placement-body", root);
-        body.replaceChildren();
-        for (const service of data.services) {
-            const row = document.createElement("tr");
-            const name = el("td", service.service);
-            if (service.singleNode) name.appendChild(el("span", "single node", "fi-tag", { title: "All ready replicas run on one node." }));
-            row.appendChild(name);
-            row.appendChild(el("td", `${service.readyReplicas} of ${service.declaredReplicas}`));
-            row.appendChild(el("td", service.nodes.map((n) => `${n.node} (${n.readyPods})`).join(", ") || "none ready"));
-            body.appendChild(row);
-        }
+        window.ResiliencePlacement.draw($("placement-map", root), {
+            nodes: data.nodes, placement: data.services || [], view: "today", failedNode: state.selected,
+            onSelect: select,
+        });
     }
 
     // ---- page --------------------------------------------------------------------------------------------------------

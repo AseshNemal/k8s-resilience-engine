@@ -2,7 +2,8 @@
 {% extends "base.html" %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/assessment.css') }}?v=assessment-20261117">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/assessment.css') }}?v=assessment-20261118">
 {% endblock %}
 
 {% block content %}
@@ -47,13 +48,15 @@
             <header class="assess-head">
                 <div>
                     <h3>Where it runs</h3>
-                    <p class="assess-hint">Pick a worker to see what stops if it fails. This is a prediction; nothing is stopped.</p>
+                    <p class="assess-hint" data-role="assess-map-hint">Pick a worker to see what stops if it fails. This is a prediction; nothing is stopped.</p>
                 </div>
-                <div class="assess-legend" aria-hidden="true">
-                    <span><i class="lg lg--ok"></i>Running</span><span><i class="lg lg--warn"></i>Fewer replicas</span><span><i class="lg lg--bad"></i>Offline</span>
+                <div class="assess-seg" role="group" aria-label="Placement shown" data-role="assess-view" hidden>
+                    <button type="button" class="assess-seg__btn" data-view="today" aria-pressed="true">Now</button>
+                    <button type="button" class="assess-seg__btn" data-view="after" aria-pressed="false">After the change</button>
                 </div>
             </header>
-            <div class="assess-nodes" data-role="assess-nodes" role="group" aria-label="Worker nodes"></div>
+            <div data-role="assess-nodes"></div>
+            <div class="pm-wfs" data-role="assess-workflows" hidden></div>
             <p class="assess-consequence" data-role="assess-consequence" aria-live="polite"></p>
         </section>
 
@@ -74,5 +77,6 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/assessment.js') }}?v=assessment-20261117" defer></script>
+<script src="{{ url_for('static', path='/js/placement-map.js') }}?v=placement-20261117" defer></script>
+<script src="{{ url_for('static', path='/js/components/assessment.js') }}?v=assessment-20261118" defer></script>
 {% endblock %}

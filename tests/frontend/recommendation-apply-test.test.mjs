@@ -418,12 +418,12 @@ test("rows that read the same in every run are marked, and the toggle hides only
 });
 
 test("after a test the person is asked to reset or keep, and Keep records the decision without resetting", async () => {
-    let kept = false;
+    let kept = false, next = 0;
     const env = setup((url, init) => {
         if (init.method === "POST") { assert.match(url, /\/keep$/); kept = true; return response({}); }
         return response({ run: { ...complete, canReset: !kept, canKeep: !kept, kept: kept ? { by: "Explicit Keep action" } : null,
             application: { status: kept ? "KEPT" : "APPLIED" } } });
-    });
+    }, { onReadyForNext: () => next++ });
     await env.panel.start();
     assert.match(text(env.root), /This test changed the cluster\. Reset it now, or keep the changes\?/);
     assert.ok(walk(env.root).some((n) => n.textContent === "Reset now"));
@@ -436,6 +436,7 @@ test("after a test the person is asked to reset or keep, and Keep records the de
     assert.match(text(env.root), /These changes were kept/);
     assert.ok(!walk(env.root).some((n) => n.textContent === "Keep changes"), "decided once");
     assert.equal(env.panel.state().busy, false);
+    assert.equal(next, 1, "keeping asks the page to recalculate risks and changes from the cluster as it is now");
 });
 
 test("a change that cannot be kept is offered Reset only", async () => {

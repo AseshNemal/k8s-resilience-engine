@@ -8,6 +8,7 @@ picture used.
 from typing import Any
 
 from app.engine.failure_impact_prediction.service import load_application_snapshot
+from app.engine.recommendation_evaluation_validation.placement_view import placement_view
 from app.engine.recommendation_evaluation_validation.portfolio import PORTFOLIO_ANALYSIS_SOURCE
 from app.shared.evidence_errors import EvidenceError
 
@@ -115,6 +116,7 @@ def _card_from_live(candidate: dict) -> dict[str, Any]:
         "selected": bool(candidate.get("selected")),
         "metric": {"label": "Predicted workflow loss, worst case", "before": before, "after": after}
         if before is not None and after is not None else None,
+        "afterPlacement": placement_view(candidate.get("simulatedDeployment")) if candidate.get("feasible") else None,
     }
 
 
@@ -165,6 +167,7 @@ def _card_from_deployment(row: dict) -> dict[str, Any]:
         "feasible": bool(row.get("feasible")),
         "selected": False,
         "metric": _deployment_metric(row),
+        "afterPlacement": row.get("afterPlacement") if row.get("feasible") else None,
     }
 
 
@@ -304,6 +307,9 @@ def compose_assessment(snapshot) -> dict[str, Any]:
         "blastRadius": row.get("blastRadius") if overview.get("scope") == "workflow" else None,
         "servicesDown": row.get("servicesDown") or [], "servicesDegraded": row.get("servicesDegraded") or [],
         "workflowsLost": row.get("workflowsLost"), "workflowsEvaluated": row.get("workflowsEvaluated"),
+        "workflows": [{"workflowId": flow.get("workflowId"), "name": flow.get("name"), "survives": flow.get("survives"),
+                       "failedMandatoryServices": flow.get("failedMandatoryServices") or []}
+                      for flow in row.get("workflows") or []] if overview.get("scope") == "workflow" else [],
     } for row in overview.get("nodes") or []]
     return {
         "readOnly": True,

@@ -40,28 +40,11 @@
 .assess-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); white-space: nowrap; }
 .assess-map, .assess-fix { padding: 18px 20px; }
 
-/* map */
-.assess-legend { display: flex; gap: 14px; font-size: 12px; color: var(--color-text-muted); }
-.assess-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.lg { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-.lg--ok { background: color-mix(in srgb, var(--ok) 55%, var(--color-surface)); }
-.lg--warn { background: var(--warn); }
-.lg--bad { background: var(--bad); }
-.assess-nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-.assess-node { display: flex; flex-direction: column; gap: 12px; text-align: left; padding: 12px; border-radius: 10px; border: 1px solid var(--color-border); background: var(--color-surface-soft); color: inherit; font: inherit; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
-.assess-node:hover { border-color: var(--color-text-muted); }
-.assess-node:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.assess-node[data-failing="true"] { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--color-surface)); }
-.assess-node__head { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
-.assess-node__state { font-size: 12px; color: var(--color-text-muted); }
-.assess-node[data-failing="true"] .assess-node__state { color: var(--bad); font-weight: 650; }
-.assess-node__list { display: flex; flex-direction: column; gap: 6px; }
-.assess-chip { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 13px; background: color-mix(in srgb, var(--ok) 13%, var(--color-surface)); border: 1px solid color-mix(in srgb, var(--ok) 28%, var(--color-border)); }
-.assess-chip__name { font-weight: 600; }
-.assess-chip__meta { font-size: 12px; color: var(--color-text-muted); }
-.assess-chip[data-state="warn"] { background: color-mix(in srgb, var(--warn) 16%, var(--color-surface)); border-color: color-mix(in srgb, var(--warn) 45%, var(--color-border)); }
-.assess-chip[data-state="bad"] { background: var(--bad); border-color: var(--bad); color: #fff; }
-.assess-chip[data-state="bad"] .assess-chip__meta { color: rgba(255, 255, 255, 0.9); font-weight: 650; }
+/* map: the placement map itself is shared (placement-map.css) */
+.assess-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--color-surface-soft); border: 1px solid var(--color-border); flex: none; }
+.assess-seg__btn { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--color-text-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.assess-seg__btn[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border); }
+.assess-seg__btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
 .assess-consequence { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--color-border); font-size: 14px; line-height: 1.5; }
 
 /* fix */

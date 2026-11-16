@@ -264,3 +264,28 @@
     outline: 2px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
     outline-offset: 1px;
 }
+
+/* The shared placement map sits in a card of its own, between the ranked nodes and the detail for the selected one. */
+.fi-map { padding: 16px 20px 18px; }
+.fi-map .section-header { margin: 0 0 12px; }
+
+/* Watch a real failure: predicted and observed side by side; state is in words, not only colour. */
+.fo-card { padding: 16px 20px 18px; margin-bottom: var(--space-md); }
+.fo-card .section-header { margin: 0 0 8px; }
+.fo-headline { margin: 0 0 8px; font-weight: 600; }
+.fo-headline--ok::before { content: "✓ "; }
+.fo-headline--warn::before { content: "! "; }
+.fo-message, .fo-note { margin: 6px 0; font-size: 0.875rem; }
+.fo-table { border-collapse: collapse; margin: 8px 0; min-width: 320px; }
+.fo-table th, .fo-table td { text-align: left; padding: 4px 16px 4px 0; font-size: 0.875rem; }
+.fo-row--differs td { font-weight: 600; }
+.fo-timeline { margin: 8px 0; padding-left: 18px; font-size: 0.8125rem; }
+.fo-actions { display: flex; gap: 8px; margin-top: 10px; }
+.fo-limits { margin-top: 10px; font-size: 0.8125rem; }
+.fo-expect { margin: 4px 0 8px; padding-left: 18px; font-size: 0.875rem; }
+.fo-actions .secondary-button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.fo-card .ui-note { font-style: normal; font-size: 0.875rem; margin: 0 0 12px; }
+.fo-headline { font-size: 1rem; line-height: 1.4; }
+.fo-expect, .fo-timeline { list-style: disc; }
+.fo-expect li, .fo-timeline li { margin: 3px 0; line-height: 1.4; }
+.fo-note { color: var(--color-text-muted); }

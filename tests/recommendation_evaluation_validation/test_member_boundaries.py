@@ -54,7 +54,13 @@ AUTHORIZED_INTEGRATION_PATHS = {
     "app/shared/schemas/failure_impact.py", "app/shared/schemas/workflow_management.py",
     "app/static/js/components/failure_impacts.js",
     "app/templates/components/failure_impacts.html", "app/templates/components/workflows.html",
+    # The product Assessment is the integrated entry point, so its router is mounted in app/main.py. That one file is
+    # shared, so it is allowed ONLY for the two lines below (see test_main_changes_only_mount_the_assessment_router).
+    "app/main.py",
 }
+
+# The only lines the integration may add to app/main.py (an import and the router mount). Anything else needs team sign-off.
+MAIN_PY_ALLOWED_ADDITIONS = {"    assessment,", "app.include_router(assessment.router)"}
 
 
 def git(*arguments: str) -> str:
@@ -79,6 +85,18 @@ def test_no_unrelated_component_page_or_shared_contract_is_changed():
                      if path.startswith(PROTECTED) and path not in AUTHORIZED_INTEGRATION_PATHS)
 
     assert touched == [], f"another member's files were changed: {touched}"
+
+
+def test_main_changes_only_mount_the_assessment_router():
+    """app/main.py is a shared file: the authorized integration may add the Assessment router and nothing else."""
+    changed_paths()  # skips when there is no git checkout or no main branch
+    diff = git("diff", git("merge-base", "main", "HEAD").strip(), "--", "app/main.py")
+    lines = [line for line in diff.splitlines() if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+    removed = [line for line in lines if line.startswith("-")]
+    added = {line[1:] for line in lines if line.startswith("+")}
+
+    assert removed == [], f"app/main.py lines were removed: {removed}"
+    assert added <= MAIN_PY_ALLOWED_ADDITIONS, f"app/main.py gained more than the Assessment router: {sorted(added - MAIN_PY_ALLOWED_ADDITIONS)}"
 
 
 def test_member_four_reaches_the_other_components_only_through_their_public_services():

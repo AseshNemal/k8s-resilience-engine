@@ -14,7 +14,8 @@ The system models the chain: `Workflow → Service → Pod → Node → Failure 
 
 This is a 4-person team project split into four independently-owned research components
 (see "Component Ownership" below). Full research context, data contracts, and per-component
-task breakdowns live in `README.md` and `docs/PROJECT_CONTEXT.md` — read them before working
+task breakdowns live in `docs/PROJECT_CONTEXT.md` (`README.md` is a short overview and the team table);
+`docs/CHANGES.md` lists what changed recently and in whose area — read them before working
 on any `app/engine/*` component. `AGENTS.md` carries the same architecture rules for
 non-Claude coding agents; keep it in sync with this file.
 
@@ -86,6 +87,8 @@ This is an early-stage scaffold, not a working system yet:
   `kubectl scale`), else its live spec (`_declared_document`). A cluster that
   declares nothing answers `DECLARED_STATE_UNAVAILABLE`, never 100% compliance.
 - **Failure impact page** (Member 3; `GET /api/failure-impacts/overview`, `failure_impact_prediction/overview.py` + `workflow_basis.py`, `failure_impacts.html/.js`, `failure-impact-view.js`): one read-only call assesses EVERY worker node of the connected application with the existing simulate → survive → blast-radius steps; no typed namespace/workflow/mode. Workflows are chosen automatically (frozen first, else declared/reviewed, always labelled not observed), one that is already broken today is reported apart and never blamed on a node, and without a workflow the workflow figures stay `None` (unknown), never 0. "See how to reduce this risk" hands the application and node to Recommendations through `localStorage` (`resilience.failure-impact.handoff.v1`, bound to the cluster fingerprint, one-shot, 10 minutes). The older `/deployment/runtime`, `/runtime`, `/portfolio/runtime` routes remain for tests and research; the synthetic portfolio stays a separate, labelled research page that the extension build removes.
+- **Placement map** (`static/js/placement-map.js`, `css/placement-map.css`; shared by Assessment, Failure impact and the service-level Recommendations view): services as rows, worker nodes as columns, one square per READY replica, a stopped node drawn as lost. It draws only what it is given: observed placement, and for one change a SIMULATED `afterPlacement` (`recommendation_evaluation_validation/placement_view.py`, carried on each candidate by the Assessment and the deployment-level recommendations). The failure rule (down = every ready replica on the node, degraded = some) is the engine's, applied to the placement shown; `tests/frontend/placement-map.test.mjs` pins it. Simulated cells are dashed and labelled; nothing on it is measured. Observed-versus-predicted monitoring would reuse it with a third, observed layer.
+- **Watch a real failure** (Member 4, `recommendation_evaluation_validation/observation/`, routes `/api/recommendations/failure-observations`, card on the Failure impact page, `static/js/failure-observation.js`; additive migration `e5f7a2c91b36`, table `failure_observations`): the developer stops a worker THEMSELVES on a cluster they chose; this app stops nothing and writes nothing (node readiness is read through a gateway built with `allow_writes` off, because Member 3's overview leaves node `ready` unknown on the discovery path). `start` fixes the model's prediction for every worker first; each status request then reads the cluster and records the first watched node going NotReady, the fewest ready replicas each service had meanwhile, and the recovery. One watch at a time (unique `active_slot`); nothing runs in the background, so a stretch nobody asked is a gap, and an unreadable cluster is unknown, never down or recovered. The comparison is only for one failed node and only for service readiness; workflow outcomes are reported as NOT observed, never as survived. Verified on in-memory doubles and a read-only watch of the real Bookinfo cluster; **no worker has been stopped and no failure has been observed for real.** After **Keep**, the page re-reads the cluster (risks and changes recalculated) and the dock offers "Choose another change".
 - `app/shared/schemas/` and `sample_data/` are complete for all five contracts (workflow,
   deployment, failure_impact, recommendation, validation); `sample_data/` is test-only.
   `app/integrations/kubernetes/` and `app/integrations/jaeger/` exist; `app/core/` is minimal config.
@@ -133,7 +136,7 @@ This is an early-stage scaffold, not a working system yet:
   approvable". The cluster chip says "Connected": the connection check reads what the app needs, and write permission is not checked until a change is applied.
 
 When asked to "run the app" or "add tests", check whether the relevant piece has actually
-been built yet rather than assuming the README's planned structure is already in place.
+been built yet rather than assuming the planned structure in `docs/PROJECT_CONTEXT.md` is already in place.
 
 ## Commands
 
@@ -190,6 +193,7 @@ JSON payloads live in `app/shared/schemas/` (`base.py`, `workflow.py`, `deployme
 `failure_impact.py`, `recommendation.py`, `validation.py`), loaded via `app/shared/sample_loader.py`.
 
 Supporting layers:
+- **Action dock** (`static/js/recommendation-action.js`, driven from `components/recommendations.js`; the top of the Recommendations page): the selected change is the one actionable item. `plan(facts)` turns server facts (approval status, the run's own flags, evidence state) into ONE next action: Review and approve (one dialog: requests and approves, nothing is applied), Apply to cluster (a separate explicit confirmation naming the cluster and Deployments), Reset now / Keep changes (a kept change keeps a Reset: run view `canResetKept`), or, with no reviewed workflow, NO Apply or approval at all, only a checklist and "Review a workflow" (Workflow Discovery) with "check again". The operator's name is asked once (in the first dialog), stored as `resilience.audit.name`, shown as "Acting as", and sent as `X-Operator-Name` (URL-encoded) so production approvals record it instead of "developer"; it is attribution, never authentication. The bottom "Approval record" section keeps the decision record; its older buttons and name inputs remain only when the dock is not loaded (`dockActive()`), which keeps the legacy page tests meaningful. Mutation paths are verified only against test doubles (`tests/support/member4_fake_apply_gateway.py`); the logic is pinned by `tests/frontend/recommendation-action.test.mjs`.
 - `app/api/` — one FastAPI router per component, mounted with a `/api/<component>` prefix in
   `app/main.py`. Routers are the only layer that should import from `app/engine/`.
 - `app/integrations/` — external system clients (`kubernetes/`, `jaeger/`, `prometheus/`),
@@ -199,12 +203,12 @@ Supporting layers:
 
 ## Component Ownership
 
-Each `app/engine/<component>/` folder is owned by one team member (see README for full
-names/registration numbers and task lists). Do not implement another member's engine
+Each `app/engine/<component>/` folder is owned by one team member (`README.md` has the names and
+registration numbers; `docs/PROJECT_CONTEXT.md` the task lists). Do not implement another member's engine
 component's algorithm without coordinating — use mock/sample JSON matching the shared
 contract instead when integrating against an unfinished upstream component.
 
-## Team Rules (from README / docs/PROJECT_CONTEXT.md)
+## Team Rules (from docs/PROJECT_CONTEXT.md)
 
 - Do not change shared schemas (`app/shared/schemas/`) without team agreement. Same goes for
   `app/main.py`, common configuration, global dependencies, cross-component signatures, and
