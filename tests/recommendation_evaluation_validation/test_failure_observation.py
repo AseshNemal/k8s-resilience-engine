@@ -19,6 +19,10 @@ class World:
         self.ready = {"worker-1": True, "worker-2": True, "worker-3": True}
         self.replicas = {"details": 1, "reviews": 3}
         self.unreadable = False
+        self.uid = "uid-cluster-a"
+
+    def cluster_uid(self):
+        return self.uid
 
     def node_states(self):
         return {name: {"ready": ready, "schedulable": True} for name, ready in self.ready.items()}
@@ -62,7 +66,7 @@ def clock():
 
 @pytest.fixture
 def service(sqlite_url, world, clock):  # noqa: F811
-    return FailureObservationService(get_engine(sqlite_url), world.overview, world.node_states, clock=clock)
+    return FailureObservationService(get_engine(sqlite_url), world.overview, world.node_states, world.cluster_uid, clock=clock)
 
 
 def test_the_prediction_is_fixed_before_anything_fails(service, world):
@@ -168,9 +172,47 @@ def test_starting_without_a_readable_cluster_records_nothing(service, world):
     assert service.read() is None
 
 
+def test_a_different_cluster_is_never_read_as_the_one_being_watched(service, world, clock):
+    started = service.start("bookinfo", None)
+    assert started["cluster"] == {"clusterUid": "uid-cluster-a"} and started["clusterMatch"] == "same"
+
+    world.uid = "uid-cluster-b"                  # another cluster with the same worker and service names
+    world.ready["worker-1"] = False
+    world.replicas.update(details=0)
+    clock.tick()
+    other = service.read(started["observationId"])
+
+    assert other["clusterMatch"] == "other" and other["status"] == "WATCHING" and other["failedNode"] is None
+    assert other["reads"]["lastError"] == "CLUSTER_CHANGED"
+
+    world.uid = "uid-cluster-a"                  # reconnecting the original cluster resumes the watch
+    clock.tick()
+    back = service.read(started["observationId"])
+    assert back["clusterMatch"] == "same" and back["status"] == "NODE_DOWN" and back["failedNode"] == "worker-1"
+
+
+def test_a_cluster_that_cannot_be_identified_is_unknown_not_the_same_cluster(service, world, clock):
+    started = service.start("bookinfo", None)
+    world.uid = None
+    world.ready["worker-1"] = False
+    clock.tick()
+    after = service.read(started["observationId"])
+
+    assert after["clusterMatch"] == "unknown" and after["failedNode"] is None
+    assert after["reads"]["lastError"] == "CLUSTER_IDENTITY_UNKNOWN"
+
+
+def test_a_watch_cannot_start_when_the_cluster_cannot_be_identified(service, world):
+    world.uid = None
+    with pytest.raises(ObservationRefused) as refused:
+        service.start("bookinfo", None)
+    assert refused.value.code == "CLUSTER_IDENTITY_UNKNOWN"
+    assert service.read() is None
+
+
 def test_the_record_survives_a_new_service_instance(sqlite_url, world, clock):  # noqa: F811
-    first = FailureObservationService(get_engine(sqlite_url), world.overview, world.node_states, clock=clock).start("bookinfo", None)
-    again = FailureObservationService(get_engine(sqlite_url), world.overview, world.node_states, clock=clock).read()
+    first = FailureObservationService(get_engine(sqlite_url), world.overview, world.node_states, world.cluster_uid, clock=clock).start("bookinfo", None)
+    again = FailureObservationService(get_engine(sqlite_url), world.overview, world.node_states, world.cluster_uid, clock=clock).read()
 
     assert again["observationId"] == first["observationId"] and again["predicted"] == first["predicted"]
 
@@ -179,6 +221,7 @@ def test_routes_start_read_and_stop_a_watch(override_get_db, monkeypatch):  # no
     world = World()
     monkeypatch.setattr("app.api.recommendations.build_cluster_failure_overview", world.overview)
     monkeypatch.setattr("app.api.recommendations.read_node_states", world.node_states)
+    monkeypatch.setattr("app.api.recommendations.read_cluster_uid", world.cluster_uid)
     client = TestClient(app)
 
     started = client.post("/api/recommendations/failure-observations", json={"namespace": "bookinfo"},

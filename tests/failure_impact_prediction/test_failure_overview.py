@@ -241,6 +241,22 @@ def test_the_route_without_any_workflow_still_answers_at_service_level(use_clust
     assert body["nodes"][0]["blastRadius"] is None
 
 
+def test_a_service_with_a_replica_on_an_unmodelled_node_is_not_assessed_from_its_truncated_placement(use_cluster, monkeypatch):
+    # web has one replica on a worker and one on the control plane: discovery drops the second, so web's placement is incomplete.
+    cluster = shop_cluster()
+    cluster.pods["shop"] = [pod("web-1", "worker-1", app="web"), pod("web-2", "cp-1", app="web"), pod("db-1", "worker-2", app="db")]
+    use_cluster(cluster)
+    stub_sources(monkeypatch, [], [])
+    body = client.get("/api/failure-impacts/overview", params={"namespace": "shop"}).json()
+
+    assert body["topology"]["incompleteServices"] == ["web"] and body["topology"]["complete"] is False
+    worker_1 = by_node(body)["worker-1"]
+    assert "web" not in worker_1["servicesDown"] + worker_1["servicesDegraded"], "web would be scored as lost from half its placement"
+    assert all(row["service"] != "web" for row in worker_1["services"])
+    assert all(row["service"] != "web" for row in body["services"])
+    assert [row["service"] for row in body["services"]] == ["db"], "complete services are still assessed"
+
+
 def test_the_route_is_read_only_and_never_reads_sample_data(use_cluster, monkeypatch):
     use_cluster(shop_cluster())
     stub_sources(monkeypatch, [], [])

@@ -63,6 +63,10 @@
             }
         }
         const notes = [];
+        if (active && observation.clusterMatch === "other") {
+            headline = "The connected cluster is not the one this watch started on, so nothing is being recorded. Reconnect that cluster, or stop the watch.";
+            tone = "warn";
+        }
         if (c.state === "NOT_COMPARABLE" || c.state === "NOT_ASSESSED") notes.push(c.message);
         if (c.workflows && c.workflows.message && observation.failedNode) notes.push(c.workflows.message);
         const reads = observation.reads || {};

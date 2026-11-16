@@ -385,8 +385,18 @@ def read_node_states() -> dict:
         raise EvidenceError("CLUSTER_NOT_CONNECTED", "No Kubernetes cluster is connected.", http_status=503, component="recommendation") from None
 
 
+def read_cluster_uid() -> str | None:
+    """The kube-system UID of the connected cluster, through the same write-less gateway. None when it cannot be read."""
+    first = next((p for p in (os.environ.get("KUBECONFIG") or "").split(os.pathsep) if p), "~/.kube/config")
+    try:
+        return getattr(KubernetesTestClusterGateway(first, connected_cluster=True).identity(), "cluster_uid", None) or None
+    except (AmbientCredentialsError, NotConnectedError):
+        raise EvidenceError("CLUSTER_NOT_CONNECTED", "No Kubernetes cluster is connected.", http_status=503, component="recommendation") from None
+
+
 def get_failure_observation_service(db: Session = Depends(get_db)) -> FailureObservationService:
-    return FailureObservationService(db.get_bind(), lambda namespace: build_cluster_failure_overview(namespace), lambda: read_node_states())
+    return FailureObservationService(db.get_bind(), lambda namespace: build_cluster_failure_overview(namespace),
+                                     lambda: read_node_states(), lambda: read_cluster_uid())
 
 
 class FailureObservationRequest(APIModel):

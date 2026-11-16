@@ -115,3 +115,10 @@ test("the panel says it is checking until the first read, and a poll that finds 
     await panel.refresh();
     assert.equal(replaced, afterFirst, "identical polls draw nothing, so a screen reader is not told the same thing every few seconds");
 });
+
+test("a watch whose cluster is not the connected one says nothing is being recorded", () => {
+    const model = plain(panelModule.describe({ ...watching, clusterMatch: "other" }));
+    assert.match(model.headline, /not the one this watch started on, so nothing is being recorded/);
+    assert.equal(model.tone, "warn");
+    assert.equal(model.canStop, true, "the person can still end it");
+});

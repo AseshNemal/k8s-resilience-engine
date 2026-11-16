@@ -201,7 +201,11 @@ def load_application_snapshot(
     incomplete = sorted(name for name, evidence in result.service_evidence.items() if not evidence.complete)
     candidates, problems = workflow_basis.resolve_workflows(result, requested, workflow_ids)
     included = [candidate.basis for candidate in candidates if candidate.included]
-    body = build_failure_overview(result.graph, included)
+    # A service whose placement is incomplete (a replica sits on a node discovery does not model) is left out of the assessment:
+    # scoring half a placement would report it lost when a replica elsewhere survives. It is named in topology.incompleteServices.
+    assessed = result.graph.model_copy(deep=True)
+    assessed.services = [item for item in assessed.services if item.name not in incomplete]
+    body = build_failure_overview(assessed, included)
     evaluated_ids = {row["workflowId"] for row in body["workflowsEvaluated"]}
     public = {
         **base,
