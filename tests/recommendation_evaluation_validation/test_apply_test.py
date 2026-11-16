@@ -385,3 +385,47 @@ def test_live_view_reports_pod_version_and_node_health_and_usage(world):
     assert {p["version"] for d in live["deployments"] for p in d["pods"]} == {"new"}
     assert nodes["desktop-worker"]["cpu"] == "250m" and nodes["desktop-worker"]["schedulable"] is True
     assert nodes["desktop-worker2"]["schedulable"] is False and nodes["desktop-worker2"]["cpu"] is None   # unknown, not zero
+
+
+def test_saved_run_stays_bound_to_its_own_application_when_the_candidate_is_applied_again(world):
+    from dataclasses import replace
+    from app.engine.recommendation_evaluation_validation.application import AppliedChangeRepository
+    service, gateway, selection = world
+    first = service.start(**selection, background=False)
+    original_id = first["application"]["applicationId"]
+    with Session(service.engine) as db:
+        repo = AppliedChangeRepository(db)
+        original = repo.get(original_id)
+        repo.save(replace(original, id=None, application_id="a-later-application"))
+    assert service.read(first["runId"])["application"]["applicationId"] == original_id
+
+
+def test_snapshot_remains_bound_to_run_if_the_worker_loses_its_application_id(world):
+    service, gateway, selection = world
+    run = service.start(**selection, background=False)
+    original = run["application"]["applicationId"]
+    service.repo.update(run["runId"], applicationId=None)
+    assert service.read(run["runId"])["application"]["applicationId"] == original
+
+
+def test_multi_deployment_reset_retries_only_unfinished_targets(world):
+    from app.integrations.kubernetes.client import ConnectionFailedError
+    service, gateway, selection = world
+    run = service.start(**selection, background=False)
+    original = gateway.restore_deployment
+    calls = []
+    def partial(snapshot):
+        calls.append(snapshot.name)
+        if len(calls) == 2:
+            raise ConnectionFailedError("ConnectError")
+        original(snapshot)
+    gateway.restore_deployment = partial
+    with Session(service.engine) as db:
+        with pytest.raises(ApplicationRefused):
+            service.application_factory(db, True).reset(selection["candidate_id"], "asesh")
+    first_restored = gateway.restores[0]
+    gateway.restore_deployment = original
+    with Session(service.engine) as db:
+        reset = service.application_factory(db, True).reset(selection["candidate_id"], "asesh")
+    assert reset.status == "RESET" and gateway.restores.count(first_restored) == 1
+    assert set(gateway.restores) == {"db", "cache"}

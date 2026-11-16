@@ -64,7 +64,10 @@ def make_report(rec_id: str, feasible: bool = True) -> RecommendationReport:
     )
 
 
+from tests.support.operational_workflows import provenance
+
 LIVE_EVIDENCE = {
+    **provenance(),
     "source": LIVE_EVIDENCE_SOURCE,
     "topologyCapturedAt": "2026-01-01T00:00:00Z",
     "connectionFingerprint": "test-connection",

@@ -18,3 +18,9 @@ deploy
 # invalidate the layer that compiles the Go helper or the one that copies the page scripts.
 extension/helper/**/*_test.go
 extension/ui-src/*.test.mjs
+
+# Local backups, acceptance evidence and browser output must never enter a build context.
+/tmp
+/.playwright-mcp
+/brag-output*
+.env.*

@@ -35,15 +35,15 @@ test("all-workflows mode needs no workflow choice and requests one aggregate eva
     assert.match(calls.at(-1), /all_workflows=true/);
 });
 
-test("all-workflows mode keeps declared evidence in the research tier and never mixes it with frozen workflows", async () => {
+test("all-workflows mode never falls back to unverified declarations", async () => {
     const body = context({ workflows: [], declaredWorkflows: [{ workflowId: "declared-a", services: ["a"], applicable: true }],
         workflowId: null, workflowChoice: "none", ready: false });
     const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/declared/detail": detailBody() });
     env.allWorkflows = true;
     const v = await C.createController(env).start();
-    assert.equal(v.workflowKind, "declared");
-    assert.match(calls.at(-1), /\/declared\/detail\?.*all_workflows=true/);
-    assert.ok(!v.evidence.some((e) => e.id === "workflow"), "a missing frozen workflow is not an error for a ready research evaluation");
+    assert.equal(v.status, "blocked");
+    assert.equal(v.workflowId, "");
+    assert.ok(calls.every((url) => !url.includes("/detail")), "no declaration is selected automatically");
 });
 
 function selectionStore() {
@@ -178,7 +178,7 @@ test("the workflow dropdown lists every frozen workflow and marks the ones that 
     const view = await C.createController(env).start();
 
     assert.deepEqual(plain(view.workflows.map((w) => [w.workflowId, w.applicable])), [["a", true], ["b", false]]);
-    assert.match(view.workflows[0].label, /^a · frozen 2026-10-20 · 2 services$/);
+    assert.match(view.workflows[0].label, /^a · frozen 2026-10-20 · trace-backed, reviewed definition · 2 services$/);
     assert.match(view.workflows[1].label, /not usable here: Services not found in bookinfo: db\./);
 });
 

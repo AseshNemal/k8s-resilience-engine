@@ -57,6 +57,8 @@ def frozen(workflow_id, mandatory, edges, freeze_id="freeze-1"):
 
 def store(monkeypatch, *workflows, assessed_but_not_frozen=()):
     """Approved frozen workflows as Component 1 would hold them. Replaces storage reads, nothing else."""
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)
     by_id = {w.graph.workflow_id: w for w in workflows}
     assessments = [SimpleNamespace(workflow_id=w) for w in [*by_id, *assessed_but_not_frozen]]
     monkeypatch.setattr(workflow_service, "list_dependency_assessments", lambda *a, **k: assessments)
@@ -168,7 +170,7 @@ def test_without_a_frozen_workflow_the_page_is_told_exactly_what_to_do(client, m
 
     workflow = evidence_item(body, "workflow")
     assert workflow["state"] == "missing" and body["workflows"] == [] and body["workflowId"] is None
-    assert "freeze its graph" in workflow["nextAction"] and "Workflow dependencies" in workflow["nextAction"]
+    assert "review" in workflow["nextAction"] and "Workflow Discovery" in workflow["nextAction"]
     assert evidence_item(body, "failureImpact")["state"] == "available"
     findings = body["deploymentFindings"]
     assert findings["scope"] == "deployment" and findings["nodes"]
@@ -382,3 +384,9 @@ def test_the_detail_reads_only_and_does_not_change_the_stored_evidence_or_the_li
     assert "currentDeployment" not in recomputed.evidence and "candidates" not in recomputed.evidence
     assert recomputed.details["currentDeployment"] and recomputed.details["candidates"]
     assert only_reads(cluster)
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

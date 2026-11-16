@@ -1,16 +1,9 @@
-"""Which workflows a failure-impact answer is based on.
+"""Resolve current operational workflow reviews through Member 1's public service.
 
-The page does not ask for a workflow ID. It uses what the connected cluster's application already has:
-
-1. workflows approved and frozen by Component 1 (observed and approved evidence), if any apply;
-2. otherwise workflows a person declared or reviewed (a declaration file, or a reviewed editor revision),
-   always labelled DECLARED: they are not observed and not approved.
-
-Frozen and declared workflows are never mixed by default (only a frozen workflow can ever reach the production
-approval gate); a person can still name any applicable workflows explicitly. A workflow is *applicable* only when
-every service it names is fully placed in the topology; otherwise it is listed with the reason and left out, never
-guessed. Everything is read through Component 1's public service interface (and Component 4's declaration loader for
-the declaration file, so both pages show the same workflows).
+Trace-backed assessments and real operator-reviewed definitions may be used.
+Unverified files and historical editor revisions remain visible with provenance,
+but are never used, even when their IDs are requested. Placement matching alone
+cannot turn a declaration into trustworthy business dependency evidence.
 """
 
 from __future__ import annotations
@@ -107,7 +100,16 @@ def resolve_workflows(
     there are any, else declared applicable ones.
     """
     problems: list[str] = []
-    frozen, frozen_problem = _frozen_bases()
+    from app.engine.workflow_dependency_modeling import service as workflow_service
+    frozen, frozen_problem = [], None
+    try:
+        trusted = workflow_service.list_operational_workflows(namespace, discovery.cluster.connection_fingerprint)
+    except EvidenceError as error:
+        trusted, frozen_problem = [], error.message
+    for item in trusted:
+        review = item.operational_review
+        frozen.append(WorkflowBasis(item.graph.model_copy(deep=True), FROZEN if review["kind"] == "frozen" else DECLARED,
+                                    review["reviewedBy"], review["statement"], item.display_name))
     declared, declared_problem = _declared_bases(namespace)
     if frozen_problem:
         problems.append(frozen_problem)
@@ -115,16 +117,20 @@ def resolve_workflows(
         problems.append(declared_problem)
 
     candidates: list[WorkflowCandidate] = []
-    for basis in [*frozen, *declared]:
+    trusted_ids = {item.workflow.workflow_id for item in frozen}
+    for basis in frozen:
         reason = _applicability(basis.workflow, discovery)
         candidates.append(WorkflowCandidate(basis, reason is None, reason))
+    for basis in declared:
+        if basis.workflow.workflow_id not in trusted_ids:
+            candidates.append(WorkflowCandidate(basis, False,
+                "Unverified or historical declaration. Review the exact real definition for this cluster and application before operational use."))
 
     wanted = {item for item in requested_ids if item}
     if wanted:
         chosen = {id(c.basis) for c in candidates if c.applicable and c.basis.workflow.workflow_id in wanted}
     else:
-        frozen_ok = [c for c in candidates if c.applicable and c.basis.kind == FROZEN]
-        pool = frozen_ok or [c for c in candidates if c.applicable and c.basis.kind == DECLARED]
+        pool = [c for c in candidates if c.applicable]
         chosen = {id(c.basis) for c in pool}
     return [WorkflowCandidate(c.basis, c.applicable, c.reason, id(c.basis) in chosen) for c in candidates], problems
 
@@ -137,6 +143,7 @@ def describe_candidates(candidates: Sequence[WorkflowCandidate]) -> list[dict[st
         "criticality": c.basis.workflow.criticality,
         "mandatoryServices": list(c.basis.workflow.mandatory_services),
         "declaredBy": c.basis.declared_by,
+        "reviewNote": c.basis.note,
         "applicable": c.applicable,
         "included": c.included,
         "reason": c.reason,
@@ -150,10 +157,10 @@ def basis_label(candidates: Sequence[WorkflowCandidate]) -> dict[str, Any]:
         return {"kind": "none", "text": "No workflow applies, so only service-level impact is shown. "
                                         "Workflow survival and blast radius are unknown."}
     if kinds == {FROZEN}:
-        return {"kind": FROZEN, "text": f"Based on {len(used)} approved, frozen workflow(s)."}
+        return {"kind": FROZEN, "text": f"Based on {len(used)} trace-backed workflow(s), explicitly reviewed for this application. Results are predictions."}
     if kinds == {DECLARED}:
-        return {"kind": DECLARED, "text": f"Based on {len(used)} declared workflow(s). They are declared by a person, "
-                                           "not observed from traces and not approved, so workflow results are conditional on them."}
+        return {"kind": DECLARED, "text": f"Based on {len(used)} operator-reviewed real workflow definition(s). Dependencies are declared, "
+                                           "not observed; predictions are conditional on those definitions."}
     return {"kind": "mixed", "text": f"Based on {len(used)} workflows, frozen and declared together. Declared ones are not observed."}
 
 

@@ -62,7 +62,8 @@ def test_a_connection_that_fails_is_a_failed_sample_named_by_its_error_type():
 def test_the_body_is_capped():
     big = LoopbackHttpFetch(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="x" * 5000)), max_body_bytes=100)
 
-    assert len(big(spec()).body) == 100
+    result = big(spec())
+    assert result.body == "" and result.error == "ResponseTooLarge"
 
 
 def test_it_plugs_into_the_engines_probe_and_judges_a_dependency_failure_page_as_a_failure():
@@ -73,3 +74,26 @@ def test_it_plugs_into_the_engines_probe_and_judges_a_dependency_failure_page_as
     first, second = probe.sample(), probe.sample()
 
     assert first.ok is True and second.ok is False and "currently unavailable" in second.reason
+
+
+@pytest.mark.parametrize("url", ["http://user:secret@localhost:8080/p", "http://localhost:8080/p#ignored"])
+def test_probe_rejects_implicit_credentials_and_fragments(url):
+    with pytest.raises(ValueError):
+        require_loopback(url)
+
+
+def test_oversized_stream_is_closed_early_and_cannot_pass_on_a_truncated_success_prefix():
+    class Stream(httpx.SyncByteStream):
+        read = 0
+        closed = False
+        def __iter__(self):
+            for _ in range(1000):
+                self.read += 1
+                yield b"Book Details" * 10
+        def close(self):
+            self.closed = True
+    stream = Stream()
+    fetch = LoopbackHttpFetch(transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=stream)), max_body_bytes=256)
+    result = WorkflowProbe(spec(), fetch).sample()
+    assert result.ok is False and result.error == "ResponseTooLarge"
+    assert stream.read == 3 and stream.closed

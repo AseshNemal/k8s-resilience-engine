@@ -153,10 +153,15 @@ def test_the_inputs_are_not_mutated():
 
 def discovery_for(graph: DeploymentGraph, incomplete: tuple[str, ...] = ()):
     evidence = {s.name: SimpleNamespace(complete=s.name not in incomplete) for s in graph.services}
-    return SimpleNamespace(graph=graph, service_evidence=evidence)
+    return SimpleNamespace(graph=graph, service_evidence=evidence, cluster=SimpleNamespace(connection_fingerprint="fake-connection"))
 
 
-def stub_sources(monkeypatch, frozen: list[WorkflowGraph], declared: list[WorkflowGraph]):
+def stub_sources(monkeypatch, frozen: list[WorkflowGraph], declared: list[WorkflowGraph], reviewed_declared=False):
+    from app.engine.workflow_dependency_modeling import service as workflow_service
+    rows = [SimpleNamespace(graph=g, operational_review={"kind": "frozen", "reviewedBy": "Owner", "statement": "Reviewed real definition"}, display_name=None) for g in frozen]
+    if reviewed_declared:
+        rows += [SimpleNamespace(graph=g, operational_review={"kind": "managed", "reviewedBy": "Owner", "statement": "Reviewed real definition"}, display_name=None) for g in declared]
+    monkeypatch.setattr(workflow_service, "list_operational_workflows", lambda *a: rows)
     monkeypatch.setattr(workflow_basis, "_frozen_bases", lambda: ([WorkflowBasis(g, FROZEN) for g in frozen], None))
     monkeypatch.setattr(workflow_basis, "_declared_bases", lambda namespace: ([WorkflowBasis(g, DECLARED, "me") for g in declared], None))
 
@@ -168,13 +173,13 @@ def test_frozen_workflows_are_preferred_and_declared_ones_are_listed_but_not_mix
     assert workflow_basis.basis_label(candidates)["kind"] == FROZEN
 
 
-def test_declared_workflows_are_used_only_when_nothing_frozen_applies_and_are_labelled_unobserved(monkeypatch):
+def test_unverified_declarations_are_never_a_fallback_when_no_reviewed_workflow_applies(monkeypatch):
     stub_sources(monkeypatch, [workflow("elsewhere", ["web", "payments"])], [workflow("declared", ["web"])])
     candidates, _ = workflow_basis.resolve_workflows(discovery_for(topology()), "shop")
     assert {c.basis.workflow.workflow_id: (c.applicable, c.included) for c in candidates} == {
-        "elsewhere": (False, False), "declared": (True, True)}
+        "elsewhere": (False, False), "declared": (False, False)}
     label = workflow_basis.basis_label(candidates)
-    assert label["kind"] == DECLARED and "not observed" in label["text"]
+    assert label["kind"] == "none" and "unknown" in label["text"]
 
 
 def test_a_workflow_over_an_incompletely_placed_service_is_not_applicable(monkeypatch):
@@ -187,7 +192,7 @@ def test_a_workflow_over_an_incompletely_placed_service_is_not_applicable(monkey
 def test_naming_workflows_uses_exactly_those(monkeypatch):
     stub_sources(monkeypatch, [workflow("approved", ["web"])], [workflow("declared", ["web", "db"])])
     candidates, _ = workflow_basis.resolve_workflows(discovery_for(topology()), "shop", ["declared"])
-    assert {c.basis.workflow.workflow_id: c.included for c in candidates} == {"approved": False, "declared": True}
+    assert {c.basis.workflow.workflow_id: c.included for c in candidates} == {"approved": False, "declared": False}
 
 
 # ---- the route, over a fake cluster ---------------------------------------------------------------------------------------
@@ -203,7 +208,7 @@ def shop_cluster(namespaces=("shop",)) -> FakeClusterSource:
 
 def test_the_route_picks_the_only_application_and_reports_the_evidence_it_used(use_cluster, monkeypatch):
     use_cluster(shop_cluster())
-    stub_sources(monkeypatch, [], [workflow("checkout", ["web", "db"])])
+    stub_sources(monkeypatch, [], [workflow("checkout", ["web", "db"])], reviewed_declared=True)
     body = client.get("/api/failure-impacts/overview").json()
     assert body["state"] == "ready" and body["namespace"] == "shop" and body["namespaceChoice"] == "only-application"
     assert body["isPrediction"] is True and body["readOnly"] is True

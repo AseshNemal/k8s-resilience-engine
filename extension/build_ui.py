@@ -27,18 +27,14 @@ INDEX_PAGE = "index.html"
 
 # route -> (file, page key used by the CSS, header title in Docker's sentence case)
 PAGES = {
-    "/": (INDEX_PAGE, "overview", "Overview"),
+    "/": (INDEX_PAGE, "overview", "Assessment"),
     "/components/workflows": ("workflows.html", "workflows", "Workflow dependencies"),
     "/components/deployments": ("deployments.html", "deployments", "Deployment topology"),
     "/components/failure-impacts": ("failure-impacts.html", "failure-impacts", "Failure impact"),
     "/components/recommendations": ("recommendations.html", "recommendations", "Recommendations"),
 }
 # The app's navigation labels are Title Case; Docker Desktop uses sentence case.
-NAV_LABELS = {
-    "Workflow Dependencies": "Workflow dependencies",
-    "Deployment Topology": "Deployment topology",
-    "Failure Impact": "Failure impact",
-}
+NAV_LABELS = {}
 
 CONNECT_ICON = (
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">'
@@ -256,9 +252,13 @@ def _static_paths(html: str, key: str, title: str) -> str:
         raise SystemExit("Could not find the sidebar collapse button to add the Connect link.")
 
     if key == "overview":
-        html, count = re.subn(r'<div class="page-header">', lambda _m: CLUSTER_PANEL + '<div class="page-header">', html, count=1)
+        html, count = re.subn(
+            r'<div class="page-header(?: [^"]*)?">',
+            lambda match: CLUSTER_PANEL + match.group(0),
+            html, count=1,
+        )
         if count != 1:
-            raise SystemExit("Could not find the Overview page header.")
+            raise SystemExit("Could not find the Assessment page header.")
     if key == "failure-impacts":
         # The synthetic-portfolio demo is a labelled sample-data page of the web app. The extension shows the connected cluster's
         # real evidence and has no such page, so the demo's entry card (and its absolute link) is not part of the extension.
@@ -287,13 +287,13 @@ def _drop_tags(html: str, tag_pattern: str, needle: str) -> str:
 def _connect_page(index_html: str) -> str:
     html = _drop_tags(index_html, r"<link[^>]*>", "dashboard.css")
     html = _drop_tags(html, r"<link[^>]*>", "pages/recommendations.css")
-    for script in ("dashboard.js", "overview-summary.js", "recommendation-topology.js", "recommendation-apply-test.js"):
+    for script in ("dashboard.js", "overview-summary.js", "recommendation-topology.js", "recommendation-apply-test.js", "assessment.js"):
         html = _drop_tags(html, r"<script[^>]*></script>", script)
     html = re.sub(r"sidebar__link\s+is-active", "sidebar__link ", html)
     html = html.replace('class="sidebar__link" data-role="connect-link"', 'class="sidebar__link is-active" data-role="connect-link"')
     html = html.replace('<body data-page="overview">', '<body data-page="connect">', 1)
     html = re.sub(r"<title>.*?</title>", "<title>Connect cluster · K8s Resilience Engine</title>", html, count=1, flags=re.S)
-    html = html.replace('<h1 class="topbar__title">Overview</h1>', '<h1 class="topbar__title">Connect cluster</h1>')
+    html = html.replace('<h1 class="topbar__title">Assessment</h1>', '<h1 class="topbar__title">Connect cluster</h1>')
     html, count = re.subn(r'<main class="page" id="main-content">.*?</main>', lambda _m: CONNECT_MAIN, html, count=1, flags=re.S)
     if count != 1:
         raise SystemExit("Could not find the main content area for the Connect page.")

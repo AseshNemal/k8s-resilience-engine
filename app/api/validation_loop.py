@@ -43,7 +43,7 @@ from app.engine.recommendation_evaluation_validation.validation_loop.service imp
     proof_from_history,
 )
 from app.engine.recommendation_evaluation_validation.validation_loop.worker import LoopWorker
-from app.shared.evidence_errors import unavailable
+from app.shared.evidence_errors import EvidenceError, unavailable
 from app.shared.schemas.base import APIModel
 
 router = APIRouter()
@@ -346,9 +346,24 @@ def history(limit: int = Query(10, ge=1, le=50), runtime: tuple[LoopRepository, 
 @router.get("/proof")
 def proof(namespace: str, workflow_id: str = Query(..., alias="workflowId"),
           candidate_sha256: str | None = Query(None, alias="candidateSha256"),
+          workflow_source: str = Query("FROZEN", alias="workflowSource", pattern="^(FROZEN|DECLARED)$"),
           runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime)) -> dict:
     """For the Approve step: was a change with this exact YAML proven, on which cluster, and at what evidence level. Reads the database only."""
-    return proof_from_history(runtime[0], namespace=namespace, workflow_id=workflow_id, candidate_sha256=candidate_sha256)
+    from app.engine.recommendation_evaluation_validation.validation_loop.planning import workflow_evidence
+    from app.engine.workflow_dependency_modeling import service as workflows
+    current = None
+    try:
+        if workflow_source == "DECLARED":  # explicit research selection, never an operational fallback
+            from app.engine.recommendation_evaluation_validation.declared_workflow import get_declared_workflow
+            declared = get_declared_workflow(workflow_id)
+            current = workflow_evidence(declared.graph, {"declaredWorkflow": declared.to_dict()})
+        else:
+            reviewed = workflows.get_operational_workflow(workflow_id, namespace)
+            current = workflow_evidence(reviewed.graph, {"workflowReview": reviewed.operational_review})
+    except (EvidenceError, LookupError):
+        pass  # history remains readable; it cannot claim proof of a missing current definition
+    return proof_from_history(runtime[0], namespace=namespace, workflow_id=workflow_id,
+                              candidate_sha256=candidate_sha256, current_workflow_evidence=current)
 
 
 # The disposable test cluster: assessment, preview of the copy, and creating it. See validation_loop_disposable.py.

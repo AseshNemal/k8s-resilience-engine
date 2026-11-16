@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
+    assessment,
     deployments,
     failure_impacts,
     health,
@@ -60,6 +61,7 @@ app.mount(
 
 # JSON API routers
 app.include_router(health.router)
+app.include_router(assessment.router)
 app.include_router(workflows.router)
 app.include_router(deployments.router)
 app.include_router(failure_impacts.router)

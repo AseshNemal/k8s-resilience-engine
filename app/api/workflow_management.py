@@ -2,11 +2,21 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.engine.workflow_dependency_modeling import service
-from app.shared.schemas.workflow_management import WorkflowEdit, RecordingStart, RecordingStop, WorkflowDecision
+from app.shared.schemas.workflow_management import WorkflowEdit, RecordingStart, RecordingStop, WorkflowDecision, OperationalWorkflowReview
 
 from app.shared.schemas.workflow_test_evidence import TestEvidenceImport, HttpTestRun
 
 router = APIRouter(prefix="/management")
+
+
+@router.get("/operational-reviews")
+def operational_reviews():
+    return service.list_managed_documents("operational-review")
+
+
+@router.post("/operational-reviews")
+def review_operational_workflow(request: OperationalWorkflowReview):
+    return service.review_operational_workflow(request)
 
 
 def _call(action, *args, **kwargs):

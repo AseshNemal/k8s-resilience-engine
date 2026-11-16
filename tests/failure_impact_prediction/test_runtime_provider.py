@@ -91,7 +91,7 @@ def test_runtime_inputs_wrap_component_one_storage_failure(monkeypatch) -> None:
 
     monkeypatch.setattr(workflow_service, "get_frozen_workflow_graph", unavailable_storage)
 
-    with pytest.raises(RuntimeInputUnavailableError, match="Component 1 frozen-workflow storage is unavailable") as caught:
+    with pytest.raises(RuntimeInputUnavailableError, match="Component 1 reviewed-workflow storage is unavailable") as caught:
         get_runtime_component_inputs("checkout")
 
     assert caught.value.http_status == 503
@@ -212,7 +212,7 @@ def test_runtime_portfolio_loads_each_workflow_and_topology_once(monkeypatch) ->
 
     def live_deployment(namespace: str):
         deployment_calls.append(namespace)
-        return deployment
+        return discovery_for(deployment, namespace=namespace)
 
     monkeypatch.setattr(
         workflow_service,
@@ -221,7 +221,7 @@ def test_runtime_portfolio_loads_each_workflow_and_topology_once(monkeypatch) ->
     )
     monkeypatch.setattr(
         deployment_service,
-        "get_live_deployment_graph",
+        "discover_live",
         live_deployment,
     )
 
@@ -265,3 +265,9 @@ def test_runtime_portfolio_rejects_invalid_workflow_selection(
 def test_runtime_portfolio_rejects_blank_namespace() -> None:
     with pytest.raises(ValueError, match="namespace"):
         get_runtime_portfolio_inputs(["checkout"], "   ")
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch, fingerprint="test-connection")

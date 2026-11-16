@@ -1007,3 +1007,4 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .rx > *, .rx-pane > *, .rx-sections > *, .rx-result > * { min-width: 0; }
 .rx-fold, .rx-research, .rx-experiment { overflow-wrap: anywhere; }
 .rx pre { max-width: 100%; }
+.rx-rail[hidden] { display: none; }

@@ -948,7 +948,7 @@
         container.hidden = !findings;
         if (!findings) return;
         const doc = container.ownerDocument;
-        container.append(element(doc, "h4", "Deployment-level findings"),
+        container.append(element(doc, "h3", "Deployment risk and suggested improvements"),
             element(doc, "p", findings.note, "ui-note"),
             element(doc, "p", "Workflow survival: unknown. Workflow blast radius: unknown. Workflow-dependent approval is unavailable."));
         const table = element(doc, "table", "", "op-table");
@@ -961,6 +961,33 @@
             table.append(row);
         }
         container.append(table);
+        const candidates = findings.recommendations || [];
+        const ranked = candidates.filter((c) => c.ranking?.rank != null);
+        container.append(element(doc, "h4", "Compare placement improvements"),
+            element(doc, "p", "The same feasibility checks and virtual simulations are used here. The percentages below describe services losing all ready replicas, not business workflows.", "ui-note"));
+        const shownServices = new Set();
+        for (const candidate of ranked) {
+            if (shownServices.has(candidate.service)) continue;
+            shownServices.add(candidate.service);
+            const card = element(doc, "article", undefined, "rx-lead");
+            const title = window.ResilienceJourney?.strategyTitle(candidate.type) || strategyName(candidate.type);
+            card.append(element(doc, "h4", `${title} · ${candidate.service}`),
+                element(doc, "p", `Average service exposure across node failures: ${percent(candidate.averageServiceExposureBefore)} → ${percent(candidate.averageServiceExposureAfter)} (predicted).`),
+                element(doc, "p", `Worst single-node service exposure: ${percent(candidate.worstCaseBefore)} → ${percent(candidate.worstCaseAfter)}. ${candidate.resourceCost} resource cost.`, "ui-note"));
+            const why = element(doc, "details");
+            why.append(element(doc, "summary", "Placement and rollout details"), element(doc, "p", candidate.reason || "Placement verified feasible under the model.", "ui-note"));
+            card.append(why);
+            container.append(card);
+        }
+        if (!ranked.length) container.append(element(doc, "p", "No placement improvement could be ranked from the available evidence. This is not proof of resilience."));
+        if (candidates.length) {
+            const details = element(doc, "details");
+            details.append(element(doc, "summary", `All ${candidates.length} evaluated options and feasibility results`));
+            const list = element(doc, "ul");
+            for (const c of candidates) list.append(element(doc, "li", `${strategyName(c.type)} · ${c.service}: ${c.feasibility?.status || "Unknown"}. ${c.reason || ""} ${c.ranking?.detail || ""}`));
+            details.append(list); container.append(details);
+        }
+        container.append(element(doc, "p", "Review a real workflow definition in Workflow Discovery to enable workflow-aware approval. Existing applied changes can still be recovered from change history.", "ui-note"));
     }
 
     window.ResilienceRecommendations = {

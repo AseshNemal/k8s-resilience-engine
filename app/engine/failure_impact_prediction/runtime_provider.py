@@ -43,13 +43,14 @@ class RuntimeComponentInputs:
 
     workflow: WorkflowGraph
     deployment: DeploymentGraph
-    workflow_freeze_id: str
-    workflow_assessment_id: str
+    workflow_freeze_id: str | None
+    workflow_assessment_id: str | None
     namespace: str
     topology_status: str = "ok"
     topology_captured_at: str = ""
     topology_warnings: list[Any] = field(default_factory=list)
     topology_unresolved: list[Any] = field(default_factory=list)
+    workflow_review: dict[str, Any] | None = None
 
 
 def _referenced_services(workflow: WorkflowGraph) -> list[str]:
@@ -97,8 +98,9 @@ class WorkflowInputProvenance:
     """Identity of one frozen Component 1 graph used in a prediction."""
 
     workflow_id: str
-    freeze_id: str
-    assessment_id: str
+    freeze_id: str | None
+    assessment_id: str | None
+    workflow_review: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,19 @@ def _load_frozen_workflow(workflow_id: str):
         raise RuntimeInputUnavailableError(
             "Component 1 frozen-workflow storage is unavailable", code="WORKFLOW_STORAGE_UNAVAILABLE"
         ) from error
+
+
+def _load_operational_workflow(workflow_id: str, namespace: str):
+    from app.engine.workflow_dependency_modeling.service import get_operational_workflow
+    try:
+        return get_operational_workflow(workflow_id, namespace)
+    except EvidenceError:
+        raise
+    except LookupError as error:
+        raise WorkflowEvidenceUnavailableError(str(error)) from error
+    except Exception as error:
+        logger.exception("Reviewed workflow storage failed")
+        raise RuntimeInputUnavailableError("Component 1 reviewed-workflow storage is unavailable", code="WORKFLOW_STORAGE_UNAVAILABLE") from error
 
 
 def _load_deployment(namespace: str) -> DeploymentGraph:
@@ -181,8 +196,12 @@ def get_runtime_component_inputs(
     if not normalized_namespace:
         raise ValueError("namespace must be a non-empty string")
 
-    frozen_workflow = _load_frozen_workflow(normalized_workflow_id)
+    frozen_workflow = _load_operational_workflow(normalized_workflow_id, normalized_namespace)
     discovery = _discover_topology(normalized_namespace)
+
+    if discovery.cluster.connection_fingerprint != frozen_workflow.operational_review["connectionFingerprint"]:
+        raise EvidenceError("WORKFLOW_REVIEW_REQUIRED", "The connection changed during evidence collection. Reload the workflow review.",
+                            http_status=409, component=COMPONENT)
 
     workflow = frozen_workflow.graph.model_copy(deep=True)
     _require_sufficient_evidence(workflow, discovery)
@@ -197,6 +216,7 @@ def get_runtime_component_inputs(
         topology_captured_at=discovery.captured_at,
         topology_warnings=list(discovery.warnings),
         topology_unresolved=list(discovery.unresolved),
+        workflow_review=frozen_workflow.operational_review,
     )
 
 
@@ -232,10 +252,15 @@ def get_runtime_portfolio_inputs(
         raise ValueError("namespace must be a non-empty string")
 
     frozen_workflows = tuple(
-        _load_frozen_workflow(workflow_id)
+        _load_operational_workflow(workflow_id, normalized_namespace)
         for workflow_id in normalized_workflow_ids
     )
-    deployment = _load_deployment(normalized_namespace)
+    discovery = _discover_topology(normalized_namespace)
+    for item in frozen_workflows:
+        _require_sufficient_evidence(item.graph, discovery)
+        if item.operational_review["connectionFingerprint"] != discovery.cluster.connection_fingerprint:
+            raise EvidenceError("WORKFLOW_REVIEW_REQUIRED", "The connection changed during evidence collection.", http_status=409, component=COMPONENT)
+    deployment = discovery.graph
 
     return RuntimePortfolioInputs(
         workflows=tuple(
@@ -248,6 +273,7 @@ def get_runtime_portfolio_inputs(
                 workflow_id=workflow_id,
                 freeze_id=frozen_workflow.freeze_id,
                 assessment_id=frozen_workflow.assessment_id,
+                workflow_review=frozen_workflow.operational_review,
             )
             for workflow_id, frozen_workflow in zip(
                 normalized_workflow_ids,

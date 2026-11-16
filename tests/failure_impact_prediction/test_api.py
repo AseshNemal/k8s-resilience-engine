@@ -31,6 +31,8 @@ def evidence(**overrides):
 
 
 def freeze_checkout(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)
     graph = WorkflowGraph(workflow_id="checkout", criticality=0.9, mandatory_services=["web", "db"],
                           edges=[WorkflowEdge(source="web", target="db")])
     monkeypatch.setattr(
@@ -265,3 +267,9 @@ def test_failure_impact_page_asks_for_no_typed_input_and_exposes_the_overview_ho
     for gone in ('data-role="input-mode"', 'data-role="workflow-id"', 'data-role="namespace"', 'data-role="node-selector"'):
         assert gone not in response.text, gone
     assert "Simulate Node Failure" not in response.text
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

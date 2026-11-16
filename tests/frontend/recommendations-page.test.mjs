@@ -118,7 +118,7 @@ const contextOf = (over = {}) => ({
     nextActions: [], ready: true, readOnly: true, ...over,
 });
 const DETAIL = "GET /api/recommendations/live/detail?workflow_id=checkout&namespace=shop";
-const PROOF = "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout";
+const PROOF = "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout&workflowSource=FROZEN";
 const BASE = { "GET /_extension/cluster": { status: 200, body: { context: "docker-desktop" } }, "GET /api/recommendations/context": { status: 200, body: contextOf() } };
 
 async function openPage(routes, storage, allWorkflows = false) {
@@ -131,9 +131,9 @@ async function openPage(routes, storage, allWorkflows = false) {
 test("the connected cluster, the only application and the only workflow are used without typing anything", async () => {
     const env = await openPage({ [DETAIL]: { status: 200, body: detailOf([cand()], "rec-live") }, "GET /api/recommendations/rec-live/approval": { status: 404, body: {} } });
 
-    assert.deepEqual(env.calls.map((c) => `${c[0]} ${c[1]}`), ["GET /_extension/cluster", "GET /api/recommendations/applications/current", "GET /api/recommendations/context", DETAIL.slice(4).replace(/^/, "GET "), "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout", "GET /api/recommendations/rec-live/approval"]);
+    assert.deepEqual(env.calls.map((c) => `${c[0]} ${c[1]}`), ["GET /_extension/cluster", "GET /api/recommendations/applications/current", "GET /api/recommendations/context", DETAIL.slice(4).replace(/^/, "GET "), "GET /api/recommendations/validation-loop/proof?namespace=shop&workflowId=checkout&workflowSource=FROZEN", "GET /api/recommendations/rec-live/approval"]);
     assert.equal(env.element('[data-role="rec-cluster"]').textContent, "Connected cluster: docker-desktop");
-    assert.equal(env.element('[data-role="source-badge"]').textContent, "Live evidence");
+    assert.equal(env.element('[data-role="source-badge"]').textContent, "Live placement · reviewed workflow definitions");
     assert.equal(env.element('[data-role="rec-namespace-select"]').value, "shop");
     assert.equal(env.element('[data-role="rec-namespace-select"]').disabled, true, "one application: nothing to choose");
     assert.equal(env.element('[data-role="rec-workflow-select"]').value, "checkout");
@@ -230,7 +230,7 @@ test("with several workflows a dropdown choice, not a typed ID, starts the recom
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.ok(calls_include(env, "/live/detail?workflow_id=checkout&namespace=shop"));
-    assert.equal(env.element('[data-role="source-badge"]').textContent, "Live evidence");
+    assert.equal(env.element('[data-role="source-badge"]').textContent, "Live placement · reviewed workflow definitions");
 });
 
 test("when the connected cluster changes the page starts over and sends nothing chosen before", async () => {

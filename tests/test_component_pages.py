@@ -11,7 +11,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 PAGE_CASES = [
-    ("/", "Overview", "dashboard.css", "components/dashboard.js"),
+    ("/", "Assessment", "pages/assessment.css", "components/assessment.js"),
     (
         "/components/workflows",
         "Workflow dependencies",

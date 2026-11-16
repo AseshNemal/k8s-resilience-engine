@@ -188,7 +188,8 @@ class ApplyTestService:
                 workflowSetDigest=live.evidence.get("workflowSetDigest"),
                 predictedRisk=next(c.predicted_blast_radius for c in live.report.recommendations if c.id == run["candidateId"]),
                 before=self._snapshot(run, live, "baseline"), yaml=proposal.yaml, yamlSha256=proposal.sha256,
-                workflowBasis=live.evidence.get("workflowBasis"), workflows=live.evidence.get("workflows"))
+                workflowBasis=live.evidence.get("workflowBasis"), workflows=live.evidence.get("workflows"),
+                workflowEvidencePolicy=live.evidence.get("workflowEvidencePolicy"), workflowReview=live.evidence.get("workflowReview"))
             self.repo.update(run_id, report=report)
             self._event(run_id, "applying", "Validate and PATCH the selected Deployments through Kubernetes API", "Saving the previous state, then applying only the selected changes.")
             with Session(self.engine) as db:
@@ -196,7 +197,7 @@ class ApplyTestService:
                 self.repo.update(run_id, authorizationId=approval.id)
                 service = self.application_factory(db, run["declared"])
                 # Recheck after baseline measurements; Apply is never based on a now-stale preview.
-                change = service.apply(run["candidateId"], run["appliedBy"], evaluate=lambda _: self._checked(run)[0])
+                change = service.apply(run["candidateId"], run["appliedBy"], evaluate=lambda _: self._checked(run)[0], run_id=run_id)
                 self.repo.update(run_id, applicationId=change.application_id)
             deadline = time.monotonic() + self.timeout
             self._event(run_id, "rollout", "GET Deployment rollout status", "Waiting for the new generation and ready replicas.")
@@ -258,7 +259,8 @@ class ApplyTestService:
             run = self.repo.get(run["runId"])
         run["report"] = {**(run.get("report") or {}), "riskTargetMet": _risk_target_met(run.get("report") or {})}
         with Session(self.engine) as db:
-            change = AppliedChangeRepository(db).latest_for(run["candidateId"])
+            applications = AppliedChangeRepository(db)
+            change = applications.get(run["applicationId"]) if run.get("applicationId") else applications.for_run(run["runId"])
             # A crash can happen after the snapshot is saved but before the worker records applicationId.
             if change and change.approval_id == run.get("authorizationId"):
                 run["application"] = change.to_dict()
@@ -270,7 +272,8 @@ class ApplyTestService:
                                    and match != "other")
                 # After a test the change is still on the cluster: the person is asked to reset it or to keep it (a recorded
                 # decision that writes nothing). Only a change that settled as applied can be kept.
-                run["canKeep"] = change.status == "APPLIED" and run["status"] in TERMINAL
+                run["canKeep"] = (change.status == "APPLIED" and run["status"] in TERMINAL and match == "same"
+                                  and (change.rollout or {}).get("state") == "completed")
                 run["kept"] = (change.detail or {}).get("kept") if change.status == "KEPT" else None
         return run
 
@@ -330,6 +333,9 @@ class ApplyTestService:
             summaries.append({**{key: run.get(key) for key in (
                 "runId", "candidateId", "namespace", "clusterUid", "clusterName", "declared", "createdAt", "status")},
                 "candidate": report.get("candidate"), "workflowSetDigest": report.get("workflowSetDigest"),
+                "workflowEvidence": {"basis": report.get("workflowBasis") or ("DECLARED" if run.get("declared") else "historical-unverified"),
+                    "policy": report.get("workflowEvidencePolicy"), "workflows": report.get("workflows"),
+                    "review": report.get("workflowReview"), "isCurrentEvidence": False},
                 "yamlSha256": report.get("yamlSha256") or run.get("expectedYamlSha256"),
                 "riskTargetMet": _risk_target_met(report),
                 "baselineRisk": (report.get("baselineRisk") or {}).get("blastRadius"),

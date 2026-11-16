@@ -762,3 +762,9 @@ def test_the_research_analyser_refuses_a_topology_too_incomplete_for_the_workflo
         ResearchAnalyser().recalculate(_basis("DECLARED"))
 
     assert refused.value.code == "TOPOLOGY_INCOMPLETE"
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

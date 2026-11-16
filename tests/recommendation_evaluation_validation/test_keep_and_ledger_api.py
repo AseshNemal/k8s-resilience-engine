@@ -35,7 +35,7 @@ def test_the_status_carries_a_readable_account_of_the_change(client, connected, 
 def test_keeping_a_change_frees_the_cluster_for_another_and_leaves_it_resettable(client, connected, approved_candidate):
     apply(client, approved_candidate)
 
-    kept = client.post(f"{RESEARCH}/{approved_candidate}/keep", json={"keptBy": "asesh"})
+    kept = client.post(f"{RESEARCH}/{approved_candidate}/keep", json={"keptBy": "asesh", "expectedApplicationId": (client.get(f"{RESEARCH}/{approved_candidate}/application").json().get("application") or {}).get("applicationId", "absent")})
 
     assert kept.status_code == 200
     body = kept.json()
@@ -46,9 +46,9 @@ def test_keeping_a_change_frees_the_cluster_for_another_and_leaves_it_resettable
 
 
 def test_keeping_what_is_not_applied_is_refused(client, connected, approved_candidate):
-    response = client.post(f"{RESEARCH}/{approved_candidate}/keep", json={"keptBy": "asesh"})
+    response = client.post(f"{RESEARCH}/{approved_candidate}/keep", json={"keptBy": "asesh", "expectedApplicationId": (client.get(f"{RESEARCH}/{approved_candidate}/application").json().get("application") or {}).get("applicationId", "absent")})
 
-    assert response.status_code == 409 and response.json()["detail"]["code"] == "NOTHING_TO_KEEP"
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "APPLICATION_CHANGED"
 
 
 def test_the_ledger_route_lists_what_is_still_applied_for_either_tier(client, connected, approved_candidate):
@@ -65,14 +65,14 @@ def test_reset_names_an_outside_change_and_restores_nothing_until_told_to_keep_i
     apply(client, approved_candidate)
     connected.deployments["db"] = replace(connected.deployments["db"], replicas=9)
 
-    refused = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh"})
+    refused = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "expectedApplicationId": client.get(f"{RESEARCH}/{approved_candidate}/application").json()["application"]["applicationId"]})
 
     assert refused.status_code == 409
     detail = refused.json()["detail"]
     assert detail["code"] == "EXTERNAL_CHANGE" and detail["details"]["external"][0]["field"] == "replicas"
     assert connected.deployments["db"].has_hostname_spread and connected.restores == []
 
-    kept = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "external": "keep"})
+    kept = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "expectedApplicationId": client.get(f"{RESEARCH}/{approved_candidate}/application").json()["application"]["applicationId"], "external": "keep"})
 
     assert kept.status_code == 200 and kept.json()["application"]["status"] == "RESET"
     assert connected.deployments["db"].replicas == 9 and not connected.deployments["db"].has_hostname_spread
@@ -81,6 +81,6 @@ def test_reset_names_an_outside_change_and_restores_nothing_until_told_to_keep_i
 def test_reset_rejects_an_external_choice_it_does_not_know(client, connected, approved_candidate):
     apply(client, approved_candidate)
 
-    response = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "external": "overwrite"})
+    response = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "expectedApplicationId": client.get(f"{RESEARCH}/{approved_candidate}/application").json()["application"]["applicationId"], "external": "overwrite"})
 
     assert response.status_code == 422

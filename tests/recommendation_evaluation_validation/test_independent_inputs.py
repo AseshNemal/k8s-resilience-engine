@@ -71,6 +71,8 @@ def no_frozen_workflow(monkeypatch):
 
 
 def freeze_checkout(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)
     graph = WorkflowGraph(workflow_id="checkout", criticality=0.9, mandatory_services=["web", "db"],
                           edges=[WorkflowEdge(source="web", target="db")])
     monkeypatch.setattr(workflow_service, "get_frozen_workflow_graph",
@@ -272,3 +274,9 @@ def test_preapproval_description_compares_live_fields_with_the_generated_patch(u
     assert fields["topology_spread_constraints"]["changed"] is True
     assert fields["pod_anti_affinity"]["changed"] is False
     assert "db:" in changes["db"]["summary"]
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

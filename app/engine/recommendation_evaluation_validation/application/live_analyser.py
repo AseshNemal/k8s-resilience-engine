@@ -79,6 +79,7 @@ class _Analyser:
             "tier": self.tier, "source": evidence.get("source"), "workflowId": evidence.get("workflowId"),
             "workflowBasis": "DECLARED" if evidence.get("source") == DECLARED_WORKFLOW_SOURCE else "FROZEN",
             "workflowFreezeId": evidence.get("workflowFreezeId"), "declarationDigest": declaration_digest(evidence),
+            "workflowReview": evidence.get("workflowReview"),
             "declaredBy": declared.get("declaredBy"),
             "namespace": evidence.get("namespace"), "failedNode": evidence.get("failedNode"),
             "failedNodeChosen": evidence.get("failedNodeChosen"), "metric": METRIC, "rankingBasis": SINGLE_WORKFLOW,
@@ -143,6 +144,8 @@ class ProductionAnalyser(_Analyser):
 
     def _load(self, basis: dict[str, Any]):
         inputs = get_runtime_component_inputs(basis["workflowId"], basis["namespace"])
+        if basis.get("workflowReview") and inputs.workflow_review != basis["workflowReview"]:
+            raise AnalysisUnavailable("WORKFLOW_CHANGED", "The reviewed definition changed after Apply. No comparison is made against a different workflow basis.")
         if basis.get("workflowFreezeId") and inputs.workflow_freeze_id != basis["workflowFreezeId"]:
             raise AnalysisUnavailable(
                 "WORKFLOW_CHANGED", "The workflow was frozen again after this change was applied, so the failure impact now would "

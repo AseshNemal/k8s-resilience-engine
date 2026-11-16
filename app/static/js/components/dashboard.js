@@ -283,8 +283,8 @@
             sections.results.replaceChildren(make("p", "ui-note", "No fix has been applied and tested yet. Apply one on the Recommendations page."));
             return;
         }
-        sections.results.replaceChildren(table(["Fix", "Application / cluster", "Before", "Proposed", "Recalculated", "Test outcome", "Date (UTC)"],
-            rows.map((row) => [row.name, `${row.namespace} / ${row.cluster}`, row.baseline, row.predicted, row.after, statePill(row.outcomeState, row.outcome), row.when])));
+        sections.results.replaceChildren(table(["Fix", "Application / cluster", "Dependency evidence", "Before", "Proposed", "Recalculated", "Test outcome", "Date (UTC)"],
+            rows.map((row) => [row.name, `${row.namespace} / ${row.cluster}`, row.evidenceBasis, row.baseline, row.predicted, row.after, statePill(row.outcomeState, row.outcome), row.when])));
     }
 
     function bar(label, value, state) {
@@ -358,6 +358,7 @@
         const row = OV.describeResults({ runs: [run] })[0];
         sections.latest.append(statePill(row.outcomeState, row.outcome), make("p", "overview-fix-name", row.name),
             make("p", "overview-caption", `${row.namespace} · ${row.cluster} · ${row.when} UTC`));
+        sections.latest.append(make("p", "ui-note", row.evidenceBasis));
         const checks = run.afterWorkflows && run.afterWorkflows.rows;
         const evidence = make("div", "overview-test-evidence");
         const marker = (label, value, state) => {
@@ -403,9 +404,8 @@
     function detailUrl(context) {
         if (!context || !context.namespace) return null;
         const frozen = (context.workflows || []).some((w) => w.applicable);
-        const declared = (context.declaredWorkflows || []).some((w) => w.applicable);
-        if (!frozen && !declared) return null;
-        return `/api/recommendations/${frozen ? "live" : "declared"}/detail?namespace=${encodeURIComponent(context.namespace)}&all_workflows=true`;
+        if (!frozen) return null;
+        return `/api/recommendations/live/detail?namespace=${encodeURIComponent(context.namespace)}&all_workflows=true`;
     }
 
     async function loadResearch() {
@@ -449,6 +449,15 @@
             drawImpact(null, why.message);
             drawFix(null, why.message);
             drawNext(null, why.message);
+            const findings = context.body?.deploymentFindings;
+            if (findings) {
+                const worst = findings.nodes?.find((n) => n.node === findings.failedNode);
+                state.risk = { state: "available", headline: "Workflow survivability unknown", lostPercent: null,
+                    sub: worst ? `If ${worst.node} stops, ${worst.failedServices.length} service(s) lose all ready replicas. Predicted from placement.` : findings.note };
+                drawRisk(state.risk);
+                drawPlacement({ currentDeployment: findings.currentDeployment, evidence: { failedNode: findings.failedNode } });
+                drawFix(null, `${findings.recommendations?.filter((r) => r.feasible).length || 0} feasible deployment-level suggestions are available in Recommendations. Workflow effects remain unknown.`);
+            }
             showStrip();
             return;
         }
@@ -463,7 +472,7 @@
         drawNext(detail.body || null, detail.error ? detail.error.message : null);
         if (detail.body) {
             const body = detail.body;
-            const basis = body.portfolio?.basis === "DECLARED" ? "Declared workflows" : "Frozen workflows";
+            const basis = body.portfolio?.basis === "DECLARED" ? "Research declarations" : "Reviewed workflow definitions";
             const captured = body.evidence?.topologyCapturedAt;
             const date = captured ? new Date(captured) : null;
             const captureLabel = date && !Number.isNaN(date.getTime())

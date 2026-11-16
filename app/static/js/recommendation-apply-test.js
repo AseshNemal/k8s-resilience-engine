@@ -1,6 +1,13 @@
 /* Apply and test: only an explicit click starts work; polls only read the durable run. */
 (function () {
     "use strict";
+
+    function workflowEvidenceLabel(row) {
+        if (row?.declared === true) return "Operator-declared workflow dependencies · research results are conditional";
+        const policy = row?.workflowEvidence?.policy || row?.report?.workflowEvidencePolicy;
+        return policy === "operational-workflow/v1" ? "Explicitly reviewed real workflow definition"
+            : "Historical workflow evidence · current operational review unavailable";
+    }
     const BASE = "/api/recommendations/apply-tests";
     const TERMINAL = new Set(["COMPLETED", "COMPLETED_WITH_GAPS", "TESTS_FAILED", "FAILED", "INTERRUPTED"]);
     const LABELS = { QUEUED: "Queued", RUNNING: "Running", COMPLETED: "Report complete", COMPLETED_WITH_GAPS: "Report complete — missing measurements",
@@ -185,6 +192,7 @@
                 operation.append(make("h4", "Current operation"), make("p", run.current.message), make("code", run.current.command, "apply-test__command"));
                 root.append(operation);
             }
+            if (run) root.append(make("p", workflowEvidenceLabel(run), "ui-note"));
             if (busy() && run) root.append(drawLive());
             if (error) { const note = make("p", error, "approval-note"); note.setAttribute("role", "alert"); root.append(note); }
             if (!env.readOnly && resetFailure?.code === "EXTERNAL_CHANGE" && run?.canReset && !busy()) {
@@ -303,13 +311,18 @@
             draw(); notify(); arm();
         }
 
+        function auditActor(fallback) {
+            try { const configured = window.localStorage?.getItem("resilience.audit.name"); if (configured) return configured; } catch (_) { /* Optional attribution. */ }
+            return run?.appliedBy || run?.application?.appliedBy || fallback;
+        }
+
         async function resetChanges(external = "refuse") {
             if (env.readOnly || busy() || !run?.canReset) return;
             resetting = true; error = null; resetFailure = null; draw(); notify();
             try {
                 const base = run.declared ? "/api/recommendations/declared" : "/api/recommendations";
                 await request(`${base}/${encodeURIComponent(run.candidateId)}/reset`, { method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ resetBy: "Explicit Reset action", external }) });
+                    body: JSON.stringify({ resetBy: auditActor("Explicit Reset action"), external, expectedApplicationId: run.application?.applicationId }) });
                 awaitingReset = true;
                 if (env.onReset) env.onReset();
             } catch (e) {
@@ -328,7 +341,7 @@
             try {
                 const base = run.declared ? "/api/recommendations/declared" : "/api/recommendations";
                 await request(`${base}/${encodeURIComponent(run.candidateId)}/keep`, { method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ keptBy: "Explicit Keep action" }) });
+                    body: JSON.stringify({ keptBy: auditActor("Explicit Keep action"), expectedApplicationId: run.application?.applicationId }) });
                 if (env.onReset) env.onReset();       // the same refresh a reset triggers: the change no longer blocks another candidate
             } catch (e) {
                 error = e.message;
@@ -591,6 +604,7 @@
                 const name = el("div", null, "cmp-head");
                 if (title.strategy) name.append(el("span", title.strategy, "cmp-strategy"));
                 name.append(el("span", title.services, "cmp-services", { title: title.id || "" }));
+                name.append(el("span", workflowEvidenceLabel(row), "ui-note"));
                 const time = el("span", when || "", null, { title: row.createdAt ? `${row.createdAt} UTC` : "" });
                 return [check, name, when ? time : none(), `${row.clusterName || "Unknown cluster"} / ${row.namespace}`, chip(outcomeLabel(row), resultLabel(row)[1]),
                     button("View saved report", () => open(row))];
@@ -720,6 +734,6 @@
         }
         return { update };
     }
-    window.ResilienceApplyTest = { createPanel, createHistoryPanel, createCandidateResultsSidebar, resultLabel,
+    window.ResilienceApplyTest = { workflowEvidenceLabel, createPanel, createHistoryPanel, createCandidateResultsSidebar, resultLabel,
         compare: { buildComparison, shortId, friendlyTime, candidateTitle, usageCell, RISK_MATCH_TOLERANCE } };
 })();

@@ -271,3 +271,110 @@ def test_leaving_a_change_at_disconnect_is_written_on_it(ready):
     service.note_left_at_disconnect([change.application_id])
 
     assert service.repository.latest_for(rid).events[-1]["event"] == "left-at-disconnect"
+
+
+def test_missing_after_snapshot_blocks_reset_without_overwriting_outside_edits(ready, cluster):
+    service, rid, change = applied(ready)
+    change.after = None
+    service.repository.update(change)
+    cluster.deployments["db"] = replace(cluster.deployments["db"], replicas=9)
+    with pytest.raises(ApplicationRefused) as refused:
+        service.reset(rid, "asesh")
+    assert refused.value.code == "RESET_EVIDENCE_MISSING"
+    assert cluster.restores == [] and cluster.deployments["db"].replicas == 9
+
+
+def test_reset_lost_response_is_reconciled_from_the_durable_journal(ready, cluster):
+    service, rid, change = applied(ready)
+    original = cluster.restore_deployment
+    def lost_reply(snapshot):
+        stored = service.repository.get(change.application_id)
+        assert stored.status == "RESET_FAILED" and stored.reset_by == "asesh"
+        assert stored.detail["resetJournal"]["targets"][snapshot.name]["replicas"] == snapshot.replicas
+        original(snapshot)
+        from app.integrations.kubernetes.client import ConnectionFailedError
+        raise ConnectionFailedError("ReadTimeout")
+    cluster.restore_deployment = lost_reply
+    with pytest.raises(ApplicationRefused):
+        service.reset(rid, "asesh")
+    assert cluster.restores == ["db"]
+    cluster.restore_deployment = original
+    # A new service has no in-memory knowledge of the successful write.
+    from app.engine.recommendation_evaluation_validation.application import ApplicationService
+    restarted = ApplicationService(service.approvals, service.repository, lambda: cluster, tier=service.tier,
+        trusted=service._trusted, require_applicable=False, writes_enabled=True)
+    restored = restarted.reset(rid, "asesh")
+    assert restored.status == RESET and cluster.restores == ["db"]
+    assert "restored-confirmed" in [e["event"] for e in restored.events]
+
+
+def test_keep_cannot_release_an_unfinished_rollout(ready, cluster):
+    service, rid, _ = applied(ready)
+    cluster.rollout_lag = 100
+    assert service.status(rid)["canKeep"] is False
+    with pytest.raises(ApplicationRefused) as refused:
+        service.keep(rid, "asesh")
+    assert refused.value.code == "ROLLOUT_NOT_COMPLETE"
+    assert service.repository.latest_for(rid).status == APPLIED
+    assert service._active_here(cluster.uid)
+
+
+def test_keep_cannot_release_a_change_on_another_or_unidentified_cluster(ready, cluster):
+    service, rid, _ = applied(ready)
+    cluster.uid = "another-cluster"
+    assert service.status(rid)["canKeep"] is False
+    with pytest.raises(ApplicationRefused) as refused:
+        service.keep(rid, "asesh")
+    assert refused.value.code == "CLUSTER_CHANGED"
+    cluster.uid = None
+    with pytest.raises(ApplicationRefused) as unknown:
+        service.keep(rid, "asesh")
+    assert unknown.value.code == "CLUSTER_IDENTITY_UNKNOWN"
+    assert service.repository.latest_for(rid).status == APPLIED
+
+
+@pytest.mark.parametrize("action", ["reset", "keep"])
+def test_old_tab_cannot_reset_or_keep_a_different_application(ready, cluster, action):
+    service, rid, change = applied(ready)
+    with pytest.raises(ApplicationRefused) as refused:
+        getattr(service, action)(rid, "asesh", expected_application_id="an-earlier-application")
+    assert refused.value.code == "APPLICATION_CHANGED"
+    assert service.repository.latest_for(rid).application_id == change.application_id
+    assert cluster.restores == []
+
+
+def test_failed_apply_does_not_adopt_an_outside_edit_as_its_own_recovery_evidence(ready, cluster):
+    service, approval, _ = ready
+    def uncertain(document, **kwargs):
+        # The patch did not apply; another actor scaled the Deployment before the timeout was handled.
+        current = cluster.deployments["db"]
+        cluster.deployments["db"] = replace(current, replicas=9, generation=current.generation + 1)
+        from app.integrations.kubernetes.client import ConnectionFailedError
+        raise ConnectionFailedError("ReadTimeout")
+    cluster.patch_deployment = uncertain
+    with pytest.raises(ApplicationRefused):
+        service.apply(approval.recommendation_id, "asesh", evaluate=evaluate)
+    stored = service.repository.latest_for(approval.recommendation_id)
+    assert stored.status == "RESET_FAILED" and stored.after is None
+    assert cluster.restores == [] and cluster.deployments["db"].replicas == 9
+    with pytest.raises(ApplicationRefused) as refused:
+        service.reset(approval.recommendation_id, "asesh")
+    assert refused.value.code == "RESET_EVIDENCE_MISSING"
+
+
+def test_reviewed_application_on_one_cluster_can_be_reset_despite_newer_record_on_another(ready, cluster):
+    service, rid, original = applied(ready)
+    service.repository.save(replace(original, id=None, application_id="newer-other-cluster", cluster={"clusterUid": "another"}))
+    reset = service.reset(rid, "asesh", expected_application_id=original.application_id)
+    assert reset.application_id == original.application_id and reset.status == RESET
+    assert not cluster.deployments["db"].has_hostname_spread
+    assert service.status(rid, application_id=original.application_id)["application"]["applicationId"] == original.application_id
+
+
+def test_earlier_kept_change_cannot_reset_over_a_newer_overlapping_change(ready, cluster):
+    service, rid, original = applied(ready)
+    service.keep(rid, "asesh", expected_application_id=original.application_id)
+    service.repository.save(replace(original, id=None, application_id="newer-here"))
+    with pytest.raises(ApplicationRefused) as refused:
+        service.reset(rid, "asesh", expected_application_id=original.application_id)
+    assert refused.value.code == "APPLICATION_CHANGED" and cluster.restores == []

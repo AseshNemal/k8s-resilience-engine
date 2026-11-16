@@ -1,209 +1,88 @@
-{# Overview dashboard. No single member owns this page — shared. #}
+{# Product assessment. Shared page: one read-only result for the selected application. #}
 {% extends "base.html" %}
-{% from "partials/icons.html" import icon %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/dashboard.css') }}?v=overview-complete-20261025">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/recommendations.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/assessment.css') }}?v=assessment-20261116">
 {% endblock %}
 
 {% block content %}
-<div class="overview-dashboard">
-<div class="page-header">
-    <h2 class="page-header__title">Workflow resilience</h2>
-    <div class="overview-toolbar">
-        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Not loaded</span>
-        <span class="overview-inventory" data-role="discovery-headline">Reading cluster inventory…</span>
-        <button type="button" class="secondary-button" data-role="reload-button">Refresh</button>
+<div class="assess">
+    <div class="page-header assess-header">
+        <div>
+            <h2 class="page-header__title">Application resilience</h2>
+            <p class="assess-lead">Connect a cluster, choose an application, and read one assessment. It covers placement, every single worker-node failure, and the strongest feasible improvement. Nothing is changed.</p>
+        </div>
+        <form class="assess-toolbar" data-role="assess-form">
+            <label class="assess-field" for="assess-application">Application
+                <select id="assess-application" data-role="assess-application" disabled>
+                    <option value="">Reading applications…</option>
+                </select>
+            </label>
+            <button type="submit" class="primary-button" data-role="assess-run" disabled>Assess</button>
+        </form>
     </div>
-</div>
-<div data-role="overview-error-region"></div>
-<div class="overview-applied" data-role="overview-applied" role="status" hidden>
-    <span data-role="overview-applied-text"></span>
-    <a class="overview-applied__link" href="/components/recommendations">Review applied change</a>
-</div>
-<div class="overview-lead">
-    <section class="card overview-risk" data-role="overview-risk" aria-live="polite">
-        <div class="overview-risk__label">Predicted impact <span class="overview-risk__badge" data-role="overview-risk-badge" hidden></span></div>
-        <div class="overview-risk__headline" data-role="overview-risk-headline">Checking the failure impact…</div>
-        <ul class="overview-risk__workflows" data-role="overview-risk-workflows" aria-label="Workflows predicted to stop" hidden></ul>
-        <p class="overview-scope" data-role="overview-scope">Assessing application scope…</p>
-        <p class="overview-risk__sub" data-role="overview-risk-sub"></p>
+
+    <div data-role="assess-error"></div>
+
+    <section class="assess-empty card" data-role="assess-empty">
+        <h3 data-role="assess-empty-title">Preparing the assessment…</h3>
+        <p data-role="assess-empty-text">Reading the connected cluster.</p>
     </section>
-    <section class="card overview-next">
-        <h3>Next action</h3>
-        <div data-role="overview-next-text"><p>Reading the evidence…</p></div>
-        <a class="secondary-button" data-role="overview-next-link" href="/components/recommendations">Review recommendations</a>
-    </section>
-</div>
-<div class="overview-analysis-grid overview-impact-grid">
-    <section class="card overview-panel">
-        <div class="overview-panel-heading"><h3>Impact by worker node</h3><span class="overview-evidence-tag" data-kind="predicted">Predicted impact</span></div>
-        <p class="overview-caption">Criticality-weighted workflow loss. <span class="overview-help" tabindex="0" aria-label="About failure impact" aria-describedby="overview-impact-help">ⓘ<span class="overview-tooltip" id="overview-impact-help" role="tooltip">Each bar predicts the consequences after assuming that worker fails. The percentage is weighted by workflow criticality; it is not the probability of a failure or a measured outage.</span></span></p>
-        <div data-role="overview-node-impact"><p class="ui-note">Waiting for the prediction…</p></div>
-    </section>
-    <section class="card overview-panel">
-        <div class="overview-panel-heading"><h3>Workflow survival</h3><span class="overview-evidence-tag" data-kind="predicted">Predicted impact</span></div>
-        <p class="overview-caption" data-role="overview-workflow-caption">Predicted survival when each worker node fails.</p>
-        <div data-role="overview-workflow-impact"><p class="ui-note">Waiting for workflow evidence…</p></div>
-        <p class="overview-focus-summary" data-role="overview-focus-summary" role="status" aria-live="polite">Select a node or workflow cell to highlight its placement.</p>
-        <div class="overview-focus-controls">
-            <a href="#overview-placement-section" data-role="overview-focus-view" hidden>View highlighted placement</a>
-            <button type="button" class="overview-text-button" data-role="overview-focus-clear" hidden>Clear highlight</button>
+
+    <div data-role="assess-result" hidden>
+        <section class="assess-verdict" data-role="assess-verdict" data-level="unknown">
+            <div>
+                <p class="assess-kicker" data-role="assess-kicker">Predicted impact</p>
+                <h3 data-role="assess-headline"></h3>
+                <p class="assess-scope" data-role="assess-scope"></p>
+            </div>
+            <p class="assess-level" data-role="assess-level"></p>
+        </section>
+
+        <div class="assess-grid">
+            <section class="card assess-panel">
+                <header class="assess-panel__head">
+                    <h3>If a worker stops</h3>
+                    <span class="assess-tag">Predicted</span>
+                </header>
+                <ol class="assess-nodes" data-role="assess-nodes"></ol>
+            </section>
+            <section class="card assess-panel">
+                <header class="assess-panel__head">
+                    <h3>Services at risk</h3>
+                    <span class="assess-tag">Observed placement</span>
+                </header>
+                <div data-role="assess-services"></div>
+            </section>
         </div>
-    </section>
-</div>
-<div class="overview-analysis-grid">
-    <section class="card overview-panel">
-        <div class="overview-panel-heading"><h3>Selected fix</h3><span class="overview-evidence-tag" data-kind="predicted">Predicted impact</span></div>
-        <div data-role="overview-fix"><p class="ui-note">Reading the recommendation…</p></div>
-    </section>
-    <section class="card overview-panel">
-        <div class="overview-panel-heading"><h3>Latest saved test</h3><span class="overview-evidence-tag" data-kind="recorded">Recorded test result</span></div>
-        <div data-role="overview-latest-test"><p class="ui-note">Reading saved tests…</p></div>
-        <a href="/components/recommendations">Open test reports</a>
-    </section>
-</div>
-<section class="overview-applications" aria-labelledby="overview-applications-title">
-    <div class="overview-panel-heading"><h3 id="overview-applications-title">Applications</h3><span class="overview-evidence-tag" data-kind="observed">Observed placement</span></div>
-    <div class="overview-namespaces" data-role="overview-namespaces"></div>
-</section>
-<section class="card overview-panel overview-topology-comparison" id="overview-placement-section">
-    <div class="overview-panel-heading"><h3>Where the assessed application runs</h3><span class="overview-evidence-tag" data-kind="observed">Observed placement</span> <span class="overview-help" tabindex="0" aria-label="About placement" aria-describedby="overview-placement-help">ⓘ<span class="overview-tooltip" id="overview-placement-help" role="tooltip">These pods and nodes were read from the cluster. The red outline marks the assessed failure scenario, not a real outage. Blue highlighting follows your selection without changing that assessment.</span></span></div>
-    <p class="overview-focus-summary" data-role="overview-placement-focus" hidden></p>
-    <div class="overview-placement" data-role="overview-placement"><p class="ui-note">Waiting for the recommendation…</p></div>
-</section>
-<section class="overview-details card">
-    <h3 class="overview-section-title">Saved fix comparisons <span class="overview-caption">Historical runs; scope and cluster may differ</span></h3>
-    <p class="overview-caption">Risk values remain model predictions. <span class="overview-help" tabindex="0" aria-label="About saved results" aria-describedby="overview-results-help">ⓘ<span class="overview-tooltip" id="overview-results-help" role="tooltip">Before, proposed and after-rollout risk are model values. A post-rollout recalculation uses observed placement; it is not experimental proof. The test outcome describes the recorded checks. Saved runs can use different proposals and clusters.</span></span></p>
-    <div class="overview-results" data-role="overview-results" role="region" aria-label="Saved fix comparisons" tabindex="0"><p class="ui-note">Reading saved tests…</p></div>
-</section>
-<section class="overview-details card">
-    <h3 class="overview-section-title">Evidence details</h3>
-    <div data-role="discovery-summary" hidden>
-        <ul data-role="discovery-notes"></ul>
-        <p class="overview-caption" data-role="discovery-provenance"></p>
+
+        <section class="card assess-fix" data-role="assess-fix">
+            <header class="assess-panel__head">
+                <h3>Strongest feasible improvement</h3>
+                <span class="assess-tag" data-role="assess-fix-tag">Predicted</span>
+            </header>
+            <div data-role="assess-fix-body"></div>
+        </section>
+
+        <section class="card assess-panel" data-role="assess-evidence">
+            <header class="assess-panel__head">
+                <h3>Evidence</h3>
+                <span class="assess-tag">How this answer was reached</span>
+            </header>
+            <div data-role="assess-evidence-body"></div>
+        </section>
     </div>
-    <div class="overview-evidence" data-role="overview-evidence"><p class="ui-note">Checking evidence…</p></div>
-    <section class="overview-status" data-role="overview-status" aria-label="Evidence availability">
-        <a class="overview-chip" href="/components/deployments" data-role="overview-chip-cluster" data-state="pending">
-            <div class="overview-chip__label">Cluster</div>
-            <div class="overview-chip__top" data-role="overview-chip-cluster-state">Checking</div>
-            <div class="overview-chip__detail" data-role="overview-chip-cluster-detail">Checking…</div>
-        </a>
-        <a class="overview-chip" href="/components/workflows" data-role="overview-chip-workflow" data-state="pending">
-            <div class="overview-chip__label">Workflow</div>
-            <div class="overview-chip__top" data-role="overview-chip-workflow-state">Checking</div>
-            <div class="overview-chip__detail" data-role="overview-chip-workflow-detail">Checking…</div>
-        </a>
-        <a class="overview-chip" href="/components/failure-impacts" data-role="overview-chip-prediction" data-state="pending">
-            <div class="overview-chip__label">Prediction</div>
-            <div class="overview-chip__top" data-role="overview-chip-prediction-state">Checking</div>
-            <div class="overview-chip__detail" data-role="overview-chip-prediction-detail">Checking…</div>
-        </a>
-        <a class="overview-chip" href="/components/recommendations" data-role="overview-chip-test" data-state="pending">
-            <div class="overview-chip__label">Latest test</div>
-            <div class="overview-chip__top" data-role="overview-chip-test-state">Checking</div>
-            <div class="overview-chip__detail" data-role="overview-chip-test-detail">Checking…</div>
-        </a>
-    </section>
-</section>
-<section class="overview-details card overview-research">
-    <h3 class="overview-section-title">Research pipeline and component ownership</h3>
-<section class="pipeline" aria-label="Component pipeline">
-    <article class="pipeline-stage">
-        <div class="pipeline-stage__badge-row">
-            <span class="pipeline-stage__number">1</span>
-            <span class="icon-badge icon-badge--blue icon-badge--sm">{{ icon("workflow", 15) }}</span>
-            <span class="pipeline-stage__name">Workflow Dependency Modeling</span>
-        </div>
-        <div class="pipeline-stage__owner">
-            <span class="icon-badge icon-badge--sm">{{ icon("user", 13) }}</span>
-            Owner: A.D. Perera
-        </div>
-        <div class="pipeline-stage__io-list">
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Input: <strong>Workflow Manifests</strong></span>
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>WorkflowGraph</strong></span>
-        </div>
-        <div class="pipeline-stage__footer">
-            <a class="pipeline-stage__link" href="/components/workflows">
-                Open Component {{ icon("external-link", 13) }}
-            </a>
-        </div>
-    </article>
 
-    <article class="pipeline-stage">
-        <div class="pipeline-stage__badge-row">
-            <span class="pipeline-stage__number">2</span>
-            <span class="icon-badge icon-badge--teal icon-badge--sm">{{ icon("topology", 15) }}</span>
-            <span class="pipeline-stage__name">Deployment Topology Modeling</span>
-        </div>
-        <div class="pipeline-stage__owner">
-            <span class="icon-badge icon-badge--sm">{{ icon("user", 13) }}</span>
-            Owner: P.A.M. Minara
-        </div>
-        <div class="pipeline-stage__io-list">
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Input: <strong>K8s Manifests</strong></span>
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>Topology Graph</strong></span>
-        </div>
-        <div class="pipeline-stage__footer">
-            <a class="pipeline-stage__link" href="/components/deployments">
-                Open Component {{ icon("external-link", 13) }}
-            </a>
-        </div>
-    </article>
-
-    <article class="pipeline-stage">
-        <div class="pipeline-stage__badge-row">
-            <span class="pipeline-stage__number">3</span>
-            <span class="icon-badge icon-badge--red icon-badge--sm">{{ icon("alert", 15) }}</span>
-            <span class="pipeline-stage__name">Failure Impact Prediction</span>
-        </div>
-        <div class="pipeline-stage__owner">
-            <span class="icon-badge icon-badge--sm">{{ icon("user", 13) }}</span>
-            Owner: K.V.D.Y.R. Karawita
-        </div>
-        <div class="pipeline-stage__io-list">
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Input: <strong>Graphs, Failed Node</strong></span>
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>Blast Radius, Survivability</strong></span>
-        </div>
-        <div class="pipeline-stage__footer">
-            <a class="pipeline-stage__link" href="/components/failure-impacts">
-                Open Component {{ icon("external-link", 13) }}
-            </a>
-        </div>
-    </article>
-
-    <article class="pipeline-stage">
-        <div class="pipeline-stage__badge-row">
-            <span class="pipeline-stage__number">4</span>
-            <span class="icon-badge icon-badge--purple icon-badge--sm">{{ icon("shield-check", 15) }}</span>
-            <span class="pipeline-stage__name">Recommendation Evaluation &amp; Validation</span>
-        </div>
-        <div class="pipeline-stage__owner">
-            <span class="icon-badge icon-badge--sm">{{ icon("user", 13) }}</span>
-            Owner: L.A. Nemal
-        </div>
-        <div class="pipeline-stage__io-list">
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Input: <strong>Predictions, Constraints</strong></span>
-            <span class="pipeline-stage__io-row">{{ icon("share", 13) }} Output: <strong>Validated Recommendations</strong></span>
-        </div>
-        <div class="pipeline-stage__footer">
-            <a class="pipeline-stage__link" href="/components/recommendations">
-                Open Component {{ icon("external-link", 13) }}
-            </a>
-        </div>
-    </article>
-</section>
-
-</section>
+    <nav class="assess-more" aria-label="Specialist pages">
+        <span>Detail pages</span>
+        <a href="/components/workflows">Workflow Discovery</a>
+        <a href="/components/deployments">Deployment Topology</a>
+        <a href="/components/failure-impacts">Failure Impact</a>
+        <a href="/components/recommendations">Recommendations</a>
+    </nav>
 </div>
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/recommendation-apply-test.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/recommendation-topology.js') }}?v=overview-complete-20261025" defer></script>
-<script src="{{ url_for('static', path='/js/workflow-names.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/overview-summary.js') }}?v=overview-complete-20261025" defer></script>
-<script src="{{ url_for('static', path='/js/components/dashboard.js') }}?v=overview-complete-20261025" defer></script>
+<script src="{{ url_for('static', path='/js/components/assessment.js') }}?v=assessment-20261116" defer></script>
 {% endblock %}

@@ -67,6 +67,8 @@ def simulate_runtime_deployment_failure(
     response.headers["X-Topology-Status"] = discovery.status
     response.headers["X-Topology-Captured-At"] = discovery.captured_at
     response.headers["X-Topology-Warnings"] = ",".join(codes)
+    response.headers["X-Workflow-Evidence"] = "unknown; deployment-only"
+    response.headers["X-Is-Prediction"] = "true"
     return report
 
 
@@ -118,6 +120,9 @@ def simulate_runtime_failure(
     response.headers["X-Topology-Status"] = evidence.topology_status
     response.headers["X-Topology-Captured-At"] = evidence.topology_captured_at
     response.headers["X-Topology-Warnings"] = ",".join(codes)
+    review = getattr(evidence, "workflow_review", None) or {}
+    response.headers["X-Workflow-Evidence"] = review.get("basis", "unknown")
+    response.headers["X-Is-Prediction"] = "true"
     return report
 
 

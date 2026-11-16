@@ -117,6 +117,8 @@ def build_portfolio_recommendation(namespace: str = "default", failed_node: str 
                             details={"workflows": live.evidence["workflowsNotEvaluated"]})
     evidence = {**live.evidence, "source": DECLARED_WORKFLOW_SOURCE if declared else LIVE_EVIDENCE_SOURCE,
                 "workflowScope": "all"}
+    if not declared:
+        evidence["workflowEvidencePolicy"] = "operational-workflow/v1"
     if declared:
         evidence["declaredWorkflow"] = {**evidence["declaration"], "workflowId": live.report.workflow_id}
     return dataclasses.replace(live, evidence=evidence)
@@ -136,7 +138,7 @@ def build_frozen_portfolio(namespace: str = "default", failed_node: str | None =
                            combination_budget: int = DEFAULT_EVALUATION_BUDGET) -> LiveRecommendation:
     """Every approved, frozen workflow evaluated together on the connected cluster's live topology."""
     namespace = _namespace(namespace)
-    frozen, problem = list_frozen_workflows()
+    frozen, problem = list_frozen_workflows(namespace)
     if problem:
         raise EvidenceError("WORKFLOW_STORAGE_UNAVAILABLE", problem, http_status=503, component=COMPONENT)
     if not frozen:
@@ -155,10 +157,11 @@ def build_frozen_portfolio(namespace: str = "default", failed_node: str | None =
         if deployment is None:      # one snapshot serves them all; the first complete one is the one every workflow is sized on
             deployment, captured = inputs.deployment, (inputs.topology_captured_at, inputs.topology_status)
         workflows.append({"workflowId": workflow_id, "criticality": inputs.workflow.criticality, "freezeId": inputs.workflow_freeze_id,
+                          "workflowReview": inputs.workflow_review,
                           "graph": inputs.workflow})
     return _evaluate(workflows, not_evaluated, first_error, deployment,
                      EvidenceProvenance(PORTFOLIO_ANALYSIS_SOURCE, namespace, captured[0], captured[1], None),
-                     failed_node, combination_budget, {"workflowBasis": "FROZEN"})
+                     failed_node, combination_budget, {"workflowBasis": "REVIEWED"})
 
 
 def _declarations_digest(declared):

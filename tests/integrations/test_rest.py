@@ -446,3 +446,9 @@ def test_cluster_identity_ignores_credentials_and_reports_none_when_unknown(tmp_
     assert rest.cluster_identity([ok]) == ("https://127.0.0.1:1", "AAAA")
     assert rest.cluster_identity([str(tmp_path / "missing")]) is None
     assert rest.cluster_identity([]) is None
+
+
+@pytest.mark.parametrize("server", ["http://localhost:6443", "https://user:secret@localhost:6443", "https://localhost:6443/?token=secret", "https://localhost:6443/#fragment", "https://localhost:bad"])
+def test_unsafe_cluster_server_addresses_are_rejected_before_connecting(tmp_path, server):
+    with pytest.raises(KubeconfigError):
+        rest.load_connection([kubeconfig(tmp_path / "unsafe.yaml", server=server)])

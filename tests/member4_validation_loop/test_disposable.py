@@ -100,7 +100,7 @@ def test_secrets_cannot_be_listed_through_the_raw_read(tmp_path):
 
 def test_the_target_loader_evaluates_on_the_targets_topology_and_the_result_can_never_be_approved(tmp_path, monkeypatch):
     world = FakeWorld(tmp_path)
-    monkeypatch.setattr(environment_module, "get_runtime_component_inputs", lambda workflow_id, namespace: SimpleNamespace(workflow=bookinfo_workflow()))
+    monkeypatch.setattr(environment_module, "get_runtime_component_inputs", lambda workflow_id, namespace: SimpleNamespace(workflow=bookinfo_workflow(), workflow_review=None))
     gateway = KubernetesTestClusterGateway(world.kubeconfig, topology_reader=discover, transport=world.api.transport)
 
     loaded = target_loader("FROZEN")("productpage-view", "offline-benchmark", gateway)

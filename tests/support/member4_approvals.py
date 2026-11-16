@@ -40,7 +40,8 @@ class InMemoryApprovals(ApprovalRepository):
 
 def as_live(live: LiveRecommendation) -> LiveRecommendation:
     """The same evaluation labelled as if it had been computed from the connected cluster (test-only)."""
-    return dataclasses.replace(live, evidence={**live.evidence, "source": LIVE_EVIDENCE_SOURCE})
+    from tests.support.operational_workflows import provenance
+    return dataclasses.replace(live, evidence={**live.evidence, **provenance(live.evidence.get("namespace") or "shop"), "source": LIVE_EVIDENCE_SOURCE})
 
 
 def requested_for_test(scenario: Scenario, **evaluate_options) -> tuple[ApprovalService, LiveRecommendation, str]:

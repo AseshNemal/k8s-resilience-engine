@@ -279,3 +279,35 @@ def test_recovery_is_only_for_a_run_that_needs_manual_restoration(repo):
     with pytest.raises(ValidationRefusedError) as refused:
         svc.recover(started["runKey"])
     assert refused.value.code == "RUN_NOT_RECOVERABLE"
+
+
+def test_workflow_definition_changes_invalidate_the_reviewed_plan_before_any_run(repo, monkeypatch):
+    svc, env = service(repo)
+    plan = svc.plan(request())
+    load = env.load
+    def changed(workflow_id, namespace):
+        loaded = load(workflow_id, namespace)
+        loaded.workflow = loaded.workflow.model_copy(update={"criticality": 0.123})
+        return loaded
+    monkeypatch.setattr(env, "load", changed)
+    assert svc.plan(request()).digest != plan.digest
+    with pytest.raises(ValidationRefusedError, match="plan changed"):
+        approve(svc, request(), plan=plan)
+    assert not repo.history(20)
+
+
+def test_historical_experiment_cannot_prove_a_changed_or_unreviewed_definition(repo):
+    from app.engine.recommendation_evaluation_validation.validation_loop.service import proof_from_history
+    svc, _ = service(repo)
+    plan = svc.plan(request(Mode.SMOKE))
+    sha = plan.candidates[0].loop_candidate.yaml_sha256
+    run = approve(svc, request(Mode.SMOKE))
+    finish(svc, run["runKey"])
+    history = repo.history(20)
+    assert history[0]["plan"]["workflowEvidence"] == plan.workflow_evidence
+    proof = proof_from_history(repo, namespace=NAMESPACE, workflow_id="productpage-view", candidate_sha256=sha)
+    assert proof["state"] == "HISTORICAL" and not proof["currentDefinitionMatches"]
+    proof = proof_from_history(repo, namespace=NAMESPACE, workflow_id="productpage-view", candidate_sha256=sha,
+                               current_workflow_evidence={**plan.workflow_evidence, "review": {"sourceVersion": "changed"}})
+    assert proof["state"] == "HISTORICAL"
+    assert repo.history(20) == history

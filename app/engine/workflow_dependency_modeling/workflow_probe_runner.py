@@ -11,6 +11,8 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
+
+from app.integrations.probe.response_limit import ResponseTooLarge, read_bounded
 from .execution_models import AssertionResult
 
 from app.engine.workflow_dependency_modeling.workflow_probe_models import (
@@ -194,7 +196,7 @@ def _execute_probe_step(
     ):
         raise ValueError("Rendered request path must remain relative to the application URL")
     try:
-        response = client.request(
+        with client.stream(
             method=step.method,
             url=rendered_path,
             params={
@@ -203,12 +205,17 @@ def _execute_probe_step(
             headers=headers,
             json=json_body,
             data=form_body or None,
-        )
+        ) as streamed:
+            body = read_bounded(streamed, 1024 * 1024, timeout_s=client.timeout.read)
+            response = httpx.Response(streamed.status_code, headers={k: v for k, v in streamed.headers.items()
+                                               if k.lower() not in {"content-encoding", "content-length"}}, content=body,
+                                      request=streamed.request)
     except httpx.TransportError as error:
         # Retain the attempt and its trace ID. A missing HTTP response is not a
         # status code, and transport failure without trace evidence is excluded
         # from dependency classification by the campaign's correlation gate.
-        reason = "Request timed out" if isinstance(error, httpx.TimeoutException) else "Request transport failed"
+        reason = ("Response exceeded the probe evidence limit" if isinstance(error, ResponseTooLarge)
+                  else "Request timed out" if isinstance(error, httpx.TimeoutException) else "Request transport failed")
         return WorkflowRunStepResult(
             name=step.name, method=step.method, path=step.path,
             status_code=None, succeeded=False, reason=reason,
@@ -269,6 +276,7 @@ def run_http_workflow_probe(
         base_url=approved_url,
         timeout=timeout_seconds,
         follow_redirects=False,
+        trust_env=False,
         transport=transport,
     ) as client:
         for step in definition.steps:

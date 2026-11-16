@@ -57,7 +57,7 @@ def test_pages_use_relative_paths_only(built, name):
 @pytest.mark.parametrize(
     "name, key, title",
     [
-        ("index.html", "overview", "Overview"),
+        ("index.html", "overview", "Assessment"),
         ("workflows.html", "workflows", "Workflow dependencies"),
         ("deployments.html", "deployments", "Deployment topology"),
         ("failure-impacts.html", "failure-impacts", "Failure impact"),
@@ -75,15 +75,15 @@ def test_each_page_has_a_key_and_a_readable_sentence_case_title(built, name, key
 def test_navigation_has_six_sentence_case_labels_and_one_active_item(built, name):
     page = html(built, name)
     labels = re.findall(r'<span class="sidebar__link-label">([^<]+)</span>', page)
-    assert labels == ["Overview", "Workflow dependencies", "Deployment topology", "Failure impact", "Recommendations", "Connect cluster"]
+    assert labels == ["Assessment", "Workflow Discovery", "Deployment Topology", "Failure Impact", "Recommendations", "Connect cluster"]
     assert len(re.findall(r"sidebar__link is-active", page)) == 1
 
 
 def test_overview_puts_the_cluster_connection_first(built):
     page = html(built, "index.html")
     assert 'data-role="cluster-panel"' in page
-    assert page.index('data-role="cluster-panel"') < page.index('class="page-header"') < page.index('data-role="overview-risk"')
-    assert page.index('data-role="overview-node-impact"') < page.index('data-role="overview-placement"')
+    assert page.index('data-role="cluster-panel"') < page.index("page-header") < page.index('data-role="assess-verdict"')
+    assert page.index('data-role="assess-nodes"') < page.index('data-role="assess-fix"')
     assert 'data-role="connect-file"' not in page
 
 

@@ -114,7 +114,8 @@ def test_history_proof_and_a_single_run_are_read_from_the_database(client, worke
     proof = client.get(f"{BASE}/proof", params={"namespace": NAMESPACE, "workflowId": "productpage-view", "candidateSha256": sha}).json()
 
     assert history[0]["runKey"] == started["runKey"] and history[0]["winner"] and one["status"] == "COMPLETED"
-    assert proof["state"] == "PROVEN" and proof["target"]["kind"] == DISPOSABLE
+    assert proof["state"] == "HISTORICAL" and proof["target"]["kind"] == DISPOSABLE
+    assert proof["currentDefinitionMatches"] is False
 
 
 def test_an_unknown_run_is_a_404(client):

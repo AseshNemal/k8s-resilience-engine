@@ -382,3 +382,9 @@ def test_a_workflows_own_name_is_reported_beside_its_unchanged_id(use_cluster, t
     assert detail["portfolio"]["workflows"] == [{"workflowId": "checkout", "name": "Checkout page", "criticality": 0.9},
                                                 {"workflowId": "browse", "criticality": 0.3}]
     assert detail["baselineImpact"]["failedWorkflows"] == ["checkout"], "ids stay the identity everywhere else"
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

@@ -88,7 +88,7 @@ def test_a_declared_workflow_id_cannot_be_put_to_approval_and_no_record_is_made(
     refused = client.post(f"/api/recommendations/{candidate}/request-approval", params=PARAMS,
                           json={"recommendationId": candidate, "proposalVersion": "v1"})
 
-    assert refused.status_code in (404, 409) and refused.json()["detail"]["code"] == "WORKFLOW_EVIDENCE_UNAVAILABLE"
+    assert refused.status_code in (404, 409) and refused.json()["detail"]["code"] == "WORKFLOW_REVIEW_REQUIRED"
     assert client.get(f"/api/recommendations/{candidate}/approval").status_code == 404
 
 
@@ -100,11 +100,11 @@ def test_the_context_lists_declared_workflows_apart_from_frozen_ones_and_never_s
     context = client.get(CONTEXT, params={"namespace": "shop"}).json()
 
     assert context["workflows"] == [] and context["ready"] is False and context["workflowId"] is None
-    (item,) = context["declaredWorkflows"]
-    assert item["workflowId"] == "checkout" and item["declared"] is True and item["approvable"] is False and item["applicable"] is True
+    assert context["declaredWorkflows"] == []
+    (item,) = context["unverifiedWorkflows"]
+    assert item["workflowId"] == "checkout" and item["declared"] is True and item["approvable"] is False and item["applicable"] is False
     assert item["freezeId"] is None and item["declaredBy"] == "asesh" and "not observed" in item["limits"]
-    entry = next(e for e in context["evidence"] if e["id"] == "declaredWorkflow")
-    assert entry["state"] == "available" and "research-only step" in entry["detail"]
+    assert item["operationalEligible"] is False
     # the frozen-workflow line still says what it said: declaring a workflow does not pretend one was frozen
     assert next(e for e in context["evidence"] if e["id"] == "workflow")["state"] == "missing"
 
@@ -138,6 +138,6 @@ def test_a_declared_workflow_naming_services_this_application_lacks_is_listed_as
     other.write_text(json.dumps({**DECLARATION, "mandatoryServices": ["web", "db", "ghost"]}))
     monkeypatch.setenv(ENV_NAME, str(other))
 
-    (item,) = client.get(CONTEXT, params={"namespace": "shop"}).json()["declaredWorkflows"]
+    (item,) = client.get(CONTEXT, params={"namespace": "shop"}).json()["unverifiedWorkflows"]
 
     assert item["applicable"] is False and "ghost" in item["reason"]

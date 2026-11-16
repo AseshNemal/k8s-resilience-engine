@@ -161,8 +161,14 @@ def _build_connection(merged: _Merged) -> Connection:
 
     server = cluster.get("server")
     parts = urlsplit(server) if isinstance(server, str) else None
-    if not parts or parts.scheme not in ("http", "https") or not parts.hostname:
+    if not parts or parts.scheme != "https" or not parts.hostname:
         raise KubeconfigError("the cluster has no usable API server address")
+    if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
+        raise KubeconfigError("the API server address must not contain credentials, query or fragment")
+    try:
+        parts.port
+    except ValueError:
+        raise KubeconfigError("the API server address has an invalid port") from None
     if cluster.get("insecure-skip-tls-verify"):
         raise KubeconfigError("insecure-skip-tls-verify is not supported: TLS is always verified")
     if cluster.get("proxy-url"):

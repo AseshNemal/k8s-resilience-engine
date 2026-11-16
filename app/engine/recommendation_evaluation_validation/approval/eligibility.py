@@ -107,6 +107,8 @@ def proposal_fingerprint(live: LiveRecommendation, recommendation_id: str) -> st
         "failedNode": evidence.get("failedNode"), "constraintsDigest": constraints,
         "placement": sorted(placement.items()), "podsToRecreate": sorted(recreate),
         "blastBefore": round(float(before), 2), "blastAfter": round(float(after), 2),
+        "workflowReview": evidence.get("workflowReview"),
+        "workflowFreezeId": evidence.get("workflowFreezeId"),
     }
     if evidence.get("workflowScope") == "all":
         digest = evidence.get("workflowSetDigest")

@@ -64,6 +64,8 @@ def evidenced_topology(monkeypatch):
 
 
 def freeze_checkout(monkeypatch, mandatory=("web", "db")):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)
     graph = WorkflowGraph(workflow_id="checkout", criticality=0.9, mandatory_services=list(mandatory),
                           edges=[WorkflowEdge(source="web", target="db")])
     monkeypatch.setattr(
@@ -330,3 +332,9 @@ def test_with_scheduling_evidence_the_verdict_and_predicted_placement_are_in_the
     assert verdict["notModeled"]  # what the prediction ignores is always disclosed
     # Adding the constraint moves no running pod; two of the three replicas have a new target node (churn).
     assert verdict["requiresPodRecreation"] is True and len(verdict["podsToRecreate"]) == 2
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

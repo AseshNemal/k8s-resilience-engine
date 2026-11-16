@@ -77,6 +77,7 @@ class LoopPlan:
     riskiest_worker: str | None
     skipped_candidates: list[dict[str, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    workflow_evidence: dict[str, Any] = field(default_factory=dict)
 
     @property
     def blocking(self) -> list[Issue]:
@@ -96,6 +97,7 @@ class LoopPlan:
                                                              "clusterUid": self.identity.cluster_uid, "apiServer": self.identity.api_server,
                                                              "nodes": list(self.identity.node_names)},
                 "namespace": self.namespace, "workflowId": self.workflow_id, "workflowBasis": self.workflow_basis,
+                "workflowEvidence": self.workflow_evidence,
                 "probe": self.probe.to_dict() if self.probe else None,
                 "candidates": [c.to_dict() for c in self.candidates], "skippedCandidates": self.skipped_candidates,
                 "disruption": {w: r.to_dict() for w, r in self.disruption.items()},
@@ -133,6 +135,12 @@ def select_candidates(live: LiveRecommendation, workflow: WorkflowGraph, workers
                                     candidate.predicted_blast_radius, candidate.risk_reduction))
     usable.sort(key=lambda c: (c.rank if c.rank is not None else 10**6, c.loop_candidate.change_key))
     return usable[:limit], skipped
+
+
+def workflow_evidence(workflow, evidence):
+    """Pin the dependency definition and its review; traces, declarations and measurements stay distinct."""
+    return {"graph": workflow.model_dump(by_alias=True), "review": evidence.get("workflowReview"),
+            "declaration": evidence.get("declaredWorkflow"), "isMeasurement": False}
 
 
 def plan_digest(parts: dict[str, Any]) -> str:

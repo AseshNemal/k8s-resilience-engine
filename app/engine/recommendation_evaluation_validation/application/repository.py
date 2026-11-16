@@ -50,6 +50,11 @@ class AppliedChangeRepository:
                                   .order_by(AppliedChangeRecord.id.desc()))
         return None if row is None else self._domain(row)
 
+    def for_run(self, run_id: str) -> AppliedChange | None:
+        row = self.session.scalar(select(AppliedChangeRecord).where(
+            AppliedChangeRecord.detail["applyTestRunId"].as_string() == run_id).order_by(AppliedChangeRecord.id.desc()))
+        return None if row is None else self._domain(row)
+
     def latest(self) -> AppliedChange | None:
         """The most recent change of any recommendation: the one whose state the cluster is in."""
         row = self.session.scalar(select(AppliedChangeRecord).order_by(AppliedChangeRecord.id.desc()))

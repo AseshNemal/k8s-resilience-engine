@@ -147,15 +147,24 @@ def predict_runtime_deployment_failure_impact_with_evidence(
     return report, discovery
 
 
-def build_cluster_failure_overview(
+class ApplicationSnapshot:
+    """One cluster read: the public failure overview, the namespace discovery it used, and the workflows that were scored."""
+
+    def __init__(self, public: dict, discovery=None, evaluated_workflows: tuple = ()):
+        self.public = public
+        self.discovery = discovery
+        self.evaluated_workflows = evaluated_workflows
+
+
+def load_application_snapshot(
     namespace: str | None = None,
     workflow_ids: tuple[str, ...] = (),
-) -> dict:
-    """Every worker node of the connected cluster's application assessed as the failed node, from one read.
+) -> ApplicationSnapshot:
+    """Read the cluster once and assess every worker of the chosen application on that snapshot.
 
     The application is the requested namespace, or the only namespace that holds applications. With several and
     none requested, the answer lists them and asks for a choice (it never picks one). Workflows come from
-    ``workflow_basis`` (frozen first, else declared; never invented). Reads only; changes nothing.
+    ``workflow_basis`` (current operational reviews only; never invented).
     """
     from app.engine.deployment_topology_modeling.discovery_all import discover_all
     from app.engine.failure_impact_prediction import workflow_basis
@@ -171,6 +180,11 @@ def build_cluster_failure_overview(
         "capturedAt": overview.captured_at,
         "cluster": {"fingerprint": overview.cluster.connection_fingerprint},
         "namespaces": names,
+        "applications": [
+            {"namespace": item.namespace, "services": sorted(service.name for service in item.graph.services),
+             "workerNodes": sorted(node.name for node in item.graph.nodes)}
+            for item in applications
+        ],
     }
     if requested and requested not in names:
         raise EvidenceError(
@@ -178,18 +192,18 @@ def build_cluster_failure_overview(
             f"The namespace {requested} holds no application in the connected cluster.",
             http_status=404, component="failure_impact",
         )
+    if not requested and len(names) != 1:
+        return ApplicationSnapshot({**base, "state": "choose-application" if names else "no-application", "namespace": None})
     if not requested:
-        if len(names) == 1:
-            requested = names[0]
-        else:
-            return {**base, "state": "choose-application" if names else "no-application", "namespace": None}
+        requested = names[0]
 
     result = next(item for item in applications if item.namespace == requested)
     incomplete = sorted(name for name, evidence in result.service_evidence.items() if not evidence.complete)
     candidates, problems = workflow_basis.resolve_workflows(result, requested, workflow_ids)
     included = [candidate.basis for candidate in candidates if candidate.included]
     body = build_failure_overview(result.graph, included)
-    return {
+    evaluated_ids = {row["workflowId"] for row in body["workflowsEvaluated"]}
+    public = {
         **base,
         "state": "ready",
         "namespace": requested,
@@ -204,6 +218,16 @@ def build_cluster_failure_overview(
                   "problems": problems},
         **body,
     }
+    evaluated = tuple(basis.workflow for basis in included if basis.workflow.workflow_id in evaluated_ids)
+    return ApplicationSnapshot(public, result, evaluated)
+
+
+def build_cluster_failure_overview(
+    namespace: str | None = None,
+    workflow_ids: tuple[str, ...] = (),
+) -> dict:
+    """Every worker node of the connected cluster's application assessed as the failed node, from one read."""
+    return load_application_snapshot(namespace, workflow_ids).public
 
 
 def predict_demo_failure_impact(failed_node: str) -> FailureImpactReport:
@@ -310,7 +334,9 @@ def get_sample_failure_impact() -> FailureImpactReport:
 
 
 __all__ = [
+    "ApplicationSnapshot",
     "build_cluster_failure_overview",
+    "load_application_snapshot",
     "build_portfolio_failure_impact_report",
     "build_current_cross_layer_graph",
     "get_demo_deployment",

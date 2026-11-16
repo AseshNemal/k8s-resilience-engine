@@ -9,6 +9,7 @@ nothing else, so a description can never claim more than was written and a Reset
 something else since (a person, a controller, a later change), and Reset leaves it alone unless it is told otherwise.
 """
 
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -27,12 +28,28 @@ def _value(snapshot: Any, field: str) -> Any:
     if field == REPLICAS:
         return raw
     if field == SPREAD:
-        return [dict(constraint) for constraint in (raw or ())]
+        return sorted([dict(constraint) for constraint in (raw or ())], key=lambda c: c.get("topologyKey", ""))
     return dict(raw) if raw else None      # an empty anti-affinity and an absent one are the same thing
 
 
 def owned(snapshot: Any) -> dict[str, Any]:
     return {field: _value(snapshot, field) for field in OWNED_FIELDS}
+
+
+def proposed(before: Any, document: Mapping[str, Any]) -> dict[str, Any]:
+    """Expected owned values of an already-whitelisted strategic merge patch, not observed evidence."""
+    result = deepcopy(owned(before))
+    spec = document["spec"]
+    pod = spec.get("template", {}).get("spec", {})
+    if "replicas" in spec:
+        result[REPLICAS] = spec["replicas"]
+    if "topologySpreadConstraints" in pod:
+        merged = {c["topologyKey"]: c for c in result[SPREAD]}
+        merged.update({c["topologyKey"]: c for c in pod["topologySpreadConstraints"]})
+        result[SPREAD] = sorted(merged.values(), key=lambda c: c["topologyKey"])
+    if "affinity" in pod:
+        result[ANTI_AFFINITY] = {**(result[ANTI_AFFINITY] or {}), **pod["affinity"]["podAntiAffinity"]}
+    return result
 
 
 def _domain(key: str | None) -> str:

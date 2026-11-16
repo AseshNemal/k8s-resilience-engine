@@ -32,6 +32,11 @@ PROTECTED = (
 # Exact integration files authorized by the recovery/hybrid-dashboard request;
 # unrelated files remain guarded. Keep the service-interface assertion below.
 AUTHORIZED_INTEGRATION_PATHS = {
+    # The production workflow evidence policy explicitly covers Member 1 provenance and Member 3 runtime inputs.
+    "app/engine/workflow_dependency_modeling/operational_evidence.py",
+    "app/engine/failure_impact_prediction/runtime_provider.py",
+    # Production-readiness request explicitly authorizes shared probe transport hardening across components.
+    "app/engine/workflow_dependency_modeling/workflow_probe_runner.py",
     "app/api/failure_impacts.py", "app/api/workflows.py",
     "app/engine/failure_impact_prediction/deployment_impact.py",
     "app/engine/failure_impact_prediction/service.py",

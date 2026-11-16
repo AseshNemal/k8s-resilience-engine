@@ -146,3 +146,14 @@ def test_the_compose_file_arms_apply_and_reset_and_nothing_else_does():
     environment = yaml.safe_load((ROOT / "extension" / "compose.yaml").read_text())["services"]["resilience-engine"]["environment"]
 
     assert environment["RESILIENCE_ALLOW_CLUSTER_WRITES"] == "1"
+
+
+def test_release_context_excludes_local_databases_and_evidence():
+    ignore = (ROOT / ".dockerignore").read_text()
+    assert "/tmp" in ignore and "/.playwright-mcp" in ignore
+
+
+def test_release_runtime_has_a_pinned_base_and_no_install_tooling():
+    assert re.search(r"FROM python:3\.13-slim@sha256:[0-9a-f]{64}", DOCKERFILE)
+    assert "pip uninstall -y pip setuptools" in DOCKERFILE
+    assert "extension/runtime.py" in DOCKERFILE

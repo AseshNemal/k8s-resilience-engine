@@ -50,6 +50,8 @@ def scarce_room() -> FakeClusterSource:
 
 
 def freeze(monkeypatch, mandatory=("web", "db", "cart"), optional=()):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)
     graph = WorkflowGraph(workflow_id="checkout", criticality=0.9, mandatory_services=list(mandatory),
                           optional_services=list(optional), edges=[WorkflowEdge(source="web", target="db")])
     monkeypatch.setattr(workflow_service, "get_frozen_workflow_graph",
@@ -312,3 +314,9 @@ def test_unknown_node_capacity_leaves_nothing_verified_and_nothing_combined(monk
     assert result.evidence["combinations"]["considered"] == 0 and result.evidence["combinations"]["entries"] == {}
     assert result.report.selected_recommendation_id is None
     assert any("capacity" in item for v in result.evidence["feasibility"].values() for item in v["missingEvidence"])
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

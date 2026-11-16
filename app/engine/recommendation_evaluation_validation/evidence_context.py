@@ -1,27 +1,14 @@
-"""What the Recommendations page needs to know before it can ask for a recommendation.
+"""Read-only operational evidence selection for Recommendations and Overview.
 
-The page used to ask the person for a cluster namespace and a frozen workflow ID. Both are things the system already
-knows: the connected cluster reports which namespaces hold applications, and Component 1 keeps the approved, frozen
-workflow graphs. This module reads them, read-only, through the other components' public service interfaces and
-answers three questions with real data only:
-
-* which application (namespace) is selected, and was it chosen automatically?
-* which approved frozen workflows exist, and does each one apply to the services in that namespace?
-* is every piece of evidence a recommendation needs available, and if not, which one is missing and what is the
-  exact next action?
-
-Nothing here builds a workflow, a topology or a failure-impact result, and nothing here writes to a cluster. A missing
-piece of evidence is reported as missing; it is never replaced, defaulted or estimated, and a request that cannot be
-answered is not turned into an empty "all clear". The failure-impact evidence is produced later, when a workflow is
-chosen and the recommendation is requested (``live_pipeline``); here it is reported as depending on that choice.
-
-Component 1's workflow discovery, Component 2's topology and Component 3's prediction are called, never changed.
+Only exact workflow definitions explicitly reviewed for the current cluster UID,
+connection and namespace can drive workflow predictions. Historical declarations
+remain separately identified. Without a current review, Member 3 service exposure
+and Member 4 placement suggestions are available; workflow outcomes remain unknown.
 """
 from types import SimpleNamespace
 from typing import Any
 
 from app.engine.deployment_topology_modeling.discovery_all import discover_all
-from app.engine.failure_impact_prediction.service import predict_deployment_failure_impact
 from app.engine.recommendation_evaluation_validation.declared_workflow import (
     NOT_OBSERVED,
     load_research_workflows,
@@ -36,8 +23,8 @@ PENDING = "pending"
 
 # Where a person obtains a frozen workflow. Component 1 owns this; the text names its steps and invents none.
 FREEZE_NEXT_ACTION = (
-    "Open Workflow dependencies, assess the workflow's dependencies from real traces, approve the assessment and "
-    "freeze its graph (Component 1's freeze step). Then return here and the workflow will be offered automatically."
+    "Open Workflow Discovery. Inspect observed calls or a real application definition, review dependency roles, and "
+    "explicitly enable operational analysis for this exact cluster and application."
 )
 
 
@@ -78,30 +65,16 @@ def _choose_namespace(requested: str | None, rows: list[dict[str, Any]]) -> tupl
     return None, "none" if not names else "ambiguous"
 
 
-def _frozen_workflows() -> tuple[list[Any], str | None]:
-    """Every approved, frozen workflow graph, found through Component 1's public interface.
-
-    Component 1 stores approved assessments and the frozen graph of each workflow. The assessments name the workflows;
-    each is then asked for its frozen graph, and one that has none is simply not listed. If the store cannot be read
-    at all, that is returned as the reason and nothing is listed.
-    """
+def _frozen_workflows(namespace: str | None = None, fingerprint: str | None = None) -> tuple[list[Any], str | None]:
+    """Only definitions explicitly reviewed for the current cluster and application."""
+    if not namespace:
+        return [], None
     try:
-        assessments = workflow_service.list_dependency_assessments()
-    except Exception:  # the text of a storage error is never shown
+        return workflow_service.list_operational_workflows(namespace, fingerprint), None
+    except EvidenceError as error:
+        return [], error.message
+    except Exception:
         return [], "The approved workflow store could not be read."
-    frozen, seen = [], set()
-    for assessment in assessments:
-        workflow_id = assessment.workflow_id
-        if workflow_id in seen:
-            continue
-        seen.add(workflow_id)
-        try:
-            frozen.append(workflow_service.get_frozen_workflow_graph(workflow_id))
-        except LookupError:
-            continue  # approved or assessed, but never frozen: not available to recommend for
-        except Exception:
-            return [], "The frozen workflow store could not be read."
-    return frozen, None
 
 
 def _describe_workflow(frozen, namespace_row: dict[str, Any] | None) -> dict[str, Any]:
@@ -130,6 +103,7 @@ def _describe_workflow(frozen, namespace_row: dict[str, Any] | None) -> dict[str
         "missingServices": missing,
         "incompleteServices": incomplete,
         "reason": reason if referenced else "The frozen graph names no services.",
+        "workflowEvidence": getattr(frozen, "operational_review", None),
     }
 
 
@@ -139,6 +113,7 @@ def _describe_declared(declared, namespace_row: dict[str, Any] | None) -> dict[s
     if declared.namespace and (namespace_row or {}).get("namespace") != declared.namespace:
         described.update(applicable=False, reason="This declaration belongs to namespace " + declared.namespace)
     return {**described, "freezeId": None, "frozenAt": None, "declared": True, "approvable": False,
+            "sourceName": declared.source_name, "namespace": declared.namespace, "note": declared.note,
             "declaredBy": declared.declared_by, "declarationSha256": declared.declaration_sha256, "limits": NOT_OBSERVED}
 
 
@@ -209,28 +184,29 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
                                       f"Every service in {chosen} has an observed placement."))
 
     # 4. approved frozen workflows (Component 1)
-    frozen, store_problem = _frozen_workflows()
+    frozen, store_problem = _frozen_workflows(chosen, cluster.get("fingerprint")) if chosen else ([], None)
     workflows = [_describe_workflow(item, row) for item in frozen]
     applicable = [w for w in workflows if w["applicable"]]
     if store_problem:
-        evidence.append(_item("workflow", "Approved frozen workflow", MISSING, store_problem,
+        evidence.append(_item("workflow", "Operational workflow definition", MISSING, store_problem,
                               "Check that the extension backend and its database are running."))
         actions.append("Check that the extension backend and its database are running.")
     elif not workflows:
-        evidence.append(_item("workflow", "Approved frozen workflow", MISSING,
-                              "No workflow has been approved and frozen yet, so there is no workflow dependency "
-                              "evidence to recommend from.", FREEZE_NEXT_ACTION))
-        actions.append(FREEZE_NEXT_ACTION)
+        evidence.append(_item("workflow", "Operational workflow definition", MISSING,
+                              "No workflow definition has a current operational review for this cluster and application. "
+                              "Workflow survivability is unknown. Deployment-level analysis is available.",
+                              "Open Workflow Discovery, review a real definition and explicitly enable operational analysis."))
+        actions.append("Open Workflow Discovery, review a real definition and explicitly enable operational analysis.")
     elif row and not applicable:
-        evidence.append(_item("workflow", "Approved frozen workflow", MISSING,
+        evidence.append(_item("workflow", "Operational workflow definition", MISSING,
                               f"{len(workflows)} frozen workflow(s) exist, but none covers the services in {chosen}.",
                               "Freeze a workflow whose services are in this application: " + FREEZE_NEXT_ACTION))
         actions.append("Freeze a workflow whose services are in this application: " + FREEZE_NEXT_ACTION)
     elif applicable:
-        evidence.append(_item("workflow", "Approved frozen workflow", AVAILABLE,
-                              f"{len(applicable)} of {len(workflows)} frozen workflow(s) apply to {chosen}."))
+        evidence.append(_item("workflow", "Operational workflow definition", AVAILABLE,
+                              f"{len(applicable)} of {len(workflows)} reviewed real workflow definition(s) apply to {chosen}."))
     else:
-        evidence.append(_item("workflow", "Approved frozen workflow", AVAILABLE,
+        evidence.append(_item("workflow", "Operational workflow definition", AVAILABLE,
                               f"{len(workflows)} frozen workflow(s) exist; choose an application to see which apply."))
 
     # 5. the workflow to use: the one asked for, or the only one that applies. Never a guess between several.
@@ -248,21 +224,13 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
     if row and not applicable:
         observed = next(result for result in overview.namespaces if result.namespace == chosen)
         if observed.graph.nodes and row["status"] != "partial" and not row["incompleteServices"]:
-            report = predict_deployment_failure_impact(observed.graph, observed.graph.nodes[0].name)
-            deployment_findings = {
-                "scope": "deployment",
-                "workflowSurvival": None,
-                "workflowBlastRadius": None,
-                "approvalAllowed": False,
-                "capturedAt": overview.captured_at,
-                "note": "Workflow dependencies are unknown. These are per-node service exposure findings, not workflow survival or blast radius.",
-                "nodes": [node.model_dump(by_alias=True) for node in report.node_risk_ranking],
-            }
+            from app.engine.recommendation_evaluation_validation.deployment_recommendations import build_deployment_recommendations
+            deployment_findings = build_deployment_recommendations(observed)
 
     impact_detail = (
         "Computed by the failure-impact predictor from the frozen workflow and the live topology when the recommendation is requested."
         if selected else
-        "Per-node service exposure is shown below. Workflow survival and blast radius require a frozen or explicitly declared workflow."
+        "Per-node service exposure and placement suggestions are shown below. Workflow survival requires a current review of a real workflow definition."
         if deployment_findings else
         "Complete deployment placement and workflow evidence are required to compute failure impact."
     )
@@ -275,9 +243,13 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
         None if selected or deployment_findings else "Select an application and a frozen workflow that applies to it."))
 
     # 7. declared workflows: Member 4's own source when Component 1 has none. Listed apart, labelled, never selected for you, never approvable.
-    declared, declared_problem = _declared_workflows(row)
+    unverified, declared_problem = _declared_workflows(row)
+    declared = []  # Legacy declarations remain research/history, never operational choices.
+    if unverified:
+        evidence.append(_item("unverifiedWorkflow", "Preserved declarations", INCOMPLETE,
+            f"{len(unverified)} file/editor declaration(s) are preserved as research or history and excluded from operational analysis without a current review."))
     if declared_problem:
-        evidence.append(_item("declaredWorkflow", "Declared workflow", MISSING, declared_problem["message"],
+        evidence.append(_item("declaredWorkflow", "Research declaration", MISSING, declared_problem["message"],
                               "Fix the declaration file named by RESILIENCE_DECLARED_WORKFLOW_PATH.", code=declared_problem["code"]))
     elif declared:
         usable = [d for d in declared if d["applicable"]]
@@ -294,6 +266,10 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
         "namespaceChoice": choice,
         "workflows": workflows,
         "declaredWorkflows": declared,
+        "unverifiedWorkflows": [{**w, "applicable": False, "operationalEligible": False,
+                                 "reason": (w.get("reason") or "") + " Historical or unverified declaration; current operational review required."}
+                                for w in unverified],
+        "workflowEvidencePolicy": "operational-workflow/v1",
         "declaredWorkflowsError": declared_problem,
         "deploymentFindings": deployment_findings,
         "workflowId": selected,

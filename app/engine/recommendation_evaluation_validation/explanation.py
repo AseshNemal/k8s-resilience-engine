@@ -260,6 +260,9 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
         "evidence": {
             "workflowId": evidence.get("workflowId"),
             "workflowFreezeId": evidence.get("workflowFreezeId"),
+            "workflowReview": evidence.get("workflowReview"),
+            "workflowEvidence": evidence.get("workflows") or ([evidence["workflowReview"]] if evidence.get("workflowReview") else []),
+            "workflowEvidencePolicy": evidence.get("workflowEvidencePolicy"),
             "source": evidence.get("source"),
             "namespace": evidence.get("namespace"),
             "topologyCapturedAt": evidence.get("topologyCapturedAt"),

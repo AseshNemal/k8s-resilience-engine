@@ -43,7 +43,7 @@
                 await request(`${base}${encodeURIComponent(change.recommendationId)}/reset`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ resetBy: "Reset and disconnect", external: "refuse" }),
+                    body: JSON.stringify({ resetBy: change.appliedBy || "Reset and disconnect", external: "refuse", expectedApplicationId: change.applicationId }),
                 });
             }
         }

@@ -90,3 +90,21 @@ class WorkflowDecision(APIModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=APIModel.model_config["alias_generator"])
     expected_version: int = Field(ge=1)
     actor: str = Field(min_length=1, max_length=100)
+
+
+class OperationalWorkflowReview(APIModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=APIModel.model_config["alias_generator"])
+    workflow_id: str = Field(min_length=1, max_length=200)
+    kind: Literal["managed", "frozen"]
+    source_version: str = Field(min_length=1, max_length=200)
+    namespace: str = Field(min_length=1, max_length=63)
+    connection_fingerprint: str = Field(min_length=1, max_length=200)
+    expected_version: int = Field(ge=0)
+    actor: str = Field(min_length=1, max_length=100)
+    statement: str = Field(min_length=20, max_length=2000)
+
+    @model_validator(mode="after")
+    def meaningful_review(self):
+        if not self.actor.strip() or len(self.statement.strip()) < 20:
+            raise ValueError("Record the reviewer and how this definition was checked against the real application")
+        return self

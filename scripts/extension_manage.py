@@ -337,9 +337,10 @@ class Manager:
         self.run(["go", "test", "./...", "-count=1"], cwd=self.root / "extension" / "helper")
         node_tests = sorted(
             Path(p).relative_to(self.root).as_posix()
-            for p in glob.glob(str(self.root / "extension" / "ui-src" / "*.test.mjs"))
+            for p in [*glob.glob(str(self.root / "extension" / "ui-src" / "*.test.mjs")),
+                      *glob.glob(str(self.root / "tests" / "frontend" / "*.test.mjs"))]
         )
-        self.run(["node", "--test", *node_tests, "tests/frontend/connection-state.test.mjs", "tests/frontend/api.test.mjs"])
+        self.run(["node", "--test", *node_tests])
 
     def build_image(self, version: str, git: GitState | None = None) -> None:
         if not self.options.skip_checks:

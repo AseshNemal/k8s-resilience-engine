@@ -243,3 +243,55 @@ def test_missing_extracted_value_is_an_evidence_failure() -> None:
     )
     assert result.business_success is False
     assert "cart.id" in result.reason
+
+
+def test_oversized_evidence_fails_and_stops_the_remaining_workflow_steps():
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(201, content=b'{"cart":{"id":"1"}}' + b' ' * (1024 * 1024))
+    result = run_http_workflow_probe("http://localhost:8080", _definition(),
+        secrets={"SHOP_API_TOKEN": "test-token"}, transport=httpx.MockTransport(handler))
+    assert not result.business_success and len(requests) == 1
+    assert "evidence limit" in result.reason
+
+
+def test_compressed_evidence_is_decoded_once_and_still_satisfies_assertions():
+    import gzip
+    def handler(request):
+        body = b'{"cart":{"id":"1"}}' if request.url.path == "/api/carts" else b"confirmed"
+        return httpx.Response(201, content=gzip.compress(body), headers={"Content-Encoding": "gzip"})
+    result = run_http_workflow_probe("http://localhost:8080", _definition(),
+        secrets={"SHOP_API_TOKEN": "test-token"}, transport=httpx.MockTransport(handler))
+    assert result.business_success
+
+
+def test_real_local_requests_ignore_proxy_environment(monkeypatch):
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    seen = []
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            seen.append(self.path)
+            body = b'{"cart":{"id":"1"}}' if self.path == "/api/carts" else b"confirmed"
+            self.send_response(201)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        monkeypatch.setenv(key, "http://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "")
+    try:
+        result = run_http_workflow_probe(f"http://127.0.0.1:{server.server_port}", _definition(),
+            secrets={"SHOP_API_TOKEN": "test-token"})
+        assert result.business_success and seen == ["/api/carts", "/api/orders"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(2)

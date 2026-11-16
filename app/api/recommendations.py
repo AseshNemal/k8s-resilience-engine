@@ -97,6 +97,7 @@ class ApplyTestRequest(APIModel):
 
 
 class ResetRequest(APIModel):
+    expected_application_id: str = Field(min_length=1, max_length=80)
     reset_by: str
     # What to do with a field something else changed since the change was applied: "refuse" restores nothing and names
     # them (the default), "keep" restores only the fields that still hold what the change set.
@@ -107,6 +108,7 @@ class KeepRequest(APIModel):
     """Who decides the applied change stays. Nothing is written to the cluster."""
 
     kept_by: str
+    expected_application_id: str = Field(min_length=1, max_length=80)
 
 
 router = APIRouter(
@@ -756,10 +758,10 @@ def _applied(service: ApplicationService, recommendation_id: str, action: Callab
     if RunRepository(service.repository.session.get_bind()).active():
         raise ApplicationRefused("APPLY_TEST_ACTIVE", "An Apply and test run is using this cluster. Wait for it to finish before Apply or Reset.")
     try:
-        action()
+        change = action()
     except PreconditionError as error:
         raise HTTPException(status_code=422, detail=str(error))
-    return service.status(recommendation_id)
+    return service.status(recommendation_id, application_id=getattr(change, "application_id", None))
 
 
 @router.get("/applications/current")
@@ -799,13 +801,13 @@ def list_outstanding_applications(production: ApplicationService = Depends(get_a
 @router.post("/{recommendation_id}/keep")
 def keep_recommendation(recommendation_id: str, request: KeepRequest,
                         service: ApplicationService = Depends(get_application_service)) -> dict:
-    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by))
+    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by, expected_application_id=request.expected_application_id))
 
 
 @router.post("/declared/{recommendation_id}/keep")
 def keep_research_recommendation(recommendation_id: str, request: KeepRequest,
                                  service: ApplicationService = Depends(get_research_application_service)) -> dict:
-    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by))
+    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by, expected_application_id=request.expected_application_id))
 
 
 @router.get("/{recommendation_id}/application")
@@ -831,7 +833,8 @@ def reset_recommendation(
     _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_application_service),
 ) -> dict:
-    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external))
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external,
+                                                                   expected_application_id=request.expected_application_id))
 
 
 @router.post("/{recommendation_id}/analysis/retry")
@@ -870,7 +873,8 @@ def reset_research_recommendation(
     _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_research_application_service),
 ) -> dict:
-    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external))
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external,
+                                                                   expected_application_id=request.expected_application_id))
 
 
 # The fault-injection validation loop ("Prove it"). Included last so that none of the `/{recommendation_id}/...` routes above can shadow it.

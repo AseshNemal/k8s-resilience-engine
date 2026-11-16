@@ -723,6 +723,7 @@
             return `Proven on ${where} (${depth}). That result stays with that cluster; applying to yours is checked again against it.`;
         }
         if (proof.state === "OTHER_PROVEN") return `A different change was proven on ${where}, not this one.`;
+        if (proof.state === "HISTORICAL") return `Historical experiment on ${where}. Its workflow evidence does not match the current reviewed definition, so it is not proof of this recommendation.`;
         return `Tested on ${where}; no change was proven.`;
     }
 
@@ -759,6 +760,7 @@
         const sha = v.detail && v.detail.yaml ? v.detail.yaml.sha256 : null;
         const query = new URLSearchParams({ namespace: v.namespace, workflowId: v.workflowId });
         if (sha) query.set("candidateSha256", sha);
+        query.set("workflowSource", isDeclared() ? "DECLARED" : "FROZEN");
         try {
             const response = await fetch(`/api/recommendations/validation-loop/proof?${query}`);
             if (!response.ok) throw new Error("not available");
@@ -1065,6 +1067,8 @@
         }
         updatePortfolio(v);
         view.renderDeploymentFindings(document.querySelector('[data-role="rec-deployment-findings"]'), v.deploymentFindings);
+        const workflowProgress = document.querySelector('.rx-rail');
+        if (workflowProgress) workflowProgress.hidden = !!v.deploymentFindings;
         view.renderEvidenceChecklist(evidenceList, v.evidence);
         const summary = view.evidenceSummary(v.evidence);
         const evidenceSummaryLine = document.querySelector('[data-role="rec-evidence-summary"]');
@@ -1314,7 +1318,7 @@
         if (v.status === "ready") {
             const declared = v.workflowKind === "declared";
             applyBadge(sourceBadge, declared ? { variant: "warning", text: applyTestPanel ? "Declared workflows · research only" : "Declared workflow · research approval only" }
-                                             : { variant: "success", text: "Live evidence" });
+                                             : { variant: "success", text: "Live placement · reviewed workflow definitions" });
             showDetail(v);
             renderDeclaredNote(v, declared);
             if (declared) {
@@ -1346,6 +1350,9 @@
                 note.textContent = "Choose an application and a workflow above to continue.";
                 region.appendChild(note);
             }
+        } else if (v.deploymentFindings) {
+            applyBadge(sourceBadge, { variant: "warning", text: "Deployment analysis · workflows unknown" });
+            region.replaceChildren();
         } else if (view.nextActionHint(v)) {
             // Only a declared workflow exists: nothing is broken, a choice is waiting, and the hint under step 1 says so.
             applyBadge(sourceBadge, { variant: "muted", text: "Choose to continue" });

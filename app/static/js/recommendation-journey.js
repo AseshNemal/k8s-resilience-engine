@@ -197,6 +197,13 @@
         const onNode = options && options.onNode;
         container.replaceChildren();
         const evidence = (detail && detail.evidence) || {};
+        const reviews = (evidence.workflowEvidence || []).map((row) => row.workflowReview || row);
+        if (reviews.length) {
+            const declared = reviews.filter((r) => r.basis === "operator-reviewed").length;
+            container.append(el(doc, "p", declared
+                ? `${declared} workflow definition(s) are operator-declared and explicitly reviewed for this application. Predictions depend on those definitions. Observed calls, where present, do not prove business necessity.`
+                : "These trace-backed definitions were explicitly reviewed for this application. Trace evidence comes from the saved assessment; the results below are predictions, not measured failures.", "ui-note"));
+        }
         const impact = (detail && detail.baselineImpact) || null;
         const model = exposure(detail, candidate);
         const failed = evidence.failedNode || null;
@@ -206,7 +213,7 @@
         const head = el(doc, "div", undefined, "rx-verdict");
         const figure = el(doc, "div", undefined, "rx-verdict__figure", { "data-level": impact && impact.blastRadius >= 50 ? "high" : impact && impact.blastRadius > 0 ? "some" : "none" });
         figure.append(el(doc, "span", impact ? percent(impact.blastRadius) : "—", "rx-verdict__number"),
-            el(doc, "span", "blast radius today", "rx-verdict__unit"));
+            el(doc, "span", "predicted blast radius", "rx-verdict__unit"));
         const words = el(doc, "div", undefined, "rx-verdict__words");
         let sentence = "The engine reported no failure impact for this application.";
         if (failed && total) {

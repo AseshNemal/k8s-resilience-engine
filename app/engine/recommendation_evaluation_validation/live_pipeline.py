@@ -415,7 +415,8 @@ def build_live_recommendation(
         failed_node, scheduling_evidence=scheduling_evidence_for(deployment),
         combination_budget=combination_budget,
     )
-    return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts})
+    return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts,
+        "workflowReview": inputs.workflow_review, "workflowEvidencePolicy": "operational-workflow/v1"})
 
 
 def _require_complete_topology(workflow, discovery) -> None:

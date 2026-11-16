@@ -736,14 +736,14 @@
         function doReset(keepOutside) {
             const who = named("resetting a change");
             if (!who) return Promise.resolve(false);
-            const body = keepOutside ? { resetBy: who, external: "keep" } : { resetBy: who };
+            const body = { resetBy: who, expectedApplicationId: status.application?.applicationId, ...(keepOutside ? { external: "keep" } : {}) };
             return mutate("reset", status, applicationUrl(status, "/reset"), body, status.application);
         }
 
         function doKeep() {
             const who = named("keeping a change");
             if (!who) return Promise.resolve(false);
-            return mutate("keep", status, applicationUrl(status, "/keep"), { keptBy: who }, status.application);
+            return mutate("keep", status, applicationUrl(status, "/keep"), { keptBy: who, expectedApplicationId: status.application?.applicationId }, status.application);
         }
 
         function doRetry() {

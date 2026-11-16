@@ -279,7 +279,7 @@
         sessions = [],
         documentRow = null,
         recording = null,
-        history = [];
+        history = [], operationalReviews = [];
     let selected = null,
         connecting = null,
         binding = null,
@@ -515,7 +515,8 @@
                 meta = el("div", null, "we-workflow-meta");
             const open = () => run(() => openDocument(row));
             info.append(button(row.name, open, "we-workflow-name"));
-            const status = el("span", row.reviewed ? "Reviewed declaration" : "Draft", "we-badge");
+            const operational = operationalReviews.some((r) => r.kind === "managed" && r.workflowId === row.id && r.sourceVersion === String(row.version));
+            const status = el("span", operational ? "Operational review recorded · operator-declared" : row.reviewed ? "Declaration · operational review required" : "Draft", "we-badge");
             status.dataset.kind = row.reviewed ? "reviewed" : "draft";
             meta.append(
                 status,
@@ -572,7 +573,8 @@
         permissions();
     }
     async function loadLists() {
-        const [docs, records] = await Promise.all([request("/workflows"), request("/recordings")]);
+        const [docs, records, reviews] = await Promise.all([request("/workflows"), request("/recordings"), request("/operational-reviews")]);
+        operationalReviews = reviews;
         saved = docs;
         sessions = records;
         renderManager();
@@ -1724,7 +1726,12 @@
         q("dialog-name-wrap").hidden = deleting;
         q("dialog-name").required = !deleting;
         q("dialog-name").value = state.name || "";
-        q("actor").value = row?.actor || documentRow?.actor || q("actor").value || "";
+        let configuredActor = "";
+        try { configuredActor = window.localStorage?.getItem("resilience.audit.name") || ""; } catch (_) { /* Optional audit preference. */ }
+        q("actor").value = configuredActor || q("actor").value || row?.actor || documentRow?.actor || "";
+        q("operational-review-wrap").hidden = !review;
+        q("operational-use").checked = false;
+        q("operational-statement").value = "";
         q("criticality").value = state.criticality ?? "";
         q("criticality-wrap").hidden = mode === "rename" || deleting;
         q("criticality").required = review;
@@ -1799,6 +1806,8 @@
         if (mode === "review" && reviewIssues(model.state()).length)
             throw new Error("Resolve the highlighted connections first.");
         const state = editable(model.state());
+        if (mode === "review" && q("operational-use").checked && q("operational-statement").value.trim().length < 20)
+            throw new Error("Describe how this exact real workflow definition was verified (at least 20 characters).");
         state.name = q("dialog-name").value.trim();
         state.criticality = q("criticality").value === "" ? null : Number(q("criticality").value);
         const body = {
@@ -1816,6 +1825,14 @@
         );
         documentRow = result;
         model.load(result);
+        if (mode === "review" && q("operational-use").checked) {
+            const reviews = await request("/operational-reviews");
+            const prior = reviews.find((r) => r.kind === "managed" && r.workflowId === result.id && r.namespace === boundNamespace);
+            await request("/operational-reviews", "POST", { workflowId: result.id, kind: "managed",
+                sourceVersion: String(result.version), namespace: boundNamespace, connectionFingerprint: binding,
+                expectedVersion: prior?.version || 0, actor, statement: q("operational-statement").value.trim() });
+        }
+        try { window.localStorage?.setItem("resilience.audit.name", actor); } catch (_) { /* Optional audit preference. */ }
         transientEvidence = result.edges;
         historical = false;
         q("dialog").close();
@@ -1825,7 +1842,9 @@
         q("saved-title").textContent = mode === "review" ? "Workflow saved" : "Draft saved";
         q("saved-message").textContent =
             mode === "review"
-                ? `“${result.name}” is ready for research risk analysis. Dependency labels are declared, not experimentally validated.`
+                ? q("operational-use").checked
+                    ? `“${result.name}” is reviewed for operational predictions on this cluster and application. Dependencies remain operator-declared; they are not experimentally validated.`
+                    : `“${result.name}” is saved as a reviewed declaration. Operational analysis requires an explicit review of the real application.`
                 : `“${result.name}” is saved as version ${result.version}. Continue editing when you’re ready to review it.`;
         q("risk").hidden = mode !== "review";
         q("continue").className = `we-button ${mode === "review" ? "" : "we-button--primary"}`;

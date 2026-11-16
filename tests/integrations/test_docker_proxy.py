@@ -263,3 +263,25 @@ def test_the_facts_for_the_memory_assessment_come_from_read_only_endpoints(proxy
     assert facts.info()["memTotalBytes"] == 4_000_000_000
     assert facts.container_memory() == {"resilience-validation-worker": 500, "postgres": 500}
     assert mutating(daemon) == []
+
+
+def test_slow_docker_facts_do_not_block_independent_proxy_requests():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    entered, release = Event(), Event()
+    def upstream(request):
+        if request.url.path == "/info":
+            entered.set()
+            assert release.wait(5)
+            return httpx.Response(200, json={"NCPU": 4})
+        return httpx.Response(200, json=[])
+    app = create_app(transport=httpx.MockTransport(upstream))
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(client.get, "/info")
+        try:
+            assert entered.wait(2)
+            second = pool.submit(client.get, "/containers/json")
+            assert second.result(timeout=2).json() == []
+        finally:
+            release.set()
+            assert first.result(timeout=3).status_code == 200

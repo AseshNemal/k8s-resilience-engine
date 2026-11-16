@@ -56,7 +56,7 @@ class DeploymentFailureImpactReport(APIModel):
     workflow_blast_radius: float | None = None
     workflow_evidence_note: str = (
         "Deployment placement only. Workflow dependencies, workflow survival and workflow "
-        "blast radius are unknown without observed or explicitly declared workflow evidence."
+        "blast radius are unknown without a current operational review of a real workflow definition."
     )
 
 

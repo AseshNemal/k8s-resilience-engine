@@ -571,7 +571,7 @@ test("Reset asks once more, needs a name, shows Resetting… at once, and cannot
 
     assert.equal(afterFirst, "Resetting…");
     assert.equal(t.network.count("POST"), 1);
-    assert.deepEqual(t.network.pending().find((c) => c.method === "POST").body, { resetBy: "asesh" });
+    assert.deepEqual(t.network.pending().find((c) => c.method === "POST").body, { resetBy: "asesh", expectedApplicationId: "apply-1" });
     assert.equal(t.find("op-reset").disabled, true);
     assert.equal(t.find("op-confirm-yes").disabled, true);
     const reset = status({ application: { ...status().application, status: "RESET", resetBy: "asesh" }, canReset: false, canApply: true,
@@ -774,7 +774,7 @@ test("Keep changes needs a name, sends one request, and writes nothing else", as
 
     assert.equal(t.network.count("POST"), 1);
     assert.equal(t.network.count("POST", KEEP_URL), 1);
-    assert.deepEqual(t.network.pending().find((c) => c.method === "POST").body, { keptBy: "asesh" });
+    assert.deepEqual(t.network.pending().find((c) => c.method === "POST").body, { keptBy: "asesh", expectedApplicationId: "apply-1" });
     t.network.respond("POST", KEEP_URL, 200, settled({ canKeep: false, application: { ...completed().application, status: "KEPT" } }));
     await flush();
     assert.equal(t.find("op-decide").hidden, true);
@@ -791,7 +791,7 @@ test("Reset now from the question goes through the same named confirmation as Re
     t.find("op-confirm-yes").click();
     await flush();
 
-    assert.deepEqual(t.network.pending().find((c) => c.method === "POST" && c.url === RESET_URL).body, { resetBy: "asesh" });
+    assert.deepEqual(t.network.pending().find((c) => c.method === "POST" && c.url === RESET_URL).body, { resetBy: "asesh", expectedApplicationId: "apply-1" });
 });
 
 test("a reset refused for an outside change names the fields and offers to leave them as they are", async () => {
@@ -816,7 +816,7 @@ test("a reset refused for an outside change names the fields and offers to leave
     await flush();
 
     const sent = t.network.pending().find((c) => c.method === "POST" && c.url === RESET_URL);
-    assert.deepEqual(sent.body, { resetBy: "asesh", external: "keep" });
+    assert.deepEqual(sent.body, { resetBy: "asesh", external: "keep", expectedApplicationId: "apply-1" });
 });
 
 test("cancelling after a refused reset forgets the outside changes it listed", async () => {
