@@ -11,6 +11,18 @@ const window = {};
 vm.runInNewContext(source, { window, URLSearchParams, Array, Object, JSON, Promise, String, Number, Error, Boolean });
 const C = window.ResilienceRecommendationContext;
 
+test("deployment findings survive the context adapter without requesting workflow approval", async () => {
+    const findings = { scope: "deployment", workflowSurvival: null, workflowBlastRadius: null, approvalAllowed: false,
+        nodes: [{ node: "worker-a", failedServices: ["orders"], affectedServices: ["orders"] }] };
+    const body = context({ workflows: [], declaredWorkflows: [], workflowId: null, ready: false, deploymentFindings: findings });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body });
+    const v = await C.createController(env).start();
+    assert.equal(v.deploymentFindings.scope, "deployment");
+    assert.equal(v.deploymentFindings.workflowSurvival, null);
+    assert.equal(v.detail, null);
+    assert.ok(calls.every(url => !url.includes("/detail") && !url.includes("approval")));
+});
+
 test("all-workflows mode needs no workflow choice and requests one aggregate evaluation", async () => {
     const body = context({ workflows: [workflow("a"), workflow("b")], workflowId: null, workflowChoice: "choose", ready: false });
     const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/live/detail": detailBody() });

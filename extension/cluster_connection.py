@@ -504,8 +504,66 @@ def connect_cluster(request: ConnectRequest) -> dict:
     return connect(request.kubeconfig, request.managed)
 
 
-def disconnect() -> dict:
-    """The person's disconnect: remove the credential and remember the choice, so nothing reconnects it."""
+def _change_ledger():
+    """The applied-change ledger against the connected cluster, with a handle to note a decision on it.
+
+    Imported here, not at module level: the connection routes must keep working (status, connect) even if the
+    recommendation component cannot be loaded.
+    """
+    from sqlalchemy.orm import Session
+
+    from app.api.recommendations import cluster_writes_enabled, get_cluster_applier, get_engine, get_settings
+    from app.engine.recommendation_evaluation_validation.application import AppliedChangeRepository, ApplicationService
+    from app.engine.recommendation_evaluation_validation.approval import ApprovalRepository
+
+    session = Session(get_engine(get_settings().database_url))
+    service = ApplicationService(ApprovalRepository(session), AppliedChangeRepository(session), get_cluster_applier(),
+                                 tier="production", trusted=lambda _approval: False, writes_enabled=cluster_writes_enabled())
+    return session, service
+
+
+def outstanding_changes() -> dict:
+    """What a disconnect would leave behind on the connected cluster. Read before the credential is removed."""
+    session, service = _change_ledger()
+    try:
+        return service.outstanding(advance_resets=True)
+    finally:
+        session.close()
+
+
+def _refuse_disconnect(code: str, message: str, ledger: dict) -> HTTPException:
+    return HTTPException(status_code=409, detail={"code": code, "message": message, "changes": ledger["blocking"]})
+
+
+def disconnect(outstanding: str | None = None) -> dict:
+    """The person's disconnect: remove the credential and remember the choice, so nothing reconnects it.
+
+    A change this application applied and has not put back needs this credential to be reset, so the credential is not
+    removed over one without a decision: ``outstanding="keep"`` is the person saying the changes stay (it is recorded on
+    each). A reset whose rollout is still being verified is never abandoned: wait for it, then disconnect.
+    """
+    if KUBECONFIG_PATH.is_file():
+        session = None
+        try:
+            try:
+                session, service = _change_ledger()
+                ledger = service.outstanding(advance_resets=True)
+            except Exception:       # the ledger cannot be read: say so, never assume there is nothing outstanding
+                raise HTTPException(status_code=503, detail={
+                    "code": "CHANGE_LEDGER_UNAVAILABLE", "changes": [],
+                    "message": "Could not check whether a change is still applied to this cluster, so it was not "
+                               "disconnected. Try again in a moment."}) from None
+            if ledger["resetInProgress"]:
+                raise _refuse_disconnect("RESET_IN_PROGRESS", "A reset is still rolling out on this cluster and this "
+                                         "connection is needed to verify it. Disconnect when it has finished.", ledger)
+            if ledger["blocking"] and outstanding != "keep":
+                raise _refuse_disconnect("OUTSTANDING_CHANGES", "A change this application applied is still on this cluster. "
+                                         "Reset it first, or disconnect keeping it.", ledger)
+            if ledger["blocking"]:
+                service.note_left_at_disconnect([row["applicationId"] for row in ledger["blocking"]])
+        finally:
+            if session is not None:
+                session.close()
     with _connection_lock(wait=DISCONNECT_WAIT_SECONDS):
         KUBECONFIG_PATH.unlink(missing_ok=True)
         _managed_path().unlink(missing_ok=True)
@@ -513,6 +571,12 @@ def disconnect() -> dict:
         return _status()
 
 
+@router.get("/cluster/outstanding")
+def get_outstanding_changes() -> dict:
+    """What is still applied to the connected cluster: what Disconnect asks about. Reads only."""
+    return outstanding_changes()
+
+
 @router.delete("/cluster")
-def disconnect_cluster() -> dict:
-    return disconnect()
+def disconnect_cluster(outstanding: Literal["keep"] | None = None) -> dict:
+    return disconnect(outstanding)

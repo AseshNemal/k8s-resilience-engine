@@ -3,9 +3,12 @@
 {% set show_project_metadata = false %}
 {% set source_label = "No workflow selected" %}
 {% block page_css %}
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflow-editor.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/workflows.css') }}?v=dashboard-11">
 {% endblock %}
 {% block content %}
+    {% include "components/workflow_editor.html" %}
+    <details class="we-experiments"><summary>Controlled dependency experiments and assessment</summary>
     <div id="workflow-workspace" class="workflow-workspace">
         <section class="workspace-datasets" aria-label="Experiment dataset">
             <div>
@@ -301,8 +304,10 @@
             </div>
         </div>
     </div>
+    </details>
 {% endblock %}
 {% block page_js %}
+    <script src="{{ url_for('static', path='/js/workflow-editor.js') }}" defer></script>
     <script src="{{ url_for('static', path='/js/workflow-discovery-poller.js') }}?v=continuous-discovery-2" defer></script>
     <script src="{{ url_for('static', path='/js/workflow-dependency-map.js') }}?v=dependency-map-2" defer></script>
     <script src="{{ url_for('static', path='/js/components/workflows.js') }}?v=dashboard-10" defer>

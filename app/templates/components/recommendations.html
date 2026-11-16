@@ -63,6 +63,7 @@
     </div>
     <p class="rec-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
     <p class="ui-note">All available workflows are evaluated together. A combined fix is one proposal.</p>
+    <div data-role="rec-deployment-findings" hidden aria-live="polite"></div>
     <details class="rec-evidence-details" data-role="rec-evidence-details">
         <summary data-role="rec-evidence-summary">Evidence</summary>
         <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
@@ -193,6 +194,16 @@
             <div class="op-progress__bar" role="progressbar" aria-label="Waiting for the cluster. No completion percentage is available."></div>
         </div>
         <p class="approval-note" data-role="op-message" hidden></p>
+        {# What the change did, field by field, in words: readable without opening the YAML. Drawn from the server's record. #}
+        <div class="op-changes" data-role="op-changes"></div>
+        {# Asked once the rollout has settled: a change is never left in place, or put back, without the person saying which. #}
+        <div class="op-decide stack-sm" data-role="op-decide" hidden>
+            <p class="op-decide__text" data-role="op-decide-text"></p>
+            <div class="approval-actions">
+                <button type="button" class="primary-button" id="btn-op-decide-reset" data-role="op-decide-reset">Reset now</button>
+                <button type="button" class="secondary-button" id="btn-op-keep" data-role="op-keep">Keep changes</button>
+            </div>
+        </div>
         <div class="op-actions" data-role="op-actions">
             <button type="button" class="secondary-button" id="btn-op-reset" data-role="op-reset" hidden>Reset to previous state</button>
             <button type="button" class="primary-button" id="btn-op-retry" data-role="op-retry" hidden>Retry analysis</button>
@@ -200,13 +211,19 @@
         </div>
         <div class="op-confirm stack-sm" data-role="op-confirm" hidden>
             <p class="approval-note" data-role="op-confirm-text"></p>
+            {# Shown when a reset was refused because something else changed these fields since the change was applied. #}
+            <div class="op-external stack-sm" data-role="op-external" hidden>
+                <p class="approval-note" role="alert">Changed outside this application since the change was applied. Reset did not touch them:</p>
+                <ul class="op-limits" data-role="op-external-list"></ul>
+            </div>
             <div class="form-group" data-role="op-name-wrap" hidden>
-                <label for="op-name">Your name (a reset is made by a named person)</label>
+                <label for="op-name">Your name (a reset or a decision to keep is made by a named person)</label>
                 <input type="text" id="op-name" class="form-input" data-role="op-name" autocomplete="off">
             </div>
             <div class="approval-actions">
                 <button type="button" class="secondary-button" id="btn-op-cancel" data-role="op-confirm-no">Cancel</button>
                 <button type="button" class="primary-button" id="btn-op-confirm-reset" data-role="op-confirm-yes">Confirm reset</button>
+                <button type="button" class="secondary-button" id="btn-op-confirm-external" data-role="op-confirm-external" hidden>Reset the rest, leave those as they are</button>
             </div>
         </div>
         <ol class="op-steps" data-role="op-steps" aria-label="Steps of the change" hidden></ol>

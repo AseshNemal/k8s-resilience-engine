@@ -650,6 +650,28 @@
             list.append(description);
         }
         container.append(element(doc, "div", "Proposal under review", "op-subtitle"), list);
+        const changes = candidate.proposedChanges || [];
+        if (changes.length) {
+            container.append(element(doc, "div", "Exact field changes before approval", "op-subtitle"));
+            const table = element(doc, "table", undefined, "data-table op-changes__table");
+            const head = element(doc, "tr");
+            ["Deployment", "Field", "Current", "Proposed", "Status"].forEach((label) =>
+                head.append(element(doc, "th", label)));
+            const thead = element(doc, "thead");
+            thead.append(head);
+            const body = element(doc, "tbody");
+            changes.forEach((change) => change.fields.forEach((field) => {
+                const row = element(doc, "tr");
+                [change.deployment, field.label, field.fromText, field.toText,
+                    field.changed ? "changed" : "unchanged"].forEach((value) =>
+                    row.append(element(doc, "td", value)));
+                body.append(row);
+            }));
+            table.append(thead, body);
+            container.append(table, element(doc, "p",
+                "These values come from the generated patch. Pod-template edits roll out the Deployment; predicted placement is not a guarantee.",
+                "ui-note"));
+        }
     }
 
     // ---- the failure being assessed, in the words a person reads it in ---------------------------------------------------
@@ -899,7 +921,29 @@
         return { text: list.length ? `Evidence: ${available} of ${list.length} available` : "Evidence", attention };
     }
 
+    function renderDeploymentFindings(container, findings) {
+        if (!container) return;
+        container.replaceChildren();
+        container.hidden = !findings;
+        if (!findings) return;
+        const doc = container.ownerDocument;
+        container.append(element(doc, "h4", "Deployment-level findings"),
+            element(doc, "p", findings.note, "ui-note"),
+            element(doc, "p", "Workflow survival: unknown. Workflow blast radius: unknown. Workflow-dependent approval is unavailable."));
+        const table = element(doc, "table", "", "op-table");
+        const head = element(doc, "tr");
+        for (const title of ["Assumed failed node", "Services losing all ready replicas", "Services losing ready replicas"]) head.append(element(doc, "th", title));
+        table.append(head);
+        for (const node of findings.nodes || []) {
+            const row = element(doc, "tr");
+            for (const value of [node.node, (node.failedServices || []).join(", ") || "None", (node.affectedServices || []).join(", ") || "None"]) row.append(element(doc, "td", value));
+            table.append(row);
+        }
+        container.append(table);
+    }
+
     window.ResilienceRecommendations = {
+        renderDeploymentFindings,
         renderSelectedImprovement,
         renderImpactSummary,
         computeSteps,

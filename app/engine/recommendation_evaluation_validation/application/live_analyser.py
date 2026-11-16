@@ -158,6 +158,8 @@ class ResearchAnalyser(_Analyser):
         from app.engine.deployment_topology_modeling.service import discover_live
 
         declared = get_declared_workflow(basis["workflowId"])
+        if declared.namespace and declared.namespace != basis["namespace"]:
+            raise AnalysisUnavailable("WORKFLOW_CHANGED", "The reviewed workflow belongs to another namespace.")
         if basis.get("declarationDigest") and declared.declaration_sha256 != basis["declarationDigest"]:
             raise AnalysisUnavailable(
                 "WORKFLOW_CHANGED", "The declared workflow was edited after this change was applied, so the failure impact now "

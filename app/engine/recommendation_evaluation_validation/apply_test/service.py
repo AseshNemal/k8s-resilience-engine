@@ -260,6 +260,10 @@ class ApplyTestService:
                                         if match == "other" else None)
                 run["canReset"] = (change.status in ("APPLYING", "APPLIED", "RESET_FAILED") and run["status"] in TERMINAL
                                    and match != "other")
+                # After a test the change is still on the cluster: the person is asked to reset it or to keep it (a recorded
+                # decision that writes nothing). Only a change that settled as applied can be kept.
+                run["canKeep"] = change.status == "APPLIED" and run["status"] in TERMINAL
+                run["kept"] = (change.detail or {}).get("kept") if change.status == "KEPT" else None
         return run
 
     def live(self, run_id=None):

@@ -1,5 +1,5 @@
 import os
-from typing import Callable
+from typing import Callable, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import Field
@@ -97,6 +97,15 @@ class ApplyTestRequest(APIModel):
 
 class ResetRequest(APIModel):
     reset_by: str
+    # What to do with a field something else changed since the change was applied: "refuse" restores nothing and names
+    # them (the default), "keep" restores only the fields that still hold what the change set.
+    external: Literal["refuse", "keep"] = "refuse"
+
+
+class KeepRequest(APIModel):
+    """Who decides the applied change stays. Nothing is written to the cluster."""
+
+    kept_by: str
 
 
 router = APIRouter(
@@ -779,6 +788,25 @@ def list_applications(limit: int = Query(20, ge=1, le=100), production: Applicat
         "rolloutState": (c.rollout or {}).get("state")} for c in production.repository.recent(limit)]}
 
 
+@router.get("/applications/outstanding")
+def list_outstanding_applications(production: ApplicationService = Depends(get_application_service)) -> dict:
+    """The change ledger's open entries, of both tiers: what is still applied, half-applied, kept, or being reset, each
+    against the cluster connected now. This is what a reconnect and a disconnect look at. It applies and resets nothing."""
+    return production.outstanding(advance_resets=True)
+
+
+@router.post("/{recommendation_id}/keep")
+def keep_recommendation(recommendation_id: str, request: KeepRequest,
+                        service: ApplicationService = Depends(get_application_service)) -> dict:
+    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by))
+
+
+@router.post("/declared/{recommendation_id}/keep")
+def keep_research_recommendation(recommendation_id: str, request: KeepRequest,
+                                 service: ApplicationService = Depends(get_research_application_service)) -> dict:
+    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by))
+
+
 @router.get("/{recommendation_id}/application")
 def get_application(recommendation_id: str, service: ApplicationService = Depends(get_application_service)) -> dict:
     return service.status(recommendation_id)
@@ -802,7 +830,7 @@ def reset_recommendation(
     _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_application_service),
 ) -> dict:
-    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external))
 
 
 @router.post("/{recommendation_id}/analysis/retry")
@@ -841,7 +869,7 @@ def reset_research_recommendation(
     _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_research_application_service),
 ) -> dict:
-    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external))
 
 
 # The fault-injection validation loop ("Prove it"). Included last so that none of the `/{recommendation_id}/...` routes above can shadow it.

@@ -891,3 +891,11 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 
 .candidate-card__evidence { margin: var(--space-xs) 0 0; font-size: 12px; color: var(--color-text-muted); }
 .rec-tie-note { margin: 0 0 var(--space-sm); }
+
+/* The applied-change panel: what changed, and the reset-or-keep question. */
+.op-changes:empty { display: none; }
+.op-changes { display: grid; gap: var(--space-xs); }
+.op-changes__table th[scope="row"] { vertical-align: top; font-weight: 600; }
+.op-changes__row--changed td { font-weight: 600; }
+.op-decide { padding: var(--space-md); border: 1px solid var(--color-primary); border-radius: var(--radius-medium); background: var(--color-surface-soft); }
+.op-decide__text { margin: 0; font-weight: 600; }

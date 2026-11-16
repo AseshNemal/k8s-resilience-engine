@@ -24,15 +24,16 @@ var ErrNotAllowed = errors.New("that change is outside what the tracing setup is
 // Everything else (another namespace, Secrets, RBAC outside the rendered inventory, the original Bookinfo
 // Deployments) is refused whatever the caller asks. The inventory is fixed when the Guard is built.
 type Guard struct {
-	w            kube.RawWriter
-	installation string
-	allowed      map[ObjectRef]bool
-	pods         map[string]bool
+	w                kube.RawWriter
+	installation     string
+	allowed          map[ObjectRef]bool
+	pods             map[string]bool
+	adoptedReviewsV2 bool
 }
 
 // NewGuard builds the allow-list from the planned inventory and the Pods the approved plan named.
-func NewGuard(w kube.RawWriter, installationID string, inventory []Entry, plannedPods []string) *Guard {
-	g := &Guard{w: w, installation: installationID, allowed: map[ObjectRef]bool{}, pods: map[string]bool{}}
+func NewGuard(w kube.RawWriter, installationID string, inventory []Entry, plannedPods []string, reviewsV2Preexisting ...bool) *Guard {
+	g := &Guard{w: w, installation: installationID, allowed: map[ObjectRef]bool{}, pods: map[string]bool{}, adoptedReviewsV2: len(reviewsV2Preexisting) > 0 && reviewsV2Preexisting[0]}
 	for _, e := range inventory {
 		g.allowed[e.Ref] = true
 	}
@@ -124,6 +125,9 @@ func (g *Guard) DeleteSidecarPod(ctx context.Context, pod kube.Object) error {
 		if pod.Labels["app"] == w.App && pod.Labels["version"] == w.Version {
 			okWorkload = true
 		}
+	}
+	if g.adoptedReviewsV2 && pod.Labels["app"] == "reviews" && pod.Labels["version"] == "v2" {
+		okWorkload = true
 	}
 	sidecar := false
 	for _, name := range pod.Containers {

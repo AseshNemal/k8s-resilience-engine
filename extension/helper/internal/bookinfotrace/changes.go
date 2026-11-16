@@ -61,17 +61,28 @@ func mustChangeset() Changeset {
 	return c
 }
 
-// WorstCaseMiB is the memory the setup can use at its caps: istiod, every sidecar at its limit, reviews-v2 and the
-// temporary client Pod. It is a bound, not a forecast: the caps are enforced by Kubernetes, the rest is an estimate.
-func (c Changeset) WorstCaseMiB() int {
+// WorstCaseMiB is the original create-reviews-v2 plan's memory bound.
+func (c Changeset) WorstCaseMiB() int { return c.WorstCaseForReviewsV2(1, false) }
+
+// WorstCaseForReviewsV2 accounts for the actual sidecars. An existing reviews-v2 is already included in Docker's
+// current memory use, so only its new sidecars are added; a created one also needs its application memory estimate.
+func (c Changeset) WorstCaseForReviewsV2(replicas int, preexisting bool) int {
 	m := c.MemoryMiB
-	return m.IstiodLimit + m.Sidecars*m.SidecarLimit + m.ReviewsV2Estimate + m.ClientPod
+	if replicas < 1 {
+		replicas = 1
+	}
+	sidecars := len(c.RecreatedWorkloads) + replicas
+	worst := m.IstiodLimit + sidecars*m.SidecarLimit + m.ClientPod
+	if !preexisting {
+		worst += m.ReviewsV2Estimate
+	}
+	return worst
 }
 
 // Change is one line of the exact preview: what will happen to what.
 type Change struct {
 	Step      int      `json:"step"`
-	Action    string   `json:"action"` // install, create, label, recreate
+	Action    string   `json:"action"` // install, create, keep, label, recreate
 	Kind      string   `json:"kind"`
 	Namespace string   `json:"namespace,omitempty"`
 	Name      string   `json:"name"`
@@ -81,8 +92,10 @@ type Change struct {
 
 // StepInputs are the facts a preview needs that are not constants.
 type StepInputs struct {
-	JaegerIPv4     string   // the rediscovered, validated address; empty when it could not be
-	PodsToRecreate []string // the live Pod names that would be deleted so they come back with a sidecar
+	JaegerIPv4                string   // the rediscovered, validated address; empty when it could not be
+	PodsToRecreate            []string // the live Pod names that would be deleted so they come back with a sidecar
+	ExistingReviewsV2         bool     // adopt the user's Deployment; never create, edit or delete it
+	ExistingReviewsV2Replicas int
 }
 
 // Steps is the exact, ordered preview of the setup. The order is the order they would run in: the route goes after
@@ -106,8 +119,13 @@ func Steps(in StepInputs) []Change {
 		{Action: "recreate", Kind: "Pod", Namespace: c.Namespace, Name: strings.Join(in.PodsToRecreate, ", "),
 			Detail: "deleted one at a time, each waits for its replacement to be Ready; they return with a sidecar", Restarts: in.PodsToRecreate},
 	}
-	steps = append(steps, Change{Action: "create", Kind: "Deployment", Namespace: c.Namespace, Name: c.CreatedFromOriginal.Name,
-		Detail: "from the unmodified bookinfo.yaml (" + c.CreatedFromOriginal.Selector + "); gets a sidecar at creation"})
+	if in.ExistingReviewsV2 {
+		steps = append(steps, Change{Action: "keep", Kind: "Deployment", Namespace: c.Namespace, Name: c.CreatedFromOriginal.Name,
+			Detail: fmt.Sprintf("already exists with %d replicas; its Deployment spec and replica count are unchanged, and Undo restarts its Pods back without sidecars", in.ExistingReviewsV2Replicas)})
+	} else {
+		steps = append(steps, Change{Action: "create", Kind: "Deployment", Namespace: c.Namespace, Name: c.CreatedFromOriginal.Name,
+			Detail: "from the unmodified bookinfo.yaml (" + c.CreatedFromOriginal.Selector + "); gets a sidecar at creation"})
+	}
 	steps = append(steps,
 		Change{Action: "create", Kind: "DestinationRule", Namespace: c.Namespace, Name: c.object("DestinationRule").Name, Detail: "subsets v1 and v2 of reviews"},
 		Change{Action: "create", Kind: "VirtualService", Namespace: c.Namespace, Name: c.object("VirtualService").Name,

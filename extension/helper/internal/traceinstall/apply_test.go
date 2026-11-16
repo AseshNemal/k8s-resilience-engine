@@ -464,28 +464,6 @@ func TestApplyingTwiceIsIdempotentAndNoticesAMissingPiece(t *testing.T) {
 	}
 }
 
-func TestAnExistingReviewsV2StopsTheSetupBeforeAnyDialogOrWrite(t *testing.T) {
-	e := newEnv(t)
-	one := 1
-	e.sim.put(kube.Deployments, kube.Object{Name: "reviews-v2", Namespace: "bookinfo", Replicas: &one, ReadyReplicas: &one, SpecDigest: "digest-v2"})
-	ready := true
-	e.sim.put(kube.Pods, kube.Object{Name: "reviews-v2-pre", Namespace: "bookinfo", Labels: map[string]string{"app": "reviews", "version": "v2"}, Containers: []string{"reviews"}, Ready: &ready, Phase: "Running"})
-	out := e.apply()
-	if out.State != StatePlanBlocked || out.Plan == nil {
-		t.Fatalf("%+v", out)
-	}
-	blocked := false
-	for _, b := range out.Plan.Blockers {
-		blocked = blocked || b.Code == "REVIEWS_V2_EXISTS"
-	}
-	if !blocked || len(e.prompter.requests) != 0 || len(e.sim.writes) != 0 {
-		t.Fatalf("blocked=%v dialogs=%d writes=%v", blocked, len(e.prompter.requests), e.sim.writes)
-	}
-	if _, kept := e.sim.get(kube.Deployments, "bookinfo", "reviews-v2"); !kept {
-		t.Fatal("the existing reviews-v2 was touched")
-	}
-}
-
 // If reviews-v2 appears between the plan and the creation, the create finds the name taken: it is never adopted.
 func TestAReviewsV2ThatAppearsAfterTheApprovalIsNeverAdopted(t *testing.T) {
 	e := newEnv(t)

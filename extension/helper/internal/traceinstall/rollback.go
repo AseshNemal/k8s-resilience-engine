@@ -136,15 +136,22 @@ func (r *run) remove(ctx context.Context, ref ObjectRef) string {
 	return ""
 }
 
+func (r *run) recreatedVersion(app string) string {
+	for _, w := range bookinfotrace.Contract.RecreatedWorkloads {
+		if w.App == app {
+			return w.Version
+		}
+	}
+	if app == "reviews" && r.rec.Snapshot.ReviewsV2Preexisting {
+		return "v2"
+	}
+	return ""
+}
+
 // restoreWorkload deletes the Pods of one workload that carry a sidecar, one at a time, and waits until each
 // replacement is Ready without one.
 func (r *run) restoreWorkload(ctx context.Context, app string) error {
-	version := ""
-	for _, w := range bookinfotrace.Contract.RecreatedWorkloads {
-		if w.App == app {
-			version = w.Version
-		}
-	}
+	version := r.recreatedVersion(app)
 	if version == "" {
 		return nil
 	}
@@ -156,21 +163,25 @@ func (r *run) restoreWorkload(ctx context.Context, app string) error {
 		if !hasSidecar(pod) {
 			continue
 		}
+		before, err := r.podsOf(ctx, app, version)
+		if err != nil {
+			return failed("the %s Pods could not be read before restoring %s", app, pod.Name)
+		}
+		previous := map[string]bool{}
+		for _, p := range before {
+			previous[p.UID] = true
+		}
 		r.log("restore "+pod.Name, "started", "unavailable until its replacement is Ready")
 		if err := r.guard.DeleteSidecarPod(ctx, pod); err != nil && !kube.IsNotFound(err) {
 			return failed("the %s Pod %s could not be recreated without its sidecar", app, pod.Name)
 		}
-		old := pod.UID
 		if err := r.waitUntil(ctx, "the replacement for "+pod.Name, r.d.Timeouts.Pod, func(ctx context.Context) (bool, error) {
 			now, err := r.podsOf(ctx, app, version)
 			if err != nil {
 				return false, err
 			}
 			for _, p := range now {
-				if p.UID != old && isReady(p) {
-					if hasSidecar(p) {
-						return false, failed("the replacement for %s still has a sidecar", pod.Name)
-					}
+				if !previous[p.UID] && isReady(p) && !hasSidecar(p) {
 					return true, nil
 				}
 			}
@@ -331,19 +342,18 @@ func Undo(ctx context.Context, d Deps, p Params) Outcome {
 	var restarts []string
 	r := newRun(d, rec)
 	for _, app := range rec.Recreated {
-		for _, w := range bookinfotrace.Contract.RecreatedWorkloads {
-			if w.App != app {
-				continue
-			}
-			pods, err := r.podsOf(ctx, app, w.Version)
-			if err != nil {
-				// The dialog lists the Pods that restart. Without that list the person cannot give an informed approval.
-				return fail(StateError, "The "+app+" Pods could not be read, so the list of Pods that would restart cannot be shown for approval. Nothing was changed.")
-			}
-			for _, pod := range pods {
-				if hasSidecar(pod) {
-					restarts = append(restarts, pod.Name)
-				}
+		version := r.recreatedVersion(app)
+		if version == "" {
+			continue
+		}
+		pods, err := r.podsOf(ctx, app, version)
+		if err != nil {
+			// The dialog lists the Pods that restart. Without that list the person cannot give an informed approval.
+			return fail(StateError, "The "+app+" Pods could not be read, so the list of Pods that would restart cannot be shown for approval. Nothing was changed.")
+		}
+		for _, pod := range pods {
+			if hasSidecar(pod) {
+				restarts = append(restarts, pod.Name)
 			}
 		}
 	}

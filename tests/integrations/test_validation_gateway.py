@@ -232,7 +232,8 @@ def test_a_restore_sets_back_what_was_there_and_removes_what_was_added(api, tmp_
 
     pod_spec = body["spec"]["template"]["spec"]
     assert body["spec"]["replicas"] == 3 and pod_spec["topologySpreadConstraints"] is None
-    assert pod_spec["affinity"] == {"podAntiAffinity": None} and "resourceVersion" not in body.get("metadata", {})
+    assert pod_spec["affinity"] == {"podAntiAffinity": None}
+    assert body["metadata"]["resourceVersion"] == before.resource_version
 
 
 def test_a_restore_replaces_the_spread_list_so_an_entry_added_under_another_key_does_not_survive(api, tmp_path):

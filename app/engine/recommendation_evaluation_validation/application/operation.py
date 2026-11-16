@@ -26,6 +26,7 @@ from app.engine.recommendation_evaluation_validation.application.models import (
     APPLIED,
     APPLYING,
     FAILED,
+    KEPT,
     RESET,
     RESET_FAILED,
     AppliedChange,
@@ -65,7 +66,7 @@ def steps(change: AppliedChange, rollout: dict[str, Any] | None, analysis: Chang
     reset = direction_of(change) == "reset"
     state_of = (rollout or {}).get("state")
     in_flight = change.status == APPLYING
-    submitted = change.status in (APPLIED, RESET)
+    submitted = change.status in (APPLIED, KEPT, RESET)
     submit_done_at = _event_at(change, "reset" if reset else "applied")
     observed = analysis.observed if analysis and analysis.status == ANALYSIS_COMPLETED else None
     rolled = state_of == rollout_watch.COMPLETED

@@ -161,30 +161,26 @@ func TestHeavySwapIsAWarningNotASilence(t *testing.T) {
 	}
 }
 
-func TestAnExistingReviewsV2BlocksThePlanBecauseItsPodHasNoSidecar(t *testing.T) {
-	facts := benchmarkFacts()
-	facts.Deployments["reviews-v2"] = DeploymentFact{Replicas: i(1), ReadyReplicas: i(1)}
-	p := BuildPlan(facts, okAddress(), nil, roomy(), "x")
-	if p.Ready {
-		t.Fatal("a plan that cannot trace the ratings calls must not be ready")
-	}
-	found := false
-	for _, b := range p.Blockers {
-		if b.Code == "REVIEWS_V2_EXISTS" {
-			found = true
-			for _, want := range []string{"reviews-v2", "no sidecar", "ratings", "plan again"} {
-				if !strings.Contains(b.Message, want) {
-					t.Errorf("the blocker does not say %q: %s", want, b.Message)
-				}
-			}
-		}
-	}
-	if !found {
+func TestTheConnectedLayoutAdoptsThreeReplicaReviewsV2WithoutReviewsV1(t *testing.T) {
+	p := BuildPlan(existingReviewsV2Facts(3), okAddress(), nil, roomy(), "x")
+	if !p.Ready || has(p, "REVIEWS_V2_EXISTS") || has(p, "REQUIRED_WORKLOAD_MISSING") {
 		t.Fatalf("blockers: %v", codes(p))
 	}
-	for _, s := range p.Preview {
-		if s.Action == "keep" {
-			t.Errorf("a plan that is blocked must not promise to keep reviews-v2: %+v", s)
+	if len(p.Restarts) != 6 {
+		t.Fatalf("the three original Pods and all three reviews-v2 Pods must restart: %v", p.Restarts)
+	}
+	for _, name := range []string{"reviews-v2-pre-0", "reviews-v2-pre-1", "reviews-v2-pre-2"} {
+		if !strings.Contains(strings.Join(p.Restarts, ","), name) {
+			t.Errorf("%s is not restarted", name)
+		}
+	}
+	step := p.Preview[5]
+	if step.Action != "keep" || step.Name != "reviews-v2" || !strings.Contains(step.Detail, "3 replicas") || !strings.Contains(step.Detail, "unchanged") {
+		t.Fatalf("the existing Deployment is not explicitly preserved: %+v", step)
+	}
+	for _, disruption := range p.Disruptions {
+		if disruption.Workload == "reviews" && !strings.Contains(disruption.Effect, "other replicas stay available") {
+			t.Errorf("rolling disruption is described as a full outage: %+v", disruption)
 		}
 	}
 }

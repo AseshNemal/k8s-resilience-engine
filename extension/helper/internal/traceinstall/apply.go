@@ -129,7 +129,7 @@ func Apply(ctx context.Context, d Deps, p Params) Outcome {
 		return fail(StateError, "an installation ID could not be made. Nothing was changed.")
 	}
 	snapshot := bookinfotrace.TakeSnapshot(facts, p.ContextName, d.clock().Now().UTC().Format("2006-01-02T15:04:05Z"))
-	rec = NewRecord(id, p.Identity, again, snapshot, bookinfotrace.Fingerprint(again), d.Tools.Reviewed(), PlannedInventory(), d.clock().Now())
+	rec = NewRecord(id, p.Identity, again, snapshot, bookinfotrace.Fingerprint(again), d.Tools.Reviewed(), PlannedInventory(snapshot.ReviewsV2Preexisting), d.clock().Now())
 	if err := d.Store.Save(rec, d.clock().Now()); err != nil {
 		return recordProblem(err)
 	}
@@ -251,25 +251,27 @@ func (r *run) stages(ctx context.Context, istio []Manifest, docs documents) erro
 			return err
 		}
 	}
-	r.log("create reviews-v2", "started", "")
-	if err := r.create(ctx, docs.reviewsV2); err != nil {
-		return err
-	}
-	if err := r.waitUntil(ctx, "reviews-v2", r.d.Timeouts.Pod, func(ctx context.Context) (bool, error) {
-		pods, err := r.podsOf(ctx, "reviews", "v2")
-		for _, p := range pods {
-			if isReady(p) {
-				if !hasSidecar(p) {
-					return false, failed("reviews-v2 started without a sidecar")
-				}
-				return true, nil
-			}
+	if !r.rec.Snapshot.ReviewsV2Preexisting {
+		r.log("create reviews-v2", "started", "")
+		if err := r.create(ctx, docs.reviewsV2); err != nil {
+			return err
 		}
-		return false, err
-	}); err != nil {
-		return err
+		if err := r.waitUntil(ctx, "reviews-v2", r.d.Timeouts.Pod, func(ctx context.Context) (bool, error) {
+			pods, err := r.podsOf(ctx, "reviews", "v2")
+			for _, p := range pods {
+				if isReady(p) {
+					if !hasSidecar(p) {
+						return false, failed("reviews-v2 started without a sidecar")
+					}
+					return true, nil
+				}
+			}
+			return false, err
+		}); err != nil {
+			return err
+		}
+		r.log("create reviews-v2", "done", "")
 	}
-	r.log("create reviews-v2", "done", "")
 
 	r.stage(StageRoute)
 	for _, doc := range []map[string]any{docs.destinationRule, docs.virtualService} {
@@ -294,6 +296,14 @@ func (r *run) replacePod(ctx context.Context, name string) error {
 	if hasSidecar(*pod) {
 		return failed("Pod %s already has a sidecar", name)
 	}
+	before, err := r.podsOf(ctx, app, version)
+	if err != nil {
+		return failed("the %s Pods could not be read before restarting %s", app, name)
+	}
+	previous := map[string]bool{}
+	for _, p := range before {
+		previous[p.UID] = true
+	}
 	if !contains(r.rec.Recreated, app) {
 		r.rec.Recreated = append(r.rec.Recreated, app)
 	}
@@ -310,11 +320,14 @@ func (r *run) replacePod(ctx context.Context, name string) error {
 			return false, err
 		}
 		for _, p := range pods {
-			if p.UID == pod.UID || !isReady(p) {
+			if previous[p.UID] || !isReady(p) {
 				continue
 			}
 			if !hasSidecar(p) {
-				return false, failed("the replacement for %s started without a sidecar", name)
+				if len(pods) == 1 {
+					return false, failed("the replacement for %s started without a sidecar", name)
+				}
+				continue
 			}
 			return true, nil
 		}

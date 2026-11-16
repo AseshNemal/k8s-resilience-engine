@@ -40,6 +40,11 @@
             "state back.",
         reset: "Reset puts back the replica count and placement constraints stored when this was applied. Other changes made to those " +
             "Deployments since are kept.",
+        keep: "Keeping leaves the cluster exactly as it is now and writes nothing. The change stays in the record as kept, stops " +
+            "blocking another change, and can still be reset while the cluster holds what it set.",
+        decide: "This change is on the cluster. Decide what happens to it: put the previous state back now, or keep it.",
+        restored: "Reset restores configuration (replica count and placement constraints). Which nodes the replacement pods land " +
+            "on is the scheduler's decision and is read separately.",
     };
 
     function percent(value) {
@@ -80,6 +85,41 @@
     }
 
     // ---- drawing -------------------------------------------------------------------------------------------------------
+
+    /** What the change did to each Deployment: the three fields this application may write, before and after, in words. */
+    function drawChanges(doc, container, current) {
+        const rows = (current && current.changes) || [];
+        if (!rows.length) return container.replaceChildren();
+        const application = current.application || {};
+        const cluster = application.cluster || {};
+        const reset = application.status === "RESET";
+        const title = make(doc, "div", reset ? "What this change did (now reset)" : "What this change did", "op-subtitle");
+        const where = make(doc, "p", `Cluster ${cluster.context || UNKNOWN} (${cluster.clusterUid || "UID unknown"}) · namespace ${application.namespace || UNKNOWN}`, "ui-note");
+        const table = make(doc, "table", null, "data-table op-changes__table");
+        const head = make(doc, "tr");
+        ["Deployment", "Field", "Before", "After", ""].forEach((label) => head.append(make(doc, "th", label, null, { scope: "col" })));
+        const thead = make(doc, "thead");
+        thead.append(head);
+        const body = make(doc, "tbody");
+        for (const row of rows) {
+            row.fields.forEach((field, index) => {
+                const line = make(doc, "tr", null, field.changed ? "op-changes__row--changed" : null);
+                if (index === 0) line.append(make(doc, "th", row.deployment, null, { scope: "row", rowspan: String(row.fields.length) }));
+                line.append(make(doc, "td", field.label), make(doc, "td", field.fromText),
+                    make(doc, "td", field.toText === null || field.toText === undefined ? "not recorded" : field.toText));
+                const mark = make(doc, "td");
+                mark.append(field.changed === null || field.changed === undefined ? chip(doc, "unknown", "warning")
+                    : field.changed ? chip(doc, "changed", "info") : chip(doc, "unchanged", "muted"));
+                line.append(mark);
+                body.append(line);
+            });
+        }
+        table.append(thead, body);
+        const wrap = make(doc, "div", null, "table-scroll");
+        wrap.append(table);
+        const note = make(doc, "p", "Only these three fields of these Deployments are ever written by Apply or Reset.", "ui-note");
+        container.replaceChildren(title, where, wrap, note);
+    }
 
     /** Which analysis the card row shows: the one of the latest write (apply, or reset after a reset). */
     function currentAnalysis(status) {
@@ -335,7 +375,8 @@
         let status = null;              // the last status adopted from the server
         let pending = null;             // { kind: "apply" | "reset" | "retry", reconciling: bool }
         let message = null;             // { text, alert }
-        let confirming = null;          // "reset" while the person is being asked once more
+        let confirming = null;          // "reset" or "keep" while the person is being asked once more
+        let external = null;            // fields a refused reset found changed outside this application
         let name = "";                  // the person's name, kept in memory only
         let timer = null;
         let inFlight = false;           // one status poll at a time
@@ -356,15 +397,25 @@
             ["op-badge", "op-stages", "op-headline", "op-progress", "op-message", "op-steps", "op-cards", "op-bars", "op-reduction", "op-placement",
                 "op-label", "op-experiment", "op-name", "op-actions", "op-reset", "op-retry", "op-recheck", "op-confirm", "op-confirm-text",
                 "op-confirm-yes", "op-confirm-no", "op-details", "op-facts", "op-rollout", "op-events", "op-limits", "op-experiments", "op-yaml", "op-raw",
-                "op-name-wrap"].forEach((role) => { slots[role.replace("op-", "")] = find(role); });
+                "op-name-wrap", "op-changes", "op-decide", "op-decide-text", "op-decide-reset", "op-keep", "op-external", "op-external-list",
+                "op-confirm-external"].forEach((role) => { slots[role.replace("op-", "")] = find(role); });
             // Handlers go on the elements that were just cloned into the page, once.
             slots.reset.addEventListener("click", () => {
                 confirming = "reset";
                 draw();
                 if (typeof slots.name.focus === "function") slots.name.focus();
             });
-            slots["confirm-no"].addEventListener("click", () => { confirming = null; draw(); });
-            slots["confirm-yes"].addEventListener("click", () => doReset());
+            const ask = (what) => () => {
+                confirming = what;
+                external = null;
+                draw();
+                if (typeof slots.name.focus === "function") slots.name.focus();
+            };
+            slots["decide-reset"].addEventListener("click", ask("reset"));
+            slots.keep.addEventListener("click", ask("keep"));
+            slots["confirm-no"].addEventListener("click", () => { confirming = null; external = null; draw(); });
+            slots["confirm-yes"].addEventListener("click", () => (confirming === "keep" ? doKeep() : doReset(false)));
+            slots["confirm-external"].addEventListener("click", () => doReset(true));
             slots.retry.addEventListener("click", () => doRetry());
             slots.recheck.addEventListener("click", () => recheck());
             slots.name.addEventListener("input", () => { name = slots.name.value; });
@@ -396,7 +447,8 @@
             let headline = operation ? operation.headline : "";
             if (pending) {
                 headline = pending.reconciling ? "Checking what the server recorded before anything else is allowed…"
-                    : pending.kind === "apply" ? "Applying change…" : pending.kind === "reset" ? "Resetting…" : "Retrying the failure-impact analysis…";
+                    : pending.kind === "apply" ? "Applying change…" : pending.kind === "reset" ? "Resetting…"
+                        : pending.kind === "keep" ? "Recording that the change is kept…" : "Retrying the failure-impact analysis…";
             }
             if (slots.headline.textContent !== headline) slots.headline.textContent = headline;     // a live region: only announce a change
             slots.progress.hidden = !(busy || (operation && operation.inProgress));
@@ -417,6 +469,7 @@
 
             const analysis = current ? currentAnalysis(current) : null;
             const reset = direction === "reset";
+            drawChanges(doc, slots.changes, application && operation ? current : null);
             if (application && operation) {
                 drawCards(doc, slots.cards, current, analysis);
                 drawBars(doc, slots.bars, analysis, reset);
@@ -444,12 +497,27 @@
             const stoppedWatching = !!(operation && operation.pollMs && !timer && !busy && !inFlight && watchingSince !== null && now() - watchingSince > MAX_AUTO_POLL_MS);
             slots.recheck.hidden = !(wantsRecheck || stoppedWatching);
             slots.recheck.disabled = busy || inFlight;
-            const askName = canReset && (confirming === "reset");
+            const canKeep = !!(current && current.canKeep);
+            // The question is asked when the change has settled on the cluster and nothing else is being asked or done.
+            const settled = !!(operation && !operation.inProgress && current.rolloutComplete === true);
+            slots.decide.hidden = !(canKeep && canReset && settled && !busy && !confirming);
+            slots["decide-text"].textContent = REVIEW_NOTE.decide;
+            slots["decide-reset"].disabled = busy;
+            slots.keep.disabled = busy;
+            const askName = (canReset && confirming === "reset") || (canKeep && confirming === "keep");
             slots["name-wrap"].hidden = !askName;
             if (slots.name.value !== name) slots.name.value = name;       // never rewrite what the person is typing
             slots.name.disabled = busy;
-            slots.confirm.hidden = confirming !== "reset";
-            slots["confirm-text"].textContent = REVIEW_NOTE.reset;
+            slots.confirm.hidden = !confirming;
+            slots["confirm-text"].textContent = confirming === "keep" ? REVIEW_NOTE.keep : `${REVIEW_NOTE.reset} ${REVIEW_NOTE.restored}`;
+            slots["confirm-yes"].textContent = confirming === "keep" ? "Confirm keep" : "Confirm reset";
+            const outside = confirming === "reset" && external && external.length ? external : null;
+            slots.external.hidden = !outside;
+            slots["external-list"].replaceChildren(...(outside || []).map((item) => make(doc, "li",
+                `${item.deployment}: ${String(item.label || item.field).toLowerCase()} is now ${item.liveText} (this change set ${item.appliedText})`)));
+            slots["confirm-external"].hidden = !outside;
+            slots["confirm-external"].disabled = busy;
+            slots["confirm-yes"].hidden = !!outside;      // the plain reset was just refused for these fields; repeating it changes nothing
             slots["confirm-yes"].disabled = busy;
             slots["confirm-no"].disabled = busy;
             root.setAttribute("aria-busy", busy ? "true" : "false");
@@ -587,6 +655,7 @@
             pending = { kind, reconciling: false, previousId: previous ? previous.applicationId : null };
             message = null;
             confirming = null;
+            external = null;
             status = target;
             unwatch();
             draw();                                           // "Applying change…" is on screen before the request leaves
@@ -604,9 +673,15 @@
                 watchingSince = now();
             } else {
                 message = { text: errorMessage(result, result.status === 0 ? "The request did not return, so the outcome is not known yet." : `The ${kind} did not complete.`), alert: true };
+                const detail = result.payload && result.payload.detail;
+                const refusedForOutsideChange = kind === "reset" && detail && detail.code === "EXTERNAL_CHANGE";
                 await reconcile(previous);
                 if (mine !== epoch || destroyed) return false;
                 pending = null;
+                if (refusedForOutsideChange) {       // nothing was restored: show exactly which fields, and offer to leave them
+                    external = (detail.details && detail.details.external) || [];
+                    confirming = "reset";
+                }
                 if (status && !status.application) status = null;       // nothing was recorded: there is no operation to show
             }
             draw();
@@ -624,17 +699,31 @@
             return mutate("apply", shell, applicationUrl(shell, "/apply"), { appliedBy: who }, previous);
         }
 
-        function doReset() {
+        function named(action) {
             const who = (slots.name.value || "").trim();
             if (pending || !status || !who) {
                 if (!who && status) {
-                    message = { text: "Enter your name: resetting a change is done by a named person.", alert: true };
+                    message = { text: `Enter your name: ${action} is done by a named person.`, alert: true };
                     draw();
                 }
-                return Promise.resolve(false);
+                return null;
             }
             name = who;
-            return mutate("reset", status, applicationUrl(status, "/reset"), { resetBy: who }, status.application);
+            return who;
+        }
+
+        /** ``keepOutside``: restore only the fields that still hold what this change set, after a reset was refused for the others. */
+        function doReset(keepOutside) {
+            const who = named("resetting a change");
+            if (!who) return Promise.resolve(false);
+            const body = keepOutside ? { resetBy: who, external: "keep" } : { resetBy: who };
+            return mutate("reset", status, applicationUrl(status, "/reset"), body, status.application);
+        }
+
+        function doKeep() {
+            const who = named("keeping a change");
+            if (!who) return Promise.resolve(false);
+            return mutate("keep", status, applicationUrl(status, "/keep"), { keptBy: who }, status.application);
         }
 
         function doRetry() {
@@ -649,6 +738,7 @@
             pending = null;
             message = null;
             confirming = null;
+            external = null;
             watchingSince = null;
             draw();
             return start();

@@ -16,6 +16,18 @@ function load() {
 
 const view = load();
 
+test("deployment exposure renders read-only nodes and explicitly unknown workflow metrics", () => {
+    const doc = makeDocument(), container = doc.container(); container.ownerDocument = doc;
+    view.renderDeploymentFindings(container, { note: "Placement only", nodes: [{ node: "worker-a", failedServices: ["orders"], affectedServices: ["orders", "catalog"] }] });
+    assert.match(text(container), /worker-a/);
+    assert.match(text(container), /orders, catalog/);
+    assert.match(text(container), /Workflow survival: unknown/);
+    assert.match(text(container), /approval is unavailable/);
+    view.renderDeploymentFindings(container, null);
+    assert.equal(container.hidden, true);
+    assert.equal(container.children.length, 0);
+});
+
 // Values built inside the vm context carry that realm's prototypes; compare them by content.
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -454,6 +466,22 @@ test("the proposal summary names the cluster, application, workflow and its prov
     const shown = text(box);
     for (const expected of ["Connected cluster", "docker-desktop", "shop", "checkout — declared by asesh, not observed or frozen", "User declaration",
         "w1 (the node whose loss hurts most)", "Model assumption", "Topology spread for db", "db", "100% → 0% (100 percentage points)", "Low — 1 Deployment pod-template edit(s)", "Feasible"]) {
+        assert.ok(shown.includes(expected), `${expected} in ${shown}`);
+    }
+});
+
+test("the proposal summary shows exact current and proposed owned fields before approval", () => {
+    const o = options(); const box = o.document.container();
+    const proposedChanges = [{ deployment: "db", fields: [
+        { label: "Replicas", fromText: "3", toText: "3", changed: false },
+        { label: "Topology spread", fromText: "none", toText: "must spread across nodes (at most 1 apart)", changed: true },
+    ] }];
+
+    view.renderProposalSummary(box, reviewed(), proposed({ proposedChanges }), "docker-desktop", o);
+
+    const shown = text(box);
+    for (const expected of ["Exact field changes before approval", "Topology spread", "Current", "Proposed",
+        "must spread across nodes (at most 1 apart)", "changed", "unchanged", "roll out"]) {
         assert.ok(shown.includes(expected), `${expected} in ${shown}`);
     }
 });

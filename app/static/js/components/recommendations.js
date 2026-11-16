@@ -984,6 +984,7 @@
             hintLine.hidden = !hint;
         }
         updatePortfolio(v);
+        view.renderDeploymentFindings(document.querySelector('[data-role="rec-deployment-findings"]'), v.deploymentFindings);
         view.renderEvidenceChecklist(evidenceList, v.evidence);
         const summary = view.evidenceSummary(v.evidence);
         const evidenceSummaryLine = document.querySelector('[data-role="rec-evidence-summary"]');

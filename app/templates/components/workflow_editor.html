@@ -1,0 +1,72 @@
+<section class="workflow-editor" id="workflow-editor" aria-labelledby="workflow-editor-title">
+    <header class="we-header">
+        <div><h2 id="workflow-editor-title">Workflow studio</h2><p>Build a workflow from live services, record application traffic, and review both in one graph.</p></div>
+        <button type="button" class="secondary-button" data-we="refresh">Refresh live services</button>
+    </header>
+    <div class="we-toolbar">
+        <label>Application namespace<select data-we="namespace" aria-label="Application namespace"><option value="">Loading applications…</option></select></label>
+        <label>Saved workflow<select data-we="saved" aria-label="Saved workflow"><option value="">New workflow</option></select></label>
+        <button type="button" class="secondary-button" data-we="new">New</button>
+        <button type="button" class="secondary-button" data-we="duplicate">Duplicate</button>
+        <button type="button" class="secondary-button" data-we="delete">Delete workflow</button>
+    </div>
+    <div class="we-toolbar">
+        <label>Workflow name<input data-we="name" maxlength="160" placeholder="Name the business action"></label>
+        <label>Entry service<select data-we="entry"><option value="">Choose from the canvas</option></select></label>
+        <label>Criticality (0–1)<input data-we="criticality" type="number" min="0" max="1" step="0.05" placeholder="Your assessment"></label>
+        <label>Your name<input data-we="actor" maxlength="100" autocomplete="name"></label>
+        <button type="button" class="secondary-button" data-we="save">Save draft</button>
+        <button type="button" class="primary-button" data-we="review">Save reviewed graph</button>
+    </div>
+    <p class="we-status" data-we="status" role="status" aria-live="polite">Reading live evidence…</p>
+    <div data-we="conflicts" class="we-limits" hidden></div>
+    <div class="we-layout">
+        <aside class="we-library" aria-label="Live service library">
+            <h3>Logical services</h3><p>Drag onto the canvas or select Add. Each node is a Kubernetes Service.</p>
+            <div data-we="services" class="we-services"></div>
+        </aside>
+        <div class="we-graph">
+            <div class="we-graph-tools">
+                <button type="button" class="secondary-button" data-we="undo">Undo</button>
+                <button type="button" class="secondary-button" data-we="redo">Redo</button>
+                <span data-we="version">Unsaved workflow</span>
+            </div>
+            <div class="we-canvas" data-we="canvas" aria-label="Workflow canvas">
+                <div class="we-space" data-we="space">
+                    <svg class="we-lines" data-we="lines" viewBox="0 0 1200 800" aria-label="Directional workflow connections"></svg>
+                    <div data-we="nodes"></div>
+                    <p class="we-empty" data-we="empty">Add the services that participate in this workflow.<br>Connect a caller to a dependency using its Connect button.</p>
+                </div>
+            </div>
+            <div class="we-toolbar we-connect">
+                <label>Caller<select data-we="from" aria-label="Connection caller"></select></label>
+                <label>Dependency<select data-we="to" aria-label="Connection dependency"></select></label>
+                <button type="button" class="secondary-button" data-we="connect">Connect services</button>
+            </div>
+            <p class="we-help">Move nodes with drag or arrow keys. Use the connection controls for keyboard access. Every new dependency starts as Unknown.</p>
+        </div>
+        <aside class="we-inspector" aria-label="Selected service or dependency">
+            <h3>Inspect and review</h3><div data-we="inspector">Select a service or a connection.</div>
+            <h4>Connections</h4><div data-we="edge-list" class="we-edge-list"></div>
+        </aside>
+    </div>
+    <section class="we-recording" aria-label="Record workflow evidence">
+        <div><h3>Record application activity</h3><p>Start recording, use your application normally, then stop. This reads your tracing backend; it installs no instrumentation.</p></div>
+        <div class="we-toolbar">
+            <label>Jaeger query URL<input data-we="jaeger" type="url" placeholder="http://jaeger:16686"></label>
+            <button type="button" class="primary-button" data-we="start">Start recording</button>
+            <button type="button" class="secondary-button" data-we="stop" disabled>Stop recording</button>
+            <label>Recording session<select data-we="recording"><option value="">No recording selected</option></select></label>
+        </div>
+        <p data-we="record-status" role="status" aria-live="polite">Manual editing works without tracing.</p>
+        <div data-we="candidates" class="we-candidates"></div>
+    </section>
+    <details class="we-history"><summary>Graph versions and evidence</summary>
+        <div class="we-toolbar"><label>Version<select data-we="history"><option value="">Save a workflow to see versions</option></select></label>
+        <button type="button" class="secondary-button" data-we="load-version">Open selected version</button>
+        <button type="button" class="secondary-button" data-we="export">Download reviewed WorkflowGraph</button></div>
+        <pre data-we="provenance">No saved graph selected.</pre>
+    </details>
+    <p class="we-limits">Declared labels describe your assumptions. Traces show observed calls. Experimental dependency validation remains a separate controlled test. Reviewed graphs feed research predictions and never bypass production approval.</p>
+    <p><a href="/components/recommendations">Continue to Recommendations</a> after saving a reviewed graph.</p>
+</section>

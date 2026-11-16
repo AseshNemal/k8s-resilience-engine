@@ -40,6 +40,7 @@ from app.engine.recommendation_evaluation_validation.live_pipeline import (
 from app.engine.recommendation_evaluation_validation.live_scheduling_evidence import enrich_scheduling_facts, live_scheduling_evidence
 from app.engine.recommendation_evaluation_validation.validation.cluster_identity import DisposableClusterDesignation
 from app.engine.recommendation_evaluation_validation.validation.kubernetes_executor import KubernetesValidationExecutor
+from app.engine.recommendation_evaluation_validation.validation.cluster_gateway import fresh_restore_snapshot
 from app.engine.recommendation_evaluation_validation.validation.models import Authorization
 from app.engine.recommendation_evaluation_validation.validation.workflow_probe import ProbeSpec, WorkflowProbe
 from app.engine.recommendation_evaluation_validation.validation_loop.environment import (
@@ -156,8 +157,9 @@ class ClusterRecoverer:
             return {"reverted": None, "error": None}
         gateway = self._env.writing_gateway()
         snapshots = [_snapshot(data) for data in restore_points.values()]
+        live = gateway.read_deployments(snapshots[0].namespace)
         for snapshot in snapshots:
-            gateway.restore_deployment(snapshot)
+            gateway.restore_deployment(fresh_restore_snapshot(snapshot, live.get(snapshot.name)))
         namespace = snapshots[0].namespace
         deadline = time.monotonic() + self._env.recovery_timeout_s
         names = [s.name for s in snapshots]

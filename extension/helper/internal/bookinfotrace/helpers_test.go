@@ -3,6 +3,7 @@ package bookinfotrace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"resilience-engine/helper/internal/execx"
@@ -128,6 +129,23 @@ func benchmarkFacts() Facts {
 		Pods: []PodFact{pod("productpage-v1-7498b5bd44-jbskx", "productpage"), pod("details-v1-65bd58d55f-b7zln", "details"),
 			pod("ratings-v1-9bff6cb79-dc6k5", "ratings"), pod("reviews-v1-54465994f9-jlmrk", "reviews")},
 	}
+}
+
+func existingReviewsV2Facts(replicas int) Facts {
+	facts := benchmarkFacts()
+	delete(facts.Deployments, "reviews-v1")
+	pods := make([]PodFact, 0, len(facts.Pods)+replicas)
+	for _, pod := range facts.Pods {
+		if pod.App != "reviews" {
+			pods = append(pods, pod)
+		}
+	}
+	facts.Deployments["reviews-v2"] = DeploymentFact{Replicas: i(replicas), ReadyReplicas: i(replicas), Containers: []string{"reviews"}, SpecDigest: "eeee5555eeee5555"}
+	for n := 0; n < replicas; n++ {
+		pods = append(pods, PodFact{Name: fmt.Sprintf("reviews-v2-pre-%d", n), App: "reviews", Version: "v2", Containers: []string{"reviews"}, Ready: b(true), Phase: "Running"})
+	}
+	facts.Pods = pods
+	return facts
 }
 
 func okAddress() *Address {

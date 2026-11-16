@@ -26,7 +26,7 @@ from app.engine.recommendation_evaluation_validation.approval import DECLARED_WO
 from app.engine.recommendation_evaluation_validation.combinations import DEFAULT_EVALUATION_BUDGET
 from app.engine.recommendation_evaluation_validation.declared_workflow import (
     DeclaredWorkflowError,
-    load_declared_workflows,
+    load_research_workflows,
 )
 from app.engine.recommendation_evaluation_validation.evidence_context import list_frozen_workflows
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
@@ -161,16 +161,27 @@ def build_frozen_portfolio(namespace: str = "default", failed_node: str | None =
                      failed_node, combination_budget, {"workflowBasis": "FROZEN"})
 
 
+def _declarations_digest(declared):
+    digests = {item.declaration_sha256 for item in declared}
+    if len(digests) == 1:
+        return next(iter(digests))
+    return hashlib.sha256(json.dumps(sorted((item.graph.workflow_id, item.declaration_sha256)
+                                           for item in declared)).encode()).hexdigest()
+
+
 def build_declared_portfolio(namespace: str = "default", failed_node: str | None = None, *,
                              combination_budget: int = DEFAULT_EVALUATION_BUDGET,
                              declaration_path: str | None = None) -> LiveRecommendation:
     """Every DECLARED workflow evaluated together on the connected cluster's live topology (research only, like a single one)."""
     from app.engine.deployment_topology_modeling.service import discover_live
 
-    declared = load_declared_workflows(declaration_path)
+    declared = load_research_workflows(declaration_path)
     if not declared:
         raise DeclaredWorkflowError("DECLARED_WORKFLOW_UNAVAILABLE", "No workflow is declared.", http_status=404)
     namespace = _namespace(namespace)
+    declared = [item for item in declared if not item.namespace or item.namespace == namespace]
+    if not declared:
+        raise DeclaredWorkflowError("DECLARED_WORKFLOW_UNAVAILABLE", "No reviewed declaration applies to this namespace.", http_status=404)
     discovery = discover_live(namespace=namespace)
     workflows, not_evaluated, first_error = [], [], None
     for item in declared:
@@ -186,7 +197,7 @@ def build_declared_portfolio(namespace: str = "default", failed_node: str | None
                      EvidenceProvenance(PORTFOLIO_ANALYSIS_SOURCE, namespace, discovery.captured_at, discovery.status, None),
                      failed_node, combination_budget,
                      {"workflowBasis": "DECLARED", "declaration": {"declaredBy": sorted({d.declared_by for d in declared}),
-                                                                   "declarationSha256": declared[0].declaration_sha256}})
+                                                                   "declarationSha256": _declarations_digest(declared)}})
 
 
 def _workflows_of(live: LiveRecommendation, candidate_id: str) -> dict[str, Any]:

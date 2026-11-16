@@ -147,6 +147,7 @@
             evidence: body.evidence.map((e) => ({ id: text(e.id, 40), label: text(e.label, 80), state: text(e.state, 20), detail: text(e.detail, 600), nextAction: text(e.nextAction, 600) || null })),
             nextActions: list(body.nextActions, 10).map((a) => text(a, 600)),
             ready: body.ready === true,
+            deploymentFindings: body.deploymentFindings?.scope === "deployment" ? body.deploymentFindings : null,
         };
     }
 
@@ -186,6 +187,7 @@
                 evidence,
                 nextActions: ctx ? ctx.nextActions : [],
                 detail: s.detail,
+                deploymentFindings: s.status === "loading" || s.detail ? null : ctx?.deploymentFindings || null,
                 error: s.error ? explainError(s.error) : null,
             };
         }

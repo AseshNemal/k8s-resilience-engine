@@ -84,6 +84,21 @@ CONNECT_MAIN = """<main class="page" id="main-content">
         </dl>
     </section>
 
+    <section class="card" aria-labelledby="outstanding-title" data-role="outstanding-card" hidden>
+        <h3 class="section-header__title" id="outstanding-title">Applied changes</h3>
+        <p class="connect__lead">Changes this application applied or was asked to keep remain visible after reconnecting. A change on another cluster is shown for information and cannot be reset here.</p>
+        <p class="connect__message" data-role="outstanding-status" role="status" aria-live="polite"></p>
+        <ul class="connect__apps" data-role="outstanding-list"></ul>
+        <div class="connect__outstanding-ask" data-role="outstanding-ask" hidden>
+            <p class="connect__lead">What should happen to the changes still on this cluster before its credential is removed?</p>
+            <div class="connect__picker">
+                <button type="button" class="danger-button" data-role="outstanding-reset">Reset &amp; disconnect</button>
+                <button type="button" class="secondary-button" data-role="outstanding-keep">Keep changes &amp; disconnect</button>
+                <button type="button" class="secondary-button" data-role="outstanding-cancel">Cancel</button>
+            </div>
+        </div>
+    </section>
+
     <section class="card" aria-labelledby="connect-auto-title" data-role="auto-card" hidden>
         <h3 class="section-header__title" id="connect-auto-title">Set up automatically</h3>
         <p class="ui-note" data-role="auto-note"></p>
@@ -282,7 +297,7 @@ def _connect_page(index_html: str) -> str:
     html, count = re.subn(r'<main class="page" id="main-content">.*?</main>', lambda _m: CONNECT_MAIN, html, count=1, flags=re.S)
     if count != 1:
         raise SystemExit("Could not find the main content area for the Connect page.")
-    scripts = "connect.js connect-auto.js trace-service.js tracing-panel.js bookinfo-tracing.js".split()
+    scripts = "outstanding.js connect.js connect-auto.js trace-service.js tracing-panel.js bookinfo-tracing.js".split()
     return html.replace("</body>", "".join(f'<script src="{name}" defer></script>\n' for name in scripts) + "</body>", 1)
 
 

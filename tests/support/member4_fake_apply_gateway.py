@@ -75,6 +75,8 @@ class FakeApplyGateway:
         if self.fail_restore:
             raise ConnectionFailedError("ConnectError")
         current = self.deployments[snapshot.name]
+        if current.resource_version != snapshot.resource_version:
+            raise ConflictError(409)
         self.deployments[snapshot.name] = replace(
             current, resource_version=str(int(current.resource_version) + 1), generation=current.generation + 1,
             replicas=snapshot.replicas, topology_spread_constraints=tuple(snapshot.topology_spread_constraints),

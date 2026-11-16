@@ -16,7 +16,7 @@
     </p>
     <div class="page-header__meta">
         <span class="component-owner">Owner: <strong>Member 3</strong></span>
-        <span class="contract-chip">In: WorkflowGraph</span>
+        <span class="contract-chip" data-role="workflow-contract-chip" hidden>In: WorkflowGraph</span>
         <span class="contract-chip">In: DeploymentGraph</span>
         <span class="contract-chip">In: Failed Node</span>
         <span class="contract-chip contract-chip--out">Out: FailureImpactReport</span>
@@ -80,12 +80,13 @@
                     id="failure-input-mode"
                     data-role="input-mode"
                 >
-                    <option value="runtime" selected>Validated runtime</option>
-                    <option value="portfolio-runtime">Validated runtime portfolio</option>
+                    <option value="deployment-runtime" selected>Live Deployments (no workflow required)</option>
+                    <option value="runtime">Frozen workflow</option>
+                    <option value="portfolio-runtime">Frozen workflow portfolio</option>
                 </select>
             </label>
             <div class="scenario-panel__runtime-fields" data-role="runtime-fields">
-                <label class="scenario-panel__field" for="failure-workflow-id">
+                <label class="scenario-panel__field" for="failure-workflow-id" data-role="workflow-field" hidden>
                     <span data-role="workflow-id-label">Workflow ID</span>
                     <input
                         class="scenario-panel__input"
@@ -131,9 +132,45 @@
 <div data-role="page-region">
     <div class="state empty-state" role="status">
         <p class="state__title">No prediction yet</p>
-        <p>Enter a frozen workflow ID, choose a worker node, and select Simulate Node Failure.</p>
+        <p>Choose a worker node and select Simulate Node Failure. Workflow evidence is optional for deployment-level findings.</p>
     </div>
 </div>
+
+<template data-role="deployment-template">
+    <section class="card" data-role="deployment-evidence-note">
+        <h3>Deployment-level findings</h3>
+        <p data-role="deployment-workflow-note"></p>
+        <p class="ui-note">This is a virtual prediction from live pod placement, not an observed failure. No workflow relationships are inferred.</p>
+    </section>
+    <section class="metric-grid" aria-label="Deployment failure impact metrics">
+        {{ metric_card("deployment-failed-node", "Failed Node", icon_name="node", icon_color="red") }}
+        {{ metric_card("deployment-failed-services", "Services Down", icon_name="alert", icon_color="red") }}
+        {{ metric_card("deployment-service-failure-rate", "Service Failure Share", icon_name="target", icon_color="amber") }}
+        {{ metric_card("deployment-services-evaluated", "Ready Services Assessed", icon_name="service", icon_color="purple") }}
+    </section>
+    <div class="section-header">
+        <h3 class="section-header__title">Service outcomes</h3>
+        <span class="section-header__note">Ready replicas before and after the virtual node failure</span>
+    </div>
+    <div class="card table-scroll">
+        <table class="data-table">
+            <thead><tr><th>Service</th><th>Ready before</th><th>Ready lost</th><th>Ready after</th><th>Outcome</th></tr></thead>
+            <tbody data-role="deployment-service-outcomes"></tbody>
+        </table>
+    </div>
+    <div class="section-header">
+        <h3 class="section-header__title">Node Exposure Ranking</h3>
+        <span class="section-header__note">Ranked by services losing their last ready replica; not workflow blast radius</span>
+    </div>
+    <div class="card table-scroll">
+        <table class="data-table">
+            <thead><tr><th>Rank</th><th>Node</th><th>Services down</th><th>Service failure share</th></tr></thead>
+            <tbody data-role="deployment-node-ranking"></tbody>
+        </table>
+    </div>
+    <div class="section-header"><h3 class="section-header__title">Raw Data</h3></div>
+    {{ raw_json_panel("deployment-impact-raw-json", "View Deployment Failure Impact") }}
+</template>
 
 <template data-role="page-template">
     <section class="metric-grid" aria-label="Failure impact metrics">

@@ -21,8 +21,10 @@ Nothing here is applied, and nothing here writes to a cluster.
 from typing import Any
 
 from app.engine.recommendation_evaluation_validation.approval import LiveRecommendation
+from app.engine.recommendation_evaluation_validation.application import changes as change_view
 from app.engine.recommendation_evaluation_validation.approval.eligibility import evaluate_eligibility
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
+from app.shared.schemas.deployment import DeploymentGraph
 
 TOPOLOGY_SPREAD = "TOPOLOGY_SPREAD"
 POD_ANTI_AFFINITY = "POD_ANTI_AFFINITY"
@@ -128,6 +130,45 @@ def _selection_text(candidate_id: str, ranking: dict[str, Any] | None, selected:
     return f"Not ranked ({excluded}). {ranking.get('detail', '')}".strip() if excluded else (ranking.get("detail") or "Not ranked.")
 
 
+def _proposed_changes(live: LiveRecommendation, proposal) -> list[dict[str, Any]]:
+    if not proposal.patches:
+        return []
+    try:
+        graph = DeploymentGraph.model_validate((live.details or {}).get("currentDeployment"))
+    except (TypeError, ValueError):
+        return []
+    services = {service.name: service for service in graph.services}
+    before, after = [], []
+    for patch in proposal.patches:
+        service = services.get(patch.service)
+        intent = service.declared_intent if service else None
+        if service is None or intent is None:
+            continue
+        snapshot = {
+            "name": patch.deployment,
+            "namespace": patch.namespace,
+            "uid": None,
+            "replicas": service.declared_replicas,
+            "topology_spread_constraints": [
+                constraint.model_dump(by_alias=True)
+                for constraint in intent.topology_spread_constraints
+            ],
+            "pod_anti_affinity": intent.pod_anti_affinity_rules,
+        }
+        proposed = dict(snapshot)
+        spec = patch.document.get("spec") or {}
+        if "replicas" in spec:
+            proposed["replicas"] = spec["replicas"]
+        pod_spec = (spec.get("template") or {}).get("spec") or {}
+        if "topologySpreadConstraints" in pod_spec:
+            proposed["topology_spread_constraints"] = pod_spec["topologySpreadConstraints"]
+        if "affinity" in pod_spec:
+            proposed["pod_anti_affinity"] = (pod_spec["affinity"] or {}).get("podAntiAffinity")
+        before.append(snapshot)
+        after.append(proposed)
+    return change_view.describe(before, after)
+
+
 def _selected_yaml(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     """The page's single YAML panel: the selected candidate's proposal, or why there is none. Never invented."""
     chosen = next((c for c in candidates if c["selected"]), None)
@@ -155,6 +196,7 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
         detail = per_candidate.get(item.id, {})
         standing = evaluate_eligibility(live, item.id)
         placement = detail.get("currentPlacement", {})
+        proposal = build_yaml_proposal(live, item.id)
         notes: list[str] = []
         if item.type == TOPOLOGY_SPREAD and detail.get("declaredReplicas") == 1:
             notes.append(SINGLE_REPLICA_NOTE)
@@ -188,7 +230,8 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
                 "requiresJustification": standing.requires_justification,
             },
             "simulatedDeployment": detail.get("simulatedDeployment"),
-            "yamlProposal": build_yaml_proposal(live, item.id).to_dict(),
+            "yamlProposal": proposal.to_dict(),
+            "proposedChanges": _proposed_changes(live, proposal),
             "notes": notes,
         })
 

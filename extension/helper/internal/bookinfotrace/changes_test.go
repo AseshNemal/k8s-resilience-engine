@@ -16,6 +16,9 @@ func TestTheContractIsWhatThePlanSays(t *testing.T) {
 	if got := c.WorstCaseMiB(); got != 512+4*128+115+144 {
 		t.Fatalf("worst case = %d", got)
 	}
+	if got := c.WorstCaseForReviewsV2(3, true); got != 512+6*128+144 {
+		t.Fatalf("adopted three-replica worst case = %d", got)
+	}
 }
 
 func TestTheWorstCaseFitsInTheMeasuredHeadroomButNotByAMile(t *testing.T) {

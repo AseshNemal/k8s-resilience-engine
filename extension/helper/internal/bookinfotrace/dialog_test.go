@@ -85,7 +85,7 @@ func TestTheDialogDisclosesDowntimeAndWhatEachPodMeansForThePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"DOWNTIME", "unavailable until its replacement is Ready", "one replica each", "ratings unavailable", "no book details", "web page does not load", "not measured", "you approve that here"} {
+	for _, want := range []string{"DOWNTIME", "unavailable until its replacement is Ready", "single-replica workload", "ratings unavailable", "no book details", "web page does not load", "not measured", "you approve that here"} {
 		if !strings.Contains(req.Body, want) {
 			t.Errorf("the dialog does not say %q:\n%s", want, req.Body)
 		}

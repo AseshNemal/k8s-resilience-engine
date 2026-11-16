@@ -46,12 +46,21 @@ func hasSidecar(containers []string) bool {
 	return false
 }
 
+// recreatedWorkloads includes an existing reviews-v2: its Pods need sidecars too, but its Deployment stays user-owned.
+func recreatedWorkloads(f Facts) []workload {
+	workloads := append([]workload(nil), Contract.RecreatedWorkloads...)
+	if _, exists := f.Deployments[Contract.CreatedFromOriginal.Name]; exists {
+		workloads = append(workloads, workload{App: "reviews", Version: "v2"})
+	}
+	return workloads
+}
+
 // podsToRecreate picks the live Pods of the workloads that need a sidecar, in the contract's order: the workloads
-// nothing else depends on first (ratings, then details, then productpage), so a Pod that is down interrupts as little
-// of the page as possible. Several Pods of one workload are ordered by name.
+// nothing else depends on first (ratings, then details, then productpage, then an existing reviews-v2), so a Pod that
+// is down interrupts as little of the page as possible. Several Pods of one workload are ordered by name.
 func podsToRecreate(f Facts) []string {
 	var names []string
-	for _, w := range Contract.RecreatedWorkloads {
+	for _, w := range recreatedWorkloads(f) {
 		var ofWorkload []string
 		for _, p := range f.Pods {
 			if p.App == w.App && p.Version == w.Version {
@@ -64,6 +73,18 @@ func podsToRecreate(f Facts) []string {
 	return names
 }
 
+func expectedRestarts(f Facts) int {
+	total := 0
+	for _, w := range recreatedWorkloads(f) {
+		d, ok := f.Deployments[w.App+"-"+w.Version]
+		if !ok || d.Replicas == nil {
+			return -1
+		}
+		total += *d.Replicas
+	}
+	return total
+}
+
 // Disruption says what a person using the application will notice while one Pod is recreated. The estimate of how
 // long is deliberately not a number: it was not measured on this machine.
 type Disruption struct {
@@ -72,8 +93,6 @@ type Disruption struct {
 	Effect   string `json:"effect"`
 }
 
-// effects are the visible consequences in Bookinfo itself. The application has one replica of each service, so while a
-// Pod is being replaced nothing else serves its requests.
 var effects = map[string]string{
 	"ratings":     "the reviews show \"ratings unavailable\"",
 	"details":     "the product page shows no book details",
@@ -84,13 +103,22 @@ func disruptionsFor(f Facts, pods []string) []Disruption {
 	out := []Disruption{}
 	for _, name := range pods {
 		for _, p := range f.Pods {
-			if p.Name == name {
-				effect := effects[p.App]
-				if effect == "" {
-					effect = "requests to it fail"
-				}
-				out = append(out, Disruption{Workload: p.App, Pod: name, Effect: effect})
+			if p.Name != name {
+				continue
 			}
+			replicas := 0
+			for _, candidate := range f.Pods {
+				if candidate.App == p.App && candidate.Version == p.Version {
+					replicas++
+				}
+			}
+			effect := effects[p.App]
+			if replicas > 1 {
+				effect = fmt.Sprintf("one of %d replicas is replaced at a time; the other replicas stay available", replicas)
+			} else if effect == "" {
+				effect = "requests to it fail"
+			}
+			out = append(out, Disruption{Workload: p.App, Pod: name, Effect: effect})
 		}
 	}
 	return out
@@ -124,8 +152,19 @@ func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, con
 		p.block("NAMESPACE_ALREADY_INJECTED", "The %s namespace already has an istio.io/rev label.", c.Namespace)
 	}
 
-	var missing, notReady []string
+	v2, hasV2 := f.Deployments[c.CreatedFromOriginal.Name]
+	required := []string{}
 	for _, name := range c.RequiredWorkloads {
+		if name == "reviews-v1" && hasV2 {
+			continue // the connected layout serves reviews entirely from v2
+		}
+		required = append(required, name)
+	}
+	if hasV2 {
+		required = append(required, c.CreatedFromOriginal.Name)
+	}
+	var missing, notReady []string
+	for _, name := range required {
 		d, ok := f.Deployments[name]
 		switch {
 		case !ok:
@@ -148,8 +187,9 @@ func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, con
 	}
 
 	recreate := podsToRecreate(f)
-	if len(recreate) != len(c.RecreatedWorkloads) {
-		p.block("WORKLOAD_NOT_READY", "Expected one Pod each for %d workloads to recreate, found %d.", len(c.RecreatedWorkloads), len(recreate))
+	expected := expectedRestarts(f)
+	if expected < 0 || len(recreate) != expected {
+		p.block("WORKLOAD_NOT_READY", "Expected %d Pods matching the declared replicas to recreate, found %d.", expected, len(recreate))
 	}
 	p.Restarts = recreate
 	p.Disruptions = disruptionsFor(f, recreate)
@@ -164,7 +204,13 @@ func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, con
 		address = addr.IPv4
 	}
 
-	p.Gate0 = Evaluate(Gate0, baseline, baseline, DefaultThresholds())
+	worstCase := c.WorstCaseMiB()
+	v2Replicas := 0
+	if hasV2 && v2.Replicas != nil {
+		v2Replicas = *v2.Replicas
+		worstCase = c.WorstCaseForReviewsV2(v2Replicas, true)
+	}
+	p.Gate0 = Evaluate(Gate0, baseline, baseline, DefaultThresholds(), worstCase)
 	if !p.Gate0.Proceed {
 		for _, reason := range p.Gate0.Reasons {
 			p.block("RESOURCES_NOT_SAFE", "%s.", reason)
@@ -174,12 +220,7 @@ func BuildPlan(f Facts, addr *Address, addrErr error, baseline Measurements, con
 		p.Warnings = append(p.Warnings, fmt.Sprintf("This computer is already using %.0f MiB of swap. The setup is gated on how much more it swaps, but close other applications first.", *baseline.SwapUsedMiB))
 	}
 
-	// An existing reviews-v2 has a Pod without a sidecar, and this setup does not restart Pods it did not plan to. The
-	// ratings calls would then never be traced, so the setup would "succeed" without being able to do what it is for.
-	if _, v2 := f.Deployments[c.CreatedFromOriginal.Name]; v2 {
-		p.block("REVIEWS_V2_EXISTS", "%s already exists, so its Pod has no sidecar and the calls it makes to ratings could not be traced. Remove it (this setup creates it itself, with a sidecar) and plan again.", c.CreatedFromOriginal.Name)
-	}
-	p.Preview = Steps(StepInputs{JaegerIPv4: address, PodsToRecreate: recreate})
+	p.Preview = Steps(StepInputs{JaegerIPv4: address, PodsToRecreate: recreate, ExistingReviewsV2: hasV2, ExistingReviewsV2Replicas: v2Replicas})
 	p.Ready = len(p.Blockers) == 0
 	return p
 }

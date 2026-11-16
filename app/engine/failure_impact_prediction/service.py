@@ -7,6 +7,9 @@ from app.engine.failure_impact_prediction.blast_radius import (
 from app.engine.failure_impact_prediction.cross_layer_graph import (
     build_cross_layer_graph,
 )
+from app.engine.failure_impact_prediction.deployment_impact import (
+    predict_deployment_failure_impact,
+)
 from app.engine.failure_impact_prediction.fixture_provider import (
     get_current_component_inputs,
     get_demo_deployment,
@@ -124,6 +127,22 @@ def predict_failure_impact(
 
     graph = build_cross_layer_graph(workflow, deployment)
     return _predict_from_graph(graph, failed_node)
+
+
+def predict_runtime_deployment_failure_impact_with_evidence(
+    failed_node: str,
+    namespace: str = "default",
+):
+    """Predict deployment-level service exposure without requiring workflow evidence."""
+    from app.engine.deployment_topology_modeling.service import discover_live
+
+    discovery = discover_live(namespace=namespace)
+    if discovery.status == "partial" or any(not evidence.complete for evidence in discovery.service_evidence.values()):
+        from app.shared.evidence_errors import EvidenceError
+        raise EvidenceError("TOPOLOGY_INCOMPLETE", "Deployment placement is incomplete, so service survival cannot be predicted reliably.",
+                            http_status=409, component="failure_impact")
+    report = predict_deployment_failure_impact(discovery.graph, failed_node)
+    return report, discovery
 
 
 def predict_demo_failure_impact(failed_node: str) -> FailureImpactReport:

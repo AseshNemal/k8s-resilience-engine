@@ -1,0 +1,64 @@
+"""Editable workflow contracts. Dependency labels are declarations, never experimental proof."""
+from typing import Literal
+
+from pydantic import ConfigDict, Field, model_validator
+
+from app.shared.schemas.base import APIModel
+
+
+class EditorNode(APIModel):
+    model_config = ConfigDict(extra="forbid")
+    service: str = Field(min_length=1, max_length=253)
+    x: float = Field(ge=0, le=4000, allow_inf_nan=False)
+    y: float = Field(ge=0, le=4000, allow_inf_nan=False)
+
+
+class EditorEdge(APIModel):
+    model_config = ConfigDict(extra="forbid")
+    source: str = Field(min_length=1, max_length=253)
+    target: str = Field(min_length=1, max_length=253)
+    dependency: Literal["Mandatory", "Optional", "Supporting", "Unknown"] = "Unknown"
+
+
+class WorkflowEdit(APIModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=APIModel.model_config["alias_generator"])
+    name: str = Field(min_length=1, max_length=160)
+    namespace: str = Field(min_length=1, max_length=63)
+    connection_fingerprint: str = Field(min_length=1, max_length=200)
+    expected_version: int = Field(ge=0)
+    actor: str = Field(min_length=1, max_length=100)
+    entry_service: str | None = Field(default=None, max_length=253)
+    criticality: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    nodes: list[EditorNode] = Field(default_factory=list, max_length=100)
+    edges: list[EditorEdge] = Field(default_factory=list, max_length=500)
+    recording_ids: list[str] = Field(default_factory=list, max_length=20)
+    reviewed: bool = False
+
+    @model_validator(mode="after")
+    def valid_graph(self):
+        names = [node.service for node in self.nodes]
+        if len(names) != len(set(names)):
+            raise ValueError("A logical service may appear only once in a workflow")
+        pairs = [(edge.source, edge.target) for edge in self.edges]
+        if len(pairs) != len(set(pairs)):
+            raise ValueError("A directional connection may appear only once")
+        if any(edge.source not in names or edge.target not in names or edge.source == edge.target for edge in self.edges):
+            raise ValueError("Connections must join two different workflow services")
+        if self.entry_service is not None and self.entry_service not in names:
+            raise ValueError("The entry service must be on the canvas")
+        if not self.actor.strip() or not self.name.strip():
+            raise ValueError("Name and actor must contain text")
+        return self
+
+
+class RecordingStart(APIModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=APIModel.model_config["alias_generator"])
+    namespace: str = Field(min_length=1, max_length=63)
+    connection_fingerprint: str = Field(min_length=1, max_length=200)
+    jaeger_url: str = Field(min_length=1, max_length=2048)
+
+
+class WorkflowDecision(APIModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=APIModel.model_config["alias_generator"])
+    expected_version: int = Field(ge=1)
+    actor: str = Field(min_length=1, max_length=100)

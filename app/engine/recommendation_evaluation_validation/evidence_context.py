@@ -21,10 +21,10 @@ from types import SimpleNamespace
 from typing import Any
 
 from app.engine.deployment_topology_modeling.discovery_all import discover_all
+from app.engine.failure_impact_prediction.service import predict_deployment_failure_impact
 from app.engine.recommendation_evaluation_validation.declared_workflow import (
     NOT_OBSERVED,
-    declared_workflow_path,
-    load_declared_workflows,
+    load_research_workflows,
 )
 from app.engine.workflow_dependency_modeling import service as workflow_service
 from app.shared.evidence_errors import EvidenceError
@@ -136,16 +136,16 @@ def _describe_workflow(frozen, namespace_row: dict[str, Any] | None) -> dict[str
 def _describe_declared(declared, namespace_row: dict[str, Any] | None) -> dict[str, Any]:
     """A declared workflow, described like a frozen one, and always labelled: it is not observed and cannot be approved."""
     described = _describe_workflow(SimpleNamespace(graph=declared.graph), namespace_row)
+    if declared.namespace and (namespace_row or {}).get("namespace") != declared.namespace:
+        described.update(applicable=False, reason="This declaration belongs to namespace " + declared.namespace)
     return {**described, "freezeId": None, "frozenAt": None, "declared": True, "approvable": False,
             "declaredBy": declared.declared_by, "declarationSha256": declared.declaration_sha256, "limits": NOT_OBSERVED}
 
 
 def _declared_workflows(row: dict[str, Any] | None) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
     """Declared workflows from Member 4's own file (never a frozen one), or the reason the file could not be used."""
-    if declared_workflow_path() is None:
-        return [], None
     try:
-        return [_describe_declared(item, row) for item in load_declared_workflows()], None
+        return [_describe_declared(item, row) for item in load_research_workflows()], None
     except EvidenceError as error:
         return [], {"code": error.code, "message": error.message}
 
@@ -243,14 +243,36 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
     else:
         selection = "none" if not applicable else "choose"
 
-    # 6. failure-impact evidence depends on that choice (Component 3), so it is reported as such, not assumed
+    # 6. With no applicable workflow, show Component 2's deployment-only evidence without inventing one.
+    deployment_findings = None
+    if row and not applicable:
+        observed = next(result for result in overview.namespaces if result.namespace == chosen)
+        if observed.graph.nodes and row["status"] != "partial" and not row["incompleteServices"]:
+            report = predict_deployment_failure_impact(observed.graph, observed.graph.nodes[0].name)
+            deployment_findings = {
+                "scope": "deployment",
+                "workflowSurvival": None,
+                "workflowBlastRadius": None,
+                "approvalAllowed": False,
+                "capturedAt": overview.captured_at,
+                "note": "Workflow dependencies are unknown. These are per-node service exposure findings, not workflow survival or blast radius.",
+                "nodes": [node.model_dump(by_alias=True) for node in report.node_risk_ranking],
+            }
+
+    impact_detail = (
+        "Computed by the failure-impact predictor from the frozen workflow and the live topology when the recommendation is requested."
+        if selected else
+        "Per-node service exposure is shown below. Workflow survival and blast radius require a frozen or explicitly declared workflow."
+        if deployment_findings else
+        "Complete deployment placement and workflow evidence are required to compute failure impact."
+    )
+
     evidence.append(_item(
-        "failureImpact", "Failure impact", PENDING if selected else MISSING,
-        "Computed by the failure-impact predictor from the frozen workflow and the live topology when the "
-        "recommendation is requested." if selected else
-        "It is computed from a frozen workflow and the live topology, so it cannot be computed until a workflow "
-        "applies to the selected application.",
-        None if selected else "Select an application and a frozen workflow that applies to it."))
+        "failureImpact",
+        "Deployment-level failure impact" if deployment_findings else "Failure impact",
+        AVAILABLE if deployment_findings else PENDING if selected else MISSING,
+        impact_detail,
+        None if selected or deployment_findings else "Select an application and a frozen workflow that applies to it."))
 
     # 7. declared workflows: Member 4's own source when Component 1 has none. Listed apart, labelled, never selected for you, never approvable.
     declared, declared_problem = _declared_workflows(row)
@@ -273,6 +295,7 @@ def build_recommendation_context(namespace: str | None = None, workflow_id: str 
         "workflows": workflows,
         "declaredWorkflows": declared,
         "declaredWorkflowsError": declared_problem,
+        "deploymentFindings": deployment_findings,
         "workflowId": selected,
         "workflowChoice": selection,
         "evidence": evidence,

@@ -1,4 +1,5 @@
 from typing import Any
+from app.api.workflow_management import router as management_router
 import httpx
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, Response, status
 
@@ -133,6 +134,7 @@ router = APIRouter(
     prefix="/api/workflows",
     tags=["Workflow Dependency Modeling"],
 )
+router.include_router(management_router)
 
 
 @router.post(
@@ -1440,7 +1442,7 @@ def run_workflow_dependency_repeatability(
 @router.get("/live/evidence", responses=JAEGER_AND_NOT_FOUND_RESPONSES)
 def read_live_evidence(
     operation: str = Query(..., min_length=1),
-    service_name: str = Query("frontend"),
+    service_name: str = Query(..., min_length=1, description="Entry service selected from recorded traces"),
     jaeger_url: str = Query(DEFAULT_JAEGER_URL),
     limit: int = Query(1000, ge=1, le=5000),
     lookback: str = Query("1h"),
@@ -1551,7 +1553,7 @@ def list_jaeger_services(
     responses=JAEGER_UNAVAILABLE_RESPONSE,
 )
 def discover_workflows(
-    service_name: str = Query("frontend", description="Ingress / entry microservice name"),
+    service_name: str = Query(..., min_length=1, description="Ingress / entry microservice name"),
     jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
     limit: int = Query(100, ge=1, le=5000, description="Max traces to analyze"),
     lookback: str = Query("1h", description="Time lookback window"),
@@ -1576,7 +1578,7 @@ def discover_workflows(
     responses=JAEGER_AND_NOT_FOUND_RESPONSES,
 )
 def read_live_workflow(
-    service_name: str = Query("frontend", description="Entry microservice name"),
+    service_name: str = Query(..., min_length=1, description="Entry microservice name"),
     operation: str | None = Query(None, description="Optional root operation name filter"),
     jaeger_url: str = Query(DEFAULT_JAEGER_URL, description=JAEGER_URL_DESCRIPTION),
     criticality: float = Query(

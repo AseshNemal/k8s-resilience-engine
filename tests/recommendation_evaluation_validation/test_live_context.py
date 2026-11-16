@@ -169,7 +169,11 @@ def test_without_a_frozen_workflow_the_page_is_told_exactly_what_to_do(client, m
     workflow = evidence_item(body, "workflow")
     assert workflow["state"] == "missing" and body["workflows"] == [] and body["workflowId"] is None
     assert "freeze its graph" in workflow["nextAction"] and "Workflow dependencies" in workflow["nextAction"]
-    assert evidence_item(body, "failureImpact")["state"] == "missing"   # cannot exist without a workflow
+    assert evidence_item(body, "failureImpact")["state"] == "available"
+    findings = body["deploymentFindings"]
+    assert findings["scope"] == "deployment" and findings["nodes"]
+    assert findings["workflowSurvival"] is None and findings["workflowBlastRadius"] is None
+    assert findings["approvalAllowed"] is False
     assert body["ready"] is False and workflow["nextAction"] in body["nextActions"]
 
 

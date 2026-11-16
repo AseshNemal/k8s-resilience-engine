@@ -41,7 +41,7 @@ func ApplyDialog(p PlanResult, extras DialogExtras) (approve.Request, error) {
 		fmt.Fprintf(&b, "%s\n", line)
 	}
 	if len(p.Disruptions) > 0 {
-		b.WriteString("\nDOWNTIME: each Pod above is deleted and unavailable until its replacement is Ready (one replica each, so nothing takes over):")
+		b.WriteString("\nDOWNTIME: each Pod above is deleted and unavailable until its replacement is Ready; a single-replica workload has nothing else to take over:")
 		for _, d := range p.Disruptions {
 			fmt.Fprintf(&b, " %s: %s;", d.Workload, d.Effect)
 		}

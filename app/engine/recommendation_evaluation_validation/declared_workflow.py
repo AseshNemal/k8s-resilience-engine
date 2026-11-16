@@ -61,11 +61,12 @@ class DeclaredWorkflow:
     note: str | None
     declaration_sha256: str      # of the whole file, so the exact declaration is identifiable
     source_name: str             # the file's name only, never its path
+    namespace: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {"workflowId": self.graph.workflow_id, "declaredBy": self.declared_by, "note": self.note,
                 "declarationSha256": self.declaration_sha256, "sourceName": self.source_name, "observed": False,
-                "approved": False, "limits": NOT_OBSERVED}
+                "approved": False, "limits": NOT_OBSERVED, "namespace": self.namespace}
 
 
 def declared_workflow_path() -> Path | None:
@@ -153,9 +154,25 @@ def load_declared_workflows(path: str | Path | None = None) -> list[DeclaredWork
     return workflows
 
 
+def load_research_workflows(path: str | Path | None = None) -> list[DeclaredWorkflow]:
+    """File declarations plus explicitly reviewed editor revisions; both keep the declared research tier."""
+    workflows = load_declared_workflows(path)
+    if path is not None:
+        return workflows
+    from app.engine.workflow_dependency_modeling import service
+    existing = {item.graph.workflow_id for item in workflows}
+    for row in service.reviewed_managed_workflows():
+        if row["id"] in existing:
+            raise _invalid("A file declaration and a managed workflow share an ID; rename the file declaration")
+        workflows.append(DeclaredWorkflow(WorkflowGraph.model_validate(row["graph"]), row["actor"],
+            f"Reviewed editor revision {row['version']}. Dependency labels remain declarations.",
+            service.managed_workflow_digest(row), "workflow-editor", row["namespace"]))
+    return workflows
+
+
 def get_declared_workflow(workflow_id: str, path: str | Path | None = None) -> DeclaredWorkflow:
     wanted = (workflow_id or "").strip()
-    for workflow in load_declared_workflows(path):
+    for workflow in load_research_workflows(path):
         if workflow.graph.workflow_id == wanted:
             return workflow
     raise DeclaredWorkflowError("DECLARED_WORKFLOW_UNAVAILABLE", f"No workflow {wanted!r} is declared.", http_status=404)

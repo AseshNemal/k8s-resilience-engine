@@ -58,7 +58,7 @@ type run struct {
 }
 
 func newRun(d Deps, rec *Record) *run {
-	return &run{d: d, rec: rec, guard: NewGuard(d.Cluster, rec.InstallationID, rec.Inventory, rec.PlannedPods), baseline: rec.Baseline}
+	return &run{d: d, rec: rec, guard: NewGuard(d.Cluster, rec.InstallationID, rec.Inventory, rec.PlannedPods, rec.Snapshot.ReviewsV2Preexisting), baseline: rec.Baseline}
 }
 
 // save writes the record. A record that cannot be saved stops the setup: nothing more may be created that could not

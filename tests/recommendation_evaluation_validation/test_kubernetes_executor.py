@@ -264,6 +264,32 @@ def test_revert_with_nothing_written_touches_nothing():
     assert s.gateway.wrote is False
 
 
+def test_revert_uses_current_resource_version_and_refuses_an_external_spec_edit():
+    from dataclasses import replace
+    s = Setup()
+    _, _, text = s.proposal()
+    executor = s.executor()
+    executor.apply(text)
+    current = s.gateway.deployments["reviews"]
+    original_restore = s.gateway.restore_deployment
+    def checked(snapshot):
+        assert snapshot.resource_version == s.gateway.deployments[snapshot.name].resource_version
+        original_restore(snapshot)
+    s.gateway.restore_deployment = checked
+    # A controller status update moves resourceVersion without changing spec generation.
+    s.gateway.deployments["reviews"] = replace(current, resource_version="status-updated")
+    executor.revert()
+
+    s = Setup()
+    _, _, text = s.proposal()
+    executor = s.executor()
+    executor.apply(text)
+    current = s.gateway.deployments["reviews"]
+    s.gateway.deployments["reviews"] = replace(current, generation=current.generation + 1, replicas=9)
+    refused("RESTORE_TARGET_CHANGED", executor.revert)
+    assert s.gateway.deployments["reviews"].replicas == 9
+
+
 def test_a_revert_that_the_api_server_refuses_raises_and_keeps_the_restore_points():
     s = Setup(gateway_options=dict(fail_at="restore"))
     _, _, text = s.proposal()

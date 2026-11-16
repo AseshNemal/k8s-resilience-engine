@@ -13,9 +13,9 @@ client = TestClient(app)
 ROUTES = [
     "/api/workflows/jaeger/status",
     "/api/workflows/jaeger/services",
-    "/api/workflows/discover",
-    "/api/workflows/live/evidence?operation=x",
-    "/api/workflows/live",
+    "/api/workflows/discover?service_name=gateway",
+    "/api/workflows/live/evidence?operation=x&service_name=gateway",
+    "/api/workflows/live?service_name=gateway",
 ]
 
 

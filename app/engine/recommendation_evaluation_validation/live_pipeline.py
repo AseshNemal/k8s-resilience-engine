@@ -418,6 +418,9 @@ def build_declared_recommendation(
     if not namespace:
         raise ValueError("namespace must be a non-empty string")
     discovery = discover_live(namespace=namespace)
+    if declared.namespace and declared.namespace != namespace:
+        raise EvidenceError("WORKFLOW_NAMESPACE_MISMATCH", "The reviewed workflow belongs to another namespace.",
+                            http_status=409, component="recommendation")
     _require_complete_topology(declared.graph, discovery)
     deployment, facts = enrich_scheduling_facts(discovery.graph.model_copy(deep=True), namespace)
     live = evaluate_recommendation(
@@ -488,6 +491,9 @@ def build_declared_failures(workflow_id: str, namespace: str = "default", *, com
     if not namespace:
         raise ValueError("namespace must be a non-empty string")
     discovery = discover_live(namespace=namespace)
+    if declared.namespace and declared.namespace != namespace:
+        raise EvidenceError("WORKFLOW_NAMESPACE_MISMATCH", "The reviewed workflow belongs to another namespace.",
+                            http_status=409, component="recommendation")
     _require_complete_topology(declared.graph, discovery)
     deployment, _facts = enrich_scheduling_facts(discovery.graph.model_copy(deep=True), namespace)
     overview = failure_overview(

@@ -38,9 +38,11 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
+from app.engine.recommendation_evaluation_validation.validation.cluster_gateway import fresh_restore_snapshot
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from app.engine.recommendation_evaluation_validation.application import changes as change_view
 from app.engine.recommendation_evaluation_validation.application import operation as operation_view
 from app.engine.recommendation_evaluation_validation.application import rollout as rollout_watch
 from app.engine.recommendation_evaluation_validation.application.analysis import (
@@ -62,6 +64,7 @@ from app.engine.recommendation_evaluation_validation.application.models import (
     APPLIED,
     APPLYING,
     FAILED,
+    KEPT,
     RESET,
     RESET_FAILED,
     RESETTABLE,
@@ -99,6 +102,7 @@ _MUTATION = threading.Lock()
 _ADVANCE = threading.Lock()
 _ANALYSING_GUARD = threading.Lock()
 _ANALYSING: set[str] = set()
+EXTERNAL_REFUSE, EXTERNAL_KEEP = "refuse", "keep"
 RESTORED_FIELDS = ("name", "namespace", "resource_version", "generation", "replicas", "selector", "pod_labels",
                    "topology_spread_constraints", "pod_anti_affinity")
 
@@ -158,6 +162,7 @@ def _snapshot(live: ObservedDeployment) -> dict[str, Any]:
 
 def _restorable(snapshot: Mapping[str, Any]) -> ObservedDeployment:
     values = {name: snapshot[name] for name in RESTORED_FIELDS}
+    values["uid"] = snapshot.get("uid")
     values["topology_spread_constraints"] = tuple(values["topology_spread_constraints"] or ())
     return ObservedDeployment(**values)
 
@@ -226,7 +231,7 @@ class ApplicationService:
         lost = None
         uid = self._connected_uid()
         match = self._cluster_match(change, uid)
-        if change is not None and change.status in (APPLIED, RESET):
+        if change is not None and change.status in (APPLIED, KEPT, RESET):
             change, lost = self._advance(change)
         active = self._active_here(uid)
         blocking = next((c for c in active if change is None or c.application_id != change.application_id), None)
@@ -239,7 +244,7 @@ class ApplicationService:
         return {
             "recommendationId": recommendation_id, "application": change.to_dict() if change else None,
             # Kept for the callers that only ask "is it settled": True only when the Deployments say so, never from a patch.
-            "rolloutComplete": (None if change is None or change.status not in (APPLIED, RESET) or lost is not None or state is None
+            "rolloutComplete": (None if change is None or change.status not in (APPLIED, KEPT, RESET) or lost is not None or state is None
                                 else state == rollout_watch.COMPLETED),
             "rollout": rollout, "analysis": {key: value.to_dict() for key, value in analyses.items()},
             "operation": operation_view.build(change, rollout, current, approved=approved, connection=lost,
@@ -249,6 +254,10 @@ class ApplicationService:
             "canApply": can_apply,
             "writesEnabled": self.writes_enabled,
             "canReset": bool(change and change.status in RESETTABLE and match != "other"),
+            # Keeping is a named decision about a change that is applied: it stops blocking another change, and can still be reset.
+            "canKeep": bool(change and change.status == APPLIED),
+            # Per Deployment, the three fields this application may write, before and after, in words (changes.py).
+            "changes": change_view.describe(change.before, change.after) if change else [],
             # "same" | "other" | "unknown" | None: the stored change against the cluster connected now; "other" is shown, never reset here.
             "clusterMatch": match,
             "changeCluster": ({"context": change.cluster.get("context"), "apiServer": change.cluster.get("apiServer")}
@@ -270,7 +279,7 @@ class ApplicationService:
         direction = (rollout or {}).get("direction")
         analysis = analyses.get(direction) if direction else None
         return {
-            "patchesAccepted": None if change is None else change.status in (APPLIED, RESET, RESET_FAILED),
+            "patchesAccepted": None if change is None else change.status in (APPLIED, KEPT, RESET, RESET_FAILED),
             "rolloutCompleted": None if rollout is None else rollout.get("state") == rollout_watch.COMPLETED,
             "analysisCompleted": None if analysis is None else analysis.status == ANALYSIS_COMPLETED,
             # Nothing in Apply, Reset or the analysis injects a failure, so none of this is an experiment.
@@ -307,7 +316,7 @@ class ApplicationService:
 
     # -- watching the rollout, then analysing it -----------------------------------------------------------------------
 
-    def _advance(self, change: AppliedChange) -> tuple[AppliedChange, dict[str, str] | None]:
+    def _advance(self, change: AppliedChange, *, analyse: bool = True) -> tuple[AppliedChange, dict[str, str] | None]:
         """Read the Deployments once, store where the rollout stands, and analyse it if it has just completed.
 
         Returns the stored change and, when the cluster could not be read just now, why (a coded cluster error: unreachable, the
@@ -333,7 +342,7 @@ class ApplicationService:
                         events = [self._event(event, record.get("direction") or "")] if event else []
                         change = (self.repository.advance_rollout(change.application_id, record.get("since"), updated, events)
                                   or self.repository.get(change.application_id) or change)
-        if lost is None:
+        if lost is None and analyse:
             change = self._analyse_if_due(change)
         return change, lost
 
@@ -341,6 +350,8 @@ class ApplicationService:
         """Whether the Deployments now hold the stored fields again: replicas, spread constraints and anti-affinity only."""
         live = gateway.read_deployments(change.namespace)
         differences = []
+        left = (change.rollout or {}).get("leftAsFound") or []
+        skipped = {(item["deployment"], item["field"]) for item in left}
         for snapshot in change.before:
             name, now = snapshot["name"], live.get(snapshot["name"])
             if now is None:
@@ -348,13 +359,18 @@ class ApplicationService:
                 continue
             if snapshot.get("uid") and now.uid and snapshot["uid"] != now.uid:
                 differences.append(f"{name}: is not the Deployment that was changed")
-            if now.replicas != snapshot["replicas"]:
+            if (name, change_view.REPLICAS) not in skipped and now.replicas != snapshot["replicas"]:
                 differences.append(f"{name}: {now.replicas} replicas, stored {snapshot['replicas']}")
-            if list(now.topology_spread_constraints) != list(snapshot["topology_spread_constraints"] or []):
+            if ((name, change_view.SPREAD) not in skipped
+                    and list(now.topology_spread_constraints) != list(snapshot["topology_spread_constraints"] or [])):
                 differences.append(f"{name}: topology spread constraints differ from the stored ones")
-            if (now.pod_anti_affinity or None) != (snapshot["pod_anti_affinity"] or None):
+            if ((name, change_view.ANTI_AFFINITY) not in skipped
+                    and (now.pod_anti_affinity or None) != (snapshot["pod_anti_affinity"] or None)):
                 differences.append(f"{name}: pod anti-affinity differs from the stored one")
-        return {"verified": not differences, "differences": differences, "checkedAt": _now().isoformat()}
+        # "verified" is about configuration only: the stored fields are back. Where the scheduler put the replacement pods is a
+        # separate fact (the reset analysis reads it); the same configuration does not promise the same nodes.
+        return {"verified": not differences, "differences": differences, "leftAsFound": left,
+                "scope": "configuration", "checkedAt": _now().isoformat()}
 
     def _analyse_if_due(self, change: AppliedChange) -> AppliedChange:
         record = change.rollout
@@ -526,11 +542,24 @@ class ApplicationService:
                 raise failure from error
             change.status = APPLIED
             change.events.append(self._event("applied", ", ".join(patched)))
+            change.after = self._read_back(gateway, namespace, patched)
+            if change.after is None:
+                change.events.append(self._event("after-not-recorded", "the Deployments could not be read back, so a later "
+                                                 "Reset cannot tell an outside change from this one"))
             change.rollout = rollout_watch.fresh(DIRECTION_APPLY, namespace, patched,
                                                  uids={s["name"]: s.get("uid") for s in change.before})
             return self.repository.update(change)
         except _CLUSTER_ERRORS as error:
             raise _cluster_error(error) from error
+
+    @staticmethod
+    def _read_back(gateway: ApplyGateway, namespace: str, names: Sequence[str]) -> list[dict[str, Any]] | None:
+        """The Deployments as the cluster holds them straight after the patches: what this change set. None if unreadable."""
+        try:
+            live = gateway.read_deployments(namespace)
+            return [_snapshot(live[name]) for name in names]
+        except (*_CLUSTER_ERRORS, KeyError):
+            return None
 
     def _still_what_was_approved(self, approval: ApprovalModel, recommendation_id: str,
                                  evaluate: Callable[[ApprovalModel], LiveRecommendation]) -> tuple[str, str, LiveRecommendation]:
@@ -561,13 +590,14 @@ class ApplicationService:
         change.events.append(self._event("apply-failed", failure.code))
         before = {snapshot["name"]: snapshot for snapshot in change.before}
         try:
+            live = gateway.read_deployments(change.namespace)
             for name in reversed(patched):
-                gateway.restore_deployment(_restorable(before[name]))
+                gateway.restore_deployment(fresh_restore_snapshot(_restorable(before[name]), live.get(name)))
                 change.events.append(self._event("restored", name))
             change.status = FAILED
             self._close_analysis(change, DIRECTION_APPLY, "APPLY_FAILED", "The change was not applied (it was put back), so "
                                  "there is no post-change topology to compare.")
-        except _CLUSTER_ERRORS:
+        except (*_CLUSTER_ERRORS, ValidationRefusedError):
             change.status = RESET_FAILED
             change.events.append(self._event("restore-failed", "Reset it to try again"))
         self.repository.update(change)
@@ -584,13 +614,19 @@ class ApplicationService:
 
     # -- reset -------------------------------------------------------------------------------------------------------
 
-    def reset(self, recommendation_id: str, reset_by: str) -> AppliedChange:
+    def reset(self, recommendation_id: str, reset_by: str, *, external: str = EXTERNAL_REFUSE) -> AppliedChange:
+        """Put back what this change replaced. ``external`` says what to do with a field something else changed since:
+        ``refuse`` (the default) restores nothing and names the fields; ``keep`` restores only the fields that still hold
+        what this change set and leaves the others exactly as they were found."""
         self._require_armed()
         who = _named(reset_by)
+        if external not in (EXTERNAL_REFUSE, EXTERNAL_KEEP):
+            raise ApplicationRefused("EXTERNAL_CHOICE_INVALID", "Say whether fields changed outside this application are "
+                                     "refused or kept.", http_status=422)
         with _MUTATION:
-            return self._reset_locked(recommendation_id, who)
+            return self._reset_locked(recommendation_id, who, external)
 
-    def _reset_locked(self, recommendation_id: str, who: str) -> AppliedChange:
+    def _reset_locked(self, recommendation_id: str, who: str, external: str = EXTERNAL_REFUSE) -> AppliedChange:
         change = self.repository.latest_for(recommendation_id)
         if change is None or change.status not in RESETTABLE:
             raise ApplicationRefused("NOTHING_TO_RESET", "Nothing applied for this recommendation is waiting to be reset.")
@@ -604,10 +640,30 @@ class ApplicationService:
             if identity.cluster_uid != change.cluster.get("clusterUid"):
                 raise ApplicationRefused("CLUSTER_CHANGED", "The connected cluster is not the one this change was applied to, so "
                                          "its stored state is not restored here. Reconnect that cluster to reset it.")
-            self._require_same_deployments(gateway, change)
+            live = self._require_same_deployments(gateway, change)
+            left = self._external_changes(change, live)
+            if left and external == EXTERNAL_REFUSE:
+                raise ApplicationRefused(
+                    "EXTERNAL_CHANGE", "Something else changed " + "; ".join(
+                        f"{item['deployment']} {item['label'].lower()} (this change set {item['appliedText']}, it is now "
+                        f"{item['liveText']})" for item in left) + " since this change was applied. Nothing was restored. "
+                    "Reset again keeping those fields as they are, or put them back yourself first.",
+                    details={"external": left})
+            if change.after is None:
+                change.events.append(self._event("external-changes-unknown", "what this change set was not recorded, so the "
+                                                 "cluster was not compared before restoring"))
+            skipped = {(item["deployment"], item["field"]) for item in left}
             for snapshot in reversed(change.before):
-                gateway.restore_deployment(_restorable(snapshot))
-                change.events.append(self._event("restored", snapshot["name"]))
+                name = snapshot["name"]
+                kept = [field for field in change_view.OWNED_FIELDS if (name, field) in skipped]
+                if len(kept) == len(change_view.OWNED_FIELDS):
+                    change.events.append(self._event("left-as-found", f"{name}: every field was changed outside"))
+                    continue
+                # A field changed outside is "restored" to the value it holds now, which leaves it exactly as it was found.
+                target = {**snapshot, **{field: change_view.owned(live[name])[field] for field in kept},
+                          "resource_version": live[name].resource_version}
+                gateway.restore_deployment(_restorable(target))
+                change.events.append(self._event("restored", name + (f" (left as found: {', '.join(kept)})" if kept else "")))
         except _CLUSTER_ERRORS as error:
             failure = _cluster_error(error)
             change.status = RESET_FAILED
@@ -619,12 +675,83 @@ class ApplicationService:
         change.events.append(self._event("reset", f"by {who}"))
         change.rollout = rollout_watch.fresh(DIRECTION_RESET, change.namespace, change.deployments,
                                              uids={s["name"]: s.get("uid") for s in change.before})
+        if left:        # read again by the restoration check, so "restored" never claims a field that was left alone
+            change.rollout["leftAsFound"] = left
         stored = self.repository.update(change)
         self._plan_reset_analysis(stored)
         return stored
 
-    def _require_same_deployments(self, gateway: ApplyGateway, change: AppliedChange) -> None:
-        """Refuse to put stored fields onto a Deployment that is not the one they came from (deleted and recreated, or gone)."""
+    @staticmethod
+    def _external_changes(change: AppliedChange, live: Mapping[str, ObservedDeployment]) -> list[dict[str, Any]]:
+        """The owned fields that no longer hold what this change set. Empty when nothing was recorded to compare with."""
+        found = []
+        for applied in change.after or []:
+            for item in change_view.drift(applied, live[applied["name"]]):
+                found.append({"deployment": applied["name"], **item})
+        return found
+
+    # -- keep --------------------------------------------------------------------------------------------------------
+
+    def keep(self, recommendation_id: str, kept_by: str) -> AppliedChange:
+        """A named person decides the applied change stays. Nothing is written to the cluster. The change stops blocking
+        another one, stays in the ledger as KEPT, and can still be reset while the cluster holds what it set."""
+        who = _named(kept_by)
+        with _MUTATION:
+            change = self.repository.latest_for(recommendation_id)
+            if change is None or change.status != APPLIED:
+                raise ApplicationRefused("NOTHING_TO_KEEP", "Only a change that is applied can be kept. One that is still being "
+                                         "applied, failed to reset or was already reset has no settled state to keep.")
+            change.status = KEPT
+            change.detail = {**(change.detail or {}), "kept": {"by": who, "at": _now().isoformat()}}
+            change.events.append(self._event("kept", f"by {who}"))
+            return self.repository.update(change)
+
+    # -- the ledger --------------------------------------------------------------------------------------------------
+
+    def note_left_at_disconnect(self, application_ids: Sequence[str]) -> None:
+        """The person disconnected with these still applied: say so on each, so a reconnect shows why they are open."""
+        for application_id in application_ids:
+            self.repository.append_events(application_id, [self._event("left-at-disconnect", "the cluster was disconnected "
+                                                                       "with this change still applied")])
+
+    def outstanding(self, *, advance_resets: bool = False) -> dict[str, Any]:
+        """Every unsettled change of BOTH tiers, against the cluster connected now. Reads the cluster's identity; with
+        ``advance_resets`` it also reads the Deployments of a reset still rolling out, so a finished one is not reported
+        as in progress only because nobody looked. It never patches and never runs an analysis.
+
+        ``blocksDisconnect`` is the part that matters before a disconnect: a change still standing on the connected cluster
+        (or on one that cannot be identified just now), and a reset whose rollout this credential is still needed to verify.
+        """
+        uid = self._connected_uid()
+        rows = []
+        for change in self.repository.outstanding():
+            match = self._cluster_match(change, uid)
+            if advance_resets and change.status == RESET and match != "other":
+                change, _lost = self._advance(change, analyse=False)
+            rollout = change.rollout or {}
+            # A reset is in progress until its rollout is seen to finish, but not for ever: past its deadline it no longer
+            # holds the connection (it is still listed, as a reset that was never seen to complete).
+            resetting = (change.status == RESET and rollout.get("state") == rollout_watch.ROLLING_OUT
+                         and not _past(rollout.get("deadline")))
+            if change.status == RESET and rollout.get("state") != rollout_watch.ROLLING_OUT:
+                continue
+            rows.append({
+                "applicationId": change.application_id, "recommendationId": change.recommendation_id, "tier": change.tier,
+                "namespace": change.namespace, "status": change.status, "deployments": change.deployments,
+                "appliedBy": change.applied_by, "appliedAt": change.applied_at.isoformat(),
+                "cluster": change.cluster, "clusterMatch": match, "resetInProgress": resetting,
+                "kept": (change.detail or {}).get("kept"),
+                "changes": change_view.describe(change.before, change.after),
+                "canReset": change.status in RESETTABLE and match != "other" and self.writes_enabled,
+                "blocksDisconnect": match != "other" and (resetting or change.status in ACTIVE),
+            })
+        return {"connectedClusterUid": uid, "changes": rows,
+                "blocking": [row for row in rows if row["blocksDisconnect"]],
+                "resetInProgress": any(row["resetInProgress"] and row["clusterMatch"] != "other" for row in rows)}
+
+    def _require_same_deployments(self, gateway: ApplyGateway, change: AppliedChange) -> Mapping[str, ObservedDeployment]:
+        """Refuse to put stored fields onto a Deployment that is not the one they came from (deleted and recreated, or gone).
+        Returns the Deployments as read, for the comparison that follows."""
         live = gateway.read_deployments(change.namespace)
         for snapshot in change.before:
             now = live.get(snapshot["name"])
@@ -634,6 +761,7 @@ class ApplicationService:
             if snapshot.get("uid") and now.uid and snapshot["uid"] != now.uid:
                 raise ApplicationRefused("DEPLOYMENT_REPLACED", f"Deployment {snapshot['name']} was deleted and created again "
                                          f"since the change, so the stored state is not restored onto the new one.")
+        return live
 
     def _plan_reset_analysis(self, change: AppliedChange) -> None:
         """The reset gets its own analysis, compared with the apply's immutable baseline; the apply's pending one is closed."""
@@ -656,6 +784,13 @@ class _Planning:
     def __init__(self, recommendation_id: str, namespace: str, deployments: list[str], cluster: dict[str, Any]) -> None:
         self.recommendation_id, self.namespace = recommendation_id, namespace
         self.application_id, self.deployments, self.cluster = None, deployments, cluster
+
+
+def _past(moment: str | None) -> bool:
+    try:
+        return _now() > datetime.fromisoformat(str(moment))
+    except (TypeError, ValueError):
+        return False
 
 
 def _not_before(captured: str | None, completed: str | None) -> bool | None:

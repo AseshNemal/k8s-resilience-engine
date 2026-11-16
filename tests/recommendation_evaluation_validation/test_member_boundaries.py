@@ -1,8 +1,10 @@
-"""Member 4's work stays inside Member 4's component: no other member's engine, API, page or the shared contracts are edited.
+"""Guard unrelated component files while allowing the explicitly requested integration work.
 
 The branch under test is compared with where it left ``main`` (the merge base), plus whatever is changed or untracked in the working
 tree, so the guard holds before and after a commit. Component 3's evaluator and Component 2's discovery are CALLED by Member 4
-(``application/live_analyser.py``); this proves they are not CHANGED to make that work. It reads the repository's git state only.
+(``application/live_analyser.py``). The 2026-11-16 recovery request authorizes changes
+across components for deployment-only prediction and hybrid workflow management.
+It reads the repository's git state only.
 """
 
 import shutil
@@ -27,6 +29,19 @@ PROTECTED = (
     "app/main.py",
 )
 
+# Exact integration files authorized by the recovery/hybrid-dashboard request;
+# unrelated files remain guarded. Keep the service-interface assertion below.
+AUTHORIZED_INTEGRATION_PATHS = {
+    "app/api/failure_impacts.py", "app/api/workflows.py",
+    "app/engine/failure_impact_prediction/deployment_impact.py",
+    "app/engine/failure_impact_prediction/service.py",
+    "app/engine/workflow_dependency_modeling/management.py",
+    "app/engine/workflow_dependency_modeling/service.py",
+    "app/shared/schemas/failure_impact.py", "app/shared/schemas/workflow_management.py",
+    "app/static/js/components/failure_impacts.js",
+    "app/templates/components/failure_impacts.html", "app/templates/components/workflows.html",
+}
+
 
 def git(*arguments: str) -> str:
     return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True, check=True).stdout
@@ -45,8 +60,9 @@ def changed_paths() -> set[str]:
     return committed | working | untracked
 
 
-def test_no_other_members_component_page_or_shared_contract_is_changed():
-    touched = sorted(path for path in changed_paths() if path.startswith(PROTECTED))
+def test_no_unrelated_component_page_or_shared_contract_is_changed():
+    touched = sorted(path for path in changed_paths()
+                     if path.startswith(PROTECTED) and path not in AUTHORIZED_INTEGRATION_PATHS)
 
     assert touched == [], f"another member's files were changed: {touched}"
 

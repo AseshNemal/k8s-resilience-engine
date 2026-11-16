@@ -11,6 +11,7 @@
  */
 
 (function () {
+    const DEPLOYMENT_IMPACT_ENDPOINT = "/api/failure-impacts/deployment/runtime";
     const RUNTIME_IMPACT_ENDPOINT = "/api/failure-impacts/runtime";
     const PORTFOLIO_RUNTIME_ENDPOINT = "/api/failure-impacts/portfolio/runtime";
     // The topology is read through the discovery envelope, not the bare graph, so the page can say how
@@ -88,9 +89,10 @@
         return Object.assign(new Error(message), { code: "INVALID_INPUT" });
     }
 
-    // "runtime" is one frozen workflow; "portfolio-runtime" is several, evaluated against one topology.
     function selectedMode() {
-        return inputMode?.value === "portfolio-runtime" ? "portfolio-runtime" : "runtime";
+        return ["deployment-runtime", "portfolio-runtime"].includes(inputMode?.value)
+            ? inputMode.value
+            : "runtime";
     }
 
     function runtimeNamespace() {
@@ -140,6 +142,14 @@
     function impactRequest() {
         const mode = selectedMode();
 
+        if (mode === "deployment-runtime") {
+            const namespace = runtimeNamespace();
+            return (failedNode) => {
+                const params = new URLSearchParams({ failed_node: failedNode, namespace });
+                return `${DEPLOYMENT_IMPACT_ENDPOINT}?${params.toString()}`;
+            };
+        }
+
         if (mode === "runtime") {
             const { workflowId, namespace } = runtimeSelection();
             return (failedNode) => {
@@ -170,14 +180,22 @@
         const described = describeDiscovery(discovery);
         applyBadge(inputSourceBadge, described.badge);
         if (inputModeNote) {
+            const scope = selectedMode() === "deployment-runtime"
+                ? " Workflow dependencies are not inferred; workflow survival and blast radius are not reported."
+                : "";
             inputModeNote.textContent =
                 `${described.headline} ${described.provenance} ` +
-                "The result below is a prediction for a virtual failure, not an observation.";
+                `The result below is a prediction for a virtual failure, not an observation.${scope}`;
         }
     }
 
     function updateInputModeUi() {
         const mode = selectedMode();
+        const deploymentOnly = mode === "deployment-runtime";
+        const workflowField = document.querySelector('[data-role="workflow-field"]');
+        const workflowContract = document.querySelector('[data-role="workflow-contract-chip"]');
+        if (workflowField) workflowField.hidden = deploymentOnly;
+        if (workflowContract) workflowContract.hidden = deploymentOnly;
         if (workflowIdLabel) {
             workflowIdLabel.textContent = mode === "portfolio-runtime"
                 ? "Workflow IDs"
@@ -186,14 +204,16 @@
         // Shown until the topology has been read; describeInput() then replaces both with the real status.
         if (inputSourceBadge) {
             inputSourceBadge.textContent = {
-                runtime: "Validated Runtime",
-                "portfolio-runtime": "Runtime Portfolio",
+                "deployment-runtime": "Live Deployments",
+                runtime: "Frozen Workflow",
+                "portfolio-runtime": "Frozen Workflow Portfolio",
             }[mode];
         }
         if (inputModeNote) {
             inputModeNote.textContent = {
-                runtime: "Runtime mode — requires configured Component 1 persistence and a frozen workflow, then uses Component 2 topology; simulation remains virtual.",
-                "portfolio-runtime": "Runtime portfolio mode — enter comma-separated frozen workflow IDs and evaluate them against one Component 2 topology; simulation remains virtual.",
+                "deployment-runtime": "Uses live pod placement only. No tracing or workflow declaration is required; workflow survival and blast radius remain unknown.",
+                runtime: "Requires an approved frozen workflow and live topology; simulation remains virtual.",
+                "portfolio-runtime": "Enter comma-separated frozen workflow IDs to evaluate them against one live topology; simulation remains virtual.",
             }[mode];
         }
     }
@@ -379,6 +399,47 @@
         });
     }
 
+    function renderDeploymentImpact(impact) {
+        const deploymentTemplate = document.querySelector('[data-role="deployment-template"]');
+        region.replaceChildren(deploymentTemplate.content.cloneNode(true));
+        setMetric(region, "deployment-failed-node", impact.failedNode);
+        setMetric(region, "deployment-failed-services", String(impact.failedServices.length));
+        setMetric(
+            region,
+            "deployment-service-failure-rate",
+            impact.serviceFailureRate == null ? "n/a" : formatPercentage(impact.serviceFailureRate)
+        );
+        setMetric(region, "deployment-services-evaluated", String(impact.servicesEvaluated));
+        const note = region.querySelector('[data-role="deployment-workflow-note"]');
+        if (note) note.textContent = impact.workflowEvidenceNote;
+
+        const outcomes = region.querySelector('[data-role="deployment-service-outcomes"]');
+        impact.serviceImpacts.forEach((service) => {
+            const row = document.createElement("tr");
+            [service.service, service.readyBefore, service.lostReady, service.readyAfter,
+                formatCodeLabel(service.outcome)].forEach((value) => {
+                const cell = document.createElement("td");
+                cell.textContent = String(value);
+                row.appendChild(cell);
+            });
+            outcomes.appendChild(row);
+        });
+
+        const ranking = region.querySelector('[data-role="deployment-node-ranking"]');
+        impact.nodeRiskRanking.forEach((entry, index) => {
+            const row = document.createElement("tr");
+            [index + 1, entry.node, entry.failedServices.join(", ") || "None",
+                entry.serviceFailureRate == null ? "n/a" : formatPercentage(entry.serviceFailureRate)]
+                .forEach((value) => {
+                    const cell = document.createElement("td");
+                    cell.textContent = String(value);
+                    row.appendChild(cell);
+                });
+            ranking.appendChild(row);
+        });
+        initJsonPanel(region.querySelector("#deployment-impact-raw-json"), impact);
+    }
+
     function setBusy(busy) {
         [reloadButton, nodeSelector, inputMode, workflowIdInput, namespaceInput].forEach((control) => {
             if (control) control.disabled = busy;
@@ -419,6 +480,11 @@
                 throw new Error("The discovered topology contains no worker nodes.");
             }
             const impact = await fetchJson(impactEndpoint(failedNode));
+            if (selectedMode() === "deployment-runtime") {
+                renderDeploymentImpact(impact);
+                updateLastRefreshed(lastRefreshed);
+                return;
+            }
 
             region.innerHTML = "";
             region.appendChild(template.content.cloneNode(true));

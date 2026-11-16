@@ -55,13 +55,17 @@ func need(d *Decision, name string, v *float64) bool {
 }
 
 // Evaluate decides one gate from the baseline (taken at Gate 0) and the readings now.
-func Evaluate(g Gate, baseline, now Measurements, t Thresholds) Decision {
+func Evaluate(g Gate, baseline, now Measurements, t Thresholds, planWorstCase ...int) Decision {
 	var d Decision
 	switch g {
 	case Gate0:
 		if need(&d, "the Docker memory limit", now.VMLimitMiB) && need(&d, "the Docker memory in use", now.VMUsedMiB) {
 			headroom := *now.VMLimitMiB - *now.VMUsedMiB
-			if worst := float64(Contract.WorstCaseMiB()); headroom < worst {
+			worstCase := Contract.WorstCaseMiB()
+			if len(planWorstCase) > 0 {
+				worstCase = planWorstCase[0]
+			}
+			if worst := float64(worstCase); headroom < worst {
 				d.fail("only %.0f MiB of Docker memory is free, but the setup can use up to %.0f MiB at its caps", headroom, worst)
 			}
 		}
