@@ -128,3 +128,80 @@ def test_client_cannot_supply_proof_or_trace_evidence(editor):
     body.pop("experimentallyValidated")
     body["edges"][0]["evidence"] = [{"traceId": "fabricated"}]
     assert client.post("/api/workflows/management/workflows", json=body).status_code == 422
+
+
+def recording_trace(timestamp, trace_id="abc123", root="frontend-web", child="orders-api"):
+    return {"traceID": trace_id, "processes": {"p1": {"serviceName": root}, "p2": {"serviceName": child}}, "spans": [
+        {"traceID": trace_id, "spanID": "a", "processID": "p1", "operationName": "GET /orders", "startTime": timestamp,
+         "duration": 100, "references": [], "tags": [{"key": "http.method", "value": "GET"}, {"key": "http.route", "value": "/orders"}]},
+        {"traceID": trace_id, "spanID": "b", "processID": "p2", "operationName": "List orders", "startTime": timestamp + 1,
+         "duration": 50, "references": [{"refType": "CHILD_OF", "traceID": trace_id, "spanID": "a"}]},
+    ]}
+
+
+def test_recording_discovers_aliases_without_an_existing_workflow(editor, monkeypatch):
+    repo, _, _ = editor
+    source = type("Traces", (), {})()
+    source.list_services = lambda: ["frontend-web", "orders-api", "jaeger-all-in-one"]
+    source.traces = []
+    source.fetch_trace_window = lambda service, start, end, limit: source.traces
+    monkeypatch.setattr(management.JaegerTraceSource, "from_url", lambda _: source)
+    start = management.start_recording(RecordingStart(namespace="shop", connection_fingerprint="fake-connection",
+        jaeger_url="http://jaeger:16686", service_map={"frontend-web": "orders", "orders-api": "payments"}))
+    source.traces = [recording_trace(start["startedMicros"])]
+
+    stopped = management.stop_recording(start["id"])
+
+    assert stopped["coverage"]["status"] == "discovered"
+    assert stopped["coverage"]["servicesQueried"] == ["frontend-web", "orders-api"]
+    candidate = stopped["candidates"][0]
+    assert candidate["entryService"] == "orders"
+    assert candidate["services"] == ["orders", "payments"]
+    assert candidate["unmappedServices"] == []
+    assert candidate["edges"][0]["source"] == "orders" and candidate["edges"][0]["target"] == "payments"
+    assert candidate["edges"][0]["dependency"] == "Unknown"
+    assert candidate["edges"][0]["evidence"][0]["traceId"] == "abc123"
+    assert stopped["serviceMap"]["frontend-web"] == "orders"
+
+
+def test_recording_keeps_unmatched_candidates_and_reports_mapping_gaps(editor, monkeypatch):
+    repo, _, _ = editor
+    source = type("Traces", (), {})()
+    source.list_services = lambda: ["frontend-web", "unknown-api"]
+    source.fetch_trace_window = lambda service, start, end, limit: source.traces
+    monkeypatch.setattr(management.JaegerTraceSource, "from_url", lambda _: source)
+    start = management.start_recording(RecordingStart(namespace="shop", connection_fingerprint="fake-connection", jaeger_url="http://jaeger:16686"))
+    source.traces = [recording_trace(start["startedMicros"], child="unknown-api")]
+
+    stopped = management.stop_recording(start["id"])
+
+    assert stopped["coverage"]["status"] == "no_matching_services"
+    assert stopped["coverage"]["tracesFetched"] == 1
+    assert stopped["coverage"]["unmappedServices"] == ["frontend-web", "unknown-api"]
+    assert {"reason": "service_mapping_required", "service": "frontend-web"} in stopped["coverage"]["gaps"]
+    candidate = stopped["candidates"][0]
+    assert candidate["entryService"] is None and candidate["services"] == []
+    assert candidate["unmappedServices"] == ["frontend-web", "unknown-api"]
+    assert candidate["edges"] == []
+
+    mapped = management.stop_recording(start["id"], service_map={"frontend-web": "orders", "unknown-api": "payments"})
+    assert mapped["candidates"][0]["services"] == ["orders", "payments"]
+    assert mapped["coverage"]["status"] == "discovered"
+    assert len(repo.versions("recording", start["id"])) == 5
+
+
+def test_empty_recording_is_no_traces_not_a_successful_query(editor, monkeypatch):
+    source = type("Traces", (), {})()
+    source.list_services = lambda: []
+    monkeypatch.setattr(management.JaegerTraceSource, "from_url", lambda _: source)
+    start = management.start_recording(RecordingStart(namespace="shop", connection_fingerprint="fake-connection", jaeger_url="http://jaeger:16686"))
+    stopped = management.stop_recording(start["id"])
+    assert stopped["coverage"]["status"] == "no_traces"
+    assert stopped["coverage"]["servicesQueried"] == []
+    assert stopped["coverage"]["tracesFetched"] == 0
+
+
+def test_recording_mapping_must_target_a_discovered_service(editor):
+    with pytest.raises(ValueError, match="discovered Kubernetes services"):
+        management.start_recording(RecordingStart(namespace="shop", connection_fingerprint="fake-connection",
+            jaeger_url="http://jaeger:16686", service_map={"frontend-web": "invented"}))

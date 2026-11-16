@@ -206,6 +206,24 @@
         return all.filter((entry) => entry.value.toLowerCase().includes(text));
     }
 
+    // The namespace a blank or empty "default" box should take: the one with the most resolved services
+    // (same rule as Deployment Topology). Returns null when the typed value already names a real
+    // application namespace, or when nothing in the cluster has services yet.
+    function preferredNamespace(summary, typed) {
+        const text = String(typed || "").trim();
+        const rows = summary && Array.isArray(summary.rows) ? summary.rows : [];
+        const withServices = rows.filter((row) => row.serviceCount > 0);
+        if (withServices.length === 0) return null;
+        const exact = rows.find((row) => row.namespace === text);
+        if (exact && exact.serviceCount > 0) return null;
+        if (text && text !== "default") return null;
+        let best = withServices[0];
+        for (const row of withServices) {
+            if (row.serviceCount > best.serviceCount) best = row;
+        }
+        return best.namespace;
+    }
+
     // The next highlighted row for an arrow key: it stops at the ends instead of wrapping, so a held key is predictable.
     function moveActive(current, count, key) {
         if (count <= 0) return -1;
@@ -214,7 +232,7 @@
         return current;
     }
 
-    window.__resilienceNamespaces = { DISCOVERY_URL, REFRESH_MS, summarize, optionLabel, options, statusText, describeFailure, createRefresher, suggestions, moveActive };
+    window.__resilienceNamespaces = { DISCOVERY_URL, REFRESH_MS, summarize, optionLabel, options, statusText, describeFailure, createRefresher, suggestions, preferredNamespace, moveActive };
     if (!window.document || !window.document.addEventListener) return;
 
     // ---- browser wiring: only on a page that has something to fill in; every other page never reads the cluster ----
@@ -351,6 +369,18 @@
             text = snap.failure.message;
         }
         lastSummary = snap.state === "ok" ? snap.summary : null;   // a failed read removes the names at once
+        // First visit: the HTML boxes start as "default". When that namespace has no applications and
+        // another one does, fill the box once so Failure impact / Recommendations open on real workloads.
+        if (lastSummary) {
+            inputs.forEach((input) => {
+                if (input.dataset.nsPreferred === "1") return;
+                const next = preferredNamespace(lastSummary, input.value);
+                if (!next || next === input.value) return;
+                input.dataset.nsPreferred = "1";
+                input.value = next;
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+        }
         combos.forEach((combo) => combo.refresh());
         hints.forEach((hint) => { hint.textContent = text; hint.dataset.kind = kind; });
         if (appsCard) appsCard.hidden = false;

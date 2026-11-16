@@ -249,9 +249,17 @@
     gap: 16px;
     padding: 20px;
     border-bottom: 1px solid var(--we-line);
+    cursor: pointer;
 }
 .we-workflow-row:last-child {
     border-bottom: 0;
+}
+.we-workflow-row:hover {
+    background: color-mix(in srgb, var(--we-blue) 6%, transparent);
+}
+.we-workflow-row:focus-visible {
+    outline: 2px solid var(--we-blue);
+    outline-offset: -2px;
 }
 .we-workflow-thumb {
     flex-shrink: 0;
@@ -328,6 +336,21 @@
     color: var(--we-muted);
     max-width: 45ch;
     margin: 10px 0 0;
+}
+.we-blank--inline {
+    min-height: 0;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    display: block;
+    text-align: left;
+    font-size: 13px;
+    color: var(--we-muted);
+    border: 1px solid var(--we-line);
+    border-radius: 8px;
+    background: var(--we-surface);
+}
+.we-blank--inline[hidden] {
+    display: none;
 }
 .we-muted {
     font-size: 12px;

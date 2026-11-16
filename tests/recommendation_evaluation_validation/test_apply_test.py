@@ -12,6 +12,8 @@ from app.core.database import get_engine
 from app.main import app
 from app.engine.recommendation_evaluation_validation.application import ApplicationRefused
 from app.engine.recommendation_evaluation_validation.application.live_analyser import ResearchAnalyser, ProductionAnalyser
+from app.engine.recommendation_evaluation_validation.approval import ApprovalRepository
+from app.engine.recommendation_evaluation_validation.approval.research import ResearchApprovalService
 from app.engine.recommendation_evaluation_validation.apply_test.measurements import measure_workflows
 from app.engine.recommendation_evaluation_validation.apply_test.repository import ApplyTestRun, now
 from app.engine.recommendation_evaluation_validation.apply_test.service import ApplyTestService, _sampled_pod_usage, _risk_target_met
@@ -22,7 +24,21 @@ from app.integrations.kubernetes.client import ApiFailedError
 from app.integrations.probe.http_fetch import Fetched
 from tests.recommendation_evaluation_validation.test_approval_api import client, override_get_db, sqlite_url  # noqa: F401
 from tests.recommendation_evaluation_validation.test_portfolio_recommendation import two_problem_cluster, declared_file
+from tests.recommendation_evaluation_validation.test_research_approval import ACK
 from tests.support.member4_fake_apply_gateway import FakeApplyGateway
+
+
+def approve_candidate(service, candidate_id, *, namespace="shop", declared=True, note=""):
+    """Persist a trusted research approval for the exact current portfolio candidate. Never invents one at Apply time."""
+    live = build_portfolio_recommendation(namespace, declared=declared)
+    proposal = build_yaml_proposal(live, candidate_id)
+    with Session(service.engine) as db:
+        gate = ResearchApprovalService(ApprovalRepository(db))
+        gate.request_research_approval(
+            candidate_id, "v1", live, acknowledged_by="asesh", acknowledgement=ACK, proposal_yaml=proposal.yaml)
+        gate.approve(
+            candidate_id, "v1", note, decided_by="asesh",
+            evaluate=lambda _: build_portfolio_recommendation(namespace, declared=declared))
 
 
 @pytest.fixture
@@ -48,7 +64,8 @@ def world(use_cluster, tmp_path, monkeypatch, sqlite_url):
     candidate = live.report.selected_recommendation_id
     proposal = build_yaml_proposal(live, candidate)
     selection = dict(candidate_id=candidate, namespace="shop", declared=True, fingerprint=proposal.fingerprint,
-                     yaml_sha256=proposal.sha256, request_key="explicit-click-123")
+                     yaml_sha256=proposal.sha256, request_key="explicit-click-123", applied_by="asesh")
+    approve_candidate(service, candidate)
     return service, gateway, selection
 
 
@@ -97,6 +114,7 @@ def test_multiple_candidates_and_full_reports_survive_reset_and_history_paginati
     alternative = next(c for c in live.report.recommendations
                        if c.id != selection["candidate_id"] and build_yaml_proposal(live, c.id).status == "GENERATED")
     proposal = build_yaml_proposal(live, alternative.id)
+    approve_candidate(service, alternative.id, note="Approving the next ranked feasible candidate for a separate test.")
     second = service.start(**{**selection, "candidate_id": alternative.id, "fingerprint": proposal.fingerprint,
         "yaml_sha256": proposal.sha256, "request_key": "another-candidate-click"}, background=False)
     assert second["status"] == "COMPLETED"
@@ -219,12 +237,15 @@ def test_an_active_apply_test_blocks_a_second_run_and_fault_injection(world):
     assert error.value.code == "RUN_ACTIVE" and not gateway.patches
 
 
-def test_apply_test_http_endpoint_has_no_separate_approval_request_and_enforces_preview_binding(client, world):
+def test_apply_test_http_endpoint_requires_persisted_approval_and_a_named_applier(client, world):
     service, gateway, selection = world
     original = service.start
     service.start = lambda **kw: original(**kw, background=False)
     app.dependency_overrides[get_apply_test_service] = lambda: service
     try:
+        refused = client.post("/api/recommendations/apply-tests", json={**selection, "applied_by": "Explicit Apply action"})
+        assert refused.status_code == 409 and refused.json()["detail"]["code"] == "APPLIER_UNNAMED"
+        assert not gateway.patches
         result = client.post("/api/recommendations/apply-tests", json=selection)
         assert result.status_code == 202, result.text
         assert result.json()["status"] == "COMPLETED" and len(gateway.patches) == 2
@@ -234,6 +255,18 @@ def test_apply_test_http_endpoint_has_no_separate_approval_request_and_enforces_
         assert client.post("/api/recommendations/apply-tests", json={"namespace": "shop"}).status_code == 422
     finally:
         app.dependency_overrides.pop(get_apply_test_service, None)
+
+
+def test_apply_and_test_refuses_without_a_persisted_approval(world):
+    service, gateway, selection = world
+    from app.shared.persistence.models import RecommendationApprovalRecord
+    with Session(service.engine) as db:
+        for record in db.query(RecommendationApprovalRecord).all():
+            db.delete(record)
+        db.commit()
+    with pytest.raises(ApplicationRefused) as error:
+        service.start(**{**selection, "request_key": "unapproved-click"}, background=False)
+    assert error.value.code == "NOT_APPROVED" and not gateway.patches
 
 
 def test_resource_collection_falls_back_to_measured_kubelet_data_without_inventing_zeros():

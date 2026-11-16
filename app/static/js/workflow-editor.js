@@ -550,7 +550,23 @@
                 }),
             );
             menu.append(summary, actions);
-            box.append(thumb(), info, button("Open", open), menu);
+            const openBtn = button("Open", open);
+            openBtn.setAttribute("data-we-open", "true");
+            box.append(thumb(), info, openBtn, menu);
+            // The whole row opens the workflow. The actions menu keeps its own clicks.
+            // At narrow Docker Desktop widths the separate Open button is hidden; the row still works.
+            box.addEventListener("click", (event) => {
+                if (event.target.closest(".we-menu, details, a, [data-we-open]")) return;
+                open();
+            });
+            box.setAttribute("role", "button");
+            box.tabIndex = 0;
+            box.addEventListener("keydown", (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                if (event.target !== box) return;
+                event.preventDefault();
+                open();
+            });
             list.append(box);
         }
         permissions();
@@ -1350,9 +1366,9 @@
             say("This evidence belongs to another application connection.", true);
             return;
         }
-        if (!candidate.services.length) {
+        if (!candidate.services.length || !candidate.entryService) {
             say(
-                "No mapped service calls are available. Export request trace IDs, check ingestion, or add explicit service mappings.",
+                "Map the observed entry and participating services first. No service identity is guessed.",
                 true,
             );
             return;
@@ -1424,6 +1440,7 @@
         q("test-results").replaceChildren();
         q("test-refresh").hidden = !row?.jaegerUrl;
         q("test-details").textContent = row ? JSON.stringify(row, null, 2) : "No evidence imported yet.";
+        if (q("test-empty")) q("test-empty").hidden = !!(row || testDocuments.length);
         if (!row) return;
         for (const candidate of row.candidates) {
             const box = el("div", null, "we-candidate"),
@@ -1593,25 +1610,37 @@
     function showRecording(row) {
         recording = row;
         const active = row?.state === "recording",
-            stopped = row?.state === "stopped";
+            stopped = row?.state === "stopped",
+            coverage = row?.coverage || {},
+            unresolved = (row?.candidates || []).filter((candidate) => !candidate.services.length || !candidate.entryService);
         q("start").hidden = active;
         q("stop").hidden = !active;
         q("refresh-recording").hidden = !stopped;
         q("record-symbol").dataset.recording = String(active);
         q("recording").value = row?.id || "";
+        q("record-map").value = JSON.stringify(row?.serviceMap || {}, null, 2);
         q("start").textContent = stopped ? "Record more activity" : "Start Recording";
         q("record-title").textContent = active
             ? "Recording your application"
             : stopped
-              ? `${row.candidates.length} workflow${row.candidates.length === 1 ? "" : "s"} found`
+              ? `${row.candidates.length} workflow candidate${row.candidates.length === 1 ? "" : "s"} found`
               : "Ready when you are";
         q("record-guidance").textContent = active
             ? "Switch to your application and complete one task. Come back here when you’re done."
             : stopped
-              ? row.candidates.length
-                  ? "Choose a workflow to review its services and calls on the canvas."
-                  : "No matching workflow was found. Check tracing and service identity mapping in the evidence below, or refresh this fixed recording window."
-              : "Open your application, then start recording one task. Your tracing service must already be connected.";
+              ? coverage.status === "no_traces"
+                  ? "Jaeger answered, but no traces matched these services in this window. Stock Bookinfo without OpenTelemetry or a mesh sidecar does not export traces — recording will stay empty until the app is instrumented. Manual workflows still work; nothing is invented."
+                  : coverage.status === "trace_service_unavailable"
+                    ? "Jaeger could not be read. Check the query URL below; your manual workflow is unaffected."
+                    : unresolved.length
+                      ? "Some observed services need an explicit mapping below. Apply mappings and refresh this same window; no names are guessed."
+                      : row.candidates.length
+                        ? "Choose a candidate to review its services and calls on the canvas."
+                        : "Traces arrived, but no request entry points could be identified. Check context propagation and instrumentation."
+              : "Open an application that already sends OpenTelemetry traces to Jaeger, then start recording one task. Recording does not install instrumentation.";
+        q("recording-coverage").textContent = stopped
+            ? `${coverage.tracesFetched || 0} trace${coverage.tracesFetched === 1 ? "" : "s"} · ${(coverage.servicesQueried || []).length} trace services queried${coverage.unmappedServices?.length ? ` · unmapped: ${coverage.unmappedServices.join(", ")}` : ""}`
+            : "";
         for (let i = 1; i <= 3; i++)
             q(`record-step-${i}`).dataset.active = String(i === (active ? 2 : stopped ? 3 : 1));
         q("record-details").textContent = row ? JSON.stringify(row, null, 2) : "No recording selected.";
@@ -1622,17 +1651,19 @@
                 info = el("div");
             info.append(
                 el("strong", candidate.name),
-                el("p", candidate.services.join(", ")),
+                el("p", candidate.services.length ? `Kubernetes services: ${candidate.services.join(", ")}` : "No Kubernetes services mapped yet"),
+                el("p", `${candidate.traceIds?.length || 0} traces · entry: ${candidate.traceEntryService || candidate.entryService || "unknown"}`),
                 el("span", "◉ Observed · roles need review", "we-badge"),
             );
-            box.append(
-                info,
-                button(
-                    "Add to workflow",
-                    () => addCandidate(row, candidate, "recording"),
-                    "we-button we-button--primary",
-                ),
+            if (candidate.unmappedServices?.length)
+                info.append(el("p", `Unmapped trace services: ${candidate.unmappedServices.join(", ")}`));
+            const add = button(
+                "Add to workflow",
+                () => addCandidate(row, candidate, "recording"),
+                "we-button we-button--primary",
             );
+            add.disabled = !candidate.services.length || !candidate.entryService;
+            box.append(info, add);
             list.append(box);
         }
         updateTimer();
@@ -1983,6 +2014,17 @@
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         }),
     );
+    function recordingServiceMap() {
+        let value;
+        try {
+            value = JSON.parse(q("record-map").value || "{}");
+        } catch {
+            throw new Error("Service mappings must be a JSON object of trace name to Kubernetes service name.");
+        }
+        if (!value || Array.isArray(value) || typeof value !== "object" || Object.values(value).some((name) => typeof name !== "string"))
+            throw new Error("Service mappings must be a JSON object of trace name to Kubernetes service name.");
+        return value;
+    }
     on("start", () =>
         run(async () => {
             if (!facts) throw new Error("Select a connected application first.");
@@ -2001,6 +2043,7 @@
                 namespace: facts.namespace,
                 connectionFingerprint: facts.connectionFingerprint,
                 jaegerUrl: q("jaeger").value.trim(),
+                serviceMap: recordingServiceMap(),
             });
             sessions.unshift(row);
             recordingOptions();
@@ -2016,8 +2059,9 @@
                 recording.connectionFingerprint !== facts?.connectionFingerprint
             )
                 throw new Error("Reconnect to the recording’s cluster and namespace first.");
+            const serviceMap = recordingServiceMap();
             q("record-guidance").textContent = "Reading calls from the fixed recording window…";
-            const row = await request(`/recordings/${encodeURIComponent(recording.id)}/stop`, "POST");
+            const row = await request(`/recordings/${encodeURIComponent(recording.id)}/stop`, "POST", { serviceMap });
             sessions = sessions.map((r) => (r.id === row.id ? row : r));
             recordingOptions();
             showRecording(row);

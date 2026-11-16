@@ -64,11 +64,26 @@ class WorkflowEdit(APIModel):
         return self
 
 
-class RecordingStart(APIModel):
+class ServiceMapping(APIModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=APIModel.model_config["alias_generator"])
+    service_map: dict[str, str] = Field(default_factory=dict, max_length=100)
+
+    @model_validator(mode="after")
+    def valid_mappings(self):
+        for trace_name, service_name in self.service_map.items():
+            if not trace_name.strip() or len(trace_name) > 253 or not service_name.strip() or len(service_name) > 253:
+                raise ValueError("Trace-service mappings need non-empty names of at most 253 characters")
+        return self
+
+
+class RecordingStart(ServiceMapping):
     namespace: str = Field(min_length=1, max_length=63)
     connection_fingerprint: str = Field(min_length=1, max_length=200)
     jaeger_url: str = Field(min_length=1, max_length=2048)
+
+
+class RecordingStop(ServiceMapping):
+    pass
 
 
 class WorkflowDecision(APIModel):

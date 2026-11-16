@@ -344,7 +344,6 @@
     }
 
     function renderApprovalState(approval, provenance, message) {
-        if (applyTestPanel && allWorkflows) return renderApplyAction();
         const stateContainer = region.querySelector('[data-role="approval-state-container"]');
         const actionsContainer = region.querySelector('[data-role="approval-actions"]');
         if (!stateContainer || !actionsContainer) return;
@@ -394,7 +393,10 @@
                 stack.append(noted);
             }
             stateContainer.append(stack);
-            if (approval.status === "APPROVED") renderApplication(stateContainer);
+            if (approval.status === "APPROVED") {
+                if (applyTestPanel && allWorkflows) renderApplyTestAction(stateContainer, actionsContainer);
+                else renderApplication(stateContainer);
+            }
 
             if (approval.status === "PENDING_APPROVAL") {
                 const reject = button("Reject", "danger-button", "btn-show-reject", () => showApprovalModal("reject"));
@@ -413,20 +415,32 @@
         }
     }
 
-    function renderApplyAction() {
-        const state = region.querySelector('[data-role="approval-state-container"]');
-        const actions = region.querySelector('[data-role="approval-actions"]');
-        if (!state || !actions) return;
-        state.replaceChildren(note("Apply starts this selected change and its tests. No separate approval is required."));
+    function renderApplyTestAction(stateContainer, actionsContainer) {
+        stateContainer.append(note("This approved change can be applied and tested. Enter your name; Apply records who started it and never invents approval."));
         const selected = lastView?.detail?.candidates?.find((c) => c.id === currentRecommendation?.id);
-        const eligible = isDeclared() ? selected?.researchApproval?.available : selected?.approval?.ready;
         const run = applyTestPanel.state();
         if (run.error || run.busy) {
             const feedback = note(run.error || (run.resetting ? "Restoring the previous configuration before another test. Your saved results are kept." : "Applying and testing. Follow the current operation in the run dashboard."));
             feedback.setAttribute("role", run.error ? "alert" : "status");
-            state.append(feedback);
+            stateContainer.append(feedback);
         }
-        const apply = button(run.resetting ? "Restoring…" : run.busy ? "Running…" : run.error ? "Retry Apply" : "Apply", "primary-button", "btn-apply-and-test", async () => {
+        const who = document.createElement("input");
+        who.type = "text";
+        who.className = "form-input";
+        who.id = "apply-test-by";
+        who.setAttribute("aria-label", "Your name");
+        who.placeholder = "Your name";
+        who.value = lastApplierName;
+        who.disabled = run.busy || run.resetting;
+        who.addEventListener("input", () => { lastApplierName = who.value; });
+        stateContainer.append(who);
+        const apply = button(run.resetting ? "Restoring…" : run.busy ? "Running…" : run.error ? "Retry Apply" : "Apply and test", "primary-button", "btn-apply-and-test", async () => {
+            const by = (who.value || "").trim();
+            if (!by) {
+                stateContainer.append(note("Enter your name: applying a change is done by a named person."));
+                return;
+            }
+            lastApplierName = by;
             const proposal = selected?.yamlProposal;
             if (!proposal?.fingerprint || !proposal?.sha256) return;
             let saved;
@@ -437,15 +451,20 @@
                 try { window.sessionStorage.setItem("resilience.apply-test.request", JSON.stringify(saved)); } catch (_e) { /* Optional storage. */ }
             }
             await applyTestPanel.apply({ candidateId: selected.id, namespace: lastView.namespace, declared: isDeclared(),
-                fingerprint: proposal.fingerprint, yamlSha256: proposal.sha256, requestKey: saved.key });
+                fingerprint: proposal.fingerprint, yamlSha256: proposal.sha256, requestKey: saved.key, appliedBy: by });
         });
-        apply.disabled = !eligible || !selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256 || run.busy || !!run.run?.canReset;
-        if (eligible && (!selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256)) state.append(note("The selected change is missing its verified proposal. Refresh recommendations before Apply."));
-        if (run.run?.canReset) state.append(note("The previous test is still applied. Reset it here to restore the baseline, then review and Apply the next candidate. All reports are kept."));
-        if (run.run?.clusterMatch === "other") state.append(note(`An earlier test is still applied on another cluster${run.run.changeCluster?.context ? ` (${run.run.changeCluster.context})` : ""}. It does not affect this one; reconnect that cluster to reset it.`));
-        if (!eligible) state.append(note(selected?.approval?.reason || "This candidate cannot be applied from the current evidence."));
-        actions.replaceChildren(apply);
-        if (run.run?.canReset && !run.busy) actions.append(button("Reset previous test", "secondary-button", "btn-reset-previous-test", () => applyTestPanel.reset()));
+        apply.disabled = !selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256 || run.busy || !!run.run?.canReset;
+        if (!selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256) {
+            stateContainer.append(note("The selected change is missing its verified proposal. Refresh recommendations before Apply."));
+        }
+        if (run.run?.canReset) stateContainer.append(note("The previous test is still applied. Reset it here to restore the baseline, then review and Apply the next candidate. All reports are kept."));
+        if (run.run?.clusterMatch === "other") {
+            stateContainer.append(note(`An earlier test is still applied on another cluster${run.run.changeCluster?.context ? ` (${run.run.changeCluster.context})` : ""}. It does not affect this one; reconnect that cluster to reset it.`));
+        }
+        actionsContainer.replaceChildren(apply);
+        if (run.run?.canReset && !run.busy) {
+            actionsContainer.append(button("Reset previous test", "secondary-button", "btn-reset-previous-test", () => applyTestPanel.reset()));
+        }
     }
 
     // The research tier's request form, for a declared workflow only. The server decides whether the candidate may be put forward at all
@@ -1147,7 +1166,6 @@
         refreshProofNote();
 
         if (currentRecommendation) {
-            if (applyTestPanel) { renderApplyAction(); return; }
             const requestedFor = currentRecommendation.id;
             loadApprovalState().then((approval) => {
                 if (!currentRecommendation || currentRecommendation.id !== requestedFor) return;   // a newer view replaced it
@@ -1194,7 +1212,7 @@
         if (!declared) return;
         // The engine's own statement, kept whole for the research view and as a tooltip; the plain view gets one sentence.
         const full = allWorkflows && applyTestPanel
-            ? "The workflow definitions are declared rather than observed from traces. Apply starts the selected research change and its checks; results depend on those definitions. No separate approval form is required."
+            ? "The workflow definitions are declared rather than observed from traces. Request research approval first; Apply and test then records a named person and runs the checks. Results depend on those definitions."
             : v.detail && v.detail.declared && v.detail.declared.notApprovableBecause;
         declaredNote.setAttribute("title", full || "");
         const short = document.createElement("span");
@@ -1418,7 +1436,7 @@
             onChange: () => {
                 const run = applyTestPanel?.state().run;
                 if (operationRoot) operationRoot.setAttribute("data-managed-run", String(!!run));
-                if (currentRecommendation) renderApplyAction();
+                if (currentRecommendation) loadApprovalState();
                 updateCandidateResults();
                 const stamp = run ? `${run.runId}:${run.status}` : "";
                 if (stamp !== historyStamp) { historyStamp = stamp; testHistoryPanel?.refresh(); }

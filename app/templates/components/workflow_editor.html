@@ -9,7 +9,7 @@
     <section data-we-panel="manager" aria-labelledby="we-manager-title">
         <header class="we-manager-heading">
             <div><h2 id="we-manager-title">Workflow Manager</h2><p>Design how your services work together.</p></div>
-            <div class="we-actions"><button type="button" class="we-button we-button--primary" data-we="new">＋ Create Manually</button><button type="button" class="we-button" data-we="discover">Record Application Activity</button><button type="button" class="we-button" data-we="tests">Discover from Tests</button></div>
+            <div class="we-actions"><button type="button" class="we-button we-button--primary" data-we="new">＋ Create Manually</button><button type="button" class="we-button" data-we="discover">Discover Automatically</button><button type="button" class="we-button" data-we="tests">Discover from Tests</button></div>
         </header>
         <div class="we-list-heading"><h3>Your workflows <span data-we="workflow-count"></span></h3><details class="we-menu"><summary>More tools</summary><div><button type="button" data-we="show-all">Show workflows from all namespaces</button><button type="button" data-we="research">Advanced / Research</button></div></details></div>
         <div data-we="workflow-list" class="we-workflow-list" aria-live="polite"></div>
@@ -18,18 +18,19 @@
 
     <section data-we-panel="discovery" aria-labelledby="we-discovery-title" hidden>
         <button type="button" class="we-back" data-we="discovery-back">‹ Back to workflow</button>
-        <header class="we-heading"><h2 id="we-discovery-title">Record application activity</h2><p>Use one application task, then add its observed calls to your current workflow.</p></header>
+        <header class="we-heading"><h2 id="we-discovery-title">Discover workflows automatically</h2><p>Record application activity, review the observed request paths, then add one to a workflow. No existing workflow is needed.</p></header>
         <ol class="we-record-steps" aria-label="Discovery progress"><li data-we="record-step-1">Start recording</li><li data-we="record-step-2">Use your application</li><li data-we="record-step-3">Review what was found</li></ol>
         <div class="we-record-stage">
             <span class="we-record-symbol" data-we="record-symbol" aria-hidden="true">◎</span>
-            <h3 data-we="record-title">Ready when you are</h3><p data-we="record-guidance">Use an application that already sends traces to your tracing service.</p>
+            <h3 data-we="record-title">Ready when you are</h3><p data-we="record-guidance">Use an application that already sends OpenTelemetry traces to Jaeger. Nothing is installed or changed in your cluster.</p>
             <button type="button" class="we-button we-button--primary" data-we="start">Start Recording</button>
-            <button type="button" class="we-button we-button--primary" data-we="stop" hidden>Stop Recording</button>
+            <button type="button" class="we-button we-button--primary" data-we="stop" hidden>Stop &amp; Discover</button>
             <p class="we-muted" data-we="record-time"></p>
         </div>
+        <p class="we-muted" data-we="recording-coverage" role="status"></p>
         <div data-we="candidates" class="we-candidates"></div>
-        <p class="we-evidence-note">Recorded calls are suggestions to review. Recording can include other activity in the same time window; it does not prove a dependency is required.</p>
-        <details class="we-disclosure" data-we="record-settings"><summary>Recording settings and evidence</summary><div class="we-settings-grid"><label>Tracing query URL<input data-we="jaeger" type="url" placeholder="Your configured Jaeger query URL"></label><label>Saved recording<select data-we="recording"><option value="">Choose a recording</option></select></label></div><button type="button" class="we-button" data-we="refresh-recording" hidden>Refresh this recording’s evidence</button><pre data-we="record-details"></pre><button type="button" class="we-text-button" data-we="record-research">Other tracing sources and research tools</button></details>
+        <p class="we-evidence-note">Recorded calls are suggestions to review. Concurrent operations remain separate candidates; activity in the same operation may still be mixed. A trace does not prove that a dependency is required.</p>
+        <details class="we-disclosure" data-we="record-settings"><summary>Tracing, service mappings and evidence</summary><div class="we-settings-grid"><label>Jaeger query URL<input data-we="jaeger" type="url" placeholder="Your configured Jaeger query URL"></label><label>Saved recording<select data-we="recording"><option value="">Choose a recording</option></select></label></div><label>Trace service → Kubernetes service mapping<textarea data-we="record-map" rows="3" placeholder='{"trace-service-name":"kubernetes-service-name"}'></textarea><small>Use this only when names differ. Unmapped trace services stay visible and are never guessed.</small></label><button type="button" class="we-button" data-we="refresh-recording" hidden>Apply mappings &amp; refresh evidence</button><details class="we-disclosure"><summary>Evidence details</summary><pre data-we="record-details"></pre></details><button type="button" class="we-text-button" data-we="record-research">Other tracing sources and research tools</button></details>
     </section>
 
     <section data-we-panel="editor" aria-label="Visual workflow editor" hidden>
@@ -62,6 +63,7 @@
     <section data-we-panel="tests" aria-label="Add application test evidence" hidden>
         <button type="button" class="we-back" data-we="tests-back">‹ Back to workflow</button>
         <header class="we-heading"><h2>Add test evidence</h2><p>Import test results with trace identities, or run an existing HTTP workflow probe. Your current workflow stays on the canvas.</p></header>
+        <p class="we-blank we-blank--inline" data-we="test-empty" role="status">No test evidence yet. Import a JSON export that includes request trace IDs, or keep using Create Manually and Discover Automatically.</p>
         <div class="we-test-upload"><label class="we-button" for="we-test-file">Choose JSON file<input id="we-test-file" type="file" accept=".json,application/json" data-we="test-file"></label><span class="we-muted" data-we="test-file-name">No file selected</span><div data-we="test-preview"></div><button type="button" class="we-button we-button--primary" data-we="test-submit" disabled>Import test evidence</button></div>
         <div data-we="test-results" class="we-candidates" aria-live="polite"></div>
         <p class="we-evidence-note">Only calls supported by the selected test’s trace IDs are added. A passing test does not prove dependencies are required.</p>

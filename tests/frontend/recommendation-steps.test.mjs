@@ -465,6 +465,8 @@ test("only one step is drawn at a time, and the declared steps are the template'
     assert.match(css, /\.rec-flow \[data-step-panel\]\s*\{\s*display:\s*none/);
     for (const n of [1, 2, 3, 4, 5]) assert.ok(css.includes(`.rec-flow[data-step="${n}"] [data-step-panel="${n}"]`), `step ${n}`);
     for (const n of [1, 2, 3, 4, 5]) assert.ok(templateHtml.includes(`data-step-panel="${n}"`), `a panel for step ${n}`);
+    assert.ok(!/data-all-workflows="true"\] \[data-step-panel="1"\],\s*\n\.rec-flow\[data-all-workflows="true"\] \[data-step-panel="3"\]/.test(css),
+        "all-workflows must not force several step panels on screen together");
 });
 
 test("the header and the steps carry one short sentence each, not paragraphs", () => {

@@ -93,6 +93,7 @@ class ApplyTestRequest(APIModel):
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     yaml_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     request_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    applied_by: str = Field(min_length=2, max_length=100)
 
 
 class ResetRequest(APIModel):
@@ -327,7 +328,7 @@ def get_apply_test_service(db: Session = Depends(get_db),
 def start_apply_test(request: ApplyTestRequest,
                      _no_validation_run: None = Depends(require_no_validation_run),
                      service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
-    """The explicit Apply action is the consent. It starts a background run; there is no separate approval form."""
+    """Start Apply and test only after a persisted approval for this exact recommendation; the named applier is recorded."""
     return service.start(**request.model_dump())
 
 

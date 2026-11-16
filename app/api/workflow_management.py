@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.engine.workflow_dependency_modeling import service
-from app.shared.schemas.workflow_management import WorkflowEdit, RecordingStart, WorkflowDecision
+from app.shared.schemas.workflow_management import WorkflowEdit, RecordingStart, RecordingStop, WorkflowDecision
 
 from app.shared.schemas.workflow_test_evidence import TestEvidenceImport, HttpTestRun
 
@@ -79,8 +79,8 @@ def recording(identity: str):
 
 
 @router.post("/recordings/{identity}/stop")
-def stop_recording(identity: str):
-    return _call(service.stop_workflow_recording, identity)
+def stop_recording(identity: str, request: RecordingStop | None = None):
+    return _call(service.stop_workflow_recording, identity, service_map=request.service_map if request else None)
 
 
 @router.get("/test-evidence")

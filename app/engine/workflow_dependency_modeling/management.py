@@ -268,30 +268,42 @@ def delete_workflow(identity, expected, actor, repo=None):
                                                         "reviewed": False, "graph": None})
 
 
+def _validated_service_map(service_map, facts):
+    present = {service["name"] for service in facts["services"]}
+    if any(not source.strip() or target not in present for source, target in service_map.items()):
+        raise ValueError("Explicit trace-service mappings must target discovered Kubernetes services")
+    return dict(service_map)
+
+
 def start_recording(request: RecordingStart, repo=None):
     facts = _bound(request.namespace, request.connection_fingerprint)
+    service_map = _validated_service_map(request.service_map, facts)
     endpoint = approved_jaeger_url(request.jaeger_url)
     source = JaegerTraceSource.from_url(endpoint)
     try:
         source.list_services()  # refuse explicitly if tracing is unavailable; manual editing remains independent
     except ConnectionError:
-        raise refuse("WORKFLOW_TRACE_UNAVAILABLE", "The trace service cannot be read. Manual workflows still work.", 503) from None
+        raise refuse("WORKFLOW_TRACE_UNAVAILABLE", "The trace service cannot be read. Manual workflows still work. Check that your application already sends OpenTelemetry traces to Jaeger; recording does not instrument or change workloads.", 503) from None
     return (repo or repository()).append("recording", uuid4().hex, 0, {
         "namespace": request.namespace, "connectionFingerprint": request.connection_fingerprint,
         "jaegerUrl": endpoint, "startedMicros": int(datetime.now(timezone.utc).timestamp() * 1_000_000),
-        "endedMicros": None, "state": "recording", "candidates": [],
+        "endedMicros": None, "state": "recording", "candidates": [], "serviceMap": service_map,
         "servicesAtStart": [service["name"] for service in facts["services"]],
-        "correlation": "Time window and matching service names only. Concurrent traffic may be included; the session ID is not injected into application requests.",
+        "correlation": "Fixed time window, trace identity, root service and operation. Exact names or explicit mappings identify Kubernetes services. Concurrent operations stay separate candidates; unrelated requests using the same operation cannot be distinguished automatically.",
         "limits": LIMITS})
 
 
-def stop_recording(identity, repo=None):
+def stop_recording(identity, repo=None, service_map=None):
     repo = repo or repository()
     record = repo.latest("recording", identity)
-    _bound(record["namespace"], record["connectionFingerprint"])
-    if record["state"] == "recording":
+    facts = _bound(record["namespace"], record["connectionFingerprint"])
+    if service_map is not None:
+        service_map = _validated_service_map(service_map, facts)
+    changed_mapping = service_map is not None and service_map != record.get("serviceMap", {})
+    if record["state"] == "recording" or changed_mapping:
         record = repo.append("recording", identity, record["version"], {
-            **record, "state": "stopped", "endedMicros": int(datetime.now(timezone.utc).timestamp() * 1_000_000)})
+            **record, "state": "stopped", "serviceMap": service_map if service_map is not None else record.get("serviceMap", {}),
+            "endedMicros": record["endedMicros"] or int(datetime.now(timezone.utc).timestamp() * 1_000_000)})
     # Re-collect on an explicit Stop/refresh only, preserving every earlier evidence revision.
     source = JaegerTraceSource.from_url(approved_jaeger_url(record["jaegerUrl"]))
     traces, gaps = {}, []
@@ -300,9 +312,15 @@ def stop_recording(identity, repo=None):
     except ConnectionError:
         recorded = []
         gaps.append({"reason": "trace_service_unavailable"})
-    relevant = sorted(set(recorded) & set(record["servicesAtStart"]))
+    excluded = {"jaeger-all-in-one", "jaeger-query", "jaeger"}
+    available = sorted({name for name in recorded if name and name.lower() not in excluded})
+    known = set(record["servicesAtStart"])
+    mappings = record.get("serviceMap", {})
+    # Exact and explicitly mapped names come first, but unfamiliar names are queried too.
+    relevant = sorted(available, key=lambda name: (name not in known and name not in mappings, name))
+    queried = relevant[:12]
     duration = max(1, math.ceil((record["endedMicros"] - record["startedMicros"]) / 1_000_000))
-    for service in relevant[:12]:
+    for service in queried:
         try:
             batch = read_trace_window(source, service, f"{duration}s", page_size=100,
                                       max_queries=8, now_us=record["endedMicros"])
@@ -315,27 +333,57 @@ def stop_recording(identity, repo=None):
             gaps.append({"service": service, "reason": "query_incomplete"})
     gaps.extend({"service": service, "reason": "service_query_limit"} for service in relevant[12:])
     candidates = []
+    all_unmapped = set()
+
+    def logical(name):
+        mapped = mappings.get(name, name)
+        return mapped if mapped in known else None
+
     for summary in discover_root_workflows(list(traces.values()), route_patterns=()):
         selected = select_workflow_traces(list(traces.values()), summary.operation_name, summary.root_service, route_patterns=())
         interactions = extract_interactions(parse_spans(selected))
+        observed = {mapped for name in summary.participating_services if (mapped := logical(name))}
+        unmapped = {name for name in summary.participating_services if logical(name) is None}
+        all_unmapped.update(unmapped)
         edges = {}
         for interaction in interactions:
             for edge in interaction.edges:
-                evidence = edges.setdefault((edge.source, edge.target), [])
-                evidence.extend({"recordingId": identity, "traceId": interaction.trace_id, **item}
-                                for item in interaction.edge_evidence.get((edge.source, edge.target), []))
+                source_name, target_name = logical(edge.source), logical(edge.target)
+                if not source_name or not target_name or source_name == target_name:
+                    continue
+                evidence = edges.setdefault((source_name, target_name), [])
+                evidence.extend({"recordingId": identity, "traceId": interaction.trace_id,
+                                 "traceSourceService": edge.source, "traceTargetService": edge.target,
+                                 "identityBasis": "explicit_mapping" if edge.source in mappings or edge.target in mappings else "exact_name",
+                                 **item} for item in interaction.edge_evidence.get((edge.source, edge.target), []))
         quality = validate_trace_quality(selected)
-        candidates.append({"name": summary.operation_name, "entryService": summary.root_service,
-            "services": summary.participating_services, "traceIds": sorted({item.trace_id for item in interactions}),
+        candidates.append({"name": summary.operation_name, "entryService": logical(summary.root_service),
+            "traceEntryService": summary.root_service, "services": sorted(observed), "unmappedServices": sorted(unmapped),
+            "traceIds": sorted({trace["traceID"] for trace in selected if trace.get("traceID")}),
             "traceQuality": {"valid": quality.valid_count, "partial": quality.partial_count, "invalid": quality.invalid_count},
+            "coverage": {"traces": len(selected), "mappedServices": len(observed), "unmappedServices": len(unmapped)},
             "edges": [{"source": key[0], "target": key[1], "dependency": "Unknown", "evidence": evidence}
                       for key, evidence in sorted(edges.items())]})
     for candidate in candidates:
         candidate["candidateId"] = candidate_identity(candidate)
+    gaps.extend({"service": service, "reason": "service_mapping_required"} for service in sorted(all_unmapped))
+    if any(reason.get("reason") == "trace_service_unavailable" for reason in gaps):
+        status = "trace_service_unavailable"
+    elif not traces:
+        status = "no_traces"
+    elif not candidates:
+        status = "no_candidates"
+    elif not any(candidate["services"] for candidate in candidates):
+        status = "no_matching_services"
+    elif gaps or len(queried) < len(relevant):
+        status = "partial"
+    else:
+        status = "discovered"
     return repo.append("recording", identity, record["version"], {**record, "candidates": candidates,
-        "coverage": {"gaps": gaps, "servicesQueried": relevant[:12], "tracesFetched": len(traces),
-                     "status": "partial" if gaps else "queried",
-                     "limits": "12 matching logical services, 8 queries per service, 100 traces per query. Sampling, ingestion delay and name/namespace ambiguity may hide or misattribute traces."}})
+        "coverage": {"gaps": gaps, "servicesRecorded": available, "servicesQueried": queried,
+                     "servicesSkipped": relevant[12:], "unmappedServices": sorted(all_unmapped), "tracesFetched": len(traces),
+                     "status": status,
+                     "limits": "12 trace services (exact and explicitly mapped names first), 8 queries per service, 100 traces per query. Sampling, ingestion delay, concurrent traffic and name/namespace ambiguity may hide or misattribute traces."}})
 
 
 def reviewed_workflows(repo=None):

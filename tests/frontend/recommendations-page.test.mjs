@@ -738,7 +738,12 @@ const captionOf = (env, number) => text(env.element('[data-role="rec-stepper"]')
 const READY_ROUTES = (extra = {}) => ({ [DETAIL]: { status: 200, body: { ...detailOf([cand()], "rec-live"), baselineImpact: IMPACT } },
     "GET /api/recommendations/rec-live/approval": { status: 404, body: {} }, [PROOF]: { status: 200, body: { state: "NOT_RUN" } }, ...extra });
 
-test("without a workflow dropdown a candidate goes straight to Apply and tests with no approval form", async () => {
+const approvedApply = (id, over = {}) => ({
+    status: "APPROVED", recommendationId: id, decidedBy: "asesh", decidedAt: "2026-10-24T10:00:00Z",
+    requestedBy: "asesh", requestedAt: "2026-10-24T09:00:00Z", proposalVersion: "v1", ...over,
+});
+
+test("without a workflow dropdown Apply and test still needs a persisted approval and a named applier", async () => {
     const pair = cand({ id: "pair", type: "COMBINATION", service: "db+cache" });
     const other = cand({ id: "other", service: "cache", selected: false, score: 0.8,
         yamlProposal: { status: "GENERATED", fingerprint: "a".repeat(64), sha256: "b".repeat(64) } });
@@ -746,7 +751,7 @@ test("without a workflow dropdown a candidate goes straight to Apply and tests w
     const env = await openPage({
         [aggregate]: { status: 200, body: detailOf([pair, other], "pair") },
         "GET /api/recommendations/pair/approval": { status: 404, body: {} },
-        "GET /api/recommendations/other/approval": { status: 404, body: {} },
+        "GET /api/recommendations/other/approval": { status: 200, body: approvedApply("other") },
         "POST /api/recommendations/apply-tests": {
             status: 202, body: { runId: "run-1", status: "RUNNING", events: [] } },
     }, undefined, true);
@@ -758,13 +763,27 @@ test("without a workflow dropdown a candidate goes straight to Apply and tests w
     await settle();
     assert.ok(text(env.element('[data-role="rec-selected"]')).includes("cache"));
     assert.ok(!calls_include(env, "workflow_id=checkout"));
-    assert.equal(byId(env, "btn-request-approval"), undefined);
-    assert.equal(byId(env, "research-ack-by"), undefined);
+    assert.ok(byId(env, "btn-apply-and-test"));
+    assert.ok(byId(env, "apply-test-by"));
+    byId(env, "apply-test-by").value = "asesh";
     await byId(env, "btn-apply-and-test").listeners.click();
     assert.equal(posts(env).length, 1);
     assert.equal(posts(env)[0][1], "/api/recommendations/apply-tests");
     assert.equal(posts(env)[0][2].candidateId, "other");
-    assert.ok(!calls_include(env, "/approval"));
+    assert.equal(posts(env)[0][2].appliedBy, "asesh");
+    assert.ok(calls_include(env, "/approval"));
+});
+
+test("missing approval blocks Apply and test instead of manufacturing consent", async () => {
+    const selected = cand({ yamlProposal: { fingerprint: "a".repeat(64), sha256: "b".repeat(64) } });
+    const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
+    const env = await openPage({
+        [aggregate]: { status: 200, body: detailOf([selected], selected.id) },
+        [`GET /api/recommendations/${selected.id}/approval`]: { status: 404, body: {} },
+    }, undefined, true);
+    assert.ok(byId(env, "btn-request-approval"));
+    assert.equal(byId(env, "btn-apply-and-test"), undefined);
+    assert.equal(posts(env).length, 0);
 });
 
 test("Apply start errors stay beside the button instead of disappearing above the selection", async () => {
@@ -772,9 +791,12 @@ test("Apply start errors stay beside the button instead of disappearing above th
     const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
     const env = await openPage({
         [aggregate]: { status: 200, body: detailOf([selected], selected.id) },
+        [`GET /api/recommendations/${selected.id}/approval`]: { status: 200, body: approvedApply(selected.id) },
         "POST /api/recommendations/apply-tests": { status: 403, body: { detail: { message: "Cluster writes are disabled" } } },
     }, undefined, true);
+    byId(env, "apply-test-by").value = "asesh";
     await byId(env, "btn-apply-and-test").listeners.click();
+    await settle();
     assert.match(text(env.element('[data-role="approval-state-container"]')), /Cluster writes are disabled/);
     assert.equal(byId(env, "btn-apply-and-test").textContent, "Retry Apply");
 });
@@ -782,11 +804,15 @@ test("Apply start errors stay beside the button instead of disappearing above th
 test("the right sidebar selects a candidate without applying it", async () => {
     const aggregate = "GET /api/recommendations/live/detail?workflow_id=all-workflows&namespace=shop&all_workflows=true";
     const env = await openPage({ [aggregate]: { status: 200, body: detailOf([
-        cand({ id: "first" }), cand({ id: "other", service: "cache", selected: false, score: 0.8 })], "first") } }, undefined, true);
+        cand({ id: "first" }), cand({ id: "other", service: "cache", selected: false, score: 0.8 })], "first") },
+        "GET /api/recommendations/first/approval": { status: 404, body: {} },
+        "GET /api/recommendations/other/approval": { status: 404, body: {} },
+    }, undefined, true);
     const sidebar = env.element('[data-role="rec-results-sidebar"]');
     const choose = allNodes(sidebar).find((n) => n.textContent === "Select candidate");
     assert.ok(choose);
     choose.listeners.click();
+    await settle();
     assert.match(text(env.element('[data-role="rec-selected"]')), /cache/);
     assert.equal(posts(env).length, 0);
 });
@@ -800,6 +826,8 @@ test("the blocked Apply control offers an explicit Reset and explains check scop
     const other = cand({ id: "other", service: "cache", selected: false, score: 0.8, yamlProposal: candidate.yamlProposal });
     const env = await openPage({ [aggregate]: { status: 200, body: detailOf([candidate, other], candidate.id) },
         "GET /api/recommendations/context?namespace=shop": { status: 200, body: contextOf() },
+        [`GET /api/recommendations/${candidate.id}/approval`]: { status: 200, body: approvedApply(candidate.id) },
+        "GET /api/recommendations/other/approval": { status: 200, body: approvedApply("other") },
         "GET /api/recommendations/apply-tests/current": () => ({ status: 200, body: { run: previous() } }),
         "GET /api/recommendations/apply-tests/previous-run": () => ({ status: 200, body: previous() }),
         "GET /api/recommendations/previous/application": { status: 200, body: {} },
@@ -807,6 +835,7 @@ test("the blocked Apply control offers an explicit Reset and explains check scop
     }, undefined, true);
     assert.equal(env.element('[data-role="rec-validation-callout"]').attributes["data-state"], "information");
     allNodes(env.element('[data-role="rec-candidate-list"]')).find((node) => node.attributes?.["data-select-candidate"] === "other").listeners.click();
+    await settle();
     assert.equal(byId(env, "btn-apply-and-test").disabled, true);
     assert.equal(posts(env).length, 0, "no restoration is automatic");
     await byId(env, "btn-reset-previous-test").listeners.click();
@@ -832,7 +861,8 @@ test("a late approval response for the previous candidate cannot replace the cur
     release({ status: "APPROVED", recommendationId: "a", decidedBy: "old-person" });
     await settle();
     assert.ok(!text(env.element('[data-role="approval-state-container"]')).includes("old-person"));
-    assert.ok(byId(env, "btn-apply-and-test"));
+    assert.ok(byId(env, "btn-request-approval"), "the newly selected candidate still needs its own approval");
+    assert.equal(byId(env, "btn-apply-and-test"), undefined);
 });
 
 test("returning to Docker with the same cluster preserves the open step and sends no writes", async () => {

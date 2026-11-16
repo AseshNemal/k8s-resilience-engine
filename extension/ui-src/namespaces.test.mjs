@@ -309,6 +309,21 @@ test("suggestions list every namespace unless the box holds text that is not yet
     assert.deepEqual(plain(N.suggestions({ rows: [] }, "")), []);
 });
 
+test("preferredNamespace fills blank or empty default when another namespace has applications", () => {
+    const rows = [
+        { namespace: "default", serviceCount: 0, incomplete: false },
+        { namespace: "bookinfo", serviceCount: 4, incomplete: false },
+        { namespace: "shop", serviceCount: 1, incomplete: false },
+    ];
+    assert.equal(N.preferredNamespace({ rows }, "default"), "bookinfo");
+    assert.equal(N.preferredNamespace({ rows }, ""), "bookinfo");
+    assert.equal(N.preferredNamespace({ rows }, "bookinfo"), null);           // already a real application ns
+    assert.equal(N.preferredNamespace({ rows }, "shop"), null);
+    assert.equal(N.preferredNamespace({ rows }, "custom"), null);             // user typed something else
+    assert.equal(N.preferredNamespace({ rows: [{ namespace: "default", serviceCount: 0 }] }, "default"), null);
+    assert.equal(N.preferredNamespace({ rows: [] }, "default"), null);
+});
+
 test("moveActive stops at the ends and starts from the right end", () => {
     const m = N.moveActive;
     assert.equal(m(-1, 3, "ArrowDown"), 0);

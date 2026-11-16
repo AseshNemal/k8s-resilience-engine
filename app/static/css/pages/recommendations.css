@@ -130,7 +130,12 @@
 /* Hidden horizontal overflow creates an unsized body scroll container and breaks sticky children. */
 html:has(.rec-layout), body:has(.rec-layout) { overflow-x: clip; overflow-y: visible; }
 .rec-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }
+.rec-layout:has(> .rec-flow[data-view="simple"]) { grid-template-columns: minmax(0, 1fr); }
+.rec-layout:has(> .rec-flow[data-view="simple"]) > .rec-results-sidebar { display: none; }
 .rec-layout > .rec-flow { min-width: 0; width: 100%; max-width: none; }
+/* Simple view: one step at a time — hide the research/history strips that sit outside the step panels. */
+body:has(.rec-flow[data-view="simple"]) .rec-workflows,
+body:has(.rec-flow[data-view="simple"]) .test-history { display: none !important; }
 .rec-results-sidebar { position: sticky; top: calc(var(--topbar-height, 64px) + 16px); padding: 18px; max-height: calc(100vh - var(--topbar-height, 64px) - 32px); overflow-y: auto; min-width: 0; }
 .rec-results-sidebar h3 { margin: 0 0 8px; font-size: 17px; }
 .rec-results-sidebar__hint, .rec-result-item__meta { font-size: 12px; color: var(--color-text-muted); line-height: 1.5; overflow-wrap: anywhere; }
@@ -742,18 +747,10 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .rec-chosen-note { margin: var(--space-sm) 0 0; }
 @media (max-width: 640px) { .rec-portfolio__label { flex-basis: 100%; } }
 
-/* The application flow keeps selection, the reason and approval together. */
-.rec-flow[data-all-workflows="true"] [data-step-panel="1"],
-.rec-flow[data-all-workflows="true"] [data-step-panel="3"],
-.rec-flow[data-all-workflows="true"] [data-step-panel="5"],
-.rec-flow[data-all-workflows="true"][data-ready="true"] .rec-operation:not([hidden]) { display: block; }
-.rec-flow[data-all-workflows="true"] .rec-nav,
-.rec-flow[data-all-workflows="true"] .rec-case > button,
-.rec-flow[data-all-workflows="true"] .rec-panel__foot [data-go],
-.rec-flow[data-all-workflows="true"] [data-role="rec-validation-go"],
+/* All-workflows still shows one step at a time; fault-injection proof (step 4) stays unavailable for the portfolio path. */
 .rec-flow[data-all-workflows="true"] [data-step-panel="4"],
-.rec-flow[data-all-workflows="true"][data-view="simple"] [data-step-panel="2"] { display: none; }
-.rec-flow[data-all-workflows="true"][data-view="research"] [data-step-panel="2"] { display: block; }
+.rec-flow[data-all-workflows="true"] [data-role="rec-validation-go"] { display: none !important; }
+.rec-flow[data-all-workflows="true"][data-ready="true"][data-step="5"] .rec-operation:not([hidden]) { display: block; }
 .apply-test { scroll-margin-top: 1rem; }
 .apply-test[data-shows="other"] { display: none; }
 .rec-candidate-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
