@@ -27,4 +27,4 @@ mkdir -p "$SOCKET_DIR"
 prepare "$SOCKET_DIR"
 
 exec setpriv --reuid=10001 --regid=10001 --init-groups -- \
-    sh -c 'umask 077 && rm -f "$1" && alembic upgrade head && exec uvicorn extension.asgi:application --uds "$1"' sh "$SOCKET"
+    sh -c 'umask 077 && exec python -m extension.runtime'

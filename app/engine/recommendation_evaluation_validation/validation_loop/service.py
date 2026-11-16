@@ -41,6 +41,7 @@ from app.engine.recommendation_evaluation_validation.validation_loop.planning im
     disruption_for,
     plan_digest,
     select_candidates,
+    workflow_evidence,
 )
 from app.engine.recommendation_evaluation_validation.validation_loop.repository import LoopRepository
 from app.engine.recommendation_evaluation_validation.validation_loop.view import build_view
@@ -139,10 +140,13 @@ class ValidationLoopService:
         parts = digest_parts(identity=identity, namespace=request.namespace, workflow_id=request.workflow_id, mode_plan=mode_plan,
                              candidates=candidates, probe=request.probe, disruption=disruption,
                              critical_namespaces=self._settings.critical_namespaces)
+        evidence = workflow_evidence(loaded.workflow, loaded.live.evidence)
+        parts["workflowEvidence"] = evidence
         plan = LoopPlan(mode_plan, identity, request.namespace, request.workflow_id, loaded.workflow_basis, request.probe, candidates,
                         disruption, readiness, issues, observed_estimate(self._repo.observed_durations(), mode_plan.planned_failures())
                         if self._repo.observed_durations() else None,
                         plan_digest(parts), riskiest, skipped, list(loaded.notes))
+        plan.workflow_evidence = evidence
         if request.probe is None:
             plan.notes.append("No workflow check was given: a candidate passes on Kubernetes readiness alone (evidence level L1).")
         if mode_plan.preliminary:
@@ -183,6 +187,8 @@ class ValidationLoopService:
             repeats=mode_plan.repeats, measure_baseline=mode_plan.measure_baseline, approved_at=self._clock(),
             desktop_ack=approval.desktop_acknowledged, acknowledged_workloads=tuple(approval.acknowledged_workloads))
         loaded = self._env.load(request.workflow_id, request.namespace)
+        if plan_digest(workflow_evidence(loaded.workflow, loaded.live.evidence)) != plan_digest(plan.workflow_evidence):
+            raise ValidationRefusedError("PLAN_CHANGED", "The workflow definition or its review changed during approval. Review the new plan; no experiment was started.")
         self._repo.create_run(grant, mode=mode_plan.mode.value, target_kind=identity.kind, workflow_id=plan.workflow_id,
                               plan=plan.to_dict())
         candidates = [c.loop_candidate for c in plan.candidates]
@@ -238,10 +244,17 @@ class ValidationLoopService:
         return self._worker.reconcile(self._env.recoverer)
 
     def proof_for(self, *, namespace: str, workflow_id: str, candidate_sha256: str | None) -> dict[str, Any]:
-        return proof_from_history(self._repo, namespace=namespace, workflow_id=workflow_id, candidate_sha256=candidate_sha256)
+        try:
+            loaded = self._env.load(workflow_id, namespace)
+            current = workflow_evidence(loaded.workflow, loaded.live.evidence)
+        except Exception:
+            current = None
+        return proof_from_history(self._repo, namespace=namespace, workflow_id=workflow_id,
+                                  candidate_sha256=candidate_sha256, current_workflow_evidence=current)
 
 
-def proof_from_history(repository: LoopRepository, *, namespace: str, workflow_id: str, candidate_sha256: str | None) -> dict[str, Any]:
+def proof_from_history(repository: LoopRepository, *, namespace: str, workflow_id: str, candidate_sha256: str | None,
+                       current_workflow_evidence: dict[str, Any] | None = None) -> dict[str, Any]:
     """What the Approve step shows: has a candidate with this exact YAML been proven, on which cluster, at what evidence level.
 
     Reads only the database. A proof stays attached to the cluster it was obtained on: it is shown with that cluster's name and kind,
@@ -253,10 +266,13 @@ def proof_from_history(repository: LoopRepository, *, namespace: str, workflow_i
             continue
         winner = result.get("winner")
         granted = {c["id"]: c["yamlSha256"] for c in (run.get("approval") or {}).get("candidates") or []}
-        state = "PROVEN" if winner and candidate_sha256 and granted.get(winner) == candidate_sha256 else ("OTHER_PROVEN" if winner else "NOT_PROVEN")
+        recorded = (run.get("plan") or {}).get("workflowEvidence")
+        same_basis = bool(current_workflow_evidence and recorded and plan_digest(recorded) == plan_digest(current_workflow_evidence))
+        state = "HISTORICAL" if not same_basis else ("PROVEN" if winner and candidate_sha256 and granted.get(winner) == candidate_sha256 else ("OTHER_PROVEN" if winner else "NOT_PROVEN"))
         return {"state": state, "runKey": run["runKey"], "target": {"kind": run["targetKind"], "name": run["targetName"]},
                 "mode": run["mode"], "preliminary": (run.get("plan") or {}).get("mode", {}).get("preliminary"),
-                "winner": winner, "finishedAt": run["finishedAt"]}
+                "winner": winner, "finishedAt": run["finishedAt"], "workflowEvidence": recorded,
+                "currentDefinitionMatches": same_basis}
     return {"state": "NOT_RUN"}
 
 

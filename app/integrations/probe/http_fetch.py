@@ -17,6 +17,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from app.integrations.probe.response_limit import read_bounded
+
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 MAX_BODY_BYTES = 256 * 1024
 
@@ -46,6 +48,8 @@ def require_loopback(url: str) -> str:
     parts = urlsplit(url or "")
     if parts.scheme not in ("http", "https") or (parts.hostname or "").lower() not in LOOPBACK_HOSTS:
         raise ValueError(f"a probe only reaches this machine's loopback address, not {url!r}")
+    if parts.username is not None or parts.password is not None or parts.fragment:
+        raise ValueError("a probe URL cannot contain credentials or a fragment")
     try:
         port = parts.port
     except ValueError:
@@ -79,8 +83,11 @@ class LoopbackHttpFetch:
         try:
             with httpx.Client(timeout=spec.timeout_s, trust_env=False, follow_redirects=False,
                               transport=self._transport) as http:
-                response = http.request(spec.method, target)
+                with http.stream(spec.method, target) as response:
+                    body = read_bounded(response, self._max, timeout_s=spec.timeout_s)
+                    text = body.decode(response.encoding or "utf-8", errors="replace")
+                    status = response.status_code
         except (httpx.HTTPError, OSError) as error:
             return Fetched(None, "", None, type(error).__name__)
         elapsed = (time.perf_counter() - started) * 1000.0
-        return Fetched(response.status_code, response.text[: self._max], elapsed, None)
+        return Fetched(status, text, elapsed, None)

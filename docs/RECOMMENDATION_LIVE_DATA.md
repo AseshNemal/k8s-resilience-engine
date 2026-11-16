@@ -29,6 +29,7 @@ No shared contract or schema is changed, and Components 1, 2 and 3 are only call
 | `GET /api/recommendations/live` | Unchanged: the bare `RecommendationReport` |
 | `GET /api/recommendations/live/failures?workflow_id=&namespace=` | Each worker node assessed separately for a frozen workflow, worst blast radius first |
 | `GET /api/recommendations/declared/failures?workflow_id=&namespace=` | Same overview for a declared workflow, labelled declared and outside production approval |
+| `POST /api/recommendations/failure-observations`, `GET .../current`, `GET .../`, `POST .../{id}/stop` | Watch a failure the developer causes. Reads the cluster only; records the prediction first, then what happened. Workflow outcomes are not observed. See `docs/CHANGES.md` |
 
 ## Where each input comes from
 

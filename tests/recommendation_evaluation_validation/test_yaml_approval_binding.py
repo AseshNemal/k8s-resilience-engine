@@ -97,7 +97,8 @@ class _Memory(ApprovalRepository):
 
 
 def as_live(live):
-    return dataclasses.replace(live, evidence={**live.evidence, "source": LIVE_EVIDENCE_SOURCE})
+    from tests.support.member4_approvals import as_live as reviewed_live
+    return reviewed_live(live)
 
 
 def test_a_deployment_that_changed_under_a_pending_request_makes_it_stale():

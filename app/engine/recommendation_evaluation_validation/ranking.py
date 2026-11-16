@@ -42,6 +42,13 @@ finite proportion, when its resource cost is not one of the known labels (it is 
 when there is no baseline risk to reduce, when it makes the assessed node or the worst-case node riskier, or
 when it only moves risk (the assessed node improves but neither the cluster average nor the worst case does).
 
+What is optimised, and what is only a condition. The score rewards removing risk at the assessed node (``t``) and on average
+over the worker nodes (``s``). The worst-case node is NOT in the score: it is a condition (a change may not make the worst case
+worse) and the one thing that tells spreading from moving. A change can therefore be ranked while ``s`` is 0: it lowers the worst
+case by sharing the same total risk over more nodes (100/0 becomes 50/50). That is a real gain in the worst case and no gain on
+average, and the ranking does not pretend otherwise: such a change scores on ``t`` alone, its ``clusterReduction`` is reported
+as 0, and one node is more at risk than before. ``OBJECTIVE`` says this in the evidence so the page can.
+
 Modes. A snapshot carries its ``basis``: ``single-workflow`` today. A portfolio basis can be added from
 Component 3's portfolio report without a new predictor: ``portfolio-equal-weight`` uses its blast radius and
 per-node blast radius as they are, and ``portfolio-criticality-weighted`` re-weights the per-workflow outcomes
@@ -75,6 +82,14 @@ from app.engine.recommendation_evaluation_validation.simulation_result import Si
 
 FORMULA_VERSION = "1"
 WEIGHTS_STATUS = "experimental defaults; not optimized or proven"
+OBJECTIVE = (
+    "Among changes verified feasible, the ranking prefers the one that removes the largest share of the risk at the assessed "
+    "node and, with less weight, of the average risk over all worker nodes, discounted for placement churn and resource cost. "
+    "The worst-case node is not part of the score. It is a condition: a change may not make the worst case worse. A change that "
+    "lowers the worst case without lowering the average spreads the same risk over more nodes instead of removing it; it is "
+    "still ranked, on its assessed-node reduction alone, its cluster reduction reads 0, and some other node becomes more "
+    "exposed than it was."
+)
 DEFAULT_TOLERANCE = 1e-6
 SINGLE_WORKFLOW = "single-workflow"
 # Several workflows evaluated together: each workflow's outcome weighted by its criticality (``portfolio.py``).

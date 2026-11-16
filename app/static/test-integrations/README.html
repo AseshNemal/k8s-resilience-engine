@@ -1,0 +1,50 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Application test evidence</title><style>body{font:15px/1.6 system-ui;max-width:850px;margin:40px auto;padding:0 20px;color:#172b4d}pre{background:#f1f5f9;padding:18px;overflow:auto;font-size:12px}h2{margin-top:35px}code{font-size:.9em}</style>
+<h1>Add application test evidence</h1><p>Keep using your application's tests. Export the selected execution and request trace IDs, import the JSON in <strong>Add Test Evidence</strong>, then add its observed calls to the current workflow. Test files are not discovered through Kubernetes.</p>
+<h2>Run an existing HTTP workflow probe</h2><p>Upload an existing probe with this wrapper. The engine uses its existing <code>http_sequence</code> runner. Each step needs explicit expected status codes; the definition needs an explicit terminal success condition. These checks do not establish dependency necessity.</p><pre>{
+  "testName": "Your existing test name",
+  "applicationUrl": "http://your-approved-application-host:port",
+  "entryService": "your-discovered-kubernetes-service",
+  "executionDefinition": {
+    "runnerType": "http_sequence",
+    "measuredStep": "open-page",
+    "steps": [{"name": "open-page", "method": "GET", "path": "/your-path",
+               "expectedStatusCodes": [200], "responseContains": ["your actual response marker"]}],
+    "successCondition": {"protocol": "http", "terminalService": "your actual trace service name",
+                         "operationName": "your actual span operation", "httpStatusCodes": [200]}
+  }
+}</pre><p>Use your actual target, requests and assertions; the example is a format description, not a supplied test case. Run sends application traffic and may have application-side effects. The target must be reachable from the engine backend and allowed by <code>WORKFLOW_TARGET_ALLOWED_HOSTS</code>. In the extension, host services commonly need <code>host.docker.internal</code> with operator configuration. No allowlist or network policy is changed by import.</p>
+<h2>Pytest</h2><p>Download <a href="pytest_evidence.py" download>the Python helper</a> into your test project. Pass a fresh <code>e.headers()</code> to each HTTP request. Keep the whole test's assertions inside the context. Write one export per execution (including retries/parameterizations).</p><pre>from pytest_evidence import Evidence
+
+def test_existing_flow(request, tmp_path):
+    e = Evidence(request.node.nodeid, "YOUR_NAMESPACE", APP_URL, ENTRY_SERVICE)
+    try:
+        with e:
+            response = your_http_client.get(APP_URL + EXISTING_PATH, headers=e.headers())
+            ok = YOUR_EXISTING_ASSERTION(response)
+            e.assertion("Your existing business assertion", bool(ok))
+            assert ok
+            # If supplied, select the actual outcome request and success condition:
+            # e.outcome_trace(e.execution["traceIds"][-1])
+    finally:
+        e.write(tmp_path / (e.execution["executionId"] + ".json"))
+</pre><p>Provide <code>success_condition=...</code> using the terminal contract above and select an outcome trace when you want trace-based success evaluation. Without it, the runner report is retained and the engine's outcome stays indeterminate.</p>
+<h2>Playwright</h2><p>Download <a href="playwright-evidence.mjs" download>the Node helper</a>. Attach before navigation, scope the browser context to one test execution, and export in <code>finally</code>. It instruments document/fetch/XHR requests to the declared application origin only; use <code>e.headers()</code> explicitly for APIRequestContext requests or additional application origins. Cross-origin CORS policy and service workers can prevent interception; the helper does not bypass either.</p><pre>import { Evidence } from './playwright-evidence.mjs';
+
+test('your existing test', async ({ context, page }, testInfo) =&gt; {
+  const e = new Evidence({ testName: testInfo.titlePath.join(' / '),
+    namespace: 'YOUR_NAMESPACE', applicationUrl: APP_URL, entryService: ENTRY_SERVICE });
+  const detach = await e.attach(context);
+  let status = 'failed';
+  try {
+    // Your existing navigation and assertions go here.
+    await page.goto(APP_URL + EXISTING_PATH);
+    await YOUR_EXISTING_ASSERTIONS(page);
+    e.assertion('Your existing business assertion', true);
+    status = 'passed';
+  } finally {
+    await detach();
+    await e.write(testInfo.outputPath(e.execution.executionId + '.json'), status);
+  }
+});</pre>
+<h2>Trace correlation and import</h2><p>Your application must already emit OpenTelemetry spans and honor incoming W3C <code>traceparent</code>. The helpers assign separate trace IDs to requests; they do not install tracing. The engine fetches only those exact IDs from its configured Jaeger query endpoint. You may instead include normalized Jaeger trace objects in the export's <code>traces</code> array, allowing import without a tracing query connection.</p><p>Raw JUnit XML, a Pytest results file or a Playwright <code>trace.zip</code> alone is insufficient: these do not identify distributed service traces. Export execution name/ID, target, timezone-aware start/finish, request trace IDs and assertions with the helper or an equivalent CI adapter. Missing traces, propagation failures, sampling and ingestion delays remain explicit. Refresh traces never reruns a test. Imported reports are developer-supplied evidence, not cluster attestation.</p><p>Trace names are matched exactly to discovered logical Kubernetes services. If names differ, add explicit <code>serviceMap</code> entries in Advanced settings. Unmatched names remain visible. Separate requests are not connected by invented call edges.</p><p>Optional <code>dependencyDeclarations</code> on an execution may list source, target and Mandatory/Optional/Supporting/Unknown labels from your test specification. They remain declared suggestions. Imports preserve current labels; differing declarations require visual review. Imports cannot create or overwrite experimental validation. A successful execution does not prove that every observed dependency is mandatory.</p><p>Limits: 10 executions, 20 trace IDs per execution, 30 total IDs, and 8 MiB per import. No arbitrary Python/JavaScript is executed by the engine. Current integration uses normalized Jaeger data; other runner/telemetry formats require an adapter.</p>
+<p>Runner integration references: <a href="https://playwright.dev/docs/network">Playwright request interception</a> and <a href="https://docs.pytest.org/en/stable/how-to/fixtures.html">Pytest fixtures</a>.</p></html>

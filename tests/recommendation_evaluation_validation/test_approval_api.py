@@ -64,7 +64,10 @@ def make_report(rec_id: str, feasible: bool = True) -> RecommendationReport:
     )
 
 
+from tests.support.operational_workflows import provenance
+
 LIVE_EVIDENCE = {
+    **provenance(),
     "source": LIVE_EVIDENCE_SOURCE,
     "topologyCapturedAt": "2026-01-01T00:00:00Z",
     "connectionFingerprint": "test-connection",
@@ -206,3 +209,29 @@ def test_infeasible_recommendation_422(mock_get_sample, client: TestClient):
     # 12. infeasible recommendation -> 422
     res = client.post("/api/recommendations/infeasible-rec/request-approval", json={"recommendationId": "infeasible-rec", "proposalVersion": "v1"})
     assert res.status_code == 422
+
+
+def test_the_configured_name_is_recorded_as_attribution_and_never_as_authentication(client: TestClient, mock_get_sample):
+    recommendation_id = "rec-named-1"
+    mock_get_sample.set(recommendation_id)
+    named = {"X-Operator-Name": "Am%C3%A9lie%20Perera"}          # URL-encoded, so any name survives the header
+
+    requested = client.post(f"/api/recommendations/{recommendation_id}/request-approval", headers=named,
+                            json={"recommendationId": recommendation_id, "proposalVersion": "v1"})
+    approved = client.post(f"/api/recommendations/{recommendation_id}/approve", headers=named,
+                           json={"expectedProposalVersion": "v1", "note": ""})
+
+    assert requested.json()["requestedBy"] == "Amélie Perera"
+    assert approved.json()["decidedBy"] == "Amélie Perera" and approved.json()["status"] == "APPROVED"
+
+
+def test_without_a_configured_name_the_record_keeps_the_generic_role(client: TestClient, mock_get_sample):
+    recommendation_id = "rec-unnamed-1"
+    mock_get_sample.set(recommendation_id)
+
+    requested = client.post(f"/api/recommendations/{recommendation_id}/request-approval",
+                            json={"recommendationId": recommendation_id, "proposalVersion": "v1"})
+    blank = client.post(f"/api/recommendations/{recommendation_id}/approve", headers={"X-Operator-Name": "%20"},
+                        json={"expectedProposalVersion": "v1", "note": ""})
+
+    assert requested.json()["requestedBy"] == "developer" and blank.json()["decidedBy"] == "developer"

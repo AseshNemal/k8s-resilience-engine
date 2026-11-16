@@ -44,7 +44,24 @@ added on top of the existing sample APIs.
 - `app/templates/components/recommendations.html`
 - `app/static/js/components/recommendations.js`
 - `app/static/css/pages/recommendations.css`
+- `app/static/js/failure-observation.js` (the "Watch a real failure" card; see below)
 - `tests/recommendation_evaluation_validation/`
+
+**Member 4 content on Member 3's page.** `failure_impacts.html` hosts a Member 4 card ("Watch a real failure", added 2026-11-17): one
+`<section>` with `data-role="observation-panel"`, one `<script>` tag, and a `.fo-*` block at the end of `failure_impacts.css`. Member 3's
+script and engine do not know about it. Member 3 owns the rest of the page and may move the card, but should keep its three parts together.
+See `docs/CHANGES.md`.
+
+## Tracing infrastructure — shared, independent of Members 1–4
+
+A read-only layer that provides a trace service and its health to any component; it analyses no traces and builds no
+graph. See `docs/TRACING_INFRASTRUCTURE.md`. Member 1 may read from it as a trace source; Members 2–4 do not depend on it.
+
+- `app/integrations/tracing/`
+- `extension/tracing_routes.py`
+- `extension/ui-src/tracing-panel.js`, `extension/ui-src/trace-service.js`
+- `extension/helper/internal/tracesvc/`
+- `tests/tracing/`, `tests/docker_extension/test_tracing_routes.py`
 
 ## Shared files — require team review before changing
 

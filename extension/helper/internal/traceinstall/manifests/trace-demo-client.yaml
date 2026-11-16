@@ -1,0 +1,42 @@
+# A temporary Pod that sends REAL requests to productpage, so real traces exist. It is created by the approved
+# Verify step and deleted at the end of it. It makes no spans itself: the sidecars on every hop do, from these
+# requests. Nothing here writes to Jaeger.
+#
+# It runs inside the mesh (the namespace is injected), so its own sidecar starts each trace at the first hop.
+# holdApplicationUntilProxyStarts makes sure no request leaves before the sidecar is ready, and the last line
+# stops the sidecar so the Pod finishes (phase Succeeded) instead of staying Running.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trace-demo-client
+  namespace: bookinfo
+  labels:
+    app: trace-demo-client
+    app.kubernetes.io/managed-by: resilience-tracing
+    resilience.sliit/tracing-setup: bookinfo
+  annotations:
+    proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
+spec:
+  restartPolicy: Never
+  containers:
+    - name: curl
+      image: curlimages/curl:8.23.0      # multi-arch (arm64 and amd64), pinned
+      env:
+        - name: REQUESTS
+          value: "60"
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          i=0
+          while [ "$i" -lt "$REQUESTS" ]; do
+            curl -sS -o /dev/null -w '%{http_code}\n' --max-time 10 http://productpage.bookinfo.svc.cluster.local:9080/productpage || true
+            i=$((i + 1))
+            sleep 1
+          done
+          curl -sS -X POST http://127.0.0.1:15020/quitquitquit || true
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { cpu: 100m, memory: 32Mi }
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: ["ALL"] }

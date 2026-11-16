@@ -27,8 +27,10 @@ def test_concentrated_bookinfo_gets_a_feasible_ranked_spread_for_reviews():
     live = bookinfo_scenario("concentrated").evaluate()
 
     by_service = {c.service: c for c in live.report.recommendations if c.type == "TOPOLOGY_SPREAD"}
-    # reviews and ratings are both on w1; each is a concentration root cause, productpage/details are spread.
-    assert set(by_service) == {"reviews", "ratings"}
+    # reviews and ratings are both on w1 and both are root causes, but ratings is optional in this workflow: changing it
+    # cannot alter the outcome, so only reviews gets a candidate and ratings is named as left out.
+    assert set(by_service) == {"reviews"}
+    assert live.evidence["servicesWithoutCandidates"]["services"] == ["ratings"]
     assert by_service["reviews"].feasible and by_service["reviews"].type == "TOPOLOGY_SPREAD"
     assert live.evidence["failedNode"] == "w1"
     assert live.evidence["blastRadiusBefore"] == pytest.approx(100.0)

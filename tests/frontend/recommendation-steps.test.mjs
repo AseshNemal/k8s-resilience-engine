@@ -268,42 +268,31 @@ const pageTemplate = templateHtml.slice(templateHtml.indexOf('<template data-rol
 const researchOnly = [...templateHtml.matchAll(/<section[^>]*rec-research-only[^>]*>[\s\S]*?<\/section>/g)].map((m) => m[0]);
 const inResearchOnly = (role) => researchOnly.some((block) => block.includes(`data-role="${role}"`));
 
-test("every block drawn for a recommendation is a step or is marked research-only, so none is shown by accident in either view", () => {
-    const sections = [...pageTemplate.matchAll(/<section class="([^"]*)"/g)].map((m) => m[1]);
-    assert.equal(sections.length, 3, "the impact, the comparison and the approval; the proof panel is its own, outside the re-rendered region");
-    for (const classes of sections) assert.ok(/\brec-panel\b|\brec-research-only\b/.test(classes), classes);
-    for (const marker of [...pageTemplate.matchAll(/data-step-panel="(\d)"/g)].map((m) => m[1])) assert.ok(["2", "3", "4", "5"].includes(marker), marker);
+test("the journey shows risk, comparison, review and approval without hidden wizard steps", () => {
+    assert.equal([...pageTemplate.matchAll(/<section class="/g)].length, 4);
+    assert.ok(!pageTemplate.includes('data-step-panel='));
 });
 
-test("the plain view keeps the steps' own parts and the research view alone keeps the ranking, the reasons and the raw data", () => {
-    for (const role of ["rec-impact", "rec-candidate-list", "rec-outcome", "rec-proposal-summary", "approval-state-container", "approval-actions"]) {
-        assert.ok(pageTemplate.includes(`data-role="${role}"`), role);
-        assert.ok(!inResearchOnly(role), `${role} must be visible in the plain view`);
-    }
-    for (const role of ["rec-detail-list", "rec-candidate-table-body", "rec-validation", "rec-yaml", "rec-failures", "rec-placement-current", "rec-raw-json"]) {
-        assert.ok(inResearchOnly(role), `${role} belongs to the research view`);
-    }
+test("research details are optional and candidate choice appears once", () => {
+    for (const role of ["rec-risk", "rec-fixes", "rec-review", "approval-state-container", "approval-actions"]) assert.ok(pageTemplate.includes(`data-role="${role}"`));
+    assert.ok(templateHtml.includes('<details class="card rx-research"'));
+    assert.equal(templateHtml.split('data-role="rec-fixes"').length - 1, 1);
 });
 
-test("the prediction-not-observation statement stays in the plain view", () => {
-    assert.ok(pageTemplate.includes("Predictions from a simulation, not measurements."));
-    assert.ok(!researchOnly.some((block) => block.includes("Predictions from a simulation, not measurements.")));
-    assert.ok(pageTemplate.includes('data-role="rec-validation-note"') && !inResearchOnly("rec-validation-note"));
+test("the review keeps its prediction disclaimer and explicit approval", () => {
+    assert.ok(pageTemplate.includes('data-role="rec-validation-note"'));
+    assert.ok(pageTemplate.includes('Nothing is applied until a named person clicks Apply'));
 });
 
-test("the page explains the explicit Apply and test action", () => {
-    assert.ok(!/<button\b[^>]*>[^<]*(?:Approve and Implement|Approve and Apply)/i.test(templateHtml));
-    assert.ok(pageTemplate.includes("What happens after Apply") && pageTemplate.includes("Run configured workflow checks"));
-    // The extension build adds the one-sentence statement inside the approval card; it must still say that approving applies nothing.
-    const build = readFileSync(new URL("../../extension/build_ui.py", import.meta.url), "utf8");
-    assert.ok(build.includes("Apply changes the selected Deployments") && build.includes("Reset restores the saved configuration."));
+test("the page describes Apply and its checks before the user acts", () => {
+    assert.ok(pageTemplate.includes('What Apply and test does'));
+    assert.ok(pageTemplate.includes('Runs the workflow checks and recalculates the risk'));
+    assert.ok(pageTemplate.includes('Asks you to keep or reset'));
 });
 
-test("the approval gate keeps the exact opening tag the extension build patches, once, inside the fifth step", () => {
-    const marker = '<div class="card" id="approval-section">';
-    assert.equal(templateHtml.split(marker).length - 1, 1);
-    const step = pageTemplate.slice(pageTemplate.indexOf('aria-labelledby="rec-step-5"'));
-    assert.ok(step.indexOf(marker) > step.indexOf('id="rec-step-5"'), "the marker sits under the step's heading");
+test("the extension approval marker stays unique inside the review journey", () => {
+    assert.equal(templateHtml.split('<div class="card" id="approval-section">').length - 1, 1);
+    assert.ok(pageTemplate.includes('id="rec-s-approve"'));
 });
 
 // ---- the services table, the selected improvement and the card marks ------------------------------------------------------------
@@ -382,14 +371,9 @@ test("only the selected candidate is marked Recommended, and every card carries 
     assert.deepEqual(find(c, (n) => /candidate-card__icon/.test(n.className)).map((n) => n.attributes["data-kind"]).sort(), ["pod_anti_affinity", "topology_spread"]);
 });
 
-test("step 1 holds the one action, and the step 4 parts and the proposal's facts are all in the plain view", () => {
-    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-proof"'));
-    assert.ok(step1.includes('data-role="reload-button"'), "the reload action lives in step 1");
-    assert.ok(!templateHtml.slice(0, templateHtml.indexOf('<ol class="rec-stepper"')).includes('data-role="reload-button"'), "and no longer in the header");
-    for (const role of ["rec-selected", "approval-state-container", "approval-actions", "rec-proposal-summary", "rec-validation-note"]) {
-        assert.ok(pageTemplate.includes(`data-role="${role}"`), role);
-        assert.ok(!inResearchOnly(role), `${role} must be visible in the plain view`);
-    }
+test("the application scope and refresh remain visible above the journey", () => {
+    assert.ok(templateHtml.indexOf('data-role="reload-button"') < templateHtml.indexOf('data-role="rec-rail"'));
+    for (const role of ["rec-review", "approval-actions", "rec-validation-note"]) assert.ok(pageTemplate.includes(`data-role="${role}"`));
 });
 
 test("the approval dialog is hidden by this page's own stylesheet until the script shows it", () => {
@@ -431,11 +415,9 @@ test("an option that cannot be used is not something to choose, and nothing is h
     assert.equal(view.nextActionHint(null), null);
 });
 
-test("the hint line and the highlight exist in step 1 and the highlight is not carried by colour alone", () => {
-    const step1 = templateHtml.slice(templateHtml.indexOf('data-role="rec-context"'), templateHtml.indexOf('data-role="rec-proof"'));
-    assert.ok(step1.includes('data-role="rec-hint"') && step1.includes('id="rec-next-hint"') && step1.includes('role="status"'));
-    const css = readFileSync(new URL("../../app/static/css/pages/recommendations.css", import.meta.url), "utf8");
-    assert.match(css, /\.rec-inputs__input\[data-attention="true"\]\s*\{[^}]*border-color[^}]*box-shadow/, "a border and a ring");
+test("missing evidence has an accessible hint beside the scope selectors", () => {
+    assert.ok(templateHtml.includes('id="rec-next-hint"') && templateHtml.includes('data-role="rec-hint"'));
+    assert.ok(templateHtml.includes('role="status"'));
 });
 
 // ---- less text -----------------------------------------------------------------------------------------------------------------
@@ -453,18 +435,16 @@ test("a card's long description and reason are behind its disclosure in full, no
     assert.equal(find(c, (n) => /candidate-card__description|candidate-card__reason/.test(n.className) && n.tag === "p").length, 2);
 });
 
-test("the plain view hides the repeated outcome sentence, shows no evidence list unless it needs a look, and keeps the proposal's facts one click away", () => {
-    const css = readFileSync(new URL("../../app/static/css/pages/recommendations.css", import.meta.url), "utf8");
-    assert.match(css, /data-view="simple"\][^{]*rec-outcome\[data-state="ready"\][^{]*\{[^}]*display:\s*none/);
-    assert.match(css, /data-view="simple"\][^{]*rec-evidence-details:not\(\[data-attention="true"\]\)[^{]*\{[^}]*display:\s*none/);
-    assert.match(pageTemplate, /<details class="rec-more rec-proposal-details">\s*<summary>Proposal details<\/summary>\s*<div class="rec-proposal" data-role="rec-proposal-summary">/);
+test("evidence and research detail use disclosures without a mode toggle", () => {
+    assert.ok(templateHtml.includes('<details class="rx-fold rx-evidence"'));
+    assert.ok(!templateHtml.includes('data-role="rec-view-simple"'));
+    assert.ok(!templateHtml.includes('data-role="rec-view-research"'));
 });
 
-test("only one step is drawn at a time, and the declared steps are the template's own", () => {
-    const css = readFileSync(new URL("../../app/static/css/pages/recommendations.css", import.meta.url), "utf8");
-    assert.match(css, /\.rec-flow \[data-step-panel\]\s*\{\s*display:\s*none/);
-    for (const n of [1, 2, 3, 4, 5]) assert.ok(css.includes(`.rec-flow[data-step="${n}"] [data-step-panel="${n}"]`), `step ${n}`);
-    for (const n of [1, 2, 3, 4, 5]) assert.ok(templateHtml.includes(`data-step-panel="${n}"`), `a panel for step ${n}`);
+test("experimental validation is reachable independently of all-workflows approval", () => {
+    assert.ok(templateHtml.includes('data-role="rec-proof-workflow"'));
+    assert.ok(templateHtml.includes('data-role="rec-proof"'));
+    assert.ok(templateHtml.includes('/js/recommendation-proof.js'));
 });
 
 test("the header and the steps carry one short sentence each, not paragraphs", () => {

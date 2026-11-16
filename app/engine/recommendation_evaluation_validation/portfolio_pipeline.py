@@ -26,7 +26,7 @@ from app.engine.recommendation_evaluation_validation.approval import DECLARED_WO
 from app.engine.recommendation_evaluation_validation.combinations import DEFAULT_EVALUATION_BUDGET
 from app.engine.recommendation_evaluation_validation.declared_workflow import (
     DeclaredWorkflowError,
-    load_declared_workflows,
+    load_research_workflows,
 )
 from app.engine.recommendation_evaluation_validation.evidence_context import list_frozen_workflows
 from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
@@ -117,6 +117,8 @@ def build_portfolio_recommendation(namespace: str = "default", failed_node: str 
                             details={"workflows": live.evidence["workflowsNotEvaluated"]})
     evidence = {**live.evidence, "source": DECLARED_WORKFLOW_SOURCE if declared else LIVE_EVIDENCE_SOURCE,
                 "workflowScope": "all"}
+    if not declared:
+        evidence["workflowEvidencePolicy"] = "operational-workflow/v1"
     if declared:
         evidence["declaredWorkflow"] = {**evidence["declaration"], "workflowId": live.report.workflow_id}
     return dataclasses.replace(live, evidence=evidence)
@@ -136,7 +138,7 @@ def build_frozen_portfolio(namespace: str = "default", failed_node: str | None =
                            combination_budget: int = DEFAULT_EVALUATION_BUDGET) -> LiveRecommendation:
     """Every approved, frozen workflow evaluated together on the connected cluster's live topology."""
     namespace = _namespace(namespace)
-    frozen, problem = list_frozen_workflows()
+    frozen, problem = list_frozen_workflows(namespace)
     if problem:
         raise EvidenceError("WORKFLOW_STORAGE_UNAVAILABLE", problem, http_status=503, component=COMPONENT)
     if not frozen:
@@ -155,10 +157,19 @@ def build_frozen_portfolio(namespace: str = "default", failed_node: str | None =
         if deployment is None:      # one snapshot serves them all; the first complete one is the one every workflow is sized on
             deployment, captured = inputs.deployment, (inputs.topology_captured_at, inputs.topology_status)
         workflows.append({"workflowId": workflow_id, "criticality": inputs.workflow.criticality, "freezeId": inputs.workflow_freeze_id,
+                          "workflowReview": inputs.workflow_review,
                           "graph": inputs.workflow})
     return _evaluate(workflows, not_evaluated, first_error, deployment,
                      EvidenceProvenance(PORTFOLIO_ANALYSIS_SOURCE, namespace, captured[0], captured[1], None),
-                     failed_node, combination_budget, {"workflowBasis": "FROZEN"})
+                     failed_node, combination_budget, {"workflowBasis": "REVIEWED"})
+
+
+def _declarations_digest(declared):
+    digests = {item.declaration_sha256 for item in declared}
+    if len(digests) == 1:
+        return next(iter(digests))
+    return hashlib.sha256(json.dumps(sorted((item.graph.workflow_id, item.declaration_sha256)
+                                           for item in declared)).encode()).hexdigest()
 
 
 def build_declared_portfolio(namespace: str = "default", failed_node: str | None = None, *,
@@ -167,10 +178,13 @@ def build_declared_portfolio(namespace: str = "default", failed_node: str | None
     """Every DECLARED workflow evaluated together on the connected cluster's live topology (research only, like a single one)."""
     from app.engine.deployment_topology_modeling.service import discover_live
 
-    declared = load_declared_workflows(declaration_path)
+    declared = load_research_workflows(declaration_path)
     if not declared:
         raise DeclaredWorkflowError("DECLARED_WORKFLOW_UNAVAILABLE", "No workflow is declared.", http_status=404)
     namespace = _namespace(namespace)
+    declared = [item for item in declared if not item.namespace or item.namespace == namespace]
+    if not declared:
+        raise DeclaredWorkflowError("DECLARED_WORKFLOW_UNAVAILABLE", "No reviewed declaration applies to this namespace.", http_status=404)
     discovery = discover_live(namespace=namespace)
     workflows, not_evaluated, first_error = [], [], None
     for item in declared:
@@ -181,12 +195,12 @@ def build_declared_portfolio(namespace: str = "default", failed_node: str | None
             first_error = first_error or error
             not_evaluated.append(_not_evaluated(graph.workflow_id, error))
             continue
-        workflows.append({"workflowId": graph.workflow_id, "criticality": graph.criticality, "freezeId": None, "graph": graph})
+        workflows.append({"workflowId": graph.workflow_id, "name": item.display_name, "criticality": graph.criticality, "freezeId": None, "graph": graph})
     return _evaluate(workflows, not_evaluated, first_error, discovery.graph.model_copy(deep=True),
                      EvidenceProvenance(PORTFOLIO_ANALYSIS_SOURCE, namespace, discovery.captured_at, discovery.status, None),
                      failed_node, combination_budget,
                      {"workflowBasis": "DECLARED", "declaration": {"declaredBy": sorted({d.declared_by for d in declared}),
-                                                                   "declarationSha256": declared[0].declaration_sha256}})
+                                                                   "declarationSha256": _declarations_digest(declared)}})
 
 
 def _workflows_of(live: LiveRecommendation, candidate_id: str) -> dict[str, Any]:
@@ -255,7 +269,9 @@ def describe_portfolio(live: LiveRecommendation) -> dict[str, Any]:
     detail["workflowDefinitions"] = (live.details or {}).get("portfolioWorkflows")
     detail["workflowRisk"] = _workflow_risk(live)
     detail["portfolio"] = {
-        "workflows": [{"workflowId": w["workflowId"], "criticality": w["criticality"]} for w in live.evidence.get("workflows", [])],
+        # "name" appears only for a workflow its author named (display only; the id stays the identity)
+        "workflows": [{"workflowId": w["workflowId"], **({"name": w["name"]} if w.get("name") else {}), "criticality": w["criticality"]}
+                      for w in live.evidence.get("workflows", [])],
         "notEvaluated": live.evidence.get("workflowsNotEvaluated", []),
         "basis": live.evidence.get("workflowBasis"),
         "note": NOT_APPROVABLE if analysis_only else "All workflows are evaluated together. A combined fix is approved and applied as one proposal.",

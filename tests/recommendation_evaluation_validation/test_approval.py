@@ -12,6 +12,7 @@ from app.engine.recommendation_evaluation_validation.approval import (
 from app.shared.schemas.approval import ApprovalStatus
 from app.shared.schemas.recommendation import RecommendationReport, RecommendationCandidate
 
+from tests.support.operational_workflows import provenance
 from unittest.mock import MagicMock
 
 @pytest.fixture
@@ -150,7 +151,7 @@ def test_approve_success(approval_service, mock_repository, sample_recommendatio
     pending.status = ApprovalStatus.PENDING_APPROVAL
     pending.proposal_version = "v1.0"
     current = LiveRecommendation(report=sample_recommendation, evidence=ranking_evidence)
-    pending.evaluation_snapshot = {"provenance": {"source": "live-discovery"},
+    pending.evaluation_snapshot = {"provenance": {**provenance(), "source": "live-discovery"},
                                    "proposal": {"fingerprint": proposal_fingerprint(current, "rec-1"), "yamlSha256": None}}
     pending.yaml_snapshot = None
     mock_repository.get_by_recommendation_id.return_value = pending

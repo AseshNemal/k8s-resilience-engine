@@ -45,6 +45,15 @@ class ResearchArtifact(Base):
     )
 
 
+class WorkflowManagementRevision(Base):
+    """Append-only editor and recording revisions; the primary key prevents lost concurrent saves."""
+    __tablename__ = "workflow_management_revisions"
+    kind: Mapped[str] = mapped_column(String(20), primary_key=True)
+    identity: Mapped[str] = mapped_column(String(100), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class RecommendationApprovalRecord(Base):
     __tablename__ = "recommendation_approvals"
 
@@ -130,6 +139,9 @@ class AppliedChangeRecord(Base):
     yaml_applied: Mapped[str] = mapped_column(String, nullable=False)
     yaml_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     before: Mapped[list] = mapped_column(JSON, nullable=False)
+    # The same Deployments read back after the patches were accepted: what this change set. NULL for a change recorded
+    # before this column existed; Reset then has nothing to compare the cluster with and says so.
+    after: Mapped[list | None] = mapped_column(JSON, nullable=True)
     cluster: Mapped[dict] = mapped_column(JSON, nullable=False)
     events: Mapped[list] = mapped_column(JSON, nullable=False)
     detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)

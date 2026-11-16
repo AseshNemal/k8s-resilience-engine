@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 from app.engine.deployment_topology_modeling.live_state.cluster_models import ClusterPod
 from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import TERMINAL_POD_PHASES
+from app.integrations.kubernetes.probe_entry import without_probe_entries
 from app.integrations.kubernetes.client import KubernetesApiSource
 
 
@@ -158,7 +159,7 @@ def resolve_deployment_ownership(
     base = f"/namespaces/{quote(namespace, safe='')}"
     return resolve_service_ownership(
         pods=pods,
-        services=source.list_objects("services", f"/api/v1{base}/services"),
+        services=without_probe_entries(source.list_objects("services", f"/api/v1{base}/services")),
         replica_sets=source.list_objects("replicasets", f"/apis/apps/v1{base}/replicasets"),
         deployments=source.list_objects("deployments", f"/apis/apps/v1{base}/deployments"),
         namespace=namespace,

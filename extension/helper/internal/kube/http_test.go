@@ -647,3 +647,83 @@ func TestNodesAreListedWithTheProviderIDTheyReport(t *testing.T) {
 		t.Fatalf("provider ids = %q, %q (an absent one must stay empty, never guessed)", nodes[0].ProviderID, nodes[1].ProviderID)
 	}
 }
+
+func TestObjectsCarryTheReadOnlyWorkloadFactsTheServerReported(t *testing.T) {
+	pod, err := objectFromRaw(map[string]any{
+		"metadata": map[string]any{"name": "web-1", "namespace": "shop"},
+		"spec":     map[string]any{"containers": []any{map[string]any{"name": "app"}, map[string]any{"name": "istio-proxy"}}},
+		"status": map[string]any{"phase": "Running", "conditions": []any{
+			map[string]any{"type": "Initialized", "status": "True"}, map[string]any{"type": "Ready", "status": "True"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pod.Containers; len(got) != 2 || got[0] != "app" || got[1] != "istio-proxy" || pod.Phase != "Running" || pod.Ready == nil || !*pod.Ready {
+		t.Fatalf("pod facts: %+v", pod)
+	}
+
+	deployment, err := objectFromRaw(map[string]any{
+		"metadata": map[string]any{"name": "web", "namespace": "shop"},
+		"spec": map[string]any{"replicas": float64(2), "template": map[string]any{"spec": map[string]any{
+			"containers": []any{map[string]any{"name": "app"}}}}},
+		"status": map[string]any{"readyReplicas": float64(1)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deployment.Replicas == nil || *deployment.Replicas != 2 || deployment.ReadyReplicas == nil || *deployment.ReadyReplicas != 1 ||
+		len(deployment.Containers) != 1 || deployment.Containers[0] != "app" {
+		t.Fatalf("deployment facts: %+v", deployment)
+	}
+}
+
+func TestWhatTheServerDidNotReportStaysUnknown(t *testing.T) {
+	bare, err := objectFromRaw(map[string]any{"metadata": map[string]any{"name": "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bare.Replicas != nil || bare.ReadyReplicas != nil || bare.Ready != nil || bare.Phase != "" || len(bare.Containers) != 0 {
+		t.Fatalf("nothing may be defaulted: %+v", bare)
+	}
+	// A Deployment with no ready replicas reported is "unknown", not "zero ready".
+	noStatus, _ := objectFromRaw(map[string]any{"metadata": map[string]any{"name": "d"}, "spec": map[string]any{"replicas": float64(1)}})
+	if noStatus.ReadyReplicas != nil {
+		t.Fatal("ready replicas were invented")
+	}
+}
+
+func TestTheSpecDigestIsStableAndChangesWithTheSpec(t *testing.T) {
+	spec := func(image string) map[string]any {
+		return map[string]any{"metadata": map[string]any{"name": "d"}, "spec": map[string]any{"replicas": float64(1), "template": map[string]any{"spec": map[string]any{"containers": []any{map[string]any{"name": "app", "image": image}}}}}}
+	}
+	a, _ := objectFromRaw(spec("web:1"))
+	again, _ := objectFromRaw(spec("web:1"))
+	b, _ := objectFromRaw(spec("web:2"))
+	if a.SpecDigest == "" || a.SpecDigest != again.SpecDigest || a.SpecDigest == b.SpecDigest {
+		t.Fatalf("digests: %q %q %q", a.SpecDigest, again.SpecDigest, b.SpecDigest)
+	}
+	// Status is not part of the spec, and a missing spec has no digest.
+	withStatus := spec("web:1")
+	withStatus["status"] = map[string]any{"readyReplicas": float64(1)}
+	c, _ := objectFromRaw(withStatus)
+	if c.SpecDigest != a.SpecDigest {
+		t.Fatal("status leaked into the digest")
+	}
+	if none, _ := objectFromRaw(map[string]any{"metadata": map[string]any{"name": "x"}}); none.SpecDigest != "" {
+		t.Fatal("an object with no spec must have no digest")
+	}
+}
+
+func TestARolloutRestartAnnotationInThePodTemplateChangesTheDigest(t *testing.T) {
+	// `kubectl rollout restart` writes an annotation into spec.template.metadata. That is a change to the spec, so
+	// the digest must notice it: it is exactly the difference between "restored" and "restored except for this".
+	base := map[string]any{"replicas": float64(1), "template": map[string]any{"spec": map[string]any{"containers": []any{map[string]any{"name": "app"}}}}}
+	restarted := map[string]any{"replicas": float64(1), "template": map[string]any{
+		"metadata": map[string]any{"annotations": map[string]any{"kubectl.kubernetes.io/restartedAt": "2026-10-22T12:00:00Z"}},
+		"spec":     map[string]any{"containers": []any{map[string]any{"name": "app"}}}}}
+	a, _ := objectFromRaw(map[string]any{"metadata": map[string]any{"name": "d"}, "spec": base})
+	b, _ := objectFromRaw(map[string]any{"metadata": map[string]any{"name": "d"}, "spec": restarted})
+	if a.SpecDigest == b.SpecDigest {
+		t.Fatal("a rollout restart must change the digest")
+	}
+}

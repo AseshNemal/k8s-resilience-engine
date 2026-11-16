@@ -101,6 +101,7 @@
     function workflowOption(workflow) {
         const parts = [workflow.workflowId];
         if (workflow.frozenAt) parts.push(`frozen ${workflow.frozenAt.slice(0, 10)}`);
+        parts.push(workflow.workflowEvidence?.basis === "operator-reviewed" ? "operator-reviewed definition" : "trace-backed, reviewed definition");
         parts.push(`${workflow.services.length} services`);
         return {
             workflowId: workflow.workflowId,
@@ -136,6 +137,7 @@
             namespaceChoice: text(body.namespaceChoice, 30),
             workflows: body.workflows.map((w) => ({
                 workflowId: text(w.workflowId, 200), freezeId: text(w.freezeId, 200) || null, frozenAt: text(w.frozenAt, 40) || null,
+                workflowEvidence: w.workflowEvidence || null,
                 services: list(w.services, 100).map((s) => text(s, 253)), applicable: w.applicable === true, reason: text(w.reason, 300) || null,
             })),
             declaredWorkflows: (Array.isArray(body.declaredWorkflows) ? body.declaredWorkflows : []).map((w) => ({
@@ -147,6 +149,7 @@
             evidence: body.evidence.map((e) => ({ id: text(e.id, 40), label: text(e.label, 80), state: text(e.state, 20), detail: text(e.detail, 600), nextAction: text(e.nextAction, 600) || null })),
             nextActions: list(body.nextActions, 10).map((a) => text(a, 600)),
             ready: body.ready === true,
+            deploymentFindings: body.deploymentFindings?.scope === "deployment" ? body.deploymentFindings : null,
         };
     }
 
@@ -186,6 +189,7 @@
                 evidence,
                 nextActions: ctx ? ctx.nextActions : [],
                 detail: s.detail,
+                deploymentFindings: s.status === "loading" || s.detail ? null : ctx?.deploymentFindings || null,
                 error: s.error ? explainError(s.error) : null,
             };
         }
@@ -246,6 +250,14 @@
                 s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; s.ctx = null;
             }
             s.identity = identity;
+            // "See how to reduce this risk" on the Failure impact page leaves the application and node it showed, bound to the cluster
+            // fingerprint it was read from. It is taken once. A different cluster's fingerprint clears it again just below.
+            const handoff = env.takeHandoff ? env.takeHandoff() : null;
+            if (handoff && typeof handoff.fingerprint === "string" && handoff.fingerprint) {
+                s.fingerprint = text(handoff.fingerprint, 200);
+                s.namespace = text(handoff.namespace, 253);
+                s.failedNode = text(handoff.failedNode, 253);
+            }
 
             let ctx;
             try {
@@ -270,11 +282,10 @@
             s.ctx = ctx;
             s.namespace = ctx.namespace || "";
             if (env.allWorkflows) {
-                // Prefer observed frozen evidence; declarations stay in their separately named research tier.
+                // Only the server's current operationally reviewed set may be selected automatically.
                 const frozen = ctx.workflows.some((w) => w.applicable);
-                const declared = !frozen && ctx.declaredWorkflows.some((w) => w.applicable);
-                s.workflowId = frozen || declared ? "all-workflows" : "";
-                s.workflowKind = declared ? "declared" : "frozen";
+                s.workflowId = frozen ? "all-workflows" : "";
+                s.workflowKind = "frozen";
                 if (!s.namespace || !s.workflowId) {
                     s.status = ctx.namespaceChoice === "ambiguous" ? "needs-input" : "blocked";
                     publish();

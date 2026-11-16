@@ -57,7 +57,7 @@ def test_pages_use_relative_paths_only(built, name):
 @pytest.mark.parametrize(
     "name, key, title",
     [
-        ("index.html", "overview", "Overview"),
+        ("index.html", "overview", "Assessment"),
         ("workflows.html", "workflows", "Workflow dependencies"),
         ("deployments.html", "deployments", "Deployment topology"),
         ("failure-impacts.html", "failure-impacts", "Failure impact"),
@@ -75,15 +75,15 @@ def test_each_page_has_a_key_and_a_readable_sentence_case_title(built, name, key
 def test_navigation_has_six_sentence_case_labels_and_one_active_item(built, name):
     page = html(built, name)
     labels = re.findall(r'<span class="sidebar__link-label">([^<]+)</span>', page)
-    assert labels == ["Overview", "Workflow dependencies", "Deployment topology", "Failure impact", "Recommendations", "Connect cluster"]
+    assert labels == ["Assessment", "Workflow Discovery", "Deployment Topology", "Failure Impact", "Recommendations", "Connect cluster"]
     assert len(re.findall(r"sidebar__link is-active", page)) == 1
 
 
 def test_overview_puts_the_cluster_connection_first(built):
     page = html(built, "index.html")
     assert 'data-role="cluster-panel"' in page
-    assert page.index('data-role="cluster-panel"') < page.index('class="page-header"') < page.index('data-role="overview-risk"')
-    assert page.index('data-role="overview-node-impact"') < page.index('data-role="overview-placement"')
+    assert page.index('data-role="cluster-panel"') < page.index("page-header") < page.index('data-role="assess-verdict"')
+    assert page.index('data-role="assess-nodes"') < page.index('data-role="assess-fix"')
     assert 'data-role="connect-file"' not in page
 
 
@@ -117,22 +117,25 @@ def test_every_page_runs_autoconnect_after_chrome(built, name):
     assert page.index('src="chrome.js"') < page.index('src="autoconnect.js"')
 
 
-def test_only_the_workflows_page_loads_the_trace_service_bridge_and_after_autoconnect(built):
+def test_only_the_workflows_and_connect_pages_load_the_trace_service_bridge_and_after_autoconnect(built):
+    # The Connect page joined the Workflows page when the tracing card was added; no other page may start anything.
     for name in PAGE_FILES:
         page = html(built, name)
-        if name == "workflows.html":
-            assert 'src="trace-service.js"' in page
-            assert page.index('src="autoconnect.js"') < page.index('src="trace-service.js"')
+        if name in ("workflows.html", "connect.html"):
+            assert 'src="trace-service.js"' in page, name
+            assert page.index('src="autoconnect.js"') < page.index('src="trace-service.js"'), name
         else:
             assert 'src="trace-service.js"' not in page, name
 
 
-def test_the_trace_service_bridge_only_ever_asks_the_helper_for_its_three_fixed_commands():
+def test_the_trace_service_bridge_only_ever_asks_the_helper_for_its_six_fixed_commands():
     code = (UI_SRC / "trace-service.js").read_text(encoding="utf-8")
     code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
     code = re.sub(r"(?m)^\s*//.*$", "", code)
-    commands = set(re.findall(r'"(trace-(?:status|start|stop))"', code))
-    assert commands == {"trace-status", "trace-start", "trace-stop"}
+    commands = set(re.findall(r'"(trace-(?:status|start|stop|enable|ensure|validate))"', code))
+    assert commands == {"trace-status", "trace-start", "trace-stop", "trace-enable", "trace-ensure", "trace-validate"}
+    # Any other trace-* name in the bridge would be a command this test does not know about.
+    assert set(re.findall(r'"(trace-[a-z]+)"(?=\s*:\s*\d)', code)) == commands
     # The helper is never given a page-supplied value: exec is called with a file and a one-item array.
     assert code.count("env.exec(") == 1
     assert code.count("env.exec(helperFile(env.platform), [command])") == 1
@@ -160,7 +163,7 @@ def test_the_page_says_nothing_happens_without_approval_in_a_system_dialog(built
     assert "nothing is changed unless you approve there" in page
 
 
-@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js", "namespaces.js"])
+@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js", "namespaces.js", "tracing-panel.js", "bookinfo-tracing.js"])
 def test_the_new_scripts_never_write_html_or_log(script):
     source = (UI_SRC / script).read_text(encoding="utf-8")
     # Comments may discuss these APIs (they explain why they are not used); only code is checked.
@@ -245,9 +248,16 @@ def test_the_trace_bridge_still_loads_after_the_namespace_script_on_the_workflow
     assert page.index('src="namespaces.js"') < page.index('src="trace-service.js"')
 
 
-def test_the_failure_impact_page_still_exposes_the_box_the_suggestions_attach_to(built):
-    # If an owner renames this hook the suggestions would silently stop; this makes that visible.
-    assert 'data-role="namespace"' in html(built, "failure-impacts.html")
+def test_the_failure_impact_page_asks_for_no_typed_input_and_loads_its_scripts_in_order(built):
+    # The application comes from the cluster (a dropdown filled by the script), never a typed namespace or workflow ID.
+    page = html(built, "failure-impacts.html")
+    for role in ("namespace-select", "page-region", "node-list", "recommend-link", "workflow-picker", "evidence-badge"):
+        assert f'data-role="{role}"' in page, role
+    for gone in ('data-role="namespace"', 'data-role="workflow-id"', 'data-role="input-mode"', 'data-role="failed-node"'):
+        assert gone not in page, f"{gone} is a typed technical input the page no longer asks for"
+    assert page.index("failure-impact-view.js") < page.index("failure_impacts.js")
+    # In the extension the hand-off link is the sidebar's own relative link (recommendations.html), never an absolute route.
+    assert 'href="recommendations.html"' in page
 
 
 def test_the_recommendations_page_evaluates_all_workflows_without_a_workflow_dropdown(built):
@@ -308,3 +318,73 @@ def test_the_sample_data_demo_is_not_offered_inside_the_extension(built):
     page = html(built, "failure-impacts.html")
     assert "synthetic-portfolio" not in page and "Viva research demonstration" not in page
     assert "data-role=\"scenario-select\"" in page or "scenario-panel" in page, "the rest of the page is still there"
+
+
+# ---- the tracing card ----------------------------------------------------------------------------------------------
+
+def test_the_connect_page_has_every_hook_the_tracing_script_uses(built):
+    # If a hook is renamed here, the card would silently stop working; this makes that visible.
+    page = html(built, "connect.html")
+    code = (UI_SRC / "tracing-panel.js").read_text(encoding="utf-8")
+    roles = set(re.findall(r'part\("([a-z-]+)"\)', code)) | {"tracing-card"}
+    assert len(roles) >= 12
+    for role in roles:
+        assert f'data-role="{role}"' in page, role
+
+
+def test_only_the_connect_page_carries_the_tracing_card_and_script(built):
+    for name in PAGE_FILES:
+        page = html(built, name)
+        assert ('data-role="tracing-card"' in page) == (name == "connect.html"), name
+        assert ('src="tracing-panel.js"' in page) == (name == "connect.html"), name
+
+
+def test_the_tracing_script_loads_after_the_bridge_and_the_namespace_list_it_reads(built):
+    page = html(built, "connect.html")
+    assert page.index('src="namespaces.js"') < page.index('src="trace-service.js"') < page.index('src="tracing-panel.js"')
+
+
+def test_the_tracing_card_says_what_it_will_not_do(built):
+    page = html(built, "connect.html")
+    assert "nothing starts unless you approve there" in page
+    assert "never sends, seeds or invents a trace" in page
+    assert "does not change your cluster" in page
+
+
+def test_the_image_ships_the_tracing_routes_and_script():
+    dockerfile = (UI_SRC.parents[1] / "extension" / "Dockerfile").read_text(encoding="utf-8")
+    assert "extension/tracing_routes.py" in dockerfile
+    assert "extension/ui-src/tracing-panel.js" in dockerfile
+
+
+# ---- the Bookinfo tracing card ----------------------------------------------------------------------------------
+
+def test_the_connect_page_has_every_hook_the_bookinfo_script_uses(built):
+    page = (built / "connect.html").read_text(encoding="utf-8")
+    code = (UI_SRC / "bookinfo-tracing.js").read_text(encoding="utf-8")
+    roles = set(re.findall(r'part\("([a-z-]+)"\)', code)) | {"bookinfo-card"}
+    assert roles, "the script names no hooks"
+    for role in roles:
+        assert f'data-role="{role}"' in page, f"the Connect page lacks data-role={role!r}"
+
+
+def test_only_the_connect_page_carries_the_bookinfo_card_and_script(built):
+    for name in ("index.html", "workflows.html", "deployments.html", "failure-impacts.html", "recommendations.html", "connect.html"):
+        page = (built / name).read_text(encoding="utf-8")
+        assert ('data-role="bookinfo-card"' in page) == (name == "connect.html"), name
+        assert ('src="bookinfo-tracing.js"' in page) == (name == "connect.html"), name
+
+
+def test_the_four_controls_start_disabled_and_the_card_says_what_it_does_not_do(built):
+    page = (built / "connect.html").read_text(encoding="utf-8")
+    for role in ("bookinfo-plan", "bookinfo-enable", "bookinfo-verify", "bookinfo-traffic", "bookinfo-undo"):
+        assert re.search(rf'<button[^>]*data-role="{role}"[^>]*disabled', page), f"{role} must start disabled"
+    text = " ".join(page.split())  # the markup wraps lines in the middle of sentences
+    for sentence in ("Plan only reads the cluster", "nothing is changed unless you approve there", "nothing is simulated or invented", "the extension's own access is not changed",
+                     "Verify only reads", "Run test traffic is separate and has its own system dialog"):
+        assert sentence in text, sentence
+
+
+def test_the_image_ships_the_bookinfo_script():
+    dockerfile = (UI_SRC.parent / "Dockerfile").read_text(encoding="utf-8")
+    assert "extension/ui-src/bookinfo-tracing.js" in dockerfile

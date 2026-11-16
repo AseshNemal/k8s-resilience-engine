@@ -40,6 +40,7 @@ from app.engine.recommendation_evaluation_validation.live_pipeline import (
 from app.engine.recommendation_evaluation_validation.live_scheduling_evidence import enrich_scheduling_facts, live_scheduling_evidence
 from app.engine.recommendation_evaluation_validation.validation.cluster_identity import DisposableClusterDesignation
 from app.engine.recommendation_evaluation_validation.validation.kubernetes_executor import KubernetesValidationExecutor
+from app.engine.recommendation_evaluation_validation.validation.cluster_gateway import fresh_restore_snapshot
 from app.engine.recommendation_evaluation_validation.validation.models import Authorization
 from app.engine.recommendation_evaluation_validation.validation.workflow_probe import ProbeSpec, WorkflowProbe
 from app.engine.recommendation_evaluation_validation.validation_loop.environment import (
@@ -122,9 +123,11 @@ def target_loader(workflow_basis: str) -> Callable[[str, str, KubernetesTestClus
     """
     def load(workflow_id: str, namespace: str, gateway: KubernetesTestClusterGateway) -> LoadedTarget:
         if workflow_basis == "DECLARED":
-            workflow = get_declared_workflow(workflow_id).graph
+            declaration = get_declared_workflow(workflow_id)
+            workflow = declaration.graph
         else:
-            workflow = get_runtime_component_inputs(workflow_id, namespace).workflow
+            inputs = get_runtime_component_inputs(workflow_id, namespace)
+            workflow = inputs.workflow
         graph = gateway.read_graph(namespace)
         base = f"/apis/apps/v1/namespaces/{namespace}/deployments"
         observed, intent_report = attach_declared_intent(graph, gateway.list_raw("deployments", base), gateway.list_raw("nodes", "/api/v1/nodes"))
@@ -133,7 +136,8 @@ def target_loader(workflow_basis: str) -> Callable[[str, str, KubernetesTestClus
         live = evaluate_recommendation(
             workflow, deployment, EvidenceProvenance(VALIDATION_TARGET_SOURCE, namespace, None, "VALIDATION_TARGET", None), None,
             scheduling_evidence=evidence)
-        live = dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": {**facts, "intentAdapter": intent_report}})
+        live = dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": {**facts, "intentAdapter": intent_report},
+            **({"declaredWorkflow": declaration.to_dict()} if workflow_basis == "DECLARED" else {"workflowReview": inputs.workflow_review})})
         return LoadedTarget(workflow, workflow_basis, live, deployment,
                             [f"Computed on the test cluster's own topology. Declared intent came from its Deployments ({intent_report['origin']})."])
     return load
@@ -156,8 +160,9 @@ class ClusterRecoverer:
             return {"reverted": None, "error": None}
         gateway = self._env.writing_gateway()
         snapshots = [_snapshot(data) for data in restore_points.values()]
+        live = gateway.read_deployments(snapshots[0].namespace)
         for snapshot in snapshots:
-            gateway.restore_deployment(snapshot)
+            gateway.restore_deployment(fresh_restore_snapshot(snapshot, live.get(snapshot.name)))
         namespace = snapshots[0].namespace
         deadline = time.monotonic() + self._env.recovery_timeout_s
         names = [s.name for s in snapshots]

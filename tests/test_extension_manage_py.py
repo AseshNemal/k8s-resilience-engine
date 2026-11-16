@@ -204,6 +204,10 @@ def test_check_runs_the_three_suites_with_go_in_the_helper_folder(tmp_path):
     ui.mkdir()
     for name in ("shim.test.mjs", "autoconnect.test.mjs", "chrome.js"):
         (ui / name).write_text("")
+    frontend = tmp_path / "tests" / "frontend"
+    frontend.mkdir(parents=True)
+    for name in ("api.test.mjs", "connection-state.test.mjs", "recommendations-page.test.mjs"):
+        (frontend / name).write_text("")
     shell = FakeShell()
 
     assert run(shell, "check", root=tmp_path) == 0
@@ -216,7 +220,7 @@ def test_check_runs_the_three_suites_with_go_in_the_helper_folder(tmp_path):
     assert node_argv == [
         "node", "--test",
         "extension/ui-src/autoconnect.test.mjs", "extension/ui-src/shim.test.mjs",
-        "tests/frontend/connection-state.test.mjs", "tests/frontend/api.test.mjs",
+        "tests/frontend/api.test.mjs", "tests/frontend/connection-state.test.mjs", "tests/frontend/recommendations-page.test.mjs",
     ]
 
 

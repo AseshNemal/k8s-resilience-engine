@@ -80,7 +80,9 @@ def create_app(*, transport: httpx.BaseTransport | None = None, allowed_clusters
             return None
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
-    async def forward(path: str, request: Request) -> Response:
+    def forward(path: str, request: Request) -> Response:
+        # Upstream I/O is synchronous. Run in FastAPI's thread pool so a slow facts/statistics
+        # request cannot block the event loop and delay a worker recovery request.
         full = "/" + path
         decision: Decision = decide(request.method, full, request.url.query, labels_of, allowed_clusters=clusters)
         if not decision.allowed:

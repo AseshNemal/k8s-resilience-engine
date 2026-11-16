@@ -110,6 +110,47 @@ def plan_reset(prior: ChangeAnalysis) -> dict[str, Any]:
             "predicted": {**prior.baseline, "kind": "restoration-target"}}
 
 
+PLACEMENT_NOTE = ("Ready replicas per node, observed after the rollout against the placement the comparison target holds. A "
+                  "rollout replaces pods, so counts are compared, not pod names. The scheduler may satisfy the constraint with a "
+                  "different arrangement than the model predicted: matchesTarget false with readyOnTwoOrMoreNodes true means the "
+                  "service is spread, only not as predicted.")
+
+
+def _ready_by_node(summary: Any) -> dict[str, int] | None:
+    """Ready replicas per node from one service's placement summary; None when the placement was not recorded."""
+    pods = summary.get("pods") if isinstance(summary, dict) else None
+    if not isinstance(pods, list):
+        return None
+    counts: dict[str, int] = {}
+    for pod in pods:
+        if pod.get("ready") and pod.get("node"):
+            counts[pod["node"]] = counts.get(pod["node"], 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def placement_outcome(target: dict[str, Any] | None, observed: dict[str, Any]) -> dict[str, Any] | None:
+    """Whether the observed placement of each target service is the one the target (prediction or baseline) holds.
+
+    A completed rollout does not show that the predicted distribution was reached, and a blast radius that matches does
+    not show it either. None when no placement was observed; a service either side did not record stays unknown.
+    """
+    seen = observed.get("placement")
+    if not isinstance(seen, dict) or not seen:
+        return None
+    wanted = (target or {}).get("placement")
+    services: dict[str, Any] = {}
+    for name in sorted(seen):
+        now = _ready_by_node(seen[name])
+        then = _ready_by_node(wanted.get(name)) if isinstance(wanted, dict) else None
+        services[name] = {
+            "observedReadyByNode": now, "targetReadyByNode": then,
+            "matchesTarget": None if now is None or then is None else now == then,
+            "readyOnTwoOrMoreNodes": None if now is None else len(now) >= 2,
+        }
+    verdicts = [entry["matchesTarget"] for entry in services.values()]
+    return {"services": services, "matchesTarget": None if None in verdicts else all(verdicts), "note": PLACEMENT_NOTE}
+
+
 def compare(baseline: dict[str, Any], predicted: dict[str, Any] | None, observed: dict[str, Any]) -> dict[str, Any]:
     """The three-way comparison, in percentage points. Unknown stays unknown; no unknown is ever a zero."""
     before, after = baseline.get("blastRadius"), observed.get("blastRadius")
@@ -117,6 +158,7 @@ def compare(baseline: dict[str, Any], predicted: dict[str, Any] | None, observed
         "beforeBlastRadius": before, "afterBlastRadius": after,
         "reductionPoints": None, "direction": None, "relativeReductionPercent": None,
         "predictedBlastRadius": None, "predictionDeltaPoints": None,
+        "placement": placement_outcome(predicted, observed),
     }
     if before is None or after is None:
         return result

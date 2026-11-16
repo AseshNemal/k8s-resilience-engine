@@ -47,6 +47,7 @@ from app.engine.recommendation_evaluation_validation.validation.cluster_gateway 
     TEST_DOUBLE,
     ClusterGateway,
     LiveDeployment,
+    fresh_restore_snapshot,
 )
 from app.engine.recommendation_evaluation_validation.validation.cluster_identity import (
     DisposableClusterDesignation,
@@ -271,8 +272,9 @@ class KubernetesValidationExecutor:
         if not self._restore_points:
             return
         self._assert_same_cluster()
+        live = self._gateway.read_deployments(self.namespace)
         for name in reversed(list(self._restore_points)):
-            self._gateway.restore_deployment(self._restore_points[name])
+            self._gateway.restore_deployment(fresh_restore_snapshot(self._restore_points[name], live.get(name)))
             del self._restore_points[name]      # forgotten only once the API accepted it
         names = list(self._affected)
         if not self._wait(lambda: self._gateway.rollout_complete(self.namespace, names), self._settle_s):

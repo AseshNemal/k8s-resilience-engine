@@ -2,11 +2,14 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.engine.failure_impact_prediction.service import (
     RuntimeInputUnavailableError,
+    build_cluster_failure_overview,
     build_portfolio_failure_impact_report,
+    predict_runtime_deployment_failure_impact_with_evidence,
     predict_runtime_failure_impact_with_evidence,
     predict_runtime_portfolio_failure_impact,
 )
 from app.shared.schemas.failure_impact import (
+    DeploymentFailureImpactReport,
     FailureImpactReport,
     PortfolioFailureImpactReport,
 )
@@ -16,6 +19,57 @@ router = APIRouter(
     prefix="/api/failure-impacts",
     tags=["Failure Impact Prediction"],
 )
+
+
+@router.get(
+    "/overview",
+    responses={
+        404: {"description": "The named namespace holds no application"},
+        502: {"description": "The connected cluster could not be read"},
+        503: {"description": "No cluster is connected"},
+    },
+)
+def read_failure_overview(
+    namespace: str | None = Query(None, description="Application namespace; default: the only one with applications"),
+    workflow_id: list[str] = Query(default=[], description="Workflows to evaluate; default: the ones that apply"),
+) -> dict:
+    """Every worker node assessed as the failed node, with the workflows that apply. Read-only and live.
+
+    One call answers the Failure impact page: ranked nodes, the services and workflows each would take down,
+    and the evidence the answer rests on. A prediction from placement, never an observation.
+    """
+    return build_cluster_failure_overview(namespace, tuple(workflow_id))
+
+
+@router.get(
+    "/deployment/runtime",
+    response_model=DeploymentFailureImpactReport,
+    response_model_by_alias=True,
+    responses={
+        422: {"description": "The failed node is invalid"},
+        503: {"description": "The connected cluster topology is unavailable"},
+    },
+)
+def simulate_runtime_deployment_failure(
+    response: Response,
+    failed_node: str = Query(..., min_length=1),
+    namespace: str = Query("default", min_length=1),
+) -> DeploymentFailureImpactReport:
+    """Predict service availability from live placement, without workflow assumptions."""
+    try:
+        report, discovery = predict_runtime_deployment_failure_impact_with_evidence(
+            failed_node, namespace
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    codes = sorted({w.code for w in discovery.warnings} | {u.reason for u in discovery.unresolved})
+    response.headers["X-Topology-Status"] = discovery.status
+    response.headers["X-Topology-Captured-At"] = discovery.captured_at
+    response.headers["X-Topology-Warnings"] = ",".join(codes)
+    response.headers["X-Workflow-Evidence"] = "unknown; deployment-only"
+    response.headers["X-Is-Prediction"] = "true"
+    return report
 
 
 @router.get(
@@ -66,6 +120,9 @@ def simulate_runtime_failure(
     response.headers["X-Topology-Status"] = evidence.topology_status
     response.headers["X-Topology-Captured-At"] = evidence.topology_captured_at
     response.headers["X-Topology-Warnings"] = ",".join(codes)
+    review = getattr(evidence, "workflow_review", None) or {}
+    response.headers["X-Workflow-Evidence"] = review.get("basis", "unknown")
+    response.headers["X-Is-Prediction"] = "true"
     return report
 
 

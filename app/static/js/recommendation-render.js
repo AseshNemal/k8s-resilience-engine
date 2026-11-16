@@ -531,14 +531,31 @@
         return rows.length ? rows.join("; ") : null;
     }
 
+    /**
+     * Two plain sentences above the candidates, both the engine's own words: what the ranking optimises (and that lowering the worst
+     * case is not the same as lowering the average), and which services were left without a candidate and why. Empty when not reported.
+     */
+    function reasoningPreface(doc, detail) {
+        const evidence = (detail && detail.evidence) || {};
+        const notes = [];
+        if (evidence.rankingObjective) notes.push(element(doc, "p", `How candidates are ranked: ${evidence.rankingObjective}`, "ui-note"));
+        const without = evidence.servicesWithoutCandidates;
+        if (without && Array.isArray(without.services) && without.services.length) {
+            notes.push(element(doc, "p", `No candidate for ${without.services.join(", ")}: ${without.reason}`, "ui-note"));
+        }
+        return notes;
+    }
+
     /** For each candidate: what is wrong, what to change, whether it is feasible and why, the effect, the cost, the ranking. */
     function renderCandidateDetails(container, detail, options) {
         const doc = documentOf(options);
         container.replaceChildren();
+        const preface = reasoningPreface(doc, detail);
         if (!detail || !Array.isArray(detail.candidates) || detail.candidates.length === 0) {
-            container.append(missingState(doc, "No candidate was generated", detail && detail.outcome ? detail.outcome.message : "The engine has no candidate for this workflow and failure."));
+            container.append(missingState(doc, "No candidate was generated", detail && detail.outcome ? detail.outcome.message : "The engine has no candidate for this workflow and failure."), ...preface);
             return;
         }
+        container.append(...preface);
         for (const candidate of detail.candidates) {
             const card = element(doc, "div", undefined, "card rec-detail", { "data-ready": String(candidate.approval.ready) });
             card.append(element(doc, "h4", `${candidate.service} · ${strategyName(candidate.type)}`, "rec-detail__title"));
@@ -550,6 +567,7 @@
                 card.append(labelled(doc, "  finding", `${finding.constraint}: ${finding.status} — ${finding.detail}`));
             }
             if ((feasibility.missingEvidence || []).length) card.append(labelled(doc, "Evidence missing", feasibility.missingEvidence.join("; ")));
+            if (feasibility.status === "FEASIBLE" && feasibility.rollout && feasibility.rollout.reason) card.append(labelled(doc, "Rollout", `Not evaluated — ${feasibility.rollout.reason}`));
             card.append(labelled(doc, "Current placement", placementText(candidate.currentPlacement)));
             card.append(labelled(doc, "Blast radius", `${percent(candidate.predicted.blastRadiusBefore)} now → ${percent(candidate.predicted.blastRadiusAfter)} predicted (${candidate.predicted.riskReduction} points)`));
             card.append(labelled(doc, "Cost", `${codeLabel(candidate.cost.resource)} — ${candidate.cost.note || "no note"}; ${candidate.cost.configuration}`));
@@ -650,6 +668,28 @@
             list.append(description);
         }
         container.append(element(doc, "div", "Proposal under review", "op-subtitle"), list);
+        const changes = candidate.proposedChanges || [];
+        if (changes.length) {
+            container.append(element(doc, "div", "Exact field changes before approval", "op-subtitle"));
+            const table = element(doc, "table", undefined, "data-table op-changes__table");
+            const head = element(doc, "tr");
+            ["Deployment", "Field", "Current", "Proposed", "Status"].forEach((label) =>
+                head.append(element(doc, "th", label)));
+            const thead = element(doc, "thead");
+            thead.append(head);
+            const body = element(doc, "tbody");
+            changes.forEach((change) => change.fields.forEach((field) => {
+                const row = element(doc, "tr");
+                [change.deployment, field.label, field.fromText, field.toText,
+                    field.changed ? "changed" : "unchanged"].forEach((value) =>
+                    row.append(element(doc, "td", value)));
+                body.append(row);
+            }));
+            table.append(thead, body);
+            container.append(table, element(doc, "p",
+                "These values come from the generated patch. Pod-template edits roll out the Deployment; predicted placement is not a guarantee.",
+                "ui-note"));
+        }
     }
 
     // ---- the failure being assessed, in the words a person reads it in ---------------------------------------------------
@@ -662,6 +702,9 @@
         if (sub) node.append(element(doc, "div", sub, "rec-tile__sub"));
         return node;
     }
+
+    /** Display name of a workflow (see workflow-names.js); the id is the fallback and stays the key. */
+    function workflowLabel(id) { return typeof window !== "undefined" && window.ResilienceWorkflowNames ? window.ResilienceWorkflowNames.label(id) : id; }
 
     /** The problem in one sentence, from the engine's own failure-impact result. Null when the engine reported none: nothing is guessed. */
     function problemStatement(detail) {
@@ -708,7 +751,7 @@
         } else {
             lostLine.append(element(doc, "span", "No service is lost when this node fails.", "rec-impact__lost-label"));
         }
-        if (failedWorkflows.length) lostLine.append(element(doc, "p", `Workflow lost: ${failedWorkflows.join(", ")}`, "ui-note"));
+        if (failedWorkflows.length) lostLine.append(element(doc, "p", `Workflow lost: ${failedWorkflows.map(workflowLabel).join(", ")}`, "ui-note"));
 
         // The four figures are the research reading of the same result.
         const tiles = element(doc, "div", undefined, "rec-impact__tiles rec-research-only");
@@ -783,9 +826,9 @@
             const exposed = candidate.workflows.exposed;
             const benefit = candidate.coverage?.protectsEveryWorkflow
                 ? "Predicted to protect every workflow against the loss of any one worker."
-                : `Predicted to protect: ${protectedIds.length ? protectedIds.join(", ") : "no additional workflow against every worker failure"}.`;
+                : `Predicted to protect: ${protectedIds.length ? protectedIds.map(workflowLabel).join(", ") : "no additional workflow against every worker failure"}.`;
             container.append(element(doc, "p", `Why this helps: ${benefit} Protection is checked against every worker's failure.`, "rec-selected__why"));
-            if (Array.isArray(exposed) && exposed.length) container.append(element(doc, "p", `Still exposed: ${exposed.join(", ")}.`, "ui-note"));
+            if (Array.isArray(exposed) && exposed.length) container.append(element(doc, "p", `Still exposed: ${exposed.map(workflowLabel).join(", ")}.`, "ui-note"));
         }
         const predicted = candidate.predicted || {};
         container.append(gauge(doc, predicted.blastRadiusBefore, predicted.blastRadiusAfter), element(doc, "p", "Predicted, not observed.", "ui-note"));
@@ -899,7 +942,160 @@
         return { text: list.length ? `Evidence: ${available} of ${list.length} available` : "Evidence", attention };
     }
 
+    /** Two bars, now and after, for one predicted figure (percent of services lost on average). */
+    function exposureMeter(doc, before, after) {
+        const box = element(doc, "div", undefined, "pm-meter");
+        for (const [name, value, kind] of [["Now", before, "before"], ["After", after, "after"]]) {
+            const row = element(doc, "div", undefined, "pm-meter__row");
+            const track = element(doc, "span", undefined, "pm-meter__track");
+            const fill = element(doc, "span", undefined, "pm-meter__fill", { "data-kind": kind });
+            fill.style.width = `${Math.max(2, Math.min(100, Number(value) || 0))}%`;
+            track.append(fill);
+            row.append(element(doc, "span", name, "pm-meter__name"), track, element(doc, "strong", percent(value), "pm-meter__value"));
+            box.append(row);
+        }
+        return box;
+    }
+
+    /** Which change leads, which others are shown (one per service, cheapest first), from the engine's ranking. */
+    function chooseFindings(findings, highlight) {
+        const candidates = findings.recommendations || [];
+        const ranked = candidates.filter((c) => c.ranking?.rank != null);
+        // One option per service: the cheapest that is predicted to do as well as the best-ranked one, then rank.
+        const bestPerService = new Map();
+        for (const candidate of ranked) {
+            const held = bestPerService.get(candidate.service);
+            const cost = COST_ORDER[candidate.resourceCost] ?? 3;
+            if (!held || cost < (COST_ORDER[held.resourceCost] ?? 3)) bestPerService.set(candidate.service, candidate);
+        }
+        const chosen = highlight && ranked.find((c) => c.service === highlight.service && c.type === highlight.type);
+        const lead = chosen || ranked.find((c) => c.id === findings.selectedCandidateId) || null;
+        const rest = [...bestPerService.values()].filter((c) => c.service !== (lead && lead.service));
+        rest.sort((a, b) => a.ranking.rank - b.ranking.rank);
+        return { candidates, ranked, lead, shown: lead ? [lead, ...rest] : rest };
+    }
+
+    function candidateCard(doc, candidate, lead, visual) {
+        const card = element(doc, "article", undefined, "rx-lead");
+        if (candidate === lead) card.setAttribute("data-selected", "true");
+        const title = window.ResilienceJourney?.strategyTitle(candidate.type) || strategyName(candidate.type);
+        const head = element(doc, "div", undefined, "rx-lead__head");
+        head.append(element(doc, "h4", `${title} · ${candidate.service}`));
+        if (visual) {
+            const tags = element(doc, "span", undefined, "rx-tags");
+            if (candidate === lead) tags.append(element(doc, "span", "Recommended on Assessment", "rx-pill rx-pill--lead"));
+            tags.append(element(doc, "span", `Cost: ${String(candidate.resourceCost || "unknown").toLowerCase()}`, "rx-pill"));
+            head.append(tags);
+        }
+        card.append(head);
+        if (candidate === lead && !visual) card.append(element(doc, "p", "Recommended on Assessment.", "ui-note"));
+        if (visual) {
+            card.append(element(doc, "p", `Services lost on average: ${percent(candidate.averageServiceExposureBefore)} → ${percent(candidate.averageServiceExposureAfter)}`, "rx-lead__sum"),
+                exposureMeter(doc, candidate.averageServiceExposureBefore, candidate.averageServiceExposureAfter),
+                element(doc, "p", `Services lost on average when a worker stops. Worst single worker: ${percent(candidate.worstCaseBefore)} → ${percent(candidate.worstCaseAfter)}.`, "ui-note"));
+        } else {
+            card.append(element(doc, "p", `Services lost on average when a worker stops: ${percent(candidate.averageServiceExposureBefore)} → ${percent(candidate.averageServiceExposureAfter)} (predicted).`),
+                element(doc, "p", `Worst single worker: ${percent(candidate.worstCaseBefore)} → ${percent(candidate.worstCaseAfter)}. Resource cost: ${String(candidate.resourceCost || "unknown").toLowerCase()}.`, "ui-note"));
+        }
+        const why = element(doc, "details");
+        why.append(element(doc, "summary", "Placement and rollout details"), element(doc, "p", candidate.reason || "Placement verified feasible under the model.", "ui-note"));
+        card.append(why);
+        return card;
+    }
+
+    /** The picture: observed placement, and the simulated placement after the change the person has selected. */
+    function drawFindingsMap(container, findings, picked, state) {
+        const Placement = window.ResiliencePlacement;
+        const after = picked && Array.isArray(picked.afterPlacement) ? picked.afterPlacement : null;
+        if (!after) state.view = "today";
+        const toggle = container.querySelector("[data-role='rec-map-view']");
+        toggle.hidden = !after;
+        toggle.querySelectorAll("button").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.view === state.view)));
+        container.querySelector("[data-role='rec-map-hint']").textContent = state.view === "after"
+            ? `Simulated placement after "${strategyName(picked.type)} · ${picked.service}". The scheduler decides where a new replica really lands.`
+            : "Observed placement. Pick a worker to see what stops if it fails; nothing is stopped.";
+        Placement.draw(container.querySelector("[data-role='rec-map']"), {
+            nodes: findings.nodes || [], placement: Placement.fromDeployment(findings.currentDeployment), after, view: state.view,
+            failedNode: state.failed, onSelect(node) { state.failed = node; drawFindingsMap(container, findings, picked, state); },
+        });
+    }
+
+    function renderDeploymentFindings(container, findings, highlight) {
+        if (!container) return;
+        container.replaceChildren();
+        container.hidden = !findings;
+        if (!findings) return;
+        const doc = container.ownerDocument;
+        const { candidates, ranked, lead, shown } = chooseFindings(findings, highlight);
+        const visual = Boolean(window.ResiliencePlacement && findings.currentDeployment && Array.isArray(findings.currentDeployment.services));
+        container.append(element(doc, "h3", "Service-level assessment"), element(doc, "p", findings.note, "ui-note"));
+
+        if (visual) {
+            const state = { view: "today", failed: findings.failedNode || ((findings.nodes || [])[0] || {}).node || null };
+            let picked = lead || shown[0] || null;
+            const region = element(doc, "div", undefined, "rx-map");
+            const head = element(doc, "div", undefined, "rx-map__head");
+            head.append(element(doc, "p", "", "ui-note", { "data-role": "rec-map-hint" }));
+            const toggle = element(doc, "div", undefined, "rx-seg", { "data-role": "rec-map-view", role: "group", "aria-label": "Placement shown" });
+            for (const [view, label] of [["today", "Now"], ["after", "After the change"]]) {
+                const button = element(doc, "button", label, "rx-seg__btn", { type: "button", "data-view": view });
+                button.addEventListener("click", () => { state.view = view; drawFindingsMap(region, findings, picked, state); });
+                toggle.append(button);
+            }
+            head.append(toggle);
+            region.append(head, element(doc, "div", undefined, undefined, { "data-role": "rec-map" }));
+            container.append(region);
+            if (picked && Array.isArray(picked.afterPlacement)) state.view = "after";
+            drawFindingsMap(region, findings, picked, state);
+
+            if (shown.length) container.append(element(doc, "h4", "Changes that would help"),
+                element(doc, "p", "Select one to preview it above. Percentages count services that lose every ready replica, not business workflows. Each change protects one service.", "ui-note"));
+            const cards = [];
+            for (const candidate of shown) {
+                const card = candidateCard(doc, candidate, lead, true);
+                card.setAttribute("role", "button");
+                card.setAttribute("tabindex", "0");
+                card.setAttribute("aria-pressed", String(candidate === picked));
+                if (candidate === picked) card.setAttribute("data-picked", "true");
+                const choose = () => {
+                    picked = candidate;
+                    state.view = Array.isArray(candidate.afterPlacement) ? "after" : "today";
+                    cards.forEach((entry) => { entry.card.setAttribute("aria-pressed", String(entry.candidate === picked)); entry.card.toggleAttribute("data-picked", entry.candidate === picked); });
+                    drawFindingsMap(region, findings, picked, state);
+                };
+                card.addEventListener("click", (event) => { if (!event.target.closest("details")) choose(); });
+                card.addEventListener("keydown", (event) => { if ((event.key === "Enter" || event.key === " ") && event.target === card) { event.preventDefault(); choose(); } });
+                cards.push({ card, candidate });
+                container.append(card);
+            }
+        } else {
+            const table = element(doc, "table", "", "op-table");
+            const head = element(doc, "tr");
+            for (const title of ["If this worker stops", "Goes offline", "Loses replicas"]) head.append(element(doc, "th", title));
+            table.append(head);
+            for (const node of findings.nodes || []) {
+                const row = element(doc, "tr");
+                for (const value of [node.node, (node.failedServices || []).join(", ") || "Nothing", (node.affectedServices || []).filter((name) => !(node.failedServices || []).includes(name)).join(", ") || "Nothing"]) row.append(element(doc, "td", value));
+                table.append(row);
+            }
+            container.append(table);
+            container.append(element(doc, "h4", "Changes that would help"),
+                element(doc, "p", "Percentages count services that lose every ready replica, not business workflows. The first change is the one Assessment recommends; the others protect a different service.", "ui-note"));
+            for (const candidate of shown) container.append(candidateCard(doc, candidate, lead, false));
+        }
+        if (!ranked.length) container.append(element(doc, "p", "No placement improvement could be ranked from the available evidence. This is not proof of resilience."));
+        if (candidates.length) {
+            const details = element(doc, "details");
+            details.append(element(doc, "summary", `All ${candidates.length} options that were checked`));
+            const list = element(doc, "ul");
+            for (const c of candidates) list.append(element(doc, "li", `${strategyName(c.type)} · ${c.service}: ${c.feasibility?.status || "Unknown"}. ${c.reason || ""} ${c.ranking?.detail || ""}`));
+            details.append(list); container.append(details);
+        }
+        container.append(element(doc, "p", "To get business impact and approval, review a workflow in Workflow Discovery. Changes already applied can still be recovered from history.", "ui-note"));
+    }
+
     window.ResilienceRecommendations = {
+        renderDeploymentFindings,
         renderSelectedImprovement,
         renderImpactSummary,
         computeSteps,

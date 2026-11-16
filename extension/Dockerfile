@@ -3,12 +3,16 @@
 #   docker build -f extension/Dockerfile -t k8s-resilience-engine:0.1.0 .
 
 # --- Backend runtime: the unmodified application plus the extension wrapper -----------------
-FROM python:3.13-slim AS runtime
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/home/app
 WORKDIR /app
+# The pinned Python base predates Debian's zlib security update. Upgrade only that runtime library.
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+    && rm -rf /var/lib/apt/lists/*
 
 # Runtime dependencies only: requirements.txt without what the extension never uses.
 #  * test-only packages (pytest, iniconfig, pluggy, pygments);
@@ -32,14 +36,14 @@ COPY app ./app
 COPY experiments ./experiments
 # sample_data/ and deploy/ are deliberately not copied: the extension never serves fixture data, and
 # declared deployment intent must come from an explicitly selected source, not a folder in the image.
-COPY extension/__init__.py extension/asgi.py extension/cluster_connection.py extension/cluster_ingest.py extension/error_envelope.py extension/healthcheck.py ./extension/
+COPY extension/__init__.py extension/asgi.py extension/runtime.py extension/cluster_connection.py extension/cluster_ingest.py extension/error_envelope.py extension/healthcheck.py extension/tracing_routes.py ./extension/
 
 # --- Host helper: one static Go binary per operating system, for this image's own architecture ---
 # Docker Desktop copies the binary for the user's operating system onto their computer. metadata.json
 # has no architecture field, so each image carries the binaries for its own architecture (an arm64
 # image runs on an arm64 host and holds arm64 binaries). Windows on arm64 is built only so the paths
 # in metadata.json always exist; it is not supported or tested.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS helper
+FROM --platform=$BUILDPLATFORM golang:1.26.11 AS helper
 WORKDIR /src
 COPY extension/helper/go.mod extension/helper/go.sum ./
 # Module and compiler caches are build cache mounts: repeat builds neither download nor recompile the
@@ -67,7 +71,9 @@ RUN --mount=type=bind,from=helper,source=/out,target=/tmp/helper-done true
 RUN python -m extension.build_ui /out
 
 # --- Final extension image ------------------------------------------------------------------
+# Build/install tooling and its vendored HTTP/archive libraries are not needed in the shipped backend.
 FROM runtime
+RUN python -m pip uninstall -y pip setuptools
 LABEL org.opencontainers.image.title="K8s Resilience Engine" \
       org.opencontainers.image.description="Dependency-aware resilience assessment for Kubernetes deployments, inside Docker Desktop. Nothing is applied or stopped without your approval of exactly what will happen." \
       org.opencontainers.image.vendor="K8s Resilience Engine research project (SLIIT J26-SE-311)" \
@@ -78,7 +84,7 @@ LABEL org.opencontainers.image.title="K8s Resilience Engine" \
 
 COPY extension/metadata.json extension/compose.yaml extension/icon.svg /
 COPY --from=render /out /ui
-COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoconnect.js extension/ui-src/namespaces.js extension/ui-src/trace-service.js extension/ui-src/connect.js extension/ui-src/connect-auto.js extension/ui-src/docker.css /ui/
+COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoconnect.js extension/ui-src/namespaces.js extension/ui-src/trace-service.js extension/ui-src/tracing-panel.js extension/ui-src/bookinfo-tracing.js extension/ui-src/outstanding.js extension/ui-src/connect.js extension/ui-src/connect-auto.js extension/ui-src/docker.css /ui/
 COPY --from=helper --chmod=0755 /out/darwin/resilience-helper /darwin/resilience-helper
 COPY --from=helper --chmod=0755 /out/linux/resilience-helper /linux/resilience-helper
 COPY --from=helper --chmod=0755 /out/windows/resilience-helper.exe /windows/resilience-helper.exe

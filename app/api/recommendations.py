@@ -1,7 +1,9 @@
 import os
-from typing import Callable
+from typing import Callable, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from urllib.parse import unquote
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import Field
 
 from app.engine.recommendation_evaluation_validation.approval import (
@@ -29,6 +31,8 @@ from app.engine.recommendation_evaluation_validation.validation.experiment_repos
 from app.engine.recommendation_evaluation_validation.application.analysis import ChangeAnalyser
 from app.engine.recommendation_evaluation_validation.application.live_analyser import ProductionAnalyser, ResearchAnalyser
 from app.engine.recommendation_evaluation_validation.apply_test.service import ApplyTestService
+from app.engine.recommendation_evaluation_validation.observation import FailureObservationService
+from app.engine.failure_impact_prediction.service import build_cluster_failure_overview
 from app.engine.recommendation_evaluation_validation.apply_test.repository import RunRepository
 from app.engine.recommendation_evaluation_validation.approval.research import declaration_digest
 from app.engine.recommendation_evaluation_validation.evidence_context import build_recommendation_context
@@ -66,6 +70,15 @@ from app.shared.schemas.base import APIModel
 from app.api.validation_loop import require_no_validation_run, router as validation_loop_router
 
 
+def attributed_to(name: str | None) -> str:
+    """The name a person set once in the page, for the audit record. It is attribution only, never authentication: anyone can type any name.
+
+    Sent URL-encoded in ``X-Operator-Name`` so a non-ASCII name survives the header. Without one the record keeps the generic role.
+    """
+    text = unquote(name or "").strip()
+    return text[:100] if len(text) >= 2 and text.isprintable() else "developer"
+
+
 class ResearchApprovalRequest(APIModel):
     """A request to approve a DECLARED-workflow recommendation for research validation. Member 4's own body; no shared schema changes."""
 
@@ -93,10 +106,22 @@ class ApplyTestRequest(APIModel):
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     yaml_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     request_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    applied_by: str = Field(min_length=2, max_length=100)
 
 
 class ResetRequest(APIModel):
+    expected_application_id: str = Field(min_length=1, max_length=80)
     reset_by: str
+    # What to do with a field something else changed since the change was applied: "refuse" restores nothing and names
+    # them (the default), "keep" restores only the fields that still hold what the change set.
+    external: Literal["refuse", "keep"] = "refuse"
+
+
+class KeepRequest(APIModel):
+    """Who decides the applied change stays. Nothing is written to the cluster."""
+
+    kept_by: str
+    expected_application_id: str = Field(min_length=1, max_length=80)
 
 
 router = APIRouter(
@@ -318,7 +343,7 @@ def get_apply_test_service(db: Session = Depends(get_db),
 def start_apply_test(request: ApplyTestRequest,
                      _no_validation_run: None = Depends(require_no_validation_run),
                      service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
-    """The explicit Apply action is the consent. It starts a background run; there is no separate approval form."""
+    """Start Apply and test only after a persisted approval for this exact recommendation; the named applier is recorded."""
     return service.start(**request.model_dump())
 
 
@@ -349,6 +374,53 @@ def apply_test_live(run_id: str, service: ApplyTestService = Depends(get_apply_t
     if live is None:
         raise HTTPException(status_code=404, detail="Apply and test run not found")
     return live
+
+
+def read_node_states() -> dict:
+    """Each node's Ready condition, through a gateway that CANNOT write (allow_writes is off). Observing never needs more."""
+    first = next((p for p in (os.environ.get("KUBECONFIG") or "").split(os.pathsep) if p), "~/.kube/config")
+    try:
+        return KubernetesTestClusterGateway(first, connected_cluster=True).read_node_states()
+    except (AmbientCredentialsError, NotConnectedError):
+        raise EvidenceError("CLUSTER_NOT_CONNECTED", "No Kubernetes cluster is connected.", http_status=503, component="recommendation") from None
+
+
+def get_failure_observation_service(db: Session = Depends(get_db)) -> FailureObservationService:
+    return FailureObservationService(db.get_bind(), lambda namespace: build_cluster_failure_overview(namespace), lambda: read_node_states())
+
+
+class FailureObservationRequest(APIModel):
+    namespace: str | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
+@router.post("/failure-observations", status_code=201)
+def start_failure_observation(
+    request: FailureObservationRequest,
+    operator: str | None = Header(default=None, alias="X-Operator-Name"),
+    service: FailureObservationService = Depends(get_failure_observation_service),
+) -> dict:
+    """Start WATCHING a failure the developer causes themselves. Read only: this app stops nothing, and the model's prediction
+    for every worker node is recorded now, before anything fails."""
+    return service.start(request.namespace, attributed_to(operator), request.note)
+
+
+@router.get("/failure-observations/current")
+def current_failure_observation(service: FailureObservationService = Depends(get_failure_observation_service)) -> dict:
+    """The watching observation (advanced from the cluster as it is now), else the latest one, else none."""
+    return {"observation": service.read()}
+
+
+@router.get("/failure-observations")
+def failure_observation_history(limit: int = Query(10, ge=1, le=50),
+                                service: FailureObservationService = Depends(get_failure_observation_service)) -> dict:
+    return {"observations": service.history(limit)}
+
+
+@router.post("/failure-observations/{observation_id}/stop")
+def stop_failure_observation(observation_id: str,
+                             service: FailureObservationService = Depends(get_failure_observation_service)) -> dict:
+    return service.stop(observation_id)
 
 
 @router.get("/apply-tests/{run_id}/report")
@@ -659,6 +731,7 @@ def request_approval(
     response: Response,
     service: ApprovalService = Depends(get_approval_service),
     provider: Callable[[], LiveRecommendation] = Depends(get_recommendation_provider),
+    operator: str | None = Header(default=None, alias="X-Operator-Name"),
 ) -> ApprovalResponse:
     live = provider()
     proposal = build_yaml_proposal(live, recommendation_id)
@@ -668,7 +741,7 @@ def request_approval(
             proposal_version=request.proposal_version,
             recommendation=live.report,
             yaml_snapshot=request.yaml_snapshot,
-            requested_by="developer",
+            requested_by=attributed_to(operator),
             evidence=live.evidence,
             proposal_yaml=proposal.yaml if proposal.status == GENERATED and proposal.applicable else None,
         )
@@ -691,13 +764,14 @@ def approve_recommendation(
     request: ApprovalDecisionRequest,
     service: ApprovalService = Depends(get_approval_service),
     evaluator: Callable[[ApprovalModel], LiveRecommendation] = Depends(get_current_evaluator),
+    operator: str | None = Header(default=None, alias="X-Operator-Name"),
 ) -> ApprovalResponse:
     try:
         approval = service.approve(
             recommendation_id=recommendation_id,
             expected_proposal_version=request.expected_proposal_version,
             note=request.note,
-            decided_by="developer",
+            decided_by=attributed_to(operator),
             evaluate=evaluator,
         )
     except PreconditionError as e:
@@ -719,13 +793,14 @@ def reject_recommendation(
     recommendation_id: str,
     request: ApprovalDecisionRequest,
     service: ApprovalService = Depends(get_approval_service),
+    operator: str | None = Header(default=None, alias="X-Operator-Name"),
 ) -> ApprovalResponse:
     try:
         approval = service.reject(
             recommendation_id=recommendation_id,
             expected_proposal_version=request.expected_proposal_version,
             note=request.note,
-            decided_by="developer",
+            decided_by=attributed_to(operator),
         )
     except PreconditionError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -746,10 +821,10 @@ def _applied(service: ApplicationService, recommendation_id: str, action: Callab
     if RunRepository(service.repository.session.get_bind()).active():
         raise ApplicationRefused("APPLY_TEST_ACTIVE", "An Apply and test run is using this cluster. Wait for it to finish before Apply or Reset.")
     try:
-        action()
+        change = action()
     except PreconditionError as error:
         raise HTTPException(status_code=422, detail=str(error))
-    return service.status(recommendation_id)
+    return service.status(recommendation_id, application_id=getattr(change, "application_id", None))
 
 
 @router.get("/applications/current")
@@ -779,6 +854,25 @@ def list_applications(limit: int = Query(20, ge=1, le=100), production: Applicat
         "rolloutState": (c.rollout or {}).get("state")} for c in production.repository.recent(limit)]}
 
 
+@router.get("/applications/outstanding")
+def list_outstanding_applications(production: ApplicationService = Depends(get_application_service)) -> dict:
+    """The change ledger's open entries, of both tiers: what is still applied, half-applied, kept, or being reset, each
+    against the cluster connected now. This is what a reconnect and a disconnect look at. It applies and resets nothing."""
+    return production.outstanding(advance_resets=True)
+
+
+@router.post("/{recommendation_id}/keep")
+def keep_recommendation(recommendation_id: str, request: KeepRequest,
+                        service: ApplicationService = Depends(get_application_service)) -> dict:
+    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by, expected_application_id=request.expected_application_id))
+
+
+@router.post("/declared/{recommendation_id}/keep")
+def keep_research_recommendation(recommendation_id: str, request: KeepRequest,
+                                 service: ApplicationService = Depends(get_research_application_service)) -> dict:
+    return _applied(service, recommendation_id, lambda: service.keep(recommendation_id, request.kept_by, expected_application_id=request.expected_application_id))
+
+
 @router.get("/{recommendation_id}/application")
 def get_application(recommendation_id: str, service: ApplicationService = Depends(get_application_service)) -> dict:
     return service.status(recommendation_id)
@@ -802,7 +896,8 @@ def reset_recommendation(
     _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_application_service),
 ) -> dict:
-    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external,
+                                                                   expected_application_id=request.expected_application_id))
 
 
 @router.post("/{recommendation_id}/analysis/retry")
@@ -841,7 +936,8 @@ def reset_research_recommendation(
     _no_validation_run: None = Depends(require_no_validation_run),
     service: ApplicationService = Depends(get_research_application_service),
 ) -> dict:
-    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by))
+    return _applied(service, recommendation_id, lambda: service.reset(recommendation_id, request.reset_by, external=request.external,
+                                                                   expected_application_id=request.expected_application_id))
 
 
 # The fault-injection validation loop ("Prove it"). Included last so that none of the `/{recommendation_id}/...` routes above can shadow it.

@@ -598,89 +598,37 @@ Team approval is required for:
 
 ## 12. Current Development Status
 
-Completed:
+Updated 2026-11-17. The authoritative, detailed status is "Current State" in `CLAUDE.md`; what changed recently, and in whose area, is in `docs/CHANGES.md`.
 
-- architecture agreed;
-- shared repository created;
-- final folder names selected;
-- FastAPI + Jinja2 foundation created;
-- dashboard created;
-- health API created;
-- sample component endpoints created;
-- shared Pydantic schemas created;
-- sample JSON files created;
-- shared sample loader created;
-- API routes call component services;
-- endpoint tests created;
-- Member 4 candidate generator created;
-- virtual deployment deep copy created;
-- topology-spread simulator created;
-- feasibility analyser created;
-- concentration metric created;
-- SimulationResult created;
-- original-input immutability test created;
-- floating-point assertions fixed with `pytest.approx`.
+- **The app serves live cluster evidence only.** Missing evidence is an explicit `EvidenceError`; sample data is for tests and research runs.
+- **Member 1:** workflow management (manual, recorded, test evidence). A workflow drives approve and Apply only after an operational review (`docs/WORKFLOW_EVIDENCE_POLICY.md`).
+- **Member 2:** selector-based Service → Pod → ReplicaSet → Deployment resolution, concentration and drift analysis, live discovery.
+- **Member 3:** node-failure prediction, the all-nodes failure overview, portfolio evaluation.
+- **Member 4:** ranked candidates (topology spread, replica increase, anti-affinity), YAML proposals, approval, Apply, rollout watch, post-change analysis, Keep/Reset, the fault-injection validation loop, and a read-only watch of a failure the developer causes.
+- **Verified against a real cluster:** reads only. Apply, Reset, node failure and the validation loop have run on in-memory doubles; no worker has been stopped.
+- **Not complete:** controlled experiments and final validation. Do not claim experimental validation before they are run.
 
-Most recent known test result:
-
-```text
-9 collected
-9 passed
-0 failed
-```
-
-The earlier float-comparison failure (`0.6666...` compared exactly against `0.67`) has been
-fixed by asserting with `pytest.approx(..., abs=0.01)` instead of exact equality. Do not
-change correct mathematics to force exact equality — always use `pytest.approx` for derived
-floating-point values.
+Run the suites with the commands in section 14.
 
 ## 13. Immediate Next Tasks
 
-Done:
+1. Review a Bookinfo workflow in Workflow Discovery, so Recommendations can approve and apply a change.
+2. Apply one small change to the research cluster with explicit approval, then Keep or Reset it, to exercise the live path.
+3. Run the first controlled node-failure experiment on a designated disposable cluster (`docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md`).
+4. Close the open handoffs for Members 2 and 3 (`docs/CHANGES.md`, "Open issues").
 
-1. ~~Fix the float test with `pytest.approx`.~~
-2. ~~Run `python -m pytest -v` and confirm all tests pass.~~
-3. ~~Commit the topology-spread checkpoint.~~
-
-Next:
-
-1. Assign component branches.
-2. Begin each member's smallest real milestone (Members 1–3 currently have no real algorithm,
-   only empty `service.py` stubs).
-3. Member 4 adds pod anti-affinity as the second candidate.
-4. Evaluate all candidates, not only the first.
-5. Integrate Member 3's evaluator before claiming blast-radius improvement.
-6. Add ranking only after simulations and feasibility checks work.
-
-Recommended branches:
-
-```text
-feature/workflow-dependency-modeling
-feature/deployment-topology-modeling
-feature/failure-impact-prediction
-feature/recommendation-evaluation-validation
-```
+Branch naming is the team's choice; keep shared-surface changes (schemas, `app/main.py`) behind a pull request.
 
 ## 14. Development Commands
 
 ```bash
 source .venv/bin/activate
 uvicorn app.main:app --reload
-python -m pytest -v
+python -m pytest
+node --test tests/frontend/*.test.mjs extension/ui-src/*.test.mjs
 ```
 
-Expected routes:
-
-```text
-/
- /docs
- /api/health
- /api/workflows/sample
- /api/deployments/sample
- /api/failure-impacts/sample
- /api/recommendations/sample
- /api/validations/sample
-```
+Pages: `/` (Assessment), `/components/workflows`, `/components/deployments`, `/components/failure-impacts`, `/components/recommendations`. API docs at `/docs`, health at `/api/health`. There are no `/sample` routes.
 
 ## 15. Experiment Plan
 

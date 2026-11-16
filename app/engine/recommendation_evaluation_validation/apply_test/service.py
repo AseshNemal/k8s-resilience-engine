@@ -28,7 +28,17 @@ from app.integrations.kubernetes.quantity import parse_quantity
 _LOCK = threading.Lock()
 _THREADS = {}
 TERMINAL = {"COMPLETED", "COMPLETED_WITH_GAPS", "TESTS_FAILED", "FAILED", "INTERRUPTED"}
-ACTOR = "Explicit Apply action"
+_REFUSED_APPLIERS = frozenset({"developer", "explicit apply action"})
+
+
+def _named_applier(applied_by):
+    who = (applied_by or "").strip()
+    if len(who) < 2 or who.lower() in _REFUSED_APPLIERS:
+        raise ApplicationRefused(
+            "APPLIER_UNNAMED",
+            "Apply and test is started by a named person. Enter your name; nothing was applied.",
+        )
+    return who
 
 
 def _sampled_pod_usage(snapshot):
@@ -60,9 +70,10 @@ class ApplyTestService:
         self.writes_enabled = writes_enabled
         self.timeout, self.poll, self.sleep, self.measure = rollout_timeout, poll_seconds, sleep, measure
 
-    def start(self, *, candidate_id, namespace, declared, fingerprint, yaml_sha256, request_key, background=True):
+    def start(self, *, candidate_id, namespace, declared, fingerprint, yaml_sha256, request_key, applied_by, background=True):
         if not self.writes_enabled:
             raise ApplicationRefused("CLUSTER_WRITES_NOT_ENABLED", "Apply is not enabled by this backend's deployment.", http_status=403)
+        who = _named_applier(applied_by)
         existing = self.repo.get(request_key=request_key)
         identity_key = [candidate_id, namespace, declared, fingerprint, yaml_sha256]
         if existing:
@@ -73,10 +84,14 @@ class ApplyTestService:
         if not identity.cluster_uid:
             raise ApplicationRefused("CLUSTER_IDENTITY_UNKNOWN", "The connected cluster UID could not be verified. The extension must be able to read the kube-system namespace. Open Connect cluster and set up this cluster again to review and update its access.")
         with Session(self.engine) as db:     # each cluster is independent: a change left on another one blocks nothing here
+            approval = ApprovalRepository(db).get_by_recommendation_id(candidate_id)
+            trusted = has_research_provenance(approval) if declared and approval else has_verified_provenance(approval) if approval else False
+            if not approval or approval.status != ApprovalStatus.APPROVED or not trusted:
+                raise ApplicationRefused("NOT_APPROVED", "Request and approve this exact recommendation before starting Apply and test. Nothing was applied.")
             if any(ApplicationService._cluster_match(c, identity.cluster_uid) != "other" for c in AppliedChangeRepository(db).active()):
                 raise ApplicationRefused("CHANGE_ACTIVE", "A change is already applied or awaiting recovery. Reset it before starting another run.")
         run_id = "apply-test-" + uuid.uuid4().hex
-        payload = {"candidateId": candidate_id, "namespace": namespace, "declared": declared,
+        payload = {"candidateId": candidate_id, "namespace": namespace, "declared": declared, "appliedBy": who,
                    "selectionKey": identity_key, "expectedFingerprint": fingerprint, "expectedYamlSha256": yaml_sha256,
                    "clusterUid": identity.cluster_uid, "clusterName": identity.context,
                    "events": [], "report": {"label": "Apply and functional test report", "faultInjected": False,
@@ -133,31 +148,24 @@ class ApplyTestService:
             raise ApplicationRefused("SELECTION_STALE", "The selected candidate or generated YAML changed. Refresh the candidates before Apply.")
         return live, proposal, standing
 
-    def _consent(self, db, run, live, proposal, standing):
-        """Record the actual Apply action, not a fabricated named-person approval or a typed acknowledgement.
-
-        The legacy application service consumes this immutable, server-generated authorization. No separate user approval
-        screen is required. Its target, eligibility, fingerprint, YAML integrity and Reset checks remain unchanged.
-        """
-        provenance = {**live.evidence, "applyConsent": {"action": "apply-and-test", "at": now().isoformat(), "identityVerified": False}}
-        if run["declared"]:
-            if declaration_digest(live.evidence) is None:
-                raise ApplicationRefused("DECLARATION_UNVERIFIED", "The declaration digest is missing.")
-            provenance.update(researchTier=RESEARCH_TIER, researchAcknowledgement={
-                "by": ACTOR, "statement": "The explicit Apply action starts this selected research proposal and its functional checks; workflow definitions are declared, not observed.",
-                "source": "apply-action", "at": now().isoformat()})
-        at = now()
-        approval = ApprovalModel(id=0, recommendation_id=run["candidateId"], proposal_version=run["runId"],
-            status=ApprovalStatus.APPROVED, requested_at=at, requested_by=ACTOR, decided_at=at, decided_by=ACTOR,
-            decision_note="Explicit Apply action; no separate approval workflow.",
-            recommendation_snapshot=next(c.model_dump() for c in live.report.recommendations if c.id == run["candidateId"]),
-            yaml_snapshot=proposal.yaml, evaluation_snapshot={"provenance": provenance,
-                "proposal": {"fingerprint": standing.fingerprint, "failedNode": live.evidence["failedNode"],
-                    "yaml": {"origin": "server-generated", "sha256": proposal.sha256, "verifiedAgainstRecommendation": True}},
-                "approvalCheck": {"proposalFingerprint": standing.fingerprint, "authorization": "explicit-apply-action"}})
-        if not (has_research_provenance(approval) if run["declared"] else has_verified_provenance(approval)):
-            raise ApplicationRefused("EVIDENCE_UNVERIFIED", "The Apply action has no verified evaluation provenance.")
-        return ApprovalRepository(db).save(approval)
+    def _approval(self, db, run, live, proposal, standing):
+        """Consume the named person's persisted decision; never manufacture authorization from the Apply click."""
+        approval = ApprovalRepository(db).get_by_recommendation_id(run["candidateId"])
+        trusted = approval and (has_research_provenance(approval) if run["declared"] else has_verified_provenance(approval))
+        if not approval or approval.status != ApprovalStatus.APPROVED or not trusted:
+            raise ApplicationRefused("NOT_APPROVED", "This exact recommendation needs an approved request before Apply and test. Nothing was applied.")
+        snapshot = approval.evaluation_snapshot or {}
+        proposal_record = snapshot.get("proposal") or {}
+        approval_check = snapshot.get("approvalCheck") or {}
+        if (approval_check.get("proposalFingerprint") != standing.fingerprint
+                or proposal_record.get("fingerprint") != standing.fingerprint
+                or not approval.yaml_snapshot or approval.yaml_snapshot != proposal.yaml
+                or (proposal_record.get("yaml") or {}).get("sha256") != proposal.sha256):
+            raise ApplicationRefused("APPROVAL_STALE", "The approved fingerprint or YAML no longer matches this selection. Request approval again; nothing was applied.")
+        if run["declared"] and (declaration_digest(live.evidence) is None
+                                or declaration_digest(live.evidence) != declaration_digest(snapshot.get("provenance"))):
+            raise ApplicationRefused("APPROVAL_STALE", "The declared workflow changed since approval. Request approval again; nothing was applied.")
+        return approval
 
     def _snapshot(self, run, live, phase):
         def progress(command):
@@ -180,15 +188,16 @@ class ApplyTestService:
                 workflowSetDigest=live.evidence.get("workflowSetDigest"),
                 predictedRisk=next(c.predicted_blast_radius for c in live.report.recommendations if c.id == run["candidateId"]),
                 before=self._snapshot(run, live, "baseline"), yaml=proposal.yaml, yamlSha256=proposal.sha256,
-                workflowBasis=live.evidence.get("workflowBasis"), workflows=live.evidence.get("workflows"))
+                workflowBasis=live.evidence.get("workflowBasis"), workflows=live.evidence.get("workflows"),
+                workflowEvidencePolicy=live.evidence.get("workflowEvidencePolicy"), workflowReview=live.evidence.get("workflowReview"))
             self.repo.update(run_id, report=report)
             self._event(run_id, "applying", "Validate and PATCH the selected Deployments through Kubernetes API", "Saving the previous state, then applying only the selected changes.")
             with Session(self.engine) as db:
-                approval = self._consent(db, run, live, proposal, standing)
+                approval = self._approval(db, run, live, proposal, standing)
                 self.repo.update(run_id, authorizationId=approval.id)
                 service = self.application_factory(db, run["declared"])
                 # Recheck after baseline measurements; Apply is never based on a now-stale preview.
-                change = service.apply(run["candidateId"], ACTOR, evaluate=lambda _: self._checked(run)[0])
+                change = service.apply(run["candidateId"], run["appliedBy"], evaluate=lambda _: self._checked(run)[0], run_id=run_id)
                 self.repo.update(run_id, applicationId=change.application_id)
             deadline = time.monotonic() + self.timeout
             self._event(run_id, "rollout", "GET Deployment rollout status", "Waiting for the new generation and ready replicas.")
@@ -250,7 +259,8 @@ class ApplyTestService:
             run = self.repo.get(run["runId"])
         run["report"] = {**(run.get("report") or {}), "riskTargetMet": _risk_target_met(run.get("report") or {})}
         with Session(self.engine) as db:
-            change = AppliedChangeRepository(db).latest_for(run["candidateId"])
+            applications = AppliedChangeRepository(db)
+            change = applications.get(run["applicationId"]) if run.get("applicationId") else applications.for_run(run["runId"])
             # A crash can happen after the snapshot is saved but before the worker records applicationId.
             if change and change.approval_id == run.get("authorizationId"):
                 run["application"] = change.to_dict()
@@ -260,6 +270,13 @@ class ApplyTestService:
                                         if match == "other" else None)
                 run["canReset"] = (change.status in ("APPLYING", "APPLIED", "RESET_FAILED") and run["status"] in TERMINAL
                                    and match != "other")
+                # After a test the change is still on the cluster: the person is asked to reset it or to keep it (a recorded
+                # decision that writes nothing). Only a change that settled as applied can be kept.
+                run["canKeep"] = (change.status == "APPLIED" and run["status"] in TERMINAL and match == "same"
+                                  and (change.rollout or {}).get("state") == "completed")
+                # A kept change stays on the cluster and stays resettable: the person can still put it back.
+                run["canResetKept"] = change.status == "KEPT" and run["status"] in TERMINAL and match != "other"
+                run["kept"] = (change.detail or {}).get("kept") if change.status == "KEPT" else None
         return run
 
     def live(self, run_id=None):
@@ -318,6 +335,9 @@ class ApplyTestService:
             summaries.append({**{key: run.get(key) for key in (
                 "runId", "candidateId", "namespace", "clusterUid", "clusterName", "declared", "createdAt", "status")},
                 "candidate": report.get("candidate"), "workflowSetDigest": report.get("workflowSetDigest"),
+                "workflowEvidence": {"basis": report.get("workflowBasis") or ("DECLARED" if run.get("declared") else "historical-unverified"),
+                    "policy": report.get("workflowEvidencePolicy"), "workflows": report.get("workflows"),
+                    "review": report.get("workflowReview"), "isCurrentEvidence": False},
                 "yamlSha256": report.get("yamlSha256") or run.get("expectedYamlSha256"),
                 "riskTargetMet": _risk_target_met(report),
                 "baselineRisk": (report.get("baselineRisk") or {}).get("blastRadius"),

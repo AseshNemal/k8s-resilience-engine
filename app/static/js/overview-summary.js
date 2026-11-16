@@ -14,6 +14,8 @@
     const INCOMPLETE = "incomplete";
     const PENDING = "pending";
 
+    // Display name for a workflow id (the person's own name when the engine reported one). Ids stay the keys.
+    const shown = (id) => (global.ResilienceWorkflowNames ? global.ResilienceWorkflowNames.label(id) : id);
     const text = (value, limit) => String(value === null || value === undefined ? "" : value).slice(0, limit || 300);
     const finite = (value) => typeof value === "number" && Number.isFinite(value);
     const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -73,7 +75,7 @@
         return {
             state: AVAILABLE, survives, lostPercent: impact.blastRadius, node,
             severity: severityOf(impact.blastRadius, options && options.thresholds),
-            lostWorkflows: names.slice(0, LOST_SHOWN), moreLost: Math.max(0, names.length - LOST_SHOWN),
+            lostWorkflows: names.slice(0, LOST_SHOWN).map(shown), moreLost: Math.max(0, names.length - LOST_SHOWN),
             headline: riskSentence(node, lost, total, survives),
             sub: `Blast radius ${percent(impact.blastRadius)}${services} · predicted from the live topology, not measured.`,
         };
@@ -99,8 +101,7 @@
         else {
             const frozen = (context.workflows || []).filter((w) => w.applicable).length;
             const declared = (context.declaredWorkflows || []).filter((w) => w.applicable).length;
-            if (frozen) workflow = { state: AVAILABLE, detail: `${plural(frozen, "frozen workflow")} apply` };
-            else if (declared) workflow = { state: AVAILABLE, detail: `${plural(declared, "declared workflow")} apply (declared, not observed)` };
+            if (frozen) workflow = { state: AVAILABLE, detail: `${plural(frozen, "reviewed workflow definition")} apply; dependency source is recorded` };
             else {
                 const item = evidenceById(context, "workflow") || evidenceById(context, "declaredWorkflow");
                 workflow = { state: MISSING, detail: item ? text(item.detail, 160) : "No workflow applies to the application" };
@@ -147,6 +148,7 @@
                 name: candidate.type ? `${strategyName(candidate.type)}${candidate.service ? ` on ${text(candidate.service, 60)}` : ""}` : text(run.candidateId, 80),
                 namespace: text(run.namespace, 60), baseline: percent(run.baselineRisk), predicted: percent(run.predictedRisk), after: percent(run.afterRisk),
                 outcome, outcomeState, when: text(run.createdAt, 40), runId: run.runId, cluster: text(run.clusterName || run.clusterUid || "Unverified cluster", 100),
+                evidenceBasis: global.ResilienceApplyTest?.workflowEvidenceLabel?.(run) || (run.declared ? "Operator-declared dependencies · research" : "Historical workflow evidence · review unavailable"),
             });
             if (rows.length >= (limit || 6)) break;
         }
@@ -190,7 +192,7 @@
             const definition = definitions.find((d) => (d.workflowId || d.workflow_id) === w.workflowId);
             const mandatory = definition && (definition.mandatoryServices || definition.mandatory_services);
             const causes = failed && Array.isArray(mandatory) && Array.isArray(lostServices) ? mandatory.filter((s) => lostServices.includes(s)) : [];
-            return { name: text(w.workflowId), failed, causes, failures: Array.isArray(failures) ? failures : null };
+            return { name: text(w.workflowId), label: shown(text(w.workflowId)), failed, causes, failures: Array.isArray(failures) ? failures : null };
         });
         return { nodes, workflows, assessed };
     }
@@ -267,7 +269,7 @@
         const related = causesKnown ? workflow.causes : references ? hosted.filter((s) => references.includes(s)) : [];
         const outcome = workflow.failures === null ? "Outcome unknown" : workflow.failures.includes(node) ? "Predicted to fail" : "Predicted to survive";
         return { node, workflow: workflowName, namespace: detail.evidence?.namespace || null, services: related,
-            message: `${workflowName} · ${node}: ${outcome}. ${causesKnown ? `Services lost: ${related.join(", ")}.` : references ? `Dependencies observed here: ${related.length ? related.join(", ") : "none"}.` : "Workflow dependency details unavailable."}` };
+            message: `${shown(workflowName)} · ${node}: ${outcome}. ${causesKnown ? `Services lost: ${related.join(", ")}.` : references ? `Dependencies observed here: ${related.length ? related.join(", ") : "none"}.` : "Workflow dependency details unavailable."}` };
     }
 
     global.ResilienceOverview = { describeRisk, describeChips, describeApplied, describeResults, describeEvidence, describeImpact, describeMatrix,

@@ -43,7 +43,7 @@ from app.engine.recommendation_evaluation_validation.validation_loop.service imp
     proof_from_history,
 )
 from app.engine.recommendation_evaluation_validation.validation_loop.worker import LoopWorker
-from app.shared.evidence_errors import unavailable
+from app.shared.evidence_errors import EvidenceError, unavailable
 from app.shared.schemas.base import APIModel
 
 router = APIRouter()
@@ -216,6 +216,30 @@ def targets(runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtim
     return {"targets": out, "blockingRun": _brief(runtime[0].blocking_run())}
 
 
+@router.get("/entry-point")
+def entry_point(namespace: str = Query(..., min_length=1)) -> dict:
+    """Is there an address the workflow check can call? Reads the namespace's Services; creates nothing, sends no request.
+
+    On the Docker Desktop cluster every application Service is ClusterIP, so a person creates ONE labelled LoadBalancer Service from
+    the shipped manifest (see ``app/integrations/kubernetes/probe_entry.py``). This says whether it exists, what address the cluster gave
+    it, and the loopback URL to try. Whether that URL answers is for ``Test it`` to show, never assumed here.
+    """
+    from urllib.parse import quote
+
+    from app.engine.deployment_topology_modeling.discovery import ClusterAccessError, _classify, get_cluster_source
+    from app.integrations.kubernetes.probe_entry import MANIFEST_PATH, describe_entry_points
+    from app.integrations.probe.http_fetch import allowed_probe_port
+
+    try:
+        services = get_cluster_source().list_objects("services", f"/api/v1/namespaces/{quote(namespace, safe='')}/services")
+    except ClusterAccessError as error:      # not connected, credential rejected...: the same coded errors discovery gives
+        raise _classify(error) from None
+    entries = describe_entry_points(services, allowed_probe_port)
+    state = "none" if not entries else ("ready" if any(entry["address"] for entry in entries) else "pending")
+    return {"namespace": namespace, "state": state, "entries": entries, "readOnly": True,
+            "manifest": MANIFEST_PATH, "applyCommand": f"kubectl apply -f {MANIFEST_PATH}"}
+
+
 def _brief(run: dict | None) -> dict | None:
     return None if run is None else {"runKey": run["runKey"], "status": run["status"], "targetKind": run["targetKind"]}
 
@@ -322,9 +346,24 @@ def history(limit: int = Query(10, ge=1, le=50), runtime: tuple[LoopRepository, 
 @router.get("/proof")
 def proof(namespace: str, workflow_id: str = Query(..., alias="workflowId"),
           candidate_sha256: str | None = Query(None, alias="candidateSha256"),
+          workflow_source: str = Query("FROZEN", alias="workflowSource", pattern="^(FROZEN|DECLARED)$"),
           runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime)) -> dict:
     """For the Approve step: was a change with this exact YAML proven, on which cluster, and at what evidence level. Reads the database only."""
-    return proof_from_history(runtime[0], namespace=namespace, workflow_id=workflow_id, candidate_sha256=candidate_sha256)
+    from app.engine.recommendation_evaluation_validation.validation_loop.planning import workflow_evidence
+    from app.engine.workflow_dependency_modeling import service as workflows
+    current = None
+    try:
+        if workflow_source == "DECLARED":  # explicit research selection, never an operational fallback
+            from app.engine.recommendation_evaluation_validation.declared_workflow import get_declared_workflow
+            declared = get_declared_workflow(workflow_id)
+            current = workflow_evidence(declared.graph, {"declaredWorkflow": declared.to_dict()})
+        else:
+            reviewed = workflows.get_operational_workflow(workflow_id, namespace)
+            current = workflow_evidence(reviewed.graph, {"workflowReview": reviewed.operational_review})
+    except (EvidenceError, LookupError):
+        pass  # history remains readable; it cannot claim proof of a missing current definition
+    return proof_from_history(runtime[0], namespace=namespace, workflow_id=workflow_id,
+                              candidate_sha256=candidate_sha256, current_workflow_evidence=current)
 
 
 # The disposable test cluster: assessment, preview of the copy, and creating it. See validation_loop_disposable.py.

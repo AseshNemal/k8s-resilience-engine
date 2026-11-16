@@ -18,7 +18,8 @@ def dashboard(request: Request):
         request=request,
         name="dashboard.html",
         context={
-            "page_title": "Overview",
+            "page_title": "Assessment",
             "active_page": "overview",
+            "show_environment_label": False,
         },
     )

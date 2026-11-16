@@ -3,11 +3,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.engine.recommendation_evaluation_validation.application.models import ACTIVE, AppliedChange
+from app.engine.recommendation_evaluation_validation.application.models import ACTIVE, KEPT, RESET, AppliedChange
 from app.shared.persistence.models import AppliedChangeRecord
 
 _FIELDS = ("application_id", "recommendation_id", "approval_id", "tier", "namespace", "status", "yaml_applied", "yaml_sha256",
-           "before", "cluster", "events", "detail", "rollout", "applied_by", "applied_at", "reset_by", "reset_at")
+           "before", "after", "cluster", "events", "detail", "rollout", "applied_by", "applied_at", "reset_by", "reset_at")
 
 
 class AppliedChangeRepository:
@@ -50,6 +50,11 @@ class AppliedChangeRepository:
                                   .order_by(AppliedChangeRecord.id.desc()))
         return None if row is None else self._domain(row)
 
+    def for_run(self, run_id: str) -> AppliedChange | None:
+        row = self.session.scalar(select(AppliedChangeRecord).where(
+            AppliedChangeRecord.detail["applyTestRunId"].as_string() == run_id).order_by(AppliedChangeRecord.id.desc()))
+        return None if row is None else self._domain(row)
+
     def latest(self) -> AppliedChange | None:
         """The most recent change of any recommendation: the one whose state the cluster is in."""
         row = self.session.scalar(select(AppliedChangeRecord).order_by(AppliedChangeRecord.id.desc()))
@@ -63,6 +68,14 @@ class AppliedChangeRepository:
         rows = self.session.scalars(select(AppliedChangeRecord).where(AppliedChangeRecord.status.in_(sorted(ACTIVE)))
                                     .order_by(AppliedChangeRecord.id))
         return [self._domain(row) for row in rows]
+
+    def outstanding(self) -> list[AppliedChange]:
+        """Every change that is not settled: applied or half-applied, a reset that failed, one a person chose to keep, and a
+        reset whose rollout has not been seen to finish. Oldest first. This is the ledger a reconnect shows."""
+        rows = self.session.scalars(select(AppliedChangeRecord).where(
+            AppliedChangeRecord.status.in_(sorted(ACTIVE | {KEPT, RESET}))).order_by(AppliedChangeRecord.id))
+        changes = [self._domain(row) for row in rows]
+        return [c for c in changes if c.status != RESET or (c.rollout or {}).get("state") == "rolling-out"]
 
     # -- targeted writes ---------------------------------------------------------------------------------------------
     # A status poll must never write back a whole stale copy of a change another request has since applied or reset, so

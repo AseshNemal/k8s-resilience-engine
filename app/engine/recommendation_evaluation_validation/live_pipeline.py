@@ -70,7 +70,9 @@ from app.engine.recommendation_evaluation_validation.portfolio import WorkflowPo
 from app.engine.recommendation_evaluation_validation.ranking import (
     CRITICALITY_WEIGHTED,
     FORMULA_VERSION,
+    OBJECTIVE,
     SINGLE_WORKFLOW,
+    DEFAULT_TOLERANCE,
     EvaluatedCandidate,
     ImpactSnapshot,
     RankingWeights,
@@ -233,6 +235,51 @@ def _coverage(deployment, service_name: str) -> float:
     return round(min(1.0, placed / service.declared_replicas), 4)
 
 
+DOMINATED_MEANING = (
+    "A ranked candidate is dominated when a better-ranked candidate for the same service(s) is at least as good on every measure "
+    "the model has and strictly better on one: the predicted blast radius at every worker node, placement churn, resource cost, "
+    "replicas added and evidence coverage. A candidate that is better on any one of them (for example, it moves fewer pods) is not "
+    "dominated. Two candidates that are equal on all of them are not dominated either: a required anti-affinity and a spread can "
+    "predict the same result while differing in how strict a guarantee they give, which the model does not score. A dominated "
+    "candidate stays listed and can still be approved with a written reason; the model measures whether a service survives, not "
+    "how much of it is left."
+)
+
+# The ROLLOUT is not verified for any candidate. Feasibility is about the final state only.
+ROLLOUT_NOT_EVALUATED = {
+    "status": "NOT_EVALUATED",
+    "reason": (
+        "Feasibility is verified for the final placement only. Whether the Deployment can ROLL OUT to it is not evaluated: that "
+        "depends on its update strategy (maxSurge, maxUnavailable), which is not in the evidence. During a rolling update old pods "
+        "still hold their CPU and memory while new ones are scheduled, so a new pod can stay Pending on a full node and the rollout "
+        "can stall with the old placement still in place. A feasible verdict is therefore not a guarantee of a successful rollout; "
+        "after Apply the rollout is watched and a stalled one is reported, and Reset restores the stored state."
+    ),
+}
+
+
+def _dominated_by(entry, ranked, evaluated: list[EvaluatedCandidate]) -> str | None:
+    """The best-ranked candidate that is at least as good on every modelled measure and better on one, or None."""
+    if entry.rank is None:
+        return None
+    by_id = {c.id: c for c in evaluated}
+    mine = by_id[entry.id]
+
+    def measures(candidate: EvaluatedCandidate, components) -> list[float]:
+        """Lower is better for every entry, in one fixed order."""
+        return [*(candidate.after.node_blast[node] for node in sorted(mine.after.node_blast)), components.placement_churn,
+                components.resource_fraction, len(candidate.simulation.added_replicas), -components.confidence]
+
+    own = measures(mine, entry.components)
+    for other in ranked:
+        if other.rank is None or other.rank >= entry.rank or other.service != entry.service:
+            continue
+        theirs = measures(by_id[other.id], other.components)
+        if all(t <= o + DEFAULT_TOLERANCE for t, o in zip(theirs, own)) and any(t < o - DEFAULT_TOLERANCE for t, o in zip(theirs, own)):
+            return other.id
+    return None
+
+
 class _Combinations(NamedTuple):
     candidates: list[EvaluatedCandidate]
     outcomes: dict[str, _Outcome]
@@ -368,7 +415,8 @@ def build_live_recommendation(
         failed_node, scheduling_evidence=scheduling_evidence_for(deployment),
         combination_budget=combination_budget,
     )
-    return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts})
+    return dataclasses.replace(live, evidence={**live.evidence, "schedulingFacts": facts,
+        "workflowReview": inputs.workflow_review, "workflowEvidencePolicy": "operational-workflow/v1"})
 
 
 def _require_complete_topology(workflow, discovery) -> None:
@@ -418,6 +466,9 @@ def build_declared_recommendation(
     if not namespace:
         raise ValueError("namespace must be a non-empty string")
     discovery = discover_live(namespace=namespace)
+    if declared.namespace and declared.namespace != namespace:
+        raise EvidenceError("WORKFLOW_NAMESPACE_MISMATCH", "The reviewed workflow belongs to another namespace.",
+                            http_status=409, component="recommendation")
     _require_complete_topology(declared.graph, discovery)
     deployment, facts = enrich_scheduling_facts(discovery.graph.model_copy(deep=True), namespace)
     live = evaluate_recommendation(
@@ -488,6 +539,9 @@ def build_declared_failures(workflow_id: str, namespace: str = "default", *, com
     if not namespace:
         raise ValueError("namespace must be a non-empty string")
     discovery = discover_live(namespace=namespace)
+    if declared.namespace and declared.namespace != namespace:
+        raise EvidenceError("WORKFLOW_NAMESPACE_MISMATCH", "The reviewed workflow belongs to another namespace.",
+                            http_status=409, component="recommendation")
     _require_complete_topology(declared.graph, discovery)
     deployment, _facts = enrich_scheduling_facts(discovery.graph.model_copy(deep=True), namespace)
     overview = failure_overview(
@@ -588,8 +642,11 @@ def evaluate_recommendation(
     # Plain topology spread for a concentrated service; a replica increase (with its spread) only for a single-replica
     # service, where no change of placement can help; required anti-affinity only for a Deployment that already asks
     # for it softly. Each rule decides from the declared facts, so a strategy is not offered where it cannot differ.
-    for spec in generate_candidates(CandidateContextBuilder.build(deployment, _candidate_source(workflow, deployment, before))):
+    source = _candidate_source(workflow, deployment, before)
+    for spec in generate_candidates(CandidateContextBuilder.build(deployment, source, workflow)):
         consider(spec)
+    mandatory = set(workflow.mandatory_services)
+    out_of_scope = sorted({cause.service for cause in source.root_causes if cause.service not in mandatory})
 
     combos = _evaluate_combinations(
         workflow, deployment, failed_node, before, before_snapshot, members, singles_after, outcomes, ready_replicas,
@@ -598,6 +655,9 @@ def evaluate_recommendation(
     outcomes.update(combos.outcomes)
     feasibility.update(combos.feasibility)
     candidate_details.update(combos.details)
+
+    for plan in feasibility.values():
+        plan["rollout"] = ROLLOUT_NOT_EVALUATED
 
     weights = ranking_weights or RankingWeights()
     ranked = rank_candidates(evaluated, weights)
@@ -617,6 +677,7 @@ def evaluate_recommendation(
         ))
 
     selected = next((entry.id for entry in ranked if entry.rank == 1), None)
+    ranking_entries = {entry.id: entry.to_dict() | {"dominatedBy": _dominated_by(entry, ranked, evaluated)} for entry in ranked}
     report = RecommendationReport(
         workflow_id=workflow.workflow_id,
         recommendations=candidates,
@@ -635,14 +696,21 @@ def evaluate_recommendation(
         "blastRadiusBefore": before.blast_radius,
         "confidenceMeaning": CONFIDENCE_MEANING,
         "skippedUnsupportedTypes": sorted(set(skipped)),
+        "servicesWithoutCandidates": {
+            "services": out_of_scope,
+            "reason": "These services also lose every ready replica in the assessed failure, but the workflow does not need them "
+                      "(they are not mandatory), so changing them cannot alter the predicted outcome and no candidate is generated.",
+        },
         "feasibility": feasibility,
         "ranking": {
             "formulaVersion": FORMULA_VERSION,
+            "objective": OBJECTIVE,
             "weights": weights.to_dict(),
             "basis": basis,
             "placementChurnMeaning": PLACEMENT_CHURN_MEANING,
             "selectedCandidate": selected,
-            "candidates": {entry.id: entry.to_dict() for entry in ranked},
+            "candidates": ranking_entries,
+            "dominatedByMeaning": DOMINATED_MEANING,
             "combinedCandidates": "pairs of verified changes are evaluated separately, see evidence['combinations']",
         },
         "combinations": combos.evidence,

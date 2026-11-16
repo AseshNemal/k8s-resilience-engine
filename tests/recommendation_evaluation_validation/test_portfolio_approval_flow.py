@@ -54,7 +54,7 @@ def test_whole_combination_gets_one_research_approval_and_apply_reset(client, wo
         applied = client.post(f"{RESEARCH}/{candidate}/apply", json={"appliedBy": "asesh"})
         assert applied.status_code == 200, applied.text
         assert {p["metadata"]["name"] for p in gateway.patches} == {"db", "cache"}
-        reset = client.post(f"{RESEARCH}/{candidate}/reset", json={"resetBy": "asesh"})
+        reset = client.post(f"{RESEARCH}/{candidate}/reset", json={"resetBy": "asesh", "expectedApplicationId": applied.json()["application"]["applicationId"]})
         assert reset.status_code == 200, reset.text
         assert set(gateway.restores) == {"db", "cache"}
     finally:
@@ -112,3 +112,9 @@ def test_a_single_workflow_test_cannot_be_presented_as_proof_of_the_entire_workf
     with pytest.raises(ValidationRefusedError) as error:
         ValidationPlan.from_approval(approval, live, CHECKOUT, TestTarget("test", "test"), allow_declared_workflow=True)
     assert error.value.code == "ALL_WORKFLOWS_PROOF_UNAVAILABLE"
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

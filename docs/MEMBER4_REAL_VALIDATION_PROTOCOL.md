@@ -7,6 +7,11 @@ been executed, and no figure below is a result.
 Research question: *what minimal feasible Kubernetes deployment change improves mandatory business-workflow survivability under
 a single worker-node failure, and how accurately can we predict the improvement?*
 
+> **Added 2026-11-17: watching a failure you cause yourself.** The Failure impact page can *watch* a worker failure that the developer
+> starts (`recommendation_evaluation_validation/observation/`). It records the prediction first, stops nothing, and compares service
+> readiness only. It is **not** a validation run: it has no approved plan, no probe and no recovery step, so it never produces the
+> evidence this protocol asks for. It has not observed a real failure yet.
+
 ## 1. What exists now (and what does not)
 
 | Piece | State |

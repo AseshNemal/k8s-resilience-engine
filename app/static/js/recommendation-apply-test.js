@@ -1,6 +1,13 @@
 /* Apply and test: only an explicit click starts work; polls only read the durable run. */
 (function () {
     "use strict";
+
+    function workflowEvidenceLabel(row) {
+        if (row?.declared === true) return "Operator-declared workflow dependencies · research results are conditional";
+        const policy = row?.workflowEvidence?.policy || row?.report?.workflowEvidencePolicy;
+        return policy === "operational-workflow/v1" ? "Explicitly reviewed real workflow definition"
+            : "Historical workflow evidence · current operational review unavailable";
+    }
     const BASE = "/api/recommendations/apply-tests";
     const TERMINAL = new Set(["COMPLETED", "COMPLETED_WITH_GAPS", "TESTS_FAILED", "FAILED", "INTERRUPTED"]);
     const LABELS = { QUEUED: "Queued", RUNNING: "Running", COMPLETED: "Report complete", COMPLETED_WITH_GAPS: "Report complete — missing measurements",
@@ -47,7 +54,11 @@
             let body;
             try { body = await response.json(); }
             catch (_error) { throw Object.assign(new Error(`The backend returned an unreadable response (HTTP ${response.status}).`), { status: response.status }); }
-            if (!response.ok) throw Object.assign(new Error(body.detail?.message || (typeof body.detail === "string" ? body.detail : `The request failed (HTTP ${response.status}).`)), { status: response.status });
+            if (!response.ok) throw Object.assign(new Error(body.detail?.message || (typeof body.detail === "string" ? body.detail : `The request failed (HTTP ${response.status}).`)), {
+                status: response.status,
+                code: body.detail?.code || null,
+                details: body.detail?.details || null,
+            });
             return body;
         }
 
@@ -181,8 +192,24 @@
                 operation.append(make("h4", "Current operation"), make("p", run.current.message), make("code", run.current.command, "apply-test__command"));
                 root.append(operation);
             }
+            if (run) root.append(make("p", workflowEvidenceLabel(run), "ui-note"));
             if (busy() && run) root.append(drawLive());
             if (error) { const note = make("p", error, "approval-note"); note.setAttribute("role", "alert"); root.append(note); }
+            if (!env.readOnly && resetFailure?.code === "EXTERNAL_CHANGE" && run?.canReset && !busy()) {
+                const outside = make("section", null, "apply-test__decide");
+                outside.append(make("h4", "Some fields were changed outside this test"));
+                const fields = make("ul");
+                (resetFailure.external || []).forEach((item) => fields.append(make("li",
+                    `${item.deployment}: ${item.label} — this test set ${item.appliedText}; it is now ${item.liveText}`)));
+                outside.append(fields, make("p",
+                    "You can restore only the fields still holding this test's values. The outside fields listed above will be left exactly as they are.",
+                    "ui-note"));
+                const leave = make("button", "Reset the rest, leave outside changes", "secondary-button");
+                leave.type = "button";
+                leave.addEventListener("click", () => resetChanges("keep"));
+                outside.append(leave);
+                root.append(outside);
+            }
             if (awaitingReset || run?.application?.status === "RESETTING") root.append(make("p", "Restoring the saved configuration. Your test report stays saved. Candidate selection will return when restoration completes.", "ui-note"));
             const events = make("ol", null, "apply-test__events");
             (run?.events || []).forEach((event) => {
@@ -198,10 +225,22 @@
             }
             if (run?.report && (run.report.before || TERMINAL.has(run.status))) root.append(drawReport(run.report));
             if (!env.readOnly && run?.canReset && !busy()) {
-                root.append(make("p", "To test another candidate independently, reset this change first. Its results remain in Test history.", "ui-note"));
-                const reset = make("button", "Reset changes", "secondary-button"); reset.type = "button";
-                reset.addEventListener("click", resetChanges); root.append(reset);
+                // The test is over and its change is still on the cluster: it is neither put back nor left there without the person saying which.
+                const decide = make("section", null, "apply-test__decide apply-test__decide--choice");
+                decide.append(make("h4", "This test changed the cluster. Reset it now, or keep the changes?"),
+                    make("p", run.canKeep
+                        ? "Reset now puts the saved configuration back. Keep changes leaves the cluster as it is, records that you kept it, and lets you test another candidate on top. The results stay in Test history either way."
+                        : "Reset now puts the saved configuration back. The results stay in Test history.", "ui-note"));
+                const actions = make("div", null, "approval-actions");
+                const reset = make("button", "Reset now", "primary-button"); reset.type = "button";
+                reset.addEventListener("click", () => resetChanges()); actions.append(reset);
+                if (run.canKeep) {
+                    const keep = make("button", "Keep changes", "secondary-button"); keep.type = "button";
+                    keep.addEventListener("click", keepChanges); actions.append(keep);
+                }
+                decide.append(actions); root.append(decide);
             }
+            if (run?.kept) root.append(make("p", `These changes were kept (${run.kept.by}). They stay in the record of applied changes and can still be reset from the Applied change panel.`, "ui-note"));
             const refresh = make("button", "Refresh run status", "secondary-button"); refresh.type = "button";
             refresh.addEventListener("click", poll); root.append(refresh);
         }
@@ -272,24 +311,47 @@
             draw(); notify(); arm();
         }
 
-        async function resetChanges() {
-            if (env.readOnly || busy() || !run?.canReset) return;
+        function auditActor(fallback) {
+            try { const configured = window.localStorage?.getItem("resilience.audit.name"); if (configured) return configured; } catch (_) { /* Optional attribution. */ }
+            return run?.appliedBy || run?.application?.appliedBy || fallback;
+        }
+
+        async function resetChanges(external = "refuse") {
+            if (env.readOnly || busy() || !(run?.canReset || run?.canResetKept)) return;
             resetting = true; error = null; resetFailure = null; draw(); notify();
             try {
                 const base = run.declared ? "/api/recommendations/declared" : "/api/recommendations";
                 await request(`${base}/${encodeURIComponent(run.candidateId)}/reset`, { method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ resetBy: "Explicit Reset action" }) });
+                    body: JSON.stringify({ resetBy: auditActor("Explicit Reset action"), external, expectedApplicationId: run.application?.applicationId }) });
                 awaitingReset = true;
                 if (env.onReset) env.onReset();
             } catch (e) {
-                error = e.message; resetFailure = { message: e.message, match: run?.clusterMatch }; resetting = false;
+                error = e.message;
+                resetFailure = { message: e.message, match: run?.clusterMatch, code: e.code,
+                    external: e.details?.external || [] };
+                resetting = false;
                 draw(); notify(); arm(); return;       // arm: re-check, so the message goes once the connected cluster is no longer the one it was about
             }
             resetting = false; await poll();
         }
 
+        async function keepChanges() {
+            if (env.readOnly || busy() || !run?.canKeep) return;
+            resetting = true; error = null; resetFailure = null; draw(); notify();
+            try {
+                const base = run.declared ? "/api/recommendations/declared" : "/api/recommendations";
+                await request(`${base}/${encodeURIComponent(run.candidateId)}/keep`, { method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ keptBy: auditActor("Explicit Keep action"), expectedApplicationId: run.application?.applicationId }) });
+                if (env.onReset) env.onReset();       // the same refresh a reset triggers: the change no longer blocks another candidate
+                env.onReadyForNext?.();               // the cluster now holds this change: recalculate risks and changes from it
+            } catch (e) {
+                error = e.message;
+            }
+            resetting = false; await poll();
+        }
+
         draw();
-        return { start: poll, apply, reset: resetChanges,
+        return { start: poll, apply, reset: resetChanges, keep: keepChanges,
             // Active means Apply was clicked for this candidate and the change is still on the cluster (running, finished but not reset, or being restored).
             state: () => ({ run, busy: busy(), error, resetting: resetting || awaitingReset || run?.application?.status === "RESETTING",
                 active: !!run?.candidateId && (!!run.canReset || !TERMINAL.has(run.status) || ["RESETTING", "RESET_FAILED"].includes(run.application?.status)) }),
@@ -543,6 +605,7 @@
                 const name = el("div", null, "cmp-head");
                 if (title.strategy) name.append(el("span", title.strategy, "cmp-strategy"));
                 name.append(el("span", title.services, "cmp-services", { title: title.id || "" }));
+                name.append(el("span", workflowEvidenceLabel(row), "ui-note"));
                 const time = el("span", when || "", null, { title: row.createdAt ? `${row.createdAt} UTC` : "" });
                 return [check, name, when ? time : none(), `${row.clusterName || "Unknown cluster"} / ${row.namespace}`, chip(outcomeLabel(row), resultLabel(row)[1]),
                     button("View saved report", () => open(row))];
@@ -672,6 +735,6 @@
         }
         return { update };
     }
-    window.ResilienceApplyTest = { createPanel, createHistoryPanel, createCandidateResultsSidebar, resultLabel,
+    window.ResilienceApplyTest = { workflowEvidenceLabel, createPanel, createHistoryPanel, createCandidateResultsSidebar, resultLabel,
         compare: { buildComparison, shortId, friendlyTime, candidateTitle, usageCell, RISK_MATCH_TOLERANCE } };
 })();

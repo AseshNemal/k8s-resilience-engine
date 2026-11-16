@@ -31,7 +31,10 @@ def run(argv: list[str], stdin) -> int:
         return _emit({"ok": True, **cc._status()}, 0)
     if argv == ["--disconnect"]:
         try:
-            return _emit({"ok": True, **cc.disconnect()}, 0)
+            # The helper has already removed the access in the cluster by the time it calls this, so refusing here would only
+            # leave a dead credential behind. The page asks about outstanding changes BEFORE it starts the helper
+            # (connect-auto.js); what is still applied is recorded as left in place.
+            return _emit({"ok": True, **cc.disconnect(outstanding="keep")}, 0)
         except HTTPException as error:
             return _emit({"ok": False, "status": error.status_code, "error": str(error.detail)}, 1)
     if argv:

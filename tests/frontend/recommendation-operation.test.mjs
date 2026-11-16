@@ -571,7 +571,7 @@ test("Reset asks once more, needs a name, shows Resetting… at once, and cannot
 
     assert.equal(afterFirst, "Resetting…");
     assert.equal(t.network.count("POST"), 1);
-    assert.deepEqual(t.network.pending().find((c) => c.method === "POST").body, { resetBy: "asesh" });
+    assert.deepEqual(t.network.pending().find((c) => c.method === "POST").body, { resetBy: "asesh", expectedApplicationId: "apply-1" });
     assert.equal(t.find("op-reset").disabled, true);
     assert.equal(t.find("op-confirm-yes").disabled, true);
     const reset = status({ application: { ...status().application, status: "RESET", resetBy: "asesh" }, canReset: false, canApply: true,
@@ -696,4 +696,143 @@ test("controlled experiments are listed in their own section, and their absence 
     unknown.network.respond("GET", CURRENT_URL, 200, { ...completed(), experiments: { available: false, measurements: [], note: "" } });
     await third;
     assert.ok(unknown.find("op-experiments").textContent.includes("unknown"));
+});
+
+// ---- what changed, reset or keep, and a reset that finds an outside change ----------------------------------------------------
+
+const CHANGES = [{ deployment: "db", namespace: "shop", uid: "uid-db", summary: "db: topology spread none → must spread across nodes (at most 1 apart)", fields: [
+    { field: "replicas", label: "Replicas", from: 3, to: 3, fromText: "3", toText: "3", changed: false },
+    { field: "topology_spread_constraints", label: "Topology spread", from: [], to: [{}], fromText: "none", toText: "must spread across nodes (at most 1 apart)", changed: true },
+    { field: "pod_anti_affinity", label: "Pod anti-affinity", from: null, to: null, fromText: "none", toText: "none", changed: false }] }];
+const settled = (over = {}) => ({ ...completed(), canKeep: true, changes: CHANGES, ...over });
+const KEEP_URL = `/api/recommendations/declared/${REC}/keep`;
+const RESET_URL = `/api/recommendations/declared/${REC}/reset`;
+
+async function opened(body) {
+    const t = open();
+    const start = t.panel.start();
+    t.network.respond("GET", CURRENT_URL, 200, body);
+    await start;
+    return t;
+}
+
+function typeName(t, value) {
+    t.find("op-name").value = value;
+    t.find("op-name").dispatchEvent({ type: "input" });
+}
+
+test("what the change did is shown in words, field by field, with the cluster it was applied to", async () => {
+    const t = await opened(settled());
+
+    const text = t.find("op-changes").textContent;
+    assert.ok(text.includes("What this change did"));
+    assert.ok(text.includes("docker-desktop") && text.includes("uid-1") && text.includes("shop"));
+    assert.ok(text.includes("Topology spread") && text.includes("none") && text.includes("must spread across nodes (at most 1 apart)"));
+    assert.ok(text.includes("changed") && text.includes("unchanged"));
+});
+
+test("a field whose new value was never recorded says so instead of showing a guess", async () => {
+    const unknown = [{ ...CHANGES[0], fields: CHANGES[0].fields.map((f) => ({ ...f, to: null, toText: null, changed: null })) }];
+    const t = await opened(settled({ changes: unknown }));
+
+    const text = t.find("op-changes").textContent;
+    assert.ok(text.includes("not recorded") && text.includes("unknown"));
+});
+
+test("once the change has settled the person is asked: reset now or keep", async () => {
+    const t = await opened(settled());
+
+    assert.equal(t.find("op-decide").hidden, false);
+    assert.ok(t.find("op-decide-text").textContent.includes("put the previous state back now, or keep it"));
+});
+
+test("the question is not asked while the rollout is still going, or when the change cannot be kept", async () => {
+    const rolling = await opened({ ...status(), canKeep: true, changes: CHANGES });
+    assert.equal(rolling.find("op-decide").hidden, true, "still rolling out");
+
+    const kept = await opened(settled({ canKeep: false, application: { ...completed().application, status: "KEPT" } }));
+    assert.equal(kept.find("op-decide").hidden, true, "already decided");
+    assert.equal(kept.find("op-reset").hidden, false, "a kept change can still be reset");
+});
+
+test("Keep changes needs a name, sends one request, and writes nothing else", async () => {
+    const t = await opened(settled());
+
+    t.find("op-keep").click();
+    assert.equal(t.find("op-confirm").hidden, false);
+    assert.equal(t.find("op-decide").hidden, true, "the question is not asked twice at once");
+    assert.equal(t.find("op-confirm-yes").textContent, "Confirm keep");
+    assert.ok(t.find("op-confirm-text").textContent.includes("writes nothing"));
+    t.find("op-confirm-yes").click();
+    await flush();
+    assert.equal(t.network.count("POST"), 0, "no name, nothing sent");
+
+    typeName(t, "asesh");
+    t.find("op-confirm-yes").click();
+    t.find("op-confirm-yes").click();
+    await flush();
+
+    assert.equal(t.network.count("POST"), 1);
+    assert.equal(t.network.count("POST", KEEP_URL), 1);
+    assert.deepEqual(t.network.pending().find((c) => c.method === "POST").body, { keptBy: "asesh", expectedApplicationId: "apply-1" });
+    t.network.respond("POST", KEEP_URL, 200, settled({ canKeep: false, application: { ...completed().application, status: "KEPT" } }));
+    await flush();
+    assert.equal(t.find("op-decide").hidden, true);
+    assert.equal(t.find("op-confirm").hidden, true);
+});
+
+test("Reset now from the question goes through the same named confirmation as Reset", async () => {
+    const t = await opened(settled());
+
+    t.find("op-decide-reset").click();
+    assert.equal(t.find("op-confirm-yes").textContent, "Confirm reset");
+    assert.ok(t.find("op-confirm-text").textContent.includes("restores configuration"), "configuration, not pod placement");
+    typeName(t, "asesh");
+    t.find("op-confirm-yes").click();
+    await flush();
+
+    assert.deepEqual(t.network.pending().find((c) => c.method === "POST" && c.url === RESET_URL).body, { resetBy: "asesh", expectedApplicationId: "apply-1" });
+});
+
+test("a reset refused for an outside change names the fields and offers to leave them as they are", async () => {
+    const t = await opened(settled());
+    t.find("op-reset").click();
+    typeName(t, "asesh");
+    t.find("op-confirm-yes").click();
+    await flush();
+    const external = [{ deployment: "db", field: "replicas", label: "Replicas", applied: 3, live: 9, appliedText: "3", liveText: "9" }];
+    t.network.respond("POST", RESET_URL, 409, { detail: { code: "EXTERNAL_CHANGE", message: "Something else changed db replicas. Nothing was restored.", details: { external } } });
+    await flush();
+    t.network.respond("GET", APPLICATION_URL, 200, settled());
+    await flush();
+
+    assert.equal(t.find("op-external").hidden, false);
+    assert.ok(t.find("op-external-list").textContent.includes("db: replicas is now 9 (this change set 3)"));
+    assert.equal(t.find("op-confirm-yes").hidden, true, "the plain reset would only be refused again");
+    assert.equal(t.find("op-confirm-external").hidden, false);
+    assert.ok(t.find("op-message").textContent.includes("Nothing was restored"));
+
+    t.find("op-confirm-external").click();
+    await flush();
+
+    const sent = t.network.pending().find((c) => c.method === "POST" && c.url === RESET_URL);
+    assert.deepEqual(sent.body, { resetBy: "asesh", external: "keep", expectedApplicationId: "apply-1" });
+});
+
+test("cancelling after a refused reset forgets the outside changes it listed", async () => {
+    const t = await opened(settled());
+    t.find("op-reset").click();
+    typeName(t, "asesh");
+    t.find("op-confirm-yes").click();
+    await flush();
+    t.network.respond("POST", RESET_URL, 409, { detail: { code: "EXTERNAL_CHANGE", message: "Nothing was restored.", details: { external: [{ deployment: "db", field: "replicas", label: "Replicas", appliedText: "3", liveText: "9" }] } } });
+    await flush();
+    t.network.respond("GET", APPLICATION_URL, 200, settled());
+    await flush();
+
+    t.find("op-confirm-no").click();
+    t.find("op-reset").click();
+
+    assert.equal(t.find("op-external").hidden, true);
+    assert.equal(t.find("op-confirm-yes").hidden, false);
 });

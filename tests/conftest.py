@@ -13,6 +13,7 @@ Real-cluster tests are opt-in: mark them ``@pytest.mark.live_cluster`` and set
 ``RESILIENCE_TEST_KUBECONFIG`` to a kubeconfig for a disposable test cluster.
 """
 
+import gc
 import os
 from pathlib import Path
 
@@ -90,3 +91,24 @@ def use_cluster(monkeypatch):
         return source
 
     return install
+
+
+# Many tests build a SQLite engine and never dispose it, so each leaves its database file open until the garbage collector runs.
+# macOS gives a shell only 256 open files by default, and the suite used to hit that ("Too many open files") partway through.
+# A collection only when usage is high keeps the suite fast and keeps it under the default limit.
+_DESCRIPTOR_SOFT_CEILING = 100
+
+
+def _open_descriptors() -> int | None:
+    try:
+        return len(os.listdir("/dev/fd"))
+    except OSError:      # no /dev/fd (Windows): nothing to measure, and the limit there is not this one
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _release_leaked_descriptors():
+    yield
+    used = _open_descriptors()
+    if used is not None and used > _DESCRIPTOR_SOFT_CEILING:
+        gc.collect()

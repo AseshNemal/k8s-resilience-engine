@@ -46,3 +46,4 @@ deploy/kubernetes/boutique.yaml
 .kube/
 /brag-output-2026-10-24-231839
 /brag-output
+/.playwright-mcp

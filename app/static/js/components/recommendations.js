@@ -22,7 +22,9 @@
     const { fetchJson } = window.ResilienceApi;
     const { formatCodeLabel, updateLastRefreshed } = window.ResilienceUi;
     const view = window.ResilienceRecommendations;
+    const journey = window.ResilienceJourney;
     const { describeError, renderStateCard, applyBadge } = window.ResilienceConnection;
+    const actionModule = window.ResilienceAction;
 
     const region = document.querySelector('[data-role="page-region"]');
     const template = document.querySelector('[data-role="page-template"]');
@@ -89,7 +91,7 @@
             const saved = JSON.parse(window.localStorage.getItem(PAGE_STATE_KEY) || "null");
             if (!saved || saved.scope !== pageScope(v)) return;
             if (Number.isInteger(saved.step) && saved.step >= 1 && saved.step <= 5) pinnedStep = saved.step;
-            if (["failures", "ranking", "placement", "raw"].includes(saved.tab)) {
+            if (["failures", "ranking", "reasoning", "raw"].includes(saved.tab)) {
                 tabChosen = true;
                 selectTab(saved.tab, false);
             }
@@ -100,6 +102,33 @@
             }
         } catch (_error) { /* Ignore outdated or malformed page state. */ }
     }
+
+    function goSection(id) {
+        const target = document.getElementById(id);
+        if (!target) return;
+        target.scrollIntoView?.({ block: "start", behavior: "smooth" });
+        target.setAttribute("tabindex", "-1");
+        target.focus?.({ preventScroll: true });
+    }
+
+    function selectPane(name, focus = false) {
+        for (const tab of document.querySelectorAll?.('[data-pane-tab]') || []) {
+            const on = tab.dataset.paneTab === name;
+            tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1;
+            if (on && focus) tab.focus();
+        }
+        for (const pane of document.querySelectorAll?.('[data-pane-panel]') || []) pane.hidden = pane.dataset.panePanel !== name;
+    }
+    flowRoot?.addEventListener("click", (event) => {
+        const tab = event.target.closest?.('[data-pane-tab]');
+        if (tab) selectPane(tab.dataset.paneTab);
+    });
+    flowRoot?.addEventListener("keydown", (event) => {
+        const tab = event.target.closest?.('[data-pane-tab]');
+        if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        selectPane(event.key === "Home" ? "current" : event.key === "End" ? "history" : tab.dataset.paneTab === "current" ? "history" : "current", true);
+    });
 
     function storedView() {
         try {
@@ -132,6 +161,22 @@
 
     function updateStepper() {
         stepFacts.applied = !!currentRecommendation && appliedFor === currentRecommendation.id;
+        if (journey) {
+            const state = applyTestPanel?.state();
+            const r = state?.run;
+            const own = r && r.candidateId === currentRecommendation?.id;
+            const model = journey.stages({ status: stepFacts.status, selected: !!currentRecommendation,
+                approval: stepFacts.approval,
+                run: own ? { busy: state.busy, finished: !state.busy, canDecide: r.canReset,
+                    kept: r.application?.status === "KEPT", reset: r.application?.status === "RESET", failed: r.status === "FAILED" } : null,
+                otherApplied: !!(r?.canReset && !own) });
+            updateDock();                                     // draws the rail's list too, so it comes first
+            const rail = document.querySelector('[data-role="rec-rail"]');
+            if (rail) journey.renderRail(rail, model, { onGo: goSection });
+            const next = document.querySelector('[data-role="rec-next"]');
+            if (next) { next.hidden = !model.next; next.textContent = model.next?.label || ""; next.onclick = () => goSection(model.next?.target); }
+            return;
+        }
         const steps = view.computeSteps(stepFacts);
         const pin = pinnedStep && steps[pinnedStep - 1];
         // A pinned step stays while it can be opened; the applied-change panel can always be reached, even with no recommendation on screen.
@@ -147,6 +192,7 @@
 
     /** The person opens a step. It stays until the work they chose (the application, the workflow, the failure) changes. */
     function openStep(number) {
+        if (journey) return goSection(number === 3 ? "rec-s-fix" : number === 5 ? "rec-s-approve" : "rec-s-risk");
         pinnedStep = number;
         updateStepper();
         rememberPage();
@@ -181,7 +227,7 @@
             }
             appliedNotice.hidden = hidden;
         }
-        if (!tabChosen) selectTab(STEP_TAB[shownStep], false);
+        if (!tabChosen) selectTab(journey ? "ranking" : STEP_TAB[shownStep], false);
     }
 
     // ---- Research tabs ---------------------------------------------------------------------------------------------
@@ -238,11 +284,23 @@
     // Declared workflows only: the server's offer of the separate research tier for the selected candidate. The production controls
     // above stay off for such a candidate; this is a different door, with its own routes and a named person's acknowledgement.
     let currentResearch = null;
-    let lastResearchName = "";                            // remembered in memory only, to save retyping within this page
-    let researchNameInput = null;
     let researchAckInput = null;
-    let lastApplierName = "";                             // remembered in memory only, to save retyping within this page
+    let lastResearchName = auditName();                            // Reuses the locally configured audit attribution; not authentication.
+    let researchNameInput = null;
+    let lastApplierName = auditName();                             // Reuses the locally configured audit attribution; not authentication.
     const RESEARCH_PLACEHOLDER = "I understand this workflow is declared by me, not observed, and approve it for research validation only.";
+
+    // The dock (top of the page) owns the actions when the journey module is loaded. Without it the page keeps its older, self-contained controls.
+    const dockActive = () => !!(document.querySelector('[data-role="rec-dock"]') && actionModule && journey);
+
+    function auditName() {
+        try { return window.localStorage.getItem("resilience.audit.name") || ""; } catch (_) { return ""; }
+    }
+    function rememberAuditName(value) {
+        if (!value?.trim()) return;
+        lastResearchName = lastApplierName = value.trim();
+        try { window.localStorage.setItem("resilience.audit.name", value.trim()); } catch (_) { /* Optional preference, not authentication. */ }
+    }
 
     function isDeclared() {
         return !!controller && controller.selection().workflowKind === "declared";
@@ -275,7 +333,7 @@
         const base = isDeclared() ? `${APPROVAL_BASE}/declared` : APPROVAL_BASE;
         const response = await fetch(`${base}/${encodeURIComponent(currentRecommendation.id)}${path}${query}`, {
             method,
-            headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
+            headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}), ...(actionModule ? actionModule.attribution.header() : {}) },
             body: body ? JSON.stringify(body) : undefined,
         });
         let payload = null;
@@ -344,7 +402,6 @@
     }
 
     function renderApprovalState(approval, provenance, message) {
-        if (applyTestPanel && allWorkflows) return renderApplyAction();
         const stateContainer = region.querySelector('[data-role="approval-state-container"]');
         const actionsContainer = region.querySelector('[data-role="approval-actions"]');
         if (!stateContainer || !actionsContainer) return;
@@ -356,13 +413,18 @@
         if (!approval && isDeclared()) {
             renderResearchRequest(stateContainer, actionsContainer);
         } else if (!approval) {
+            // The next action is the dock's, at the top of the page: this section keeps the record of the decision.
             stateContainer.append(approvalBadge("No approval requested", "muted"));
-            const request = button("Request approval", "primary-button", "btn-request-approval", requestApproval);
-            if (!currentRecommendation.feasible || !currentApproval.ready) {
-                request.disabled = true;
-                request.title = currentApproval.reason || "Recommendation must be feasible";
+            if (dockActive()) {
+                if (!currentRecommendation.feasible || !currentApproval.ready) stateContainer.append(note(currentApproval.reason || "Recommendation must be feasible"));
+            } else {
+                const request = button("Request approval", "primary-button", "btn-request-approval", requestApproval);
+                if (!currentRecommendation.feasible || !currentApproval.ready) {
+                    request.disabled = true;
+                    request.title = currentApproval.reason || "Recommendation must be feasible";
+                }
+                actionsContainer.append(request);
             }
-            actionsContainer.append(request);
         } else {
             const research = provenance === "research-declared" || isDeclared();
             const words = DECISION_WORDS[research ? "research" : "production"];
@@ -394,9 +456,13 @@
                 stack.append(noted);
             }
             stateContainer.append(stack);
-            if (approval.status === "APPROVED") renderApplication(stateContainer);
+            if (approval.status === "APPROVED") {
+                if (applyTestPanel && allWorkflows) { if (dockActive()) renderApplyTestAction(stateContainer); else renderApplyTestActionLegacy(stateContainer, actionsContainer); }
+                else renderApplication(stateContainer);
+            }
 
-            if (approval.status === "PENDING_APPROVAL") {
+            // Approve and Reject for a pending request are the dock's too (a declared workflow's own research decision stays here).
+            if (approval.status === "PENDING_APPROVAL" && (research || !dockActive())) {
                 const reject = button("Reject", "danger-button", "btn-show-reject", () => showApprovalModal("reject"));
                 const approve = button("Approve", "success-button", "btn-show-approve", () => showApprovalModal("approve"));
                 if (provenance === "unverified") approve.disabled = true;
@@ -413,20 +479,49 @@
         }
     }
 
-    function renderApplyAction() {
-        const state = region.querySelector('[data-role="approval-state-container"]');
-        const actions = region.querySelector('[data-role="approval-actions"]');
-        if (!state || !actions) return;
-        state.replaceChildren(note("Apply starts this selected change and its tests. No separate approval is required."));
+    // What the approval record says about applying. The button itself is the dock's (top of the page); this keeps the plain facts beside the record.
+    function renderApplyTestAction(stateContainer) {
         const selected = lastView?.detail?.candidates?.find((c) => c.id === currentRecommendation?.id);
-        const eligible = isDeclared() ? selected?.researchApproval?.available : selected?.approval?.ready;
         const run = applyTestPanel.state();
         if (run.error || run.busy) {
             const feedback = note(run.error || (run.resetting ? "Restoring the previous configuration before another test. Your saved results are kept." : "Applying and testing. Follow the current operation in the run dashboard."));
             feedback.setAttribute("role", run.error ? "alert" : "status");
-            state.append(feedback);
+            stateContainer.append(feedback);
         }
-        const apply = button(run.resetting ? "Restoring…" : run.busy ? "Running…" : run.error ? "Retry Apply" : "Apply", "primary-button", "btn-apply-and-test", async () => {
+        if (!selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256) {
+            stateContainer.append(note("The selected change is missing its verified proposal. Refresh recommendations before Apply."));
+        }
+        if (run.run?.clusterMatch === "other") {
+            stateContainer.append(note(`An earlier test is still applied on another cluster${run.run.changeCluster?.context ? ` (${run.run.changeCluster.context})` : ""}. It does not affect this one; reconnect that cluster to reset it.`));
+        }
+    }
+
+    function renderApplyTestActionLegacy(stateContainer, actionsContainer) {
+        stateContainer.append(note("This approved change can be applied and tested. Enter your name; Apply records who started it and never invents approval."));
+        const selected = lastView?.detail?.candidates?.find((c) => c.id === currentRecommendation?.id);
+        const run = applyTestPanel.state();
+        if (run.error || run.busy) {
+            const feedback = note(run.error || (run.resetting ? "Restoring the previous configuration before another test. Your saved results are kept." : "Applying and testing. Follow the current operation in the run dashboard."));
+            feedback.setAttribute("role", run.error ? "alert" : "status");
+            stateContainer.append(feedback);
+        }
+        const who = document.createElement("input");
+        who.type = "text";
+        who.className = "form-input";
+        who.id = "apply-test-by";
+        who.setAttribute("aria-label", "Your name");
+        who.placeholder = "Your name";
+        who.value = lastApplierName;
+        who.disabled = run.busy || run.resetting;
+        who.addEventListener("input", () => { lastApplierName = who.value; });
+        stateContainer.append(who);
+        const apply = button(run.resetting ? "Restoring…" : run.busy ? "Running…" : run.error ? "Retry Apply" : "Apply and test", "primary-button", "btn-apply-and-test", async () => {
+            const by = (who.value || "").trim();
+            if (!by) {
+                stateContainer.append(note("Enter your name: applying a change is done by a named person."));
+                return;
+            }
+            rememberAuditName(by);
             const proposal = selected?.yamlProposal;
             if (!proposal?.fingerprint || !proposal?.sha256) return;
             let saved;
@@ -437,15 +532,20 @@
                 try { window.sessionStorage.setItem("resilience.apply-test.request", JSON.stringify(saved)); } catch (_e) { /* Optional storage. */ }
             }
             await applyTestPanel.apply({ candidateId: selected.id, namespace: lastView.namespace, declared: isDeclared(),
-                fingerprint: proposal.fingerprint, yamlSha256: proposal.sha256, requestKey: saved.key });
+                fingerprint: proposal.fingerprint, yamlSha256: proposal.sha256, requestKey: saved.key, appliedBy: by });
         });
-        apply.disabled = !eligible || !selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256 || run.busy || !!run.run?.canReset;
-        if (eligible && (!selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256)) state.append(note("The selected change is missing its verified proposal. Refresh recommendations before Apply."));
-        if (run.run?.canReset) state.append(note("The previous test is still applied. Reset it here to restore the baseline, then review and Apply the next candidate. All reports are kept."));
-        if (run.run?.clusterMatch === "other") state.append(note(`An earlier test is still applied on another cluster${run.run.changeCluster?.context ? ` (${run.run.changeCluster.context})` : ""}. It does not affect this one; reconnect that cluster to reset it.`));
-        if (!eligible) state.append(note(selected?.approval?.reason || "This candidate cannot be applied from the current evidence."));
-        actions.replaceChildren(apply);
-        if (run.run?.canReset && !run.busy) actions.append(button("Reset previous test", "secondary-button", "btn-reset-previous-test", () => applyTestPanel.reset()));
+        apply.disabled = !selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256 || run.busy || !!run.run?.canReset;
+        if (!selected?.yamlProposal?.fingerprint || !selected?.yamlProposal?.sha256) {
+            stateContainer.append(note("The selected change is missing its verified proposal. Refresh recommendations before Apply."));
+        }
+        if (run.run?.canReset) stateContainer.append(note("The previous test is still applied. Reset it here to restore the baseline, then review and Apply the next candidate. All reports are kept."));
+        if (run.run?.clusterMatch === "other") {
+            stateContainer.append(note(`An earlier test is still applied on another cluster${run.run.changeCluster?.context ? ` (${run.run.changeCluster.context})` : ""}. It does not affect this one; reconnect that cluster to reset it.`));
+        }
+        actionsContainer.replaceChildren(apply);
+        if (run.run?.canReset && !run.busy) {
+            actionsContainer.append(button("Reset previous test", "secondary-button", "btn-reset-previous-test", () => applyTestPanel.reset()));
+        }
     }
 
     // The research tier's request form, for a declared workflow only. The server decides whether the candidate may be put forward at all
@@ -469,29 +569,31 @@
         scope.className = "approval-note rec-scope";
         scope.textContent = offer.scope;
         scope.setAttribute("title", offer.scope);              // the plain view clamps it; the whole text stays one hover away
-        researchNameInput = document.createElement("input");
-        researchNameInput.type = "text";
-        researchNameInput.className = "form-input";
-        researchNameInput.id = "research-ack-by";
-        researchNameInput.placeholder = "Your name";
-        researchNameInput.value = lastResearchName;
+        if (!dockActive()) {
+            researchNameInput = document.createElement("input");
+            researchNameInput.type = "text";
+            researchNameInput.className = "form-input";
+            researchNameInput.id = "research-ack-by";
+            researchNameInput.placeholder = "Your name";
+            researchNameInput.value = lastResearchName;
+        }
         researchAckInput = document.createElement("textarea");
         researchAckInput.className = "form-input";
         researchAckInput.id = "research-ack-text";
         researchAckInput.rows = 3;
         researchAckInput.placeholder = RESEARCH_PLACEHOLDER;
         researchAckInput.value = "";
-        form.append(scope, researchNameInput, researchAckInput);
+        form.append(...(researchNameInput ? [scope, researchNameInput, researchAckInput] : [scope, researchAckInput]));
         stateContainer.append(form);
         actionsContainer.append(button("Request research approval", "primary-button", "btn-request-research", requestResearchApproval));
     }
 
     async function requestResearchApproval() {
         const requestedFor = currentRecommendation.id;
-        const by = ((researchNameInput && researchNameInput.value) || "").trim();
+        const by = ((researchNameInput && researchNameInput.value) || auditName()).trim();
         const statement = ((researchAckInput && researchAckInput.value) || "").trim();
-        if (!by) return renderApprovalState(null, null, "Enter your name: a research approval is made by a named person.");
-        lastResearchName = by;
+        if (!by) return renderApprovalState(null, null, dockActive() ? "Add your name in the box at the top of the page first: a research approval is made by a named person." : "Enter your name: a research approval is made by a named person.");
+        rememberAuditName(by);
         const result = await callApproval("POST", "/request-approval", {
             recommendationId: currentRecommendation.id,
             proposalVersion: PROPOSAL_VERSION,
@@ -563,16 +665,19 @@
             box.append(line);
         }
         if (status.canApply) {
-            const who = document.createElement("input");
-            who.type = "text";
-            who.className = "form-input";
-            who.id = "apply-by";
-            who.setAttribute("aria-label", "Your name");
-            who.placeholder = "Your name";
-            who.value = lastApplierName;
-            who.disabled = busy;
-            who.addEventListener("input", () => { lastApplierName = who.value; });
-            box.append(who);
+            let who = null;
+            if (!dockActive()) {
+                who = document.createElement("input");
+                who.type = "text";
+                who.className = "form-input";
+                who.id = "apply-by";
+                who.setAttribute("aria-label", "Your name");
+                who.placeholder = "Your name";
+                who.value = lastApplierName;
+                who.disabled = busy;
+                who.addEventListener("input", () => { lastApplierName = who.value; });
+                box.append(who);
+            }
             const row = document.createElement("div");
             row.className = "approval-actions";
             if (applyConfirming) {
@@ -599,16 +704,247 @@
     }
 
     async function submitApplication(box, status, whoInput) {
-        const by = (whoInput.value || "").trim();
+        const by = ((whoInput && whoInput.value) || auditName()).trim();
         if (!operationPanel || operationBusy()) return;                        // a second click while one request is in flight does nothing
-        if (!by) return fillApplication(box, status, "Enter your name: applying a change is done by a named person.");
-        lastApplierName = by;
+        if (!by) return fillApplication(box, status, dockActive() ? "Add your name in the box at the top of the page first: applying a change is done by a named person." : "Enter your name: applying a change is done by a named person.");
+        rememberAuditName(by);
         applyConfirming = false;
         const requestedFor = currentRecommendation.id;
         const started = operationPanel.startApply(requestedFor, isDeclared() ? "research" : "production", by);
         fillApplication(box, status);                                          // the controls are off the moment the request is on its way
         await started;
         if (applicationBox === box && currentRecommendation && currentRecommendation.id === requestedFor) refreshApplication(box, requestedFor);
+    }
+
+    // ---- The action dock: the selected change as the one thing to act on ------------------------------------------------------------
+    // What may be done next is decided by the server (approval status, the run's own flags). This only turns those facts into the one
+    // obvious button, and asks once more, with the exact change in view, before anything is approved, applied or put back.
+    const dockRoot = document.querySelector('[data-role="rec-dock"]');
+    let editingName = false;
+    let dockMessage = null;                                   // a one-line failure from the last action, shown in the dock
+
+    const sentence = (text) => (text ? text.charAt(0) + text.slice(1).toLowerCase() : "");
+
+    function dockMap(detail, selected) {
+        const Placement = window.ResiliencePlacement;
+        if (!Placement || !detail || !detail.currentDeployment) return null;
+        return { nodes: (detail.currentDeployment.nodes || []).map((n) => n.name).filter(Boolean),
+            current: Placement.fromDeployment(detail.currentDeployment),
+            after: selected && selected.simulatedDeployment ? Placement.fromDeployment(selected.simulatedDeployment) : null,
+            failedNode: (detail.evidence && detail.evidence.failedNode) || null };
+    }
+
+    /** The selected change with workflow evidence: what it is, what it is predicted to do, and whether it was ever tested. */
+    function workflowChange(v) {
+        const detail = v.detail;
+        const selected = currentRecommendation && detail.candidates.find((c) => c.id === currentRecommendation.id);
+        if (!selected) return { selected: null, candidate: null, map: null };
+        const n = journey.numbers(selected);
+        const name = journey.fixName(selected);
+        const model = journey.exposure(detail, selected);
+        const saved = (sidebarHistory.history || []).find((row) => row.candidateId === selected.id && (!v.namespace || row.namespace === v.namespace));
+        const cost = selected.cost && selected.cost.resource;
+        return { selected, map: dockMap(detail, selected), candidate: {
+            title: name.title, target: name.target,
+            scope: n.scope === "worst" ? "Worst case, any single node" : `If ${detail.evidence.failedNode || "the assessed node"} stops`,
+            before: n.before, after: n.after,
+            workflows: model.safeAfter !== null && model.workflows.length ? `${model.safeAfter} of ${model.workflows.length} workflows survive any node loss` : null,
+            cost: cost ? `${sentence(cost)} cost` : null,
+            tested: saved && window.ResilienceApplyTest ? `Latest test: ${window.ResilienceApplyTest.resultLabel(saved)[0].toLowerCase()}` : "Predicted, not tested" } };
+    }
+
+    /** With no reviewed workflow: the change Assessment carried over (or the engine's best), shown as a prediction that cannot be applied. */
+    function deploymentChange(v) {
+        const found = v.deploymentFindings;
+        const ranked = ((found && found.recommendations) || []).filter((c) => c.ranking && c.ranking.rank != null);
+        const pick = (preferredChange && ranked.find((c) => c.service === preferredChange.service && c.type === preferredChange.type))
+            || ranked.find((c) => c.id === found.selectedCandidateId) || ranked[0];
+        if (!pick) return null;
+        return { title: journey.strategyTitle(pick.type), target: pick.service, scope: "Services lost on average",
+            before: Math.round(pick.averageServiceExposureBefore), after: Math.round(pick.averageServiceExposureAfter),
+            workflows: "Business impact unknown", cost: pick.resourceCost ? `${sentence(pick.resourceCost)} cost` : null, tested: "Predicted, not tested" };
+    }
+
+    function runFacts() {
+        const state = applyTestPanel ? applyTestPanel.state() : null;
+        const run = state && state.run;
+        if (!run) return { run: null, other: false, error: state && state.error };
+        const own = run.candidateId === currentRecommendation?.id;
+        const flags = { busy: state.busy, resetting: state.resetting, finished: !state.busy, failed: run.status === "FAILED", canReset: !!run.canReset,
+            canKeep: !!run.canKeep, canResetKept: !!run.canResetKept, kept: !!run.kept || run.application?.status === "KEPT", reset: run.application?.status === "RESET",
+            message: run.current && run.current.message };
+        return { run: own || run.canReset ? flags : null, other: !own && !!run.canReset, error: state.error, validation: own || run.canReset ? validationOf(run) : null };
+    }
+
+    /** What the finished run measured, in one line: the risk recalculated after the rollout against the prediction, and the workflow checks. */
+    function validationOf(run) {
+        const report = run.report;
+        if (!report || !report.after) return null;
+        const finite = (value) => typeof value === "number" && Number.isFinite(value);
+        const after = report.riskAnalysis && report.riskAnalysis.observed && report.riskAnalysis.observed.blastRadius;
+        const parts = [];
+        let tone = "plain";
+        if (finite(after) && finite(report.predictedRisk)) {
+            parts.push(`Risk recalculated after the rollout: ${after}% (predicted ${report.predictedRisk}%).`);
+            if (report.riskTargetMet === true) { parts.push("The expected protection was achieved."); tone = "ok"; }
+            else if (report.riskTargetMet === false) { parts.push("The expected protection was not achieved."); tone = "warn"; }
+        }
+        const rows = (report.after.workflows && report.after.workflows.rows) || [];
+        if (rows.length) {
+            const passed = rows.filter((row) => row.httpStatus === "PASSED").length;
+            parts.push(`Workflow checks passed: ${passed} of ${rows.length}.`);
+            if (passed < rows.length) tone = "warn";
+        }
+        return parts.length ? { text: parts.join(" "), tone } : null;
+    }
+
+    function dockFacts() {
+        const v = lastView || { status: "loading" };
+        const raw = v.status;
+        const status = raw === "ready" ? "ready" : raw === "loading" || raw === "loading-recommendation" ? "loading" : raw === "needs-input" ? "needs-input" : "blocked";
+        const facts = { status, name: actionModule.attribution.get(), editingName, message: dockMessage, mode: v.deploymentFindings ? "deployment" : "workflow",
+            declared: isDeclared(), checks: null, map: null, candidate: null };
+        if (status === "blocked") {
+            const described = blockedDescriptor(v);
+            facts.blockedMessage = described.message;
+            facts.retryable = described.retryable;
+            facts.blockedBy = v.deploymentFindings || (v.error && v.error.code === "WORKFLOW_REVIEW_REQUIRED") ? "workflow" : "evidence";
+            if (v.deploymentFindings) facts.candidate = deploymentChange(v);
+            if (facts.blockedBy === "workflow") {
+                facts.checks = [
+                    { state: "ok", text: "Placement read from the cluster" },
+                    ...(facts.candidate ? [{ state: "ok", text: "A feasible change is predicted to help" }] : []),
+                    { state: "no", text: v.deploymentFindings ? "No reviewed workflow, so business impact is unknown" : "No current workflow review for this application" },
+                    { state: "wait", text: "Approval, apply and validation unlock once a workflow is reviewed" },
+                ];
+            }
+            return facts;
+        }
+        if (status !== "ready") return facts;
+        const change = workflowChange(v);
+        const running = runFacts();
+        facts.candidate = change.candidate;
+        facts.map = change.map;
+        facts.approval = stepFacts.approval;
+        facts.approvalReady = !!currentApproval.ready;
+        facts.approvalReason = currentApproval.reason;
+        facts.run = running.run;
+        facts.validation = running.validation;
+        facts.runIsOther = running.other;
+        const proposal = change.selected && change.selected.yamlProposal;
+        if (!proposal || !proposal.fingerprint || !proposal.sha256) { facts.canApply = false; facts.applyReason = "The selected change is missing its verified proposal. Refresh recommendations."; }
+        if (running.error && !facts.message) facts.message = running.error;
+        return facts;
+    }
+
+    function dockHref(id) {
+        if (id !== "workflows") return "#";
+        const link = Array.from(document.querySelectorAll(".sidebar a[href]")).find((item) => item.getAttribute("href").includes("workflows"));
+        return link ? link.getAttribute("href") : "/components/workflows";
+    }
+
+    function updateDock() {
+        if (!dockRoot || !actionModule || !journey) return;
+        actionModule.render(dockRoot, dockFacts(), {
+            onAction: dockAction, hrefFor: dockHref,
+            editName: () => { editingName = true; updateDock(); },
+            nameChanged: () => { editingName = false; dockMessage = null; updateDock(); },
+        });
+    }
+
+    async function dockAction(id) {
+        dockMessage = null;
+        if (id === "recheck") { followTheWork(); controller.reload(); }
+        else if (id === "approve") openApproveDialog();
+        else if (id === "reject") showApprovalModal("reject");
+        else if (id === "go-approve") goSection("rec-s-approve");
+        else if (id === "apply") openApplyDialog();
+        else if (id === "keep") await applyTestPanel?.keep();
+        else if (id === "reset") await applyTestPanel?.reset();
+        else if (id === "choose") goSection("rec-s-fix");
+                updateDock();
+    }
+
+    const dialogParagraph = (text, className) => { const node = document.createElement("p"); node.className = className || ""; node.textContent = text; return node; };
+
+    /** One decision, with the exact change in view: this requests and approves it. It applies nothing. */
+    function openApproveDialog() {
+        const v = lastView;
+        const selected = currentRecommendation && v?.detail?.candidates?.find((c) => c.id === currentRecommendation.id);
+        if (!selected) return;
+        const name = journey.fixName(selected);
+        const body = document.createElement("div");
+        body.className = "stack-sm rx-dialog__body";
+        body.append(dialogParagraph(`${name.title} · ${name.target}`, "rx-dialog__lead"),
+            dialogParagraph("Approving authorises exactly the change below, as it is proposed now. It applies nothing: Apply is a separate step, and you can reset afterwards. The server checks the placement again when you approve."),
+            dialogParagraph("The audit record carries the name you set for this page. It is a label, not a login.", "ui-note"));
+        const review = document.createElement("div");
+        journey.renderReview(review, v.detail, selected);
+        body.append(review);
+        const label = document.createElement("label");
+        label.className = "rx-dialog__label";
+        label.textContent = "Decision note (optional)";
+        const note = document.createElement("textarea");
+        note.className = "form-input";
+        note.rows = 2;
+        label.append(note);
+        body.append(label);
+        return actionModule.dialog({ title: "Approve this exact change", body, confirmLabel: "Approve this change", askName: true, onConfirm: async () => {
+            const requestedFor = selected.id;
+            if (stepFacts.approval === "none") {
+                const asked = await callApproval("POST", "/request-approval", { recommendationId: requestedFor, proposalVersion: PROPOSAL_VERSION });
+                if (!asked.ok) return errorText(asked, "Could not request approval.");
+                if (currentRecommendation && currentRecommendation.id === requestedFor) renderApprovalState(asked.payload, asked.provenance);
+            }
+            const decided = await callApproval("POST", "/approve", { note: note.value, expectedProposalVersion: PROPOSAL_VERSION });
+            if (!decided.ok) return errorText(decided, "The approval could not be recorded.");
+            if (currentRecommendation && currentRecommendation.id === requestedFor) renderApprovalState(decided.payload, decided.provenance);
+            return null;
+        } });
+    }
+
+    /** The authorisation to write to the cluster: named, with the cluster, the Deployments and what is saved first in view. */
+    function openApplyDialog() {
+        const v = lastView;
+        const selected = currentRecommendation && v?.detail?.candidates?.find((c) => c.id === currentRecommendation.id);
+        const proposal = selected && selected.yamlProposal;
+        if (!selected || !proposal || !proposal.fingerprint || !proposal.sha256) {
+            dockMessage = "The selected change is missing its verified proposal. Refresh recommendations before Apply.";
+            return updateDock();
+        }
+        const name = journey.fixName(selected);
+        const deployments = [...new Set((selected.proposedChanges || []).map((change) => change.deployment))];
+        const body = document.createElement("div");
+        body.className = "stack-sm rx-dialog__body";
+        const facts = document.createElement("dl");
+        facts.className = "rx-dialog__facts";
+        const add = (label, value) => { const dt = document.createElement("dt"); dt.textContent = label; const dd = document.createElement("dd"); dd.textContent = value; facts.append(dt, dd); };
+        add("Cluster", v.cluster.identity || "the connected cluster");
+        add("Application", v.namespace);
+        add("Change", `${name.title} · ${name.target}`);
+        add("Deployments edited", deployments.join(", ") || "as proposed");
+        if (actionModule.attribution.get()) add("Recorded as", actionModule.attribution.get());
+        body.append(facts,
+            dialogParagraph("This changes the connected cluster. The current configuration is saved first, exactly the approved change is applied, the rollout is watched and the risk is recalculated. No node is stopped. Afterwards you keep the change or reset it; nothing is left in place without your decision."));
+        return actionModule.dialog({ title: "Apply this change to the cluster?", body, confirmLabel: "Apply to cluster", danger: true, askName: true, onConfirm: () => {
+            startApplyAndTest(selected);                    // not awaited: progress is shown on the page, not in this dialog
+            return null;
+        } });
+    }
+
+    function startApplyAndTest(selected) {
+        const proposal = selected.yamlProposal;
+        const by = auditName().trim();
+        if (!by || !proposal?.fingerprint || !proposal?.sha256) return null;
+        let saved;
+        try { saved = JSON.parse(window.sessionStorage.getItem("resilience.apply-test.request") || "null"); } catch (_e) { /* Optional storage. */ }
+        if (!saved || saved.fingerprint !== proposal.fingerprint || saved.candidateId !== selected.id) {
+            saved = { fingerprint: proposal.fingerprint, candidateId: selected.id,
+                key: window.crypto?.randomUUID?.() || `apply-${Date.now()}-${Math.random().toString(36).slice(2)}` };
+            try { window.sessionStorage.setItem("resilience.apply-test.request", JSON.stringify(saved)); } catch (_e) { /* Optional storage. */ }
+        }
+        return applyTestPanel.apply({ candidateId: selected.id, namespace: lastView.namespace, declared: isDeclared(),
+            fingerprint: proposal.fingerprint, yamlSha256: proposal.sha256, requestKey: saved.key, appliedBy: by });
     }
 
     // ---- "Prove it on a test cluster": its own panel, outside the re-rendered region, moved into the slot after every render ----------
@@ -619,13 +955,21 @@
 
     function proofContext() {
         const v = lastView || {};
-        return { namespace: v.namespace || null, workflowId: v.workflowId || null, workflowSource: v.workflowKind === "declared" ? "DECLARED" : "FROZEN" };
+        return { namespace: v.namespace || null, workflowId: allWorkflows ? document.querySelector('[data-role="rec-proof-workflow"]')?.value || null : v.workflowId || null, workflowSource: v.workflowKind === "declared" ? "DECLARED" : "FROZEN" };
     }
 
     /** Put the panel between the comparison and the approval, or take it out of the page when there is nothing to prove. */
     function placeProof() {
         if (!proofRoot) return;
-        if (allWorkflows) { proofRoot.hidden = true; return; }
+        if (allWorkflows) {
+            proofRoot.hidden = false;
+            const select = document.querySelector('[data-role="rec-proof-workflow"]');
+            if (select) {
+                const previous = select.value;
+                fillSelect(select, (lastView?.workflows || []).filter((w) => w.applicable && !!w.declared === isDeclared()).map((w) => ({ value: w.workflowId, label: w.label })), previous, "Choose a workflow to test…");
+            }
+            return;
+        }
         const slot = region.querySelector('[data-role="rec-proof-slot"]');
         if (slot && currentRecommendation) {
             slot.appendChild(proofRoot);
@@ -643,6 +987,7 @@
             return `Proven on ${where} (${depth}). That result stays with that cluster; applying to yours is checked again against it.`;
         }
         if (proof.state === "OTHER_PROVEN") return `A different change was proven on ${where}, not this one.`;
+        if (proof.state === "HISTORICAL") return `Historical experiment on ${where}. Its workflow evidence does not match the current reviewed definition, so it is not proof of this recommendation.`;
         return `Tested on ${where}; no change was proven.`;
     }
 
@@ -679,6 +1024,7 @@
         const sha = v.detail && v.detail.yaml ? v.detail.yaml.sha256 : null;
         const query = new URLSearchParams({ namespace: v.namespace, workflowId: v.workflowId });
         if (sha) query.set("candidateSha256", sha);
+        query.set("workflowSource", isDeclared() ? "DECLARED" : "FROZEN");
         try {
             const response = await fetch(`/api/recommendations/validation-loop/proof?${query}`);
             if (!response.ok) throw new Error("not available");
@@ -749,7 +1095,7 @@
         const reject = approvalModal.querySelector("#modal-confirm-reject");
         approve.style.display = "none";
         reject.style.display = "none";
-        // A research decision is made by a named person; the field is in the template and only shown for a declared workflow.
+        // A research decision is made by a named person. With the dock the name is the configured one; the older page asks in the dialog.
         const declared = isDeclared();
         const deciderGroup = approvalModal.querySelector("#research-decider-group");
         const decider = approvalModal.querySelector("#research-decider");
@@ -788,8 +1134,8 @@
         const body = { note, expectedProposalVersion: PROPOSAL_VERSION };
         if (isDeclared()) {
             const decider = approvalModal.querySelector("#research-decider");
-            body.decidedBy = ((decider && decider.value) || "").trim();
-            if (body.decidedBy) lastResearchName = body.decidedBy;
+            body.decidedBy = ((decider && decider.value) || auditName()).trim();
+            if (body.decidedBy) rememberAuditName(body.decidedBy);
         }
         const result = await callApproval("POST", `/${action}`, body);
         hideApprovalModal();
@@ -928,8 +1274,8 @@
     function chosenFromComparison(detail, report) {
         if (!preferredChange) return { recommendation: null, note: null };
         const wording = `${view.strategyName(preferredChange.type)} on ${preferredChange.service}`;
-        const wanted = detail.candidates.find((c) => preferredChange.id ? c.id === preferredChange.id
-            : c.service === preferredChange.service && c.type === preferredChange.type);
+        const wanted = (preferredChange.id && detail.candidates.find((c) => c.id === preferredChange.id))
+            || detail.candidates.find((c) => c.service === preferredChange.service && c.type === preferredChange.type);
         const recommendation = wanted && wanted.feasible ? report.recommendations.find((r) => r.id === wanted.id) || null : null;
         if (!recommendation) {
             return { recommendation: null, note: `The change you chose (${wording}) is not an option for this workflow, so this workflow's own top-ranked change is shown.` };
@@ -964,8 +1310,19 @@
         fillSelect(workflowSelect,
             v.workflows.map((w) => ({ value: w.value, label: w.label, disabled: !w.applicable })),
             v.workflowValue, v.workflowChoice === "choose" || !v.workflowId ? (v.workflows.length ? "Choose a workflow…" : "No approved frozen workflow") : null);
-        fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case node");
-        if (nodeSelect) nodeSelect.setAttribute("title", "The node whose loss hurts most is assessed unless you choose one.");
+        if (v.deploymentFindings) {
+            // Service-level view: every worker is already listed in the table below, so the control only states which one the
+            // lead change protects (the same worker Assessment named) and cannot pick another.
+            const names = (v.deploymentFindings.nodes || []).map((row) => row.node);
+            fillSelect(nodeSelect, names.map((name) => ({ value: name, label: name })), v.deploymentFindings.failedNode, "");
+            if (nodeSelect) {
+                nodeSelect.disabled = true;
+                nodeSelect.setAttribute("title", "The worker the lead change protects. Every worker is listed below.");
+            }
+        } else {
+            fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case node");
+            if (nodeSelect) nodeSelect.setAttribute("title", "The node whose loss hurts most is assessed unless you choose one.");
+        }
         // While the page waits for a choice, the field to use is marked and said in words.
         const hint = allWorkflows && v.namespace ? null : view.nextActionHint(v);
         [["namespace", namespaceSelect], ["workflow", workflowSelect]].forEach(([name, select]) => {
@@ -984,6 +1341,9 @@
             hintLine.hidden = !hint;
         }
         updatePortfolio(v);
+        view.renderDeploymentFindings(document.querySelector('[data-role="rec-deployment-findings"]'), v.deploymentFindings, preferredChange);
+        const workflowProgress = document.querySelector('.rx-rail');
+        if (workflowProgress) workflowProgress.hidden = !!v.deploymentFindings;
         view.renderEvidenceChecklist(evidenceList, v.evidence);
         const summary = view.evidenceSummary(v.evidence);
         const evidenceSummaryLine = document.querySelector('[data-role="rec-evidence-summary"]');
@@ -1038,9 +1398,9 @@
         view.renderRankingTable(tabPart("rec-candidate-table-body"), { recommendations: [] });
         const reasons = tabPart("rec-detail-list");
         if (reasons) reasons.replaceChildren();
-        view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), null, null);
-        view.renderValidation(tabPart("rec-validation"), null);
-        view.renderYaml(tabPart("rec-yaml"), null);
+        if (!journey) view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), null, null);
+        if (!journey) view.renderValidation(tabPart("rec-validation"), null);
+        if (tabPart("rec-yaml")) view.renderYaml(tabPart("rec-yaml"), null);
         const raw = tabPart("rec-raw-json");
         if (raw) raw.textContent = "Nothing loaded yet.";
         showMetrics({ baseline: null, bestPredicted: null, selectedRiskReduction: null, feasibleCount: 0 });
@@ -1076,18 +1436,27 @@
             currentDeployment: detail.currentDeployment,
             simulatedDeployment: selected ? selected.simulatedDeployment : null,   // only a selected, feasible candidate has one
         };
-        view.renderImpactSummary(region.querySelector('[data-role="rec-impact"]'), detail);
+        if (journey) {
+            journey.renderRisk(region.querySelector('[data-role="rec-risk"]'), detail, selected,
+                { onNode: (node) => controller.selectFailedNode(node) });
+            journey.renderFixes(region.querySelector('[data-role="rec-fixes"]'), detail, {
+                selectedId: currentRecommendation?.id, engineId: report.selectedRecommendationId,
+                failedNode: detail.evidence.failedNode, canSelect: canSelectCandidate,
+                whyNot: whyNotSelectable, onSelect: selectCandidate });
+            journey.renderReview(region.querySelector('[data-role="rec-review"]'), detail, selected);
+        }
+        if (!journey) view.renderImpactSummary(region.querySelector('[data-role="rec-impact"]'), detail);
         const outcomeBox = region.querySelector('[data-role="rec-outcome"]');
-        view.renderOutcome(outcomeBox, detail.outcome);
+        if (!journey || !selected) view.renderOutcome(outcomeBox, detail.outcome);
         if (chosen.note && outcomeBox && outcomeBox.append) {
             const note = document.createElement("p");
             note.className = "ui-note rec-chosen-note";
             note.textContent = chosen.note;
             outcomeBox.append(note);
         }
-        view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
+        if (!journey) view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
             selected || null, v.cluster && v.cluster.identity ? v.cluster.identity : "");
-        view.renderSelectedImprovement(region.querySelector('[data-role="rec-selected"]'), selected || null);
+        if (!journey) view.renderSelectedImprovement(region.querySelector('[data-role="rec-selected"]'), selected || null);
         // Each card says what it changes and, when it cannot be put forward, the engine's own reason.
         const descriptions = {};
         const reasons = {};
@@ -1098,7 +1467,7 @@
             if (!c.feasible && c.approval.reason) reasons[c.id] = c.approval.reason;
         });
         // A declared workflow's cards do not repeat the notice that production approval is unavailable: it is said once, above the steps.
-        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), shownReport, context, {
+        if (!journey) view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), shownReport, context, {
             descriptions, reasons, effects,
             ...(allWorkflows ? {
                 dashboard: true,
@@ -1118,7 +1487,7 @@
         }
 
         // The research tabs.
-        view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
+        if (!journey) view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
         drawWorkflowRisk(detail, selected || null);
         // The whole topology now and after the selected change, from the same two graphs; only drawn when there is one to compare.
         const topologyBox = region.querySelector('[data-role="rec-topology-box"]');
@@ -1129,7 +1498,7 @@
         }
         view.renderRankingTable(tabPart("rec-candidate-table-body"), report);
         view.renderCandidateDetails(tabPart("rec-detail-list"), detail);
-        view.renderValidation(tabPart("rec-validation"), context.validation);
+        if (!journey) view.renderValidation(tabPart("rec-validation"), context.validation);
         view.renderYaml(tabPart("rec-yaml"), context.yaml);
         const raw = tabPart("rec-raw-json");
         if (raw) raw.textContent = JSON.stringify(detail, null, 2);
@@ -1146,7 +1515,6 @@
         refreshProofNote();
 
         if (currentRecommendation) {
-            if (applyTestPanel) { renderApplyAction(); return; }
             const requestedFor = currentRecommendation.id;
             loadApprovalState().then((approval) => {
                 if (!currentRecommendation || currentRecommendation.id !== requestedFor) return;   // a newer view replaced it
@@ -1193,7 +1561,7 @@
         if (!declared) return;
         // The engine's own statement, kept whole for the research view and as a tooltip; the plain view gets one sentence.
         const full = allWorkflows && applyTestPanel
-            ? "The workflow definitions are declared rather than observed from traces. Apply starts the selected research change and its checks; results depend on those definitions. No separate approval form is required."
+            ? "The workflow definitions are declared rather than observed from traces. Request research approval first; Apply and test then records a named person and runs the checks. Results depend on those definitions."
             : v.detail && v.detail.declared && v.detail.declared.notApprovableBecause;
         declaredNote.setAttribute("title", full || "");
         const short = document.createElement("span");
@@ -1201,7 +1569,7 @@
             : "Declared workflow, not observed. It can be approved for research validation on a test cluster only; production approval is not available for it.";
         if (full) {
             const long = document.createElement("span");
-            long.className = "rec-research-only";
+            long.className = "visually-hidden";
             long.textContent = ` ${full}`;
             declaredNote.replaceChildren(short, long);
         } else {
@@ -1211,6 +1579,7 @@
 
     function render(v) {
         lastView = v;
+        if (window.ResilienceWorkflowNames) window.ResilienceWorkflowNames.use(v && v.detail);
         restorePage(v);
         renderContext(v);
         renderCase(v);
@@ -1224,7 +1593,7 @@
         if (v.status === "ready") {
             const declared = v.workflowKind === "declared";
             applyBadge(sourceBadge, declared ? { variant: "warning", text: applyTestPanel ? "Declared workflows · research only" : "Declared workflow · research approval only" }
-                                             : { variant: "success", text: "Live evidence" });
+                                             : { variant: "success", text: "Live placement · reviewed workflow definitions" });
             showDetail(v);
             renderDeclaredNote(v, declared);
             if (declared) {
@@ -1255,6 +1624,15 @@
                 note.className = "ui-note";
                 note.textContent = "Choose an application and a workflow above to continue.";
                 region.appendChild(note);
+            }
+        } else if (v.deploymentFindings) {
+            applyBadge(sourceBadge, { variant: "warning", text: "Deployment analysis · workflows unknown" });
+            region.replaceChildren();
+            if (preferredChange && preferredChange.service && preferredChange.type) {
+                const carried = document.createElement("p");
+                carried.className = "ui-note";
+                carried.textContent = `From Assessment: ${view.strategyName(preferredChange.type)} for ${preferredChange.service}. Workflow survival is still unknown, so this change cannot be approved yet.`;
+                region.append(carried);
             }
         } else if (view.nextActionHint(v)) {
             // Only a declared workflow exists: nothing is broken, a choice is waiting, and the hint under step 1 says so.
@@ -1357,7 +1735,7 @@
             if (!latest.has(row.candidateId)) latest.set(row.candidateId, row);
         }
         for (const node of Array.from(region.querySelectorAll("[data-evidence-for]"))) {
-            const predicted = `Predicted ${node.getAttribute("data-predicted")}%`;
+            const predicted = journey ? "Simulation prediction" : `Predicted ${node.getAttribute("data-predicted")}%`;
             const row = latest.get(node.getAttribute("data-evidence-for"));
             node.textContent = row ? `${predicted} · latest test: ${window.ResilienceApplyTest.resultLabel(row)[0].toLowerCase()}`
                 : sidebarHistory.historyLoaded === false ? `${predicted} · reading saved tests…`
@@ -1369,8 +1747,11 @@
     function updateCandidateResults() {
         testHistoryPanel?.redraw?.();             // the comparison marks the selected candidate's column
         updateCardEvidence();
-        updateSelectedData();
+        if (!journey) updateSelectedData();
         const applied = applyTestPanel?.state();
+        if (journey && applyTestRoot) applyTestRoot.setAttribute("data-shows", applied?.active || applied?.busy || applied?.error ? "live" : "other");
+        const count = document.querySelector('[data-role="rec-history-count"]');
+        if (count) { count.textContent = String(sidebarHistory.history.length); count.hidden = !sidebarHistory.history.length; }
         resultsSidebar?.update({ ...sidebarHistory, namespace: lastView?.namespace,
             activeId: applied?.active ? applied.run.candidateId : null, activeRun: applied?.active ? applied.run : null,
             selectedId: lastView?.status === "ready" ? currentRecommendation?.id : null,
@@ -1417,8 +1798,9 @@
             onChange: () => {
                 const run = applyTestPanel?.state().run;
                 if (operationRoot) operationRoot.setAttribute("data-managed-run", String(!!run));
-                if (currentRecommendation) renderApplyAction();
+                if (currentRecommendation) loadApprovalState();
                 updateCandidateResults();
+                updateStepper();
                 const stamp = run ? `${run.runId}:${run.status}` : "";
                 if (stamp !== historyStamp) { historyStamp = stamp; testHistoryPanel?.refresh(); }
             },
@@ -1435,10 +1817,11 @@
         });
     }
 
-    if (proofModule && proofRoot && !allWorkflows) {
+    document.querySelector('[data-role="rec-proof-workflow"]')?.addEventListener("change", () => proofPanel?.reset());
+    if (proofModule && proofRoot) {
         proofPanel = proofModule.createProofPanel({
             root: proofRoot, document, fetchImpl: (url, init) => fetch(url, init), getContext: proofContext, onChange: proofChanged,
-            isResearch: () => !!flowRoot && flowRoot.getAttribute("data-view") === "research", onContinue: continueToApproval,
+            isResearch: () => isDeclared(), onContinue: () => goSection("rec-s-approve"),
         });
     }
 
@@ -1455,6 +1838,20 @@
         // Aggregation evaluates every workflow and worker on the server.
         fetchJson: (url) => fetchJson(url, { timeout: allWorkflows ? 120000 : 45000 }),
         clusterIdentity,
+        takeHandoff: () => {
+            // Left by the Failure impact page; used once and only while fresh (see failure-impact-view.js).
+            const key = "resilience.failure-impact.handoff.v1";
+            try {
+                const record = JSON.parse(window.localStorage.getItem(key) || "null");
+                window.localStorage.removeItem(key);
+                const age = record && typeof record.at === "number" ? Date.now() - record.at : Infinity;
+                if (!(age <= 10 * 60 * 1000)) return null;
+                if (record && typeof record.service === "string" && record.service && typeof record.type === "string" && record.type) {
+                    preferredChange = { service: record.service, type: record.type };
+                }
+                return record;
+            } catch (_error) { return null; }
+        },
         onClusterChange: () => {
             preferredChange = null;
             if (portfolioPanel) portfolioPanel.clear();

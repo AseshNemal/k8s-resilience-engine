@@ -73,6 +73,7 @@
         try {
             const body = await response.json();
             if (typeof body.detail === "string") return body.detail;
+            if (body.detail && typeof body.detail.message === "string") return body.detail.message;
         } catch (_ignored) {
             /* fall through */
         }
@@ -123,13 +124,23 @@
     });
 
     disconnect.addEventListener("click", async () => {
+        const outstanding = window.__resilienceOutstanding && window.__resilienceOutstanding.page;
+        const choice = outstanding ? await outstanding.beforeDisconnect() : "proceed";
+        if (choice === "cancel") {
+            say("Disconnect cancelled. The cluster is still connected.");
+            return;
+        }
+        disconnect.disabled = true;
         try {
-            const response = await fetch("/_extension/cluster", { method: "DELETE" });
+            const suffix = choice === "proceed-keep" ? "?outstanding=keep" : "";
+            const response = await fetch(`/_extension/cluster${suffix}`, { method: "DELETE" });
             if (!response.ok) throw new Error(await errorText(response));
             render(await response.json());
-            say("Disconnected. The stored credential was deleted.", "ok");
+            say(choice === "proceed-keep" ? "Disconnected with the applied changes kept. The stored credential was deleted." : "Disconnected. The stored credential was deleted.", "ok");
         } catch (error) {
             say(error.message, "error");
+        } finally {
+            disconnect.disabled = false;
         }
     });
 

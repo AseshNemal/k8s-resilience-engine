@@ -125,4 +125,21 @@ jobs:
           node-version: "22"
       - run: python -m pip install -r requirements.txt
       - run: python -m pytest -q --tb=short
-      - run: node --test extension/ui-src/*.test.mjs
+      - run: node --test extension/ui-src/*.test.mjs tests/frontend/*.test.mjs
+
+  dependency-security:
+    name: Python and reachable Go vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: extension/helper/go.mod
+      - run: python -m pip install pip-audit==2.10.1
+      - run: pip-audit -r requirements.txt --no-deps --disable-pip
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - run: govulncheck ./...
+        working-directory: extension/helper

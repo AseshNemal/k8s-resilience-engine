@@ -30,6 +30,7 @@ from app.engine.deployment_topology_modeling.live_state.concentration_analyzer i
 )
 from app.engine.deployment_topology_modeling.live_state.cluster_state_parser import TERMINAL_POD_PHASES
 from app.engine.deployment_topology_modeling.live_state.ownership_resolver import resolve_service_ownership
+from app.integrations.kubernetes.probe_entry import without_probe_entries
 from app.integrations.kubernetes.client import (
     AuthFailedError,
     ClusterAccessError,
@@ -138,7 +139,7 @@ def _read_cluster(source: ClusterSource, namespace: str) -> tuple:
         nodes = source.list_nodes()
         pods = source.list_pods(namespace)
         base = quote(namespace, safe="")
-        services = source.list_objects("services", f"/api/v1/namespaces/{base}/services")
+        services = without_probe_entries(source.list_objects("services", f"/api/v1/namespaces/{base}/services"))
         replica_sets = source.list_objects("replicasets", f"/apis/apps/v1/namespaces/{base}/replicasets")
         deployments = source.list_objects("deployments", f"/apis/apps/v1/namespaces/{base}/deployments")
         fingerprint = source.connection_fingerprint()

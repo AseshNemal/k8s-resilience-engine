@@ -17,7 +17,8 @@ def test_approval_ui_elements_render():
     # Check that approval-related UI elements are present in the HTML
     assert 'id="approval-section"' in html
     assert 'data-role="approval-state-container"' in html
-    assert 'id="btn-request-approval"' in html
+    # Approval actions are generated from the server's gate, so no enabled placeholder is rendered.
+    assert 'data-role="approval-actions"' in html
     
     # Check that the modal exists
     assert 'id="approval-modal"' in html

@@ -122,11 +122,41 @@ test("Reset restores once, then returns candidate selection without applying any
         return response({ run: { ...complete, canReset: !restored, application: { status: restored ? "RESET" : "APPLIED" } } });
     }, { onReadyForNext: () => ready++ });
     await env.panel.start();
-    await walk(env.root).find((n) => n.textContent === "Reset changes").listeners.click();
+    await walk(env.root).find((n) => n.textContent === "Reset now").listeners.click({ type: "click", target: {} });
+    const resetCall = env.calls.find(([, method]) => method === "POST");
+    assert.equal(JSON.parse(resetCall[2]).external, "refuse", "the click event must not become the reset policy");
     assert.equal(ready, 1);
     assert.equal(env.panel.state().busy, false);
     assert.equal(env.calls.filter(([, method]) => method === "POST").length, 1);
     assert.ok(env.calls.every(([url, method]) => method !== "POST" || url.endsWith("/reset")));
+});
+
+test("Apply-and-test can reset only its own fields while leaving outside changes", async () => {
+    let attempts = 0, restored = false;
+    const env = setup((url, init) => {
+        if (init.method === "POST") {
+            attempts += 1;
+            if (attempts === 1) return response({ detail: { code: "EXTERNAL_CHANGE", message: "Outside scale detected", details: {
+                external: [{ deployment: "db", label: "Replicas", field: "replicas", appliedText: "3", liveText: "9" }],
+            } } }, 409);
+            assert.equal(JSON.parse(init.body).external, "keep");
+            return response({});
+        }
+        if (url.endsWith("/application")) restored = true;
+        return response({ run: { ...complete, canReset: !restored, application: { status: restored ? "RESET" : "APPLIED" } } });
+    });
+    await env.panel.start();
+    await walk(env.root).find((n) => n.textContent === "Reset now").listeners.click();
+
+    assert.match(text(env.root), /Outside scale detected/);
+    assert.match(text(env.root), /db: Replicas.*3.*9/);
+    const leave = walk(env.root).find((n) => n.textContent === "Reset the rest, leave outside changes");
+    await leave.listeners.click();
+
+    const bodies = env.calls.filter(([, method]) => method === "POST").map(([, , body]) => JSON.parse(body));
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0].external, "refuse");
+    assert.equal(bodies[1].external, "keep");
 });
 
 test("saved reports and comparisons remain read-only while the current candidate is separate", async () => {
@@ -147,7 +177,7 @@ test("saved reports and comparisons remain read-only while the current candidate
     await walk(root).find((n) => n.textContent === "View saved report").listeners.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.ok(calls.some(([url]) => url.endsWith("/saved-1")));
-    assert.ok(!walk(root).some((n) => n.textContent === "Reset changes"));
+    assert.ok(!walk(root).some((n) => n.textContent === "Reset now"));
     assert.ok(calls.every(([, method]) => method === "GET"));
     history.destroy();
 });
@@ -385,4 +415,33 @@ test("rows that read the same in every run are marked, and the toggle hides only
     assert.ok(!labels.includes("Cluster") && !labels.includes("Workflow version"), "identical rows are hidden");
     assert.ok(labels.includes("Before / predicted / after") && labels.includes("Run"), "rows that differ, or identify a run, stay");
     assert.ok(walk(root).some((n) => n.attributes["data-selected"] === "true"), "the selected candidate's column is marked");
+});
+
+test("after a test the person is asked to reset or keep, and Keep records the decision without resetting", async () => {
+    let kept = false, next = 0;
+    const env = setup((url, init) => {
+        if (init.method === "POST") { assert.match(url, /\/keep$/); kept = true; return response({}); }
+        return response({ run: { ...complete, canReset: !kept, canKeep: !kept, kept: kept ? { by: "Explicit Keep action" } : null,
+            application: { status: kept ? "KEPT" : "APPLIED" } } });
+    }, { onReadyForNext: () => next++ });
+    await env.panel.start();
+    assert.match(text(env.root), /This test changed the cluster\. Reset it now, or keep the changes\?/);
+    assert.ok(walk(env.root).some((n) => n.textContent === "Reset now"));
+
+    await walk(env.root).find((n) => n.textContent === "Keep changes").listeners.click();
+
+    const posts = env.calls.filter(([, method]) => method === "POST");
+    assert.equal(posts.length, 1);
+    assert.match(posts[0][0], /\/keep$/);
+    assert.match(text(env.root), /These changes were kept/);
+    assert.ok(!walk(env.root).some((n) => n.textContent === "Keep changes"), "decided once");
+    assert.equal(env.panel.state().busy, false);
+    assert.equal(next, 1, "keeping asks the page to recalculate risks and changes from the cluster as it is now");
+});
+
+test("a change that cannot be kept is offered Reset only", async () => {
+    const env = setup(() => response({ run: { ...complete, canReset: true, canKeep: false, application: { status: "RESET_FAILED" } } }));
+    await env.panel.start();
+    assert.ok(walk(env.root).some((n) => n.textContent === "Reset now"));
+    assert.ok(!walk(env.root).some((n) => n.textContent === "Keep changes"));
 });

@@ -12,7 +12,7 @@ for. It is constructed with credentials that were named for this purpose and not
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from app.engine.recommendation_evaluation_validation.validation.cluster_identity import ClusterIdentity
@@ -21,6 +21,24 @@ from app.shared.schemas.deployment import DeploymentGraph
 HOSTNAME = "kubernetes.io/hostname"
 # Where the evidence came from. Only REAL_CLUSTER can ever be presented as an experimental observation.
 REAL_CLUSTER, TEST_DOUBLE = "REAL_CLUSTER", "TEST_DOUBLE"
+
+
+def fresh_restore_snapshot(snapshot, current):
+    """Retain the restore values, but pin the PATCH to the version just read.
+
+    A run writes each Deployment at most once before reverting it. Status updates
+    move resourceVersion without moving generation. A second spec edit or a
+    replacement therefore needs manual reconciliation, never an unconditional restore.
+    """
+    from app.engine.recommendation_evaluation_validation.validation.models import ValidationRefusedError
+
+    original_uid = getattr(snapshot, "uid", None)
+    if (current is None or not current.resource_version
+            or (original_uid and getattr(current, "uid", None) != original_uid)
+            or current.generation not in {snapshot.generation, snapshot.generation + 1}):
+        raise ValidationRefusedError("RESTORE_TARGET_CHANGED",
+            f"Deployment {snapshot.name} was replaced or its spec changed outside this run. Stored recovery values were retained; no restore was attempted.")
+    return replace(snapshot, resource_version=current.resource_version)
 
 
 @dataclass(frozen=True)

@@ -161,7 +161,7 @@
 
     function showFocus() {
         sections.focusSummary.textContent = focused ? focused.message : "Select a node or workflow cell to highlight its placement.";
-        sections.placementFocus.textContent = focused ? `Highlighted: ${focused.workflow ? `${focused.workflow} · ` : ""}${focused.node}. The assessed failure remains unchanged.` : "";
+        sections.placementFocus.textContent = focused ? `Highlighted: ${focused.workflow ? `${window.ResilienceWorkflowNames ? window.ResilienceWorkflowNames.label(focused.workflow) : focused.workflow} · ` : ""}${focused.node}. The assessed failure remains unchanged.` : "";
         sections.placementFocus.hidden = !focused;
         sections.focusClear.hidden = !focused;
         sections.focusView.hidden = !focused;
@@ -283,8 +283,8 @@
             sections.results.replaceChildren(make("p", "ui-note", "No fix has been applied and tested yet. Apply one on the Recommendations page."));
             return;
         }
-        sections.results.replaceChildren(table(["Fix", "Application / cluster", "Before", "Proposed", "Recalculated", "Test outcome", "Date (UTC)"],
-            rows.map((row) => [row.name, `${row.namespace} / ${row.cluster}`, row.baseline, row.predicted, row.after, statePill(row.outcomeState, row.outcome), row.when])));
+        sections.results.replaceChildren(table(["Fix", "Application / cluster", "Dependency evidence", "Before", "Proposed", "Recalculated", "Test outcome", "Date (UTC)"],
+            rows.map((row) => [row.name, `${row.namespace} / ${row.cluster}`, row.evidenceBasis, row.baseline, row.predicted, row.after, statePill(row.outcomeState, row.outcome), row.when])));
     }
 
     function bar(label, value, state) {
@@ -317,11 +317,11 @@
             sections.workflows.append(make("p", "ui-note", reason || "Workflow exposure is unavailable.")); return;
         }
         const grid = table(["Workflow", ...model.nodes.map((r) => r.node)], model.workflows.map((w) => [
-            w.name, ...model.nodes.map((r) => {
+            w.label || w.name, ...model.nodes.map((r) => {
                 const failed = w.failures === null ? null : w.failures.includes(r.node);
                 const cell = focusButton(make("button", "overview-survival-cell", failed === null ? "? Unknown" : failed ? "× Fails" : "✓ Survives"), r.node, w.name);
                 cell.setAttribute("data-state", failed === null ? "unknown" : failed ? "failed" : "passed");
-                cell.setAttribute("aria-label", `${w.name}: ${failed === null ? "unknown" : failed ? "fails" : "survives"} if ${r.node} fails. Highlight placement`);
+                cell.setAttribute("aria-label", `${w.label || w.name}: ${failed === null ? "unknown" : failed ? "fails" : "survives"} if ${r.node} fails. Highlight placement`);
                 return cell;
             }),
         ]));
@@ -358,6 +358,7 @@
         const row = OV.describeResults({ runs: [run] })[0];
         sections.latest.append(statePill(row.outcomeState, row.outcome), make("p", "overview-fix-name", row.name),
             make("p", "overview-caption", `${row.namespace} · ${row.cluster} · ${row.when} UTC`));
+        sections.latest.append(make("p", "ui-note", row.evidenceBasis));
         const checks = run.afterWorkflows && run.afterWorkflows.rows;
         const evidence = make("div", "overview-test-evidence");
         const marker = (label, value, state) => {
@@ -372,7 +373,7 @@
         marker("Resource usage", run.afterResources === true ? "Measured" : "Unavailable", run.afterResources === true ? "available" : "missing");
         sections.latest.append(evidence);
         sections.latest.append(help("Recorded workflow checks", Array.isArray(checks) && checks.length
-            ? checks.map((w) => `${w.workflowId}: ${w.httpStatus || "Unavailable"}`).join("; ") : "Post-apply workflow checks were not collected."),
+            ? checks.map((w) => `${window.ResilienceWorkflowNames ? window.ResilienceWorkflowNames.label(w.workflowId) : w.workflowId}: ${w.httpStatus || "Unavailable"}`).join("; ") : "Post-apply workflow checks were not collected."),
             help("About this saved result", `Model risk: ${row.baseline} before → ${row.predicted} proposed → ${row.after} after rollout. Recalculated risk is a model result, not experimental proof. This saved run may use a different proposal or cluster.`));
     }
 
@@ -403,9 +404,8 @@
     function detailUrl(context) {
         if (!context || !context.namespace) return null;
         const frozen = (context.workflows || []).some((w) => w.applicable);
-        const declared = (context.declaredWorkflows || []).some((w) => w.applicable);
-        if (!frozen && !declared) return null;
-        return `/api/recommendations/${frozen ? "live" : "declared"}/detail?namespace=${encodeURIComponent(context.namespace)}&all_workflows=true`;
+        if (!frozen) return null;
+        return `/api/recommendations/live/detail?namespace=${encodeURIComponent(context.namespace)}&all_workflows=true`;
     }
 
     async function loadResearch() {
@@ -449,11 +449,21 @@
             drawImpact(null, why.message);
             drawFix(null, why.message);
             drawNext(null, why.message);
+            const findings = context.body?.deploymentFindings;
+            if (findings) {
+                const worst = findings.nodes?.find((n) => n.node === findings.failedNode);
+                state.risk = { state: "available", headline: "Workflow survivability unknown", lostPercent: null,
+                    sub: worst ? `If ${worst.node} stops, ${worst.failedServices.length} service(s) lose all ready replicas. Predicted from placement.` : findings.note };
+                drawRisk(state.risk);
+                drawPlacement({ currentDeployment: findings.currentDeployment, evidence: { failedNode: findings.failedNode } });
+                drawFix(null, `${findings.recommendations?.filter((r) => r.feasible).length || 0} feasible deployment-level suggestions are available in Recommendations. Workflow effects remain unknown.`);
+            }
             showStrip();
             return;
         }
         const detail = await attempt(url, { timeout: 120000 });
         if (!current()) return;
+        if (window.ResilienceWorkflowNames) window.ResilienceWorkflowNames.use(detail.body || null);
         state.risk = OV.describeRisk(detail.body || null, detail.error ? { message: detail.error.message } : null);
         drawRisk(state.risk);
         drawPlacement(detail.body || null, detail.error ? detail.error.message : null);
@@ -462,7 +472,7 @@
         drawNext(detail.body || null, detail.error ? detail.error.message : null);
         if (detail.body) {
             const body = detail.body;
-            const basis = body.portfolio?.basis === "DECLARED" ? "Declared workflows" : "Frozen workflows";
+            const basis = body.portfolio?.basis === "DECLARED" ? "Research declarations" : "Reviewed workflow definitions";
             const captured = body.evidence?.topologyCapturedAt;
             const date = captured ? new Date(captured) : null;
             const captureLabel = date && !Number.isNaN(date.getTime())

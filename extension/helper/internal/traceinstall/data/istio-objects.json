@@ -1,0 +1,197 @@
+{
+  "istioVersion": "1.31.2",
+  "objects": [
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "authorizationpolicies.security.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "destinationrules.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "envoyfilters.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "gateways.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "peerauthentications.security.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "proxyconfigs.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "requestauthentications.security.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "serviceentries.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "sidecars.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "telemetries.telemetry.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "trafficextensions.extensions.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "virtualservices.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "wasmplugins.extensions.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "workloadentries.networking.istio.io"
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "namespace": "",
+      "name": "workloadgroups.networking.istio.io"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "namespace": "istio-system",
+      "name": "istio-reader-service-account"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "namespace": "istio-system",
+      "name": "istiod"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "namespace": "",
+      "name": "istio-reader-clusterrole-istio-system"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "namespace": "",
+      "name": "istiod-clusterrole-istio-system"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "namespace": "",
+      "name": "istiod-gateway-controller-istio-system"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "namespace": "",
+      "name": "istio-reader-clusterrole-istio-system"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "namespace": "",
+      "name": "istiod-clusterrole-istio-system"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "namespace": "",
+      "name": "istiod-gateway-controller-istio-system"
+    },
+    {
+      "apiVersion": "admissionregistration.k8s.io/v1",
+      "kind": "ValidatingWebhookConfiguration",
+      "namespace": "",
+      "name": "istio-validator-istio-system"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "namespace": "istio-system",
+      "name": "istio"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "namespace": "istio-system",
+      "name": "istio-sidecar-injector"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "namespace": "istio-system",
+      "name": "values"
+    },
+    {
+      "apiVersion": "admissionregistration.k8s.io/v1",
+      "kind": "MutatingWebhookConfiguration",
+      "namespace": "",
+      "name": "istio-sidecar-injector"
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "namespace": "istio-system",
+      "name": "istiod"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "namespace": "istio-system",
+      "name": "istiod"
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "namespace": "istio-system",
+      "name": "istiod"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "namespace": "istio-system",
+      "name": "istiod"
+    }
+  ]
+}

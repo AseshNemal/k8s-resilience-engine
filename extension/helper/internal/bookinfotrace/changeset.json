@@ -1,0 +1,33 @@
+{
+  "istioVersion": "1.31.2",
+  "supportedKubernetesMinors": { "min": 32, "max": 37 },
+  "namespace": "bookinfo",
+  "istioNamespace": "istio-system",
+  "managedBy": "resilience-tracing",
+  "install": {
+    "source": "istio/install-minimal.yaml",
+    "renderedObjects": 32,
+    "customResourceDefinitions": 15,
+    "webhooks": 2
+  },
+  "objects": [
+    { "kind": "ServiceEntry", "name": "trace-demo-jaeger-otlp", "source": "istio/serviceentry-jaeger-otlp.tmpl.yaml" },
+    { "kind": "Telemetry", "name": "trace-demo", "source": "istio/telemetry-bookinfo.yaml" },
+    { "kind": "DestinationRule", "name": "trace-demo-reviews", "source": "istio/reviews-v2-route.yaml" },
+    { "kind": "VirtualService", "name": "trace-demo-reviews", "source": "istio/reviews-v2-route.yaml" },
+    { "kind": "Pod", "name": "trace-demo-client", "source": "traffic/trace-demo-client.yaml" }
+  ],
+  "createdFromOriginal": {
+    "kind": "Deployment",
+    "name": "reviews-v2",
+    "source": "bookinfo.yaml",
+    "selector": "app=reviews,version=v2"
+  },
+  "recreatedWorkloads": [
+    { "app": "ratings", "version": "v1" },
+    { "app": "details", "version": "v1" },
+    { "app": "productpage", "version": "v1" }
+  ],
+  "requiredWorkloads": ["productpage-v1", "details-v1", "ratings-v1", "reviews-v1"],
+  "memoryMiB": { "istiodLimit": 512, "sidecarLimit": 128, "sidecars": 4, "reviewsV2Estimate": 115, "clientPod": 144 }
+}

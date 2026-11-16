@@ -53,6 +53,7 @@ func TestTheTraceCommandsPrintOneJSONLineAndExitZero(t *testing.T) {
 func TestTheTraceCommandsTakeNoArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"trace-status", "x"}, {"trace-start", "--image", "evil"}, {"trace-stop", "other-container"},
+		{"trace-enable", "yes"}, {"trace-ensure", "x"}, {"trace-validate", "host.example"},
 	} {
 		code, out, errOut := invoke(t, approve.Approved, &backend{}, args...)
 		if code != 2 || out != "" || !strings.HasPrefix(errOut, "usage:") {
@@ -63,9 +64,44 @@ func TestTheTraceCommandsTakeNoArguments(t *testing.T) {
 
 func TestTheUsageLineNamesTheTraceCommands(t *testing.T) {
 	_, _, errOut := invoke(t, approve.Approved, &backend{}, "bogus")
-	for _, name := range []string{"trace-status", "trace-start", "trace-stop"} {
+	for _, name := range []string{"trace-status", "trace-enable", "trace-ensure", "trace-validate", "trace-start", "trace-stop"} {
 		if !strings.Contains(errOut, name) {
 			t.Errorf("usage does not mention %s: %q", name, errOut)
 		}
+	}
+}
+
+// With no Docker the new commands say so (or, for the ones that need nothing, that there was nothing to do),
+// as one JSON line, and none of them reaches Docker or asks anyone anything.
+func TestTheNewTraceCommandsAnswerWithOneJSONLineWhenThereIsNoDocker(t *testing.T) {
+	want := map[string]struct {
+		state string
+		ok    bool
+	}{
+		"trace-enable":   {"docker-unavailable", false},
+		"trace-ensure":   {"trace-not-enabled", true}, // never turned on, so it does not even look at Docker
+		"trace-validate": {"trace-endpoints-failed", false},
+	}
+	for command, expect := range want {
+		code, out, errOut := invoke(t, approve.Declined, &backend{}, command)
+		var v map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &v); err != nil || code != 0 || errOut != "" {
+			t.Fatalf("%s: code %d stdout %q stderr %q (%v)", command, code, out, errOut, err)
+		}
+		if v["command"] != command || v["state"] != expect.state || v["ok"] != expect.ok {
+			t.Errorf("%s: got %v, want state %s ok %v", command, v, expect.state, expect.ok)
+		}
+		trace, _ := v["trace"].(map[string]any)
+		if trace == nil || trace["enabled"] != false {
+			t.Errorf("%s: the answer must say tracing is not turned on: %v", command, v["trace"])
+		}
+	}
+}
+
+// The background job runs renew-managed. When tracing was never turned on it must not reach Docker.
+func TestTheBackgroundTickDoesNotTouchDockerWhenTracingIsOff(t *testing.T) {
+	code, _, _ := invoke(t, approve.Approved, &backend{}, "renew-managed")
+	if code != 0 {
+		t.Fatalf("renew-managed exited %d", code)
 	}
 }

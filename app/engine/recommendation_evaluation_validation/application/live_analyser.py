@@ -29,8 +29,9 @@ from app.engine.recommendation_evaluation_validation.declared_workflow import ge
 from app.engine.recommendation_evaluation_validation.live_pipeline import impact_detail, require_complete_topology
 from app.engine.recommendation_evaluation_validation.ranking import SINGLE_WORKFLOW
 
-METRIC = ("Blast radius of the one workflow for the one assessed node failure, in percentage points of the workflow's "
-          "weighted services (Component 3's definition, unchanged).")
+METRIC = ("Blast radius of the one workflow for the one assessed node failure (Component 3's definition, unchanged): the "
+          "share of the evaluated workflows that fail, in percentage points. For one workflow it is 100 when a mandatory "
+          "service is left with no ready replica and 0 otherwise.")
 OBSERVED_KIND = "recalculated-from-live-topology"
 
 
@@ -78,6 +79,7 @@ class _Analyser:
             "tier": self.tier, "source": evidence.get("source"), "workflowId": evidence.get("workflowId"),
             "workflowBasis": "DECLARED" if evidence.get("source") == DECLARED_WORKFLOW_SOURCE else "FROZEN",
             "workflowFreezeId": evidence.get("workflowFreezeId"), "declarationDigest": declaration_digest(evidence),
+            "workflowReview": evidence.get("workflowReview"),
             "declaredBy": declared.get("declaredBy"),
             "namespace": evidence.get("namespace"), "failedNode": evidence.get("failedNode"),
             "failedNodeChosen": evidence.get("failedNodeChosen"), "metric": METRIC, "rankingBasis": SINGLE_WORKFLOW,
@@ -142,6 +144,8 @@ class ProductionAnalyser(_Analyser):
 
     def _load(self, basis: dict[str, Any]):
         inputs = get_runtime_component_inputs(basis["workflowId"], basis["namespace"])
+        if basis.get("workflowReview") and inputs.workflow_review != basis["workflowReview"]:
+            raise AnalysisUnavailable("WORKFLOW_CHANGED", "The reviewed definition changed after Apply. No comparison is made against a different workflow basis.")
         if basis.get("workflowFreezeId") and inputs.workflow_freeze_id != basis["workflowFreezeId"]:
             raise AnalysisUnavailable(
                 "WORKFLOW_CHANGED", "The workflow was frozen again after this change was applied, so the failure impact now would "
@@ -158,6 +162,8 @@ class ResearchAnalyser(_Analyser):
         from app.engine.deployment_topology_modeling.service import discover_live
 
         declared = get_declared_workflow(basis["workflowId"])
+        if declared.namespace and declared.namespace != basis["namespace"]:
+            raise AnalysisUnavailable("WORKFLOW_CHANGED", "The reviewed workflow belongs to another namespace.")
         if basis.get("declarationDigest") and declared.declaration_sha256 != basis["declarationDigest"]:
             raise AnalysisUnavailable(
                 "WORKFLOW_CHANGED", "The declared workflow was edited after this change was applied, so the failure impact now "

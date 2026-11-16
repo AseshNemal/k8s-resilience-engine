@@ -1,0 +1,89 @@
+/* Assessment: one answer, then the map, then the fix. Tokens only, so the standalone app and the Docker theme both work. */
+.assess { --bad: var(--color-danger); --warn: var(--color-warning); --ok: var(--color-success); display: flex; flex-direction: column; gap: 18px; max-width: 1120px; }
+.assess [hidden] { display: none !important; }
+.assess-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+.assess-lead { margin: 4px 0 0; color: var(--color-text-muted); font-size: 14px; max-width: 60ch; }
+.assess-toolbar { display: flex; align-items: flex-end; gap: 10px; }
+.assess-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
+.assess-field select { min-width: 200px; height: 36px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); color: var(--color-text); font: inherit; font-size: 14px; font-weight: 500; }
+.assess-result { display: flex; flex-direction: column; gap: 18px; }
+
+/* waiting / empty */
+.assess-state { display: flex; align-items: center; gap: 16px; padding: 20px 22px; }
+.assess-state h3 { margin: 0; font-size: 16px; }
+.assess-state p { margin: 4px 0 0; color: var(--color-text-muted); font-size: 14px; }
+.assess-state__spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--color-border); border-top-color: var(--color-primary); animation: assess-spin 0.9s linear infinite; flex: none; }
+.assess-state[data-busy="false"] .assess-state__spinner { display: none; }
+@keyframes assess-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .assess-state__spinner { animation: none; } }
+
+/* hero */
+.assess-hero { --tone: var(--color-text-muted); display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; padding: 22px 26px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--color-border)); background: color-mix(in srgb, var(--tone) 9%, var(--color-surface)); }
+.assess-hero[data-level="critical"], .assess-hero[data-level="high"] { --tone: var(--bad); }
+.assess-hero[data-level="moderate"], .assess-hero[data-level="low"] { --tone: var(--warn); }
+.assess-hero[data-level="none"] { --tone: var(--ok); }
+.assess-kicker { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+.assess-kicker [data-role="assess-level"] { color: var(--tone); }
+.assess-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); }
+.assess-sep { opacity: 0.5; }
+.assess-hero__title { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 650; max-width: 30ch; }
+.assess-hero__sub { margin: 8px 0 0; color: var(--color-text-muted); font-size: 13px; }
+.assess-stats { display: flex; gap: 10px; margin: 0; }
+.assess-stat { display: flex; flex-direction: column-reverse; align-items: flex-start; min-width: 96px; padding: 10px 14px; border-radius: 10px; background: var(--color-surface); border: 1px solid var(--color-border); }
+.assess-stat__value { margin: 0; font-size: 26px; font-weight: 700; line-height: 1.1; }
+.assess-stat__label { font-size: 12px; color: var(--color-text-muted); }
+
+/* shared card heads */
+.assess-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.assess-head h3 { margin: 0; font-size: 16px; }
+.assess-hint { margin: 2px 0 0; color: var(--color-text-muted); font-size: 13px; line-height: 1.45; }
+.assess-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); white-space: nowrap; }
+.assess-map, .assess-fix { padding: 18px 20px; }
+
+/* map: the placement map itself is shared (placement-map.css) */
+.assess-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--color-surface-soft); border: 1px solid var(--color-border); flex: none; }
+.assess-seg__btn { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--color-text-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.assess-seg__btn[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border); }
+.assess-seg__btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.assess-consequence { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--color-border); font-size: 14px; line-height: 1.5; }
+
+/* fix */
+.assess-fix__grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 28px; align-items: start; }
+.assess-fix__title { margin: 0 0 8px; font-size: 20px; line-height: 1.3; }
+.assess-fix__why { margin: 0; font-size: 14px; line-height: 1.55; color: var(--color-text-muted); }
+.assess-fix__cost { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0 0; }
+.assess-pill { padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 650; background: var(--color-surface-soft); border: 1px solid var(--color-border); }
+.assess-meter { padding: 14px 16px; border-radius: 10px; border: 1px solid var(--color-border); background: var(--color-surface-soft); }
+.assess-meter__label { margin: 0 0 10px; font-size: 12px; font-weight: 650; color: var(--color-text-muted); }
+.assess-meter__row { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; }
+.assess-meter__name { color: var(--color-text-muted); }
+.assess-meter__value { text-align: right; }
+.assess-meter__track { height: 10px; border-radius: 99px; background: var(--color-border); overflow: hidden; }
+.assess-meter__fill { display: block; height: 100%; border-radius: 99px; }
+.assess-meter__fill[data-kind="before"] { background: var(--bad); }
+.assess-meter__fill[data-kind="after"] { background: var(--ok); }
+.assess-follow { margin-top: 18px; padding: 12px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--color-border)); background: color-mix(in srgb, var(--warn) 9%, var(--color-surface)); }
+.assess-follow__title { margin: 0 0 6px; font-size: 13px; font-weight: 650; }
+.assess-follow__list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-text-muted); }
+.assess-follow__list strong { color: var(--color-text); }
+.assess-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.assess-fix > div > .assess-hint { margin-top: 12px; }
+
+/* evidence */
+.assess-evidence { padding: 0 2px; color: var(--color-text-muted); font-size: 13px; }
+.assess-evidence summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.assess-evidence__list { margin: 8px 0 0; padding-left: 18px; line-height: 1.55; }
+
+@media (max-width: 800px) {
+    .assess-hero { grid-template-columns: 1fr; }
+    .assess-stats { flex-wrap: wrap; }
+    .assess-fix__grid { grid-template-columns: 1fr; }
+    .assess-hero__title { font-size: 21px; }
+}
+
+/* Links used as buttons (the shared stylesheet only defines them as <button>). */
+.assess a.primary-button, .assess a.secondary-button { display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 16px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; }
+.assess a.primary-button { background: var(--color-primary); border: 1px solid var(--color-primary); color: #fff; }
+.assess a.primary-button:hover { background: var(--color-primary-dark); }
+.assess a.secondary-button { background: transparent; border: 1px solid var(--color-border); color: var(--color-text); }
+.assess a.secondary-button:hover { background: var(--color-surface-soft); }

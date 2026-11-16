@@ -46,4 +46,14 @@ class LiveRecommendation:
 
 def has_verified_provenance(approval: "ApprovalModel") -> bool:
     provenance = (approval.evaluation_snapshot or {}).get("provenance")
-    return isinstance(provenance, dict) and provenance.get("source") == LIVE_EVIDENCE_SOURCE
+    if not isinstance(provenance, dict) or provenance.get("source") != LIVE_EVIDENCE_SOURCE:
+        return False
+    if provenance.get("workflowEvidencePolicy") != "operational-workflow/v1":
+        return False
+    reviews = ([w.get("workflowReview") for w in provenance.get("workflows", [])]
+               if provenance.get("workflowScope") == "all" else [provenance.get("workflowReview")])
+    return bool(provenance.get("namespace")) and bool(reviews) and all(isinstance(r, dict) and r.get("policy") == "operational-workflow/v1"
+        and isinstance(r.get("sourceDigest"), str) and len(r["sourceDigest"]) == 64
+        and r.get("sourceVersion") and r.get("kind") in ("frozen", "managed") and r.get("connectionFingerprint")
+        and r.get("clusterUid") and r.get("reviewedBy") and r.get("statement")
+        and r.get("namespace") == provenance.get("namespace") for r in reviews)

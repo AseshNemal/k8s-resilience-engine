@@ -9,6 +9,31 @@ from __future__ import annotations
 from time import perf_counter_ns
 from typing import TYPE_CHECKING, Any, Mapping
 
+from app.engine.workflow_dependency_modeling.operational_evidence import (
+    operational_workflows as list_operational_workflows,
+    get_operational_workflow,
+    review_workflow as review_operational_workflow,
+)
+
+from app.engine.workflow_dependency_modeling.management import (
+    catalog as workflow_editor_catalog,
+    save_workflow as save_managed_workflow,
+    delete_workflow as delete_managed_workflow,
+    list_documents as list_managed_documents,
+    read_document as read_managed_document,
+    document_history as managed_workflow_history,
+    start_recording as start_workflow_recording,
+    stop_recording as stop_workflow_recording,
+    reviewed_workflows as reviewed_managed_workflows,
+    document_digest as managed_workflow_digest,
+)
+
+from app.engine.workflow_dependency_modeling.test_discovery import (
+    import_test_evidence as import_workflow_test_evidence,
+    run_http_test as run_workflow_http_test,
+    refresh_test_evidence as refresh_workflow_test_evidence,
+)
+
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
     configure_analysis_session_repository,
     discover_analysis_workflows,
@@ -185,7 +210,7 @@ def build_workflow_graph(
 
 
 def discover_live_workflows(
-    service_name: str = "frontend",
+    service_name: str,
     jaeger_url: str = "http://localhost:16686",
     limit: int = 100,
     lookback: str = "1h",
@@ -226,7 +251,7 @@ def discover_live_workflows(
 
 
 def get_live_workflow(
-    service_name: str = "frontend",
+    service_name: str,
     operation: str | None = None,
     jaeger_url: str = "http://localhost:16686",
     criticality: float = 0.8,

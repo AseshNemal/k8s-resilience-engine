@@ -63,7 +63,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const discovery = { status: "ok", cluster: { connectionFingerprint: "abc", identityVerified: false }, capturedAt: "2026-10-24T10:00:00Z", excludedNamespaces: [],
     totals: { workerNodes: 2, services: 4, unresolved: 0 }, namespaces: [{ namespace: "bookinfo", status: "ok", unresolved: [], graph: { nodes: [], services: [] } }] };
-const context = { namespace: "bookinfo", workflows: [], declaredWorkflows: [{ workflowId: "productpage-view", applicable: true }, { workflowId: "x", applicable: true }],
+const context = { namespace: "bookinfo", declaredWorkflows: [], workflows: [{ workflowId: "productpage-view", applicable: true }, { workflowId: "x", applicable: true }],
     evidence: [{ id: "cluster", label: "Connected cluster", state: "available", detail: "ok" }, { id: "workflow", label: "Approved frozen workflow", state: "missing", detail: "None frozen." }], nextActions: [] };
 const detail = { evidence: { failedNode: "desktop-worker2" }, baselineImpact: { blastRadius: 100, failedServices: ["productpage"], failedWorkflows: ["a", "b", "c"] },
     portfolio: { workflows: [{ workflowId: "a" }, { workflowId: "b" }, { workflowId: "c" }] }, currentDeployment: { services: [], nodes: [] }, candidates: [] };
@@ -133,7 +133,7 @@ test("with no detail the risk is missing with the reason, or pending while it is
 test("the status strip: each chip is available, missing or pending from what is known so far, and links to the page that moves it on", () => {
     const chips = plain(OV.describeChips({ discovery: true, context, risk: OV.describeRisk(detail), history: { runs: [run()] } }));
     assert.deepEqual(chips.map((c) => [c.id, c.state]), [["cluster", "available"], ["workflow", "available"], ["prediction", "available"], ["test", "incomplete"]]);
-    assert.match(chips[1].detail, /2 declared workflows apply \(declared, not observed\)/);
+    assert.match(chips[1].detail, /2 reviewed workflow definitions apply/);
     assert.match(chips[3].detail, /1 saved test; latest: missing checks/);
     assert.deepEqual(chips.map((c) => c.href), ["/components/deployments", "/components/workflows", "/components/failure-impacts", "/components/recommendations"]);
 
@@ -182,7 +182,7 @@ function respond({ history = { runs: [run()], hasMore: false }, applied = { appl
         if (url === "/api/recommendations/context") return context;
         if (url.startsWith("/api/recommendations/apply-tests/history")) { if (history instanceof Error) throw history; return history; }
         if (url === "/api/recommendations/applications/current") return applied;
-        if (url.startsWith("/api/recommendations/declared/detail")) return detail;
+        if (url.startsWith("/api/recommendations/live/detail")) return detail;
         throw new Error(`unexpected request ${url}`);
     };
 }
@@ -192,7 +192,7 @@ test("the page draws the strip, the risk, the banner, the results and the eviden
     await page.load();
 
     assert.deepEqual(plain(page.calls).sort(), ["/api/deployments/discovery/all", "/api/recommendations/apply-tests/history?limit=50", "/api/recommendations/applications/current",
-        "/api/recommendations/context", "/api/recommendations/declared/detail?namespace=bookinfo&all_workflows=true"].sort());
+        "/api/recommendations/context", "/api/recommendations/live/detail?namespace=bookinfo&all_workflows=true"].sort());
     assert.match(node(page, "overview-risk-headline").textContent, /Losing desktop-worker2 would stop all 3 workflows/);
     const badge = node(page, "overview-risk-badge");
     assert.deepEqual([badge.hidden, badge.textContent, badge.attributes["data-severity"]], [false, "Critical", "critical"]);
@@ -203,7 +203,7 @@ test("the page draws the strip, the risk, the banner, the results and the eviden
     assert.equal(node(page, "overview-applied").hidden, false);
     assert.match(node(page, "overview-applied-text").textContent, /ratings-v1/);
     assert.deepEqual(["cluster", "workflow", "prediction", "test"].map((id) => node(page, `overview-chip-${id}`).attributes["data-state"]), ["available", "available", "available", "incomplete"]);
-    assert.match(node(page, "overview-chip-workflow-detail").textContent, /2 declared workflows apply/);
+    assert.match(node(page, "overview-chip-workflow-detail").textContent, /2 reviewed workflow definitions apply/);
     assert.equal(node(page, "overview-chip-test-state").textContent, "Missing checks");
     assert.match(node(page, "overview-results").text(), /Combination on ratings\+reviews[\s\S]*Missing checks/);
     assert.match(node(page, "overview-evidence").text(), /Workflow checks[\s\S]*0 of 2 workflows have an HTTP check configured/);
@@ -220,7 +220,7 @@ test("when saved tests cannot be read the page says so; it does not draw an empt
 });
 
 test("with no workflow that applies the page asks for no detail and shows why", async () => {
-    const page = boot((url) => (url === "/api/recommendations/context" ? { ...context, declaredWorkflows: [], nextActions: ["Declare a workflow whose services are in this application."] } : respond()(url)));
+    const page = boot((url) => (url === "/api/recommendations/context" ? { ...context, workflows: [], declaredWorkflows: [], nextActions: ["Declare a workflow whose services are in this application."] } : respond()(url)));
     await page.load();
 
     assert.ok(!page.calls.some((url) => url.includes("/detail")), "no recommendation is computed for nothing to compute it from");
@@ -328,7 +328,7 @@ test("linked inspection distinguishes reported failure causes from observed depe
 });
 
 test("selecting a survival cell links to one topology and clears on explicit reset or refresh, using no new requests", async () => {
-    const page = boot((url) => url.includes("/declared/detail") ? interactiveDetail : url === "/api/deployments/discovery/all"
+    const page = boot((url) => url.includes("/live/detail") ? interactiveDetail : url === "/api/deployments/discovery/all"
         ? { ...discovery, namespaces: [{ namespace: "bookinfo", status: "ok", unresolved: [], graph: interactiveDetail.currentDeployment }] } : respond()(url));
     await page.load();
     const calls = page.calls.length;

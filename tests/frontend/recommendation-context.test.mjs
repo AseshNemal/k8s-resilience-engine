@@ -11,6 +11,18 @@ const window = {};
 vm.runInNewContext(source, { window, URLSearchParams, Array, Object, JSON, Promise, String, Number, Error, Boolean });
 const C = window.ResilienceRecommendationContext;
 
+test("deployment findings survive the context adapter without requesting workflow approval", async () => {
+    const findings = { scope: "deployment", workflowSurvival: null, workflowBlastRadius: null, approvalAllowed: false,
+        nodes: [{ node: "worker-a", failedServices: ["orders"], affectedServices: ["orders"] }] };
+    const body = context({ workflows: [], declaredWorkflows: [], workflowId: null, ready: false, deploymentFindings: findings });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body });
+    const v = await C.createController(env).start();
+    assert.equal(v.deploymentFindings.scope, "deployment");
+    assert.equal(v.deploymentFindings.workflowSurvival, null);
+    assert.equal(v.detail, null);
+    assert.ok(calls.every(url => !url.includes("/detail") && !url.includes("approval")));
+});
+
 test("all-workflows mode needs no workflow choice and requests one aggregate evaluation", async () => {
     const body = context({ workflows: [workflow("a"), workflow("b")], workflowId: null, workflowChoice: "choose", ready: false });
     const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/live/detail": detailBody() });
@@ -23,15 +35,15 @@ test("all-workflows mode needs no workflow choice and requests one aggregate eva
     assert.match(calls.at(-1), /all_workflows=true/);
 });
 
-test("all-workflows mode keeps declared evidence in the research tier and never mixes it with frozen workflows", async () => {
+test("all-workflows mode never falls back to unverified declarations", async () => {
     const body = context({ workflows: [], declaredWorkflows: [{ workflowId: "declared-a", services: ["a"], applicable: true }],
         workflowId: null, workflowChoice: "none", ready: false });
     const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/declared/detail": detailBody() });
     env.allWorkflows = true;
     const v = await C.createController(env).start();
-    assert.equal(v.workflowKind, "declared");
-    assert.match(calls.at(-1), /\/declared\/detail\?.*all_workflows=true/);
-    assert.ok(!v.evidence.some((e) => e.id === "workflow"), "a missing frozen workflow is not an error for a ready research evaluation");
+    assert.equal(v.status, "blocked");
+    assert.equal(v.workflowId, "");
+    assert.ok(calls.every((url) => !url.includes("/detail")), "no declaration is selected automatically");
 });
 
 function selectionStore() {
@@ -166,7 +178,7 @@ test("the workflow dropdown lists every frozen workflow and marks the ones that 
     const view = await C.createController(env).start();
 
     assert.deepEqual(plain(view.workflows.map((w) => [w.workflowId, w.applicable])), [["a", true], ["b", false]]);
-    assert.match(view.workflows[0].label, /^a · frozen 2026-10-20 · 2 services$/);
+    assert.match(view.workflows[0].label, /^a · frozen 2026-10-20 · trace-backed, reviewed definition · 2 services$/);
     assert.match(view.workflows[1].label, /not usable here: Services not found in bookinfo: db\./);
 });
 
@@ -505,4 +517,28 @@ test("a context without any declared workflows behaves exactly as before", async
     assert.equal(view.status, "ready");
     assert.equal(view.workflowKind, "frozen");
     assert.deepEqual(plain(view.workflows.map((w) => w.declared)), [false]);
+});
+
+test("a hand-off from the Failure impact page preselects the application and node once, for that cluster only", async () => {
+    const pending = [{ namespace: "shop", failedNode: "worker-2", fingerprint: "cluster-A", at: Date.now() }];
+    const body = context({ workflows: [workflow("a")], workflowId: "a", ready: true, namespace: "shop" });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/live/detail": detailBody() });
+    env.takeHandoff = () => pending.shift() || null;
+    const c = C.createController(env);
+    await c.start();
+    assert.match(calls[0], /namespace=shop/, "the hand-off's application is what the first context read asks for");
+    assert.equal(c.selection().failedNode, "worker-2");
+    assert.match(calls.at(-1), /failed_node=worker-2/);
+    assert.equal(pending.length, 0, "taken once");
+});
+
+test("a hand-off made on another cluster is dropped, never applied", async () => {
+    const body = context({ workflows: [workflow("a")], workflowId: "a", ready: true });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/live/detail": detailBody() });
+    const pending = [{ namespace: "shop", failedNode: "worker-2", fingerprint: "SOME-OTHER-CLUSTER", at: Date.now() }];
+    env.takeHandoff = () => pending.shift() || null;     // one-shot, as the page's own reader is
+    const c = C.createController(env);
+    await c.start();
+    assert.equal(c.selection().failedNode, "", "the node chosen on the other cluster is cleared");
+    assert.ok(calls.every((url) => !url.includes("worker-2")), "nothing chosen on one cluster is sent to another");
 });

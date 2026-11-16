@@ -562,7 +562,7 @@ class KubernetesTestClusterGateway:
 
         Fields the snapshot did not have are set to null, which a strategic merge patch reads as "remove"; the spread list is
         replaced as a whole (see below), so an entry added under a different key is removed too. Nothing else on
-        the Deployment is touched, and no resourceVersion is sent: a restore is unconditional.
+        the Deployment is touched. The snapshot's resourceVersion makes the API server refuse a concurrent edit.
         """
         self._require_writes()
         anti = snapshot.pod_anti_affinity
@@ -577,7 +577,8 @@ class KubernetesTestClusterGateway:
                 PREFERRED_ANTI_AFFINITY: anti.get(PREFERRED_ANTI_AFFINITY) or None}},
         }
         self._patch(snapshot.namespace, snapshot.name,
-                    {"spec": {"replicas": snapshot.replicas, "template": {"spec": pod_spec}}})
+                    {"metadata": {"resourceVersion": snapshot.resource_version},
+                     "spec": {"replicas": snapshot.replicas, "template": {"spec": pod_spec}}})
 
     # -- creating a copy of an application on a disposable cluster -----------------------------------------------------------------------
 

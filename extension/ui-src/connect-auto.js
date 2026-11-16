@@ -196,8 +196,14 @@
     removeButton.addEventListener("click", async () => {
         const name = removeButton.dataset.context || selected();
         if (!name) return;
+        const outstanding = window.__resilienceOutstanding && window.__resilienceOutstanding.page;
+        const choice = outstanding ? await outstanding.beforeDisconnect() : "proceed";
+        if (choice === "cancel") {
+            say("Access was not removed. The cluster is still connected.");
+            return;
+        }
         setBusy(true);
-        say("Waiting for your answer in the system dialog…");
+        say(choice === "proceed-keep" ? "Keeping the applied changes. Waiting for your answer in the system dialog…" : "Waiting for your answer in the system dialog…");
         const result = await controller.remove(name);
         setBusy(false);
         say(result.ok ? auto.messageFor("disconnected") : auto.messageFor(result.state), result.ok ? "ok" : "");

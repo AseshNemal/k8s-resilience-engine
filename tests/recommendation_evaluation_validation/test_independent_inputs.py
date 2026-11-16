@@ -71,6 +71,8 @@ def no_frozen_workflow(monkeypatch):
 
 
 def freeze_checkout(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)
     graph = WorkflowGraph(workflow_id="checkout", criticality=0.9, mandatory_services=["web", "db"],
                           edges=[WorkflowEdge(source="web", target="db")])
     monkeypatch.setattr(workflow_service, "get_frozen_workflow_graph",
@@ -255,3 +257,26 @@ def test_the_selection_sentence_uses_it_and_the_score_itself_is_untouched(use_cl
 
     assert "0000000" not in selected["selectionJustification"] and "9999999" not in selected["selectionJustification"]
     assert selected["score"] == pytest.approx(selected["ranking"]["score"])
+
+
+def test_preapproval_description_compares_live_fields_with_the_generated_patch(use_cluster, declared, no_frozen_workflow):
+    use_cluster(concentrated_db())
+
+    shown = describe_live_recommendation(live_pipeline.build_declared_recommendation("checkout", None, "shop"))
+    selected = next(candidate for candidate in shown["candidates"] if candidate["selected"])
+
+    changes = {row["deployment"]: row for row in selected["proposedChanges"]}
+    assert set(changes) == {"db"}
+    fields = {field["field"]: field for field in changes["db"]["fields"]}
+    assert fields["replicas"]["from"] == 3
+    assert fields["topology_spread_constraints"]["from"] == []
+    assert fields["topology_spread_constraints"]["to"][0]["topologyKey"] == "kubernetes.io/hostname"
+    assert fields["topology_spread_constraints"]["changed"] is True
+    assert fields["pod_anti_affinity"]["changed"] is False
+    assert "db:" in changes["db"]["summary"]
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_component_source(monkeypatch):
+    from tests.support.operational_workflows import install_reviewed_source
+    install_reviewed_source(monkeypatch)

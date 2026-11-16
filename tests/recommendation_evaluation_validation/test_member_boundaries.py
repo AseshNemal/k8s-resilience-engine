@@ -1,8 +1,10 @@
-"""Member 4's work stays inside Member 4's component: no other member's engine, API, page or the shared contracts are edited.
+"""Guard unrelated component files while allowing the explicitly requested integration work.
 
 The branch under test is compared with where it left ``main`` (the merge base), plus whatever is changed or untracked in the working
 tree, so the guard holds before and after a commit. Component 3's evaluator and Component 2's discovery are CALLED by Member 4
-(``application/live_analyser.py``); this proves they are not CHANGED to make that work. It reads the repository's git state only.
+(``application/live_analyser.py``). The 2026-11-16 recovery request authorizes changes
+across components for deployment-only prediction and hybrid workflow management.
+It reads the repository's git state only.
 """
 
 import shutil
@@ -27,6 +29,39 @@ PROTECTED = (
     "app/main.py",
 )
 
+# Exact integration files authorized by the recovery/hybrid-dashboard request;
+# unrelated files remain guarded. Keep the service-interface assertion below.
+AUTHORIZED_INTEGRATION_PATHS = {
+    # The production workflow evidence policy explicitly covers Member 1 provenance and Member 3 runtime inputs.
+    "app/engine/workflow_dependency_modeling/operational_evidence.py",
+    "app/engine/failure_impact_prediction/runtime_provider.py",
+    # Production-readiness request explicitly authorizes shared probe transport hardening across components.
+    "app/engine/workflow_dependency_modeling/workflow_probe_runner.py",
+    "app/api/failure_impacts.py", "app/api/workflows.py",
+    "app/engine/failure_impact_prediction/deployment_impact.py",
+    "app/engine/failure_impact_prediction/service.py",
+    # Member 3's own whole-cluster overview (the Failure impact page's single read) and its page styles.
+    "app/engine/failure_impact_prediction/overview.py", "app/engine/failure_impact_prediction/workflow_basis.py",
+    "app/static/css/pages/failure_impacts.css",
+    # The probe entry point is a Service that selects the application's pods; discovery must leave it out of the topology (two one-line filters).
+    "app/engine/deployment_topology_modeling/discovery.py", "app/engine/deployment_topology_modeling/live_state/ownership_resolver.py",
+    "app/engine/workflow_dependency_modeling/management.py",
+    "app/engine/workflow_dependency_modeling/service.py",
+    # New files of the same authorized hybrid-workflow work: service.py (above) imports test_discovery, which imports the
+    # evidence schema. They are named exactly; nothing else under either directory is opened.
+    "app/engine/workflow_dependency_modeling/test_discovery.py",
+    "app/shared/schemas/workflow_test_evidence.py",
+    "app/shared/schemas/failure_impact.py", "app/shared/schemas/workflow_management.py",
+    "app/static/js/components/failure_impacts.js",
+    "app/templates/components/failure_impacts.html", "app/templates/components/workflows.html",
+    # The product Assessment is the integrated entry point, so its router is mounted in app/main.py. That one file is
+    # shared, so it is allowed ONLY for the two lines below (see test_main_changes_only_mount_the_assessment_router).
+    "app/main.py",
+}
+
+# The only lines the integration may add to app/main.py (an import and the router mount). Anything else needs team sign-off.
+MAIN_PY_ALLOWED_ADDITIONS = {"    assessment,", "app.include_router(assessment.router)"}
+
 
 def git(*arguments: str) -> str:
     return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True, check=True).stdout
@@ -45,10 +80,23 @@ def changed_paths() -> set[str]:
     return committed | working | untracked
 
 
-def test_no_other_members_component_page_or_shared_contract_is_changed():
-    touched = sorted(path for path in changed_paths() if path.startswith(PROTECTED))
+def test_no_unrelated_component_page_or_shared_contract_is_changed():
+    touched = sorted(path for path in changed_paths()
+                     if path.startswith(PROTECTED) and path not in AUTHORIZED_INTEGRATION_PATHS)
 
     assert touched == [], f"another member's files were changed: {touched}"
+
+
+def test_main_changes_only_mount_the_assessment_router():
+    """app/main.py is a shared file: the authorized integration may add the Assessment router and nothing else."""
+    changed_paths()  # skips when there is no git checkout or no main branch
+    diff = git("diff", git("merge-base", "main", "HEAD").strip(), "--", "app/main.py")
+    lines = [line for line in diff.splitlines() if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+    removed = [line for line in lines if line.startswith("-")]
+    added = {line[1:] for line in lines if line.startswith("+")}
+
+    assert removed == [], f"app/main.py lines were removed: {removed}"
+    assert added <= MAIN_PY_ALLOWED_ADDITIONS, f"app/main.py gained more than the Assessment router: {sorted(added - MAIN_PY_ALLOWED_ADDITIONS)}"
 
 
 def test_member_four_reaches_the_other_components_only_through_their_public_services():

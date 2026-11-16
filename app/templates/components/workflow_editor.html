@@ -1,0 +1,79 @@
+<section class="workflow-editor" id="workflow-editor" data-view="manager" aria-label="Workflow management">
+    <div class="we-context">
+        <span class="we-connection" data-we="cluster"><span class="we-dot" aria-hidden="true"></span>Checking connection…</span>
+        <label class="we-namespace">Namespace <select data-we="namespace" aria-label="Application namespace"><option value="">Choose an application</option></select></label>
+        <button type="button" class="we-icon-button" data-we="refresh" aria-label="Refresh live services" title="Refresh live services">↻</button>
+    </div>
+    <p class="we-notice" data-we="status" role="status" aria-live="polite" hidden></p>
+
+    <section data-we-panel="manager" aria-labelledby="we-manager-title">
+        <header class="we-manager-heading">
+            <div><h2 id="we-manager-title">Workflow Manager</h2><p>Design how your services work together.</p></div>
+            <div class="we-actions"><button type="button" class="we-button we-button--primary" data-we="new">＋ Create Manually</button><button type="button" class="we-button" data-we="discover">Discover Automatically</button><button type="button" class="we-button" data-we="tests">Discover from Tests</button></div>
+        </header>
+        <div class="we-list-heading"><h3>Your workflows <span data-we="workflow-count"></span></h3><details class="we-menu"><summary>More tools</summary><div><button type="button" data-we="show-all">Show workflows from all namespaces</button><button type="button" data-we="research">Advanced / Research</button></div></details></div>
+        <div data-we="workflow-list" class="we-workflow-list" aria-live="polite"></div>
+        <p class="we-muted" data-we="other-workflows" hidden></p>
+    </section>
+
+    <section data-we-panel="discovery" aria-labelledby="we-discovery-title" hidden>
+        <button type="button" class="we-back" data-we="discovery-back">‹ Back to workflow</button>
+        <header class="we-heading"><h2 id="we-discovery-title">Discover workflows automatically</h2><p>Record application activity, review the observed request paths, then add one to a workflow. No existing workflow is needed.</p></header>
+        <ol class="we-record-steps" aria-label="Discovery progress"><li data-we="record-step-1">Start recording</li><li data-we="record-step-2">Use your application</li><li data-we="record-step-3">Review what was found</li></ol>
+        <div class="we-record-stage">
+            <span class="we-record-symbol" data-we="record-symbol" aria-hidden="true">◎</span>
+            <h3 data-we="record-title">Ready when you are</h3><p data-we="record-guidance">Use an application that already sends OpenTelemetry traces to Jaeger. Nothing is installed or changed in your cluster.</p>
+            <button type="button" class="we-button we-button--primary" data-we="start">Start Recording</button>
+            <button type="button" class="we-button we-button--primary" data-we="stop" hidden>Stop &amp; Discover</button>
+            <p class="we-muted" data-we="record-time"></p>
+        </div>
+        <p class="we-muted" data-we="recording-coverage" role="status"></p>
+        <div data-we="candidates" class="we-candidates"></div>
+        <p class="we-evidence-note">Recorded calls are suggestions to review. Concurrent operations remain separate candidates; activity in the same operation may still be mixed. A trace does not prove that a dependency is required.</p>
+        <details class="we-disclosure" data-we="record-settings"><summary>Tracing, service mappings and evidence</summary><div class="we-settings-grid"><label>Jaeger query URL<input data-we="jaeger" type="url" placeholder="Your configured Jaeger query URL"></label><label>Saved recording<select data-we="recording"><option value="">Choose a recording</option></select></label></div><label>Trace service → Kubernetes service mapping<textarea data-we="record-map" rows="3" placeholder='{"trace-service-name":"kubernetes-service-name"}'></textarea><small>Use this only when names differ. Unmapped trace services stay visible and are never guessed.</small></label><button type="button" class="we-button" data-we="refresh-recording" hidden>Apply mappings &amp; refresh evidence</button><details class="we-disclosure"><summary>Evidence details</summary><pre data-we="record-details"></pre></details><button type="button" class="we-text-button" data-we="record-research">Other tracing sources and research tools</button></details>
+    </section>
+
+    <section data-we-panel="editor" aria-label="Visual workflow editor" hidden>
+        <header class="we-editor-heading">
+            <button type="button" class="we-back" data-we="editor-back">‹ Workflows</button>
+            <div class="we-editor-identity"><input data-we="name" aria-label="Workflow name" maxlength="160" placeholder="Untitled workflow"><span data-we="version">Not saved yet</span></div>
+            <div class="we-actions"><button type="button" class="we-button we-button--quiet" data-we="save">Save Draft</button><button type="button" class="we-button we-button--primary" data-we="review">Review &amp; Save</button><details class="we-menu"><summary aria-label="More workflow actions">•••</summary><div><button type="button" data-we="duplicate">Duplicate workflow</button><button type="button" data-we="history-open">Version history &amp; evidence</button><button type="button" data-we="editor-research">Advanced / Research</button></div></details></div>
+        </header>
+        <nav class="we-add-methods" aria-label="Add to this workflow"><button type="button" class="we-button" data-we="add-manually">＋ Add Manually</button><button type="button" class="we-button" data-we="add-recording">◎ Record Activity</button><button type="button" class="we-button" data-we="add-tests">⊕ Add Test Evidence</button><details class="we-source-menu"><summary data-we="source-summary">Evidence sources</summary><div data-we="source-list"></div></details></nav>
+        <div class="we-editor-layout" data-we="layout" data-inspector="false" data-library="true">
+            <aside class="we-library" data-we="library" aria-label="Available Kubernetes services">
+                <header><h3>Services</h3><button type="button" class="we-icon-button" data-we="library-close" aria-label="Close service inventory">×</button></header>
+                <label class="we-search"><span aria-hidden="true">⌕</span><input type="search" data-we="search" placeholder="Find a service…" aria-label="Search services"></label>
+                <p class="we-library-hint">Drag to the canvas or click ＋</p><div data-we="services" class="we-services"></div>
+            </aside>
+            <div class="we-graph">
+                <div class="we-canvas-tools"><div><button type="button" class="we-icon-button" data-we="library-toggle" aria-label="Toggle service inventory" title="Services">☰</button><button type="button" class="we-icon-button" data-we="undo" aria-label="Undo" title="Undo (Ctrl or Command Z)">↶</button><button type="button" class="we-icon-button" data-we="redo" aria-label="Redo" title="Redo (Ctrl or Command Shift Z)">↷</button></div><span data-we="canvas-summary">No services yet</span></div>
+                <div class="we-canvas" data-we="canvas" tabindex="0" aria-label="Workflow canvas. Drag the background to pan. Use connection handles to join services.">
+                    <div class="we-space" data-we="space"><svg class="we-lines" data-we="lines" width="4000" height="4000" aria-label="Workflow connections"></svg><div data-we="nodes"></div></div>
+                    <div class="we-canvas-empty" data-we="empty"><span aria-hidden="true">＋</span><h3>Start with a service</h3><p>Add the service where a request begins.<br>Then connect it to the services it calls.</p><button type="button" class="we-button" data-we="empty-add">Choose a service</button></div>
+                    <p class="we-connect-prompt" data-we="connect-prompt" role="status" hidden></p>
+                </div>
+                <footer class="we-canvas-footer"><details class="we-legend"><summary>Graph key</summary><div><span class="we-key" data-kind="Mandatory">Required</span><span class="we-key" data-kind="Optional">Optional</span><span class="we-key" data-kind="Supporting">Supporting</span><span class="we-key" data-kind="Unknown">Unknown</span><hr><span>◇ Declared relationship</span><span>◉ Observed call</span><button type="button" data-we="legend-research">✓ Experimental validation is in Research tools</button></div></details><div class="we-zoom"><button type="button" class="we-icon-button" data-we="zoom-out" aria-label="Zoom out">−</button><output data-we="zoom" aria-label="Canvas zoom">100%</output><button type="button" class="we-icon-button" data-we="zoom-in" aria-label="Zoom in">＋</button><button type="button" class="we-text-button" data-we="fit">Fit</button></div></footer>
+            </div>
+            <aside class="we-inspector" data-we="inspector-wrap" aria-label="Selection properties"><header><h3 data-we="inspector-heading">Properties</h3><button type="button" class="we-icon-button" data-we="inspector-close" aria-label="Close properties">×</button></header><div data-we="inspector"></div></aside>
+        </div>
+        <p class="we-short-hint" data-we="editor-hint">Drag a node to move it. Drag its arrow handle to another service to connect.</p>
+    </section>
+
+    <section data-we-panel="tests" aria-label="Add application test evidence" hidden>
+        <button type="button" class="we-back" data-we="tests-back">‹ Back to workflow</button>
+        <header class="we-heading"><h2>Add test evidence</h2><p>Import test results with trace identities, or run an existing HTTP workflow probe. Your current workflow stays on the canvas.</p></header>
+        <p class="we-blank we-blank--inline" data-we="test-empty" role="status">No test evidence yet. Import a JSON export that includes request trace IDs, or keep using Create Manually and Discover Automatically.</p>
+        <div class="we-test-upload"><label class="we-button" for="we-test-file">Choose JSON file<input id="we-test-file" type="file" accept=".json,application/json" data-we="test-file"></label><span class="we-muted" data-we="test-file-name">No file selected</span><div data-we="test-preview"></div><button type="button" class="we-button we-button--primary" data-we="test-submit" disabled>Import test evidence</button></div>
+        <div data-we="test-results" class="we-candidates" aria-live="polite"></div>
+        <p class="we-evidence-note">Only calls supported by the selected test’s trace IDs are added. A passing test does not prove dependencies are required.</p>
+        <details class="we-disclosure"><summary>Connect your test runner</summary><p>Kubernetes cannot find test files. Run your application tests where they already live and export execution names, target, timestamps and request trace IDs. Plain Pytest/JUnit results and Playwright trace.zip files do not contain distributed service traces.</p><div class="we-actions"><a class="we-button" href="/static/test-integrations/README.html" target="_blank" rel="noopener">Integration guide</a><a class="we-text-button" href="/static/test-integrations/pytest_evidence.py" download>Python helper</a><a class="we-text-button" href="/static/test-integrations/playwright-evidence.mjs" download>Playwright helper</a></div></details>
+        <details class="we-disclosure"><summary>Tracing, mappings &amp; saved evidence</summary><div class="we-settings-grid"><label>Jaeger query URL<input data-we="test-jaeger" type="url" placeholder="Optional for exports containing traces"></label><label>Trace service → Kubernetes service mapping<textarea data-we="test-map" rows="3" placeholder='{"trace-service-name":"kubernetes-service-name"}'></textarea></label></div><label>Saved test evidence<select data-we="test-history"><option value="">Choose imported or executed tests</option></select></label><button type="button" class="we-button" data-we="test-refresh" hidden>Refresh traces only</button><p class="we-muted">Refreshing never runs the test again. Earlier evidence revisions remain available in the workflow’s history.</p><details class="we-disclosure"><summary>Evidence details</summary><pre data-we="test-details"></pre></details></details>
+    </section>
+
+    <section data-we-panel="saved" class="we-saved" hidden><span class="we-saved-mark" aria-hidden="true">✓</span><h2 data-we="saved-title">Workflow saved</h2><p data-we="saved-message"></p><div class="we-actions"><a class="we-button we-button--primary" data-we="risk" href="/components/recommendations">Analyze Risk</a><button type="button" class="we-button" data-we="continue">Continue editing</button><button type="button" class="we-text-button" data-we="saved-back">Back to workflows</button></div></section>
+
+    <dialog class="we-dialog" data-we="dialog" aria-labelledby="we-dialog-title"><form data-we="dialog-form" novalidate><header><h2 id="we-dialog-title" data-we="dialog-title">Review workflow</h2><button type="button" class="we-icon-button" data-we="dialog-close" aria-label="Close dialog">×</button></header><div data-we="review-summary"></div><div data-we="review-issues" class="we-review-issues"></div><label data-we="dialog-name-wrap">Workflow name<input data-we="dialog-name" maxlength="160" required></label><details class="we-disclosure" data-we="review-settings"><summary>Advanced review settings</summary><div class="we-settings-grid"><label>Your name<input data-we="actor" maxlength="100" autocomplete="name" required><small>Recorded with this revision.</small></label><label data-we="criticality-wrap">Workflow importance<input data-we="criticality" type="number" min="0" max="1" step="any" placeholder="Choose 0 to 1"><small>Criticality used in research predictions. No value is assumed.</small></label></div></details><div data-we="operational-review-wrap"><label><input type="checkbox" data-we="operational-use"> Use this real workflow for operational analysis</label><label>How was this definition verified against the real application?<textarea data-we="operational-statement" rows="3" minlength="20" maxlength="2000" placeholder="Describe the reviewed application behavior and why these services are required."></textarea></label><p class="we-muted">This records your declaration for this exact revision, cluster UID and namespace. It does not claim trace observation or experimental validation. Leave unchecked for drafts, examples or research assumptions.</p></div><p class="we-evidence-note" data-we="review-note">Your dependency labels remain declarations. Observed calls are not experimental validation.</p><p data-we="dialog-error" class="we-form-error" role="alert" hidden></p><footer><button type="button" class="we-button" data-we="dialog-cancel">Cancel</button><button type="submit" class="we-button we-button--primary" data-we="dialog-submit">Save reviewed workflow</button></footer></form></dialog>
+
+    <dialog class="we-dialog we-dialog--wide" data-we="history-dialog" aria-labelledby="we-history-title"><header><h2 id="we-history-title">Versions &amp; evidence</h2><button type="button" class="we-icon-button" data-we="history-close" aria-label="Close version history">×</button></header><label>Version<select data-we="history"><option value="">Save a workflow to see versions</option></select></label><div class="we-actions"><button type="button" class="we-button" data-we="load-version">Open selected version</button><button type="button" class="we-button" data-we="export">Download reviewed graph</button></div><div data-we="conflicts"></div><details class="we-disclosure"><summary>Raw graph and provenance</summary><pre data-we="provenance"></pre></details></dialog>
+</section>

@@ -6,6 +6,8 @@ The top-ranked candidate stays the automatic selection; another ranked candidate
 justification, carried in the existing approval note so no shared schema changes.
 """
 
+from tests.support.operational_workflows import provenance
+
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -79,7 +81,8 @@ class Source:
                 id=s.id, type="TOPOLOGY_SPREAD", service=s.id, feasible=s.feasible, predicted_blast_radius=0.0,
                 risk_reduction=0.0, resource_cost="LOW", confidence=1.0, score=s.score or 0.0) for s in self.specs],
             selected_recommendation_id=self.selected)
-        evidence = {"source": LIVE_EVIDENCE_SOURCE, "topologyCapturedAt": "2026-01-01T00:00:00Z",
+        from tests.support.operational_workflows import provenance
+        evidence = {**provenance(), "source": LIVE_EVIDENCE_SOURCE, "topologyCapturedAt": "2026-01-01T00:00:00Z",
                     "workflowId": "wf1", "namespace": "shop", "failedNode": "w1"} | self.provenance_extra
         if self.with_ranking:
             evidence["ranking"] = {"formulaVersion": "1", "candidates": {
@@ -243,7 +246,7 @@ def test_the_justification_length_is_configurable():
     pending.status = ApprovalStatus.PENDING_APPROVAL
     pending.proposal_version = "v1"
     current = Source().set(TOP, SECOND)()
-    pending.evaluation_snapshot = {"provenance": {"source": LIVE_EVIDENCE_SOURCE},
+    pending.evaluation_snapshot = {"provenance": {**provenance(), "source": LIVE_EVIDENCE_SOURCE},
                                    "proposal": {"fingerprint": proposal_fingerprint(current, "second"), "yamlSha256": None}}
     pending.yaml_snapshot = None
     repository = MagicMock(spec=ApprovalRepository)
@@ -287,7 +290,7 @@ def test_a_record_written_before_the_gate_is_judged_by_the_current_evaluation_no
         requested_at=datetime.now(timezone.utc), requested_by="developer",
         recommendation_snapshot={"id": "idle"},
         evaluation_snapshot={"score": 0.95, "provenance": {
-            "source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop", "failedNode": "w1"}}))
+            **provenance(), "source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop", "failedNode": "w1"}}))
 
     response = decide(client, "idle", note=JUSTIFICATION)
 
@@ -302,7 +305,7 @@ def test_a_record_written_before_the_gate_is_refused_even_when_its_candidate_is_
         id=0, recommendation_id="top", proposal_version="v1", status=ApprovalStatus.PENDING_APPROVAL,
         requested_at=datetime.now(timezone.utc), requested_by="developer", recommendation_snapshot={"id": "top"},
         evaluation_snapshot={"provenance": {
-            "source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop", "failedNode": "w1"}}))
+            **provenance(), "source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop", "failedNode": "w1"}}))
 
     response = decide(client, "top")
 
@@ -314,7 +317,7 @@ def test_a_verified_record_that_does_not_say_what_to_re_evaluate_cannot_be_appro
     ApprovalRepository(session).save(ApprovalModel(
         id=0, recommendation_id="top", proposal_version="v1", status=ApprovalStatus.PENDING_APPROVAL,
         requested_at=datetime.now(timezone.utc), requested_by="developer", recommendation_snapshot={"id": "top"},
-        evaluation_snapshot={"provenance": {"source": LIVE_EVIDENCE_SOURCE}}))
+        evaluation_snapshot={"provenance": {**provenance(), "source": LIVE_EVIDENCE_SOURCE}}))
     app.dependency_overrides.pop(get_current_evaluator, None)      # the real evaluator reads the provenance
 
     response = decide(client, "top")
@@ -377,7 +380,7 @@ def test_without_a_current_evaluation_the_service_fails_closed():
     pending = MagicMock()
     pending.status = ApprovalStatus.PENDING_APPROVAL
     pending.proposal_version = "v1"
-    pending.evaluation_snapshot = {"provenance": {"source": LIVE_EVIDENCE_SOURCE}}
+    pending.evaluation_snapshot = {"provenance": {**provenance(), "source": LIVE_EVIDENCE_SOURCE}}
     repository = MagicMock(spec=ApprovalRepository)
     repository.get_by_recommendation_id.return_value = pending
 
@@ -632,7 +635,7 @@ def test_a_verified_request_with_no_stored_fingerprint_predates_the_binding_and_
     ApprovalRepository(session).save(ApprovalModel(
         id=0, recommendation_id="top", proposal_version="v1", status=ApprovalStatus.PENDING_APPROVAL,
         requested_at=datetime.now(timezone.utc), requested_by="developer", recommendation_snapshot={"id": "top"},
-        evaluation_snapshot={"provenance": {"source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop",
+        evaluation_snapshot={"provenance": {**provenance(), "source": LIVE_EVIDENCE_SOURCE, "workflowId": "wf1", "namespace": "shop",
                                             "failedNode": "w1"}}))
 
     response = decide(client, "top")

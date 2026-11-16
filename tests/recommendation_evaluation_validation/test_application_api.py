@@ -52,7 +52,7 @@ def test_the_research_door_applies_and_resets_an_approved_change(client, connect
     assert body["canReset"] is True and body["canApply"] is False and body["rolloutComplete"] is True
     assert connected.deployments["db"].has_hostname_spread
 
-    reset = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh"})
+    reset = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "expectedApplicationId": client.get(f"{RESEARCH}/{approved_candidate}/application").json().get("application", {}).get("applicationId", "absent")})
 
     assert reset.status_code == 200 and reset.json()["application"]["status"] == "RESET" and reset.json()["canApply"] is True
     assert not connected.deployments["db"].has_hostname_spread
@@ -104,7 +104,7 @@ def test_a_backend_that_was_not_armed_refuses_every_write_and_the_page_is_told(c
     monkeypatch.delenv("RESILIENCE_ALLOW_CLUSTER_WRITES")
 
     refused = client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
-    reset = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh"})
+    reset = client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "expectedApplicationId": "absent"})
     status = client.get(f"{RESEARCH}/{approved_candidate}/application").json()
 
     assert refused.status_code == 403 and refused.json()["detail"]["code"] == "CLUSTER_WRITES_NOT_ENABLED"
@@ -142,7 +142,7 @@ def test_the_current_application_is_found_again_whichever_recommendation_is_sele
 
 def test_the_history_lists_each_application_from_storage_without_reading_the_cluster(client, connected, approved_candidate):
     client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
-    client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh"})
+    client.post(f"{RESEARCH}/{approved_candidate}/reset", json={"resetBy": "asesh", "expectedApplicationId": client.get(f"{RESEARCH}/{approved_candidate}/application").json()["application"]["applicationId"]})
     reads = connected.reads
 
     history = client.get(f"{PROD}/applications").json()["applications"]
@@ -170,3 +170,13 @@ def test_the_status_carries_the_operation_the_page_draws(client, connected, appr
 
     assert set(body["operation"]) >= {"direction", "stage", "stages", "tone", "headline", "nextAction", "steps", "inProgress", "pollMs", "connectionLost"}
     assert body["states"]["experimentallyValidated"] is False and "experiments" in body
+
+
+@pytest.mark.parametrize("action,body", [("reset", {"resetBy": "asesh"}), ("keep", {"keptBy": "asesh"})])
+def test_http_decisions_require_the_reviewed_application_id(client, connected, approved_candidate, action, body):
+    applied = client.post(f"{RESEARCH}/{approved_candidate}/apply", params=PARAMS, json={"appliedBy": "asesh"})
+    before = len(connected.restores)
+    refused = client.post(f"{RESEARCH}/{approved_candidate}/{action}", json=body)
+    assert refused.status_code == 422
+    assert len(connected.restores) == before
+    assert applied.json()["application"]["status"] == "APPLIED"

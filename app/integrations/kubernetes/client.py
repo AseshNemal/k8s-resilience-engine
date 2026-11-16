@@ -15,6 +15,7 @@ Design points:
 
 import hashlib
 import os
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -162,20 +163,34 @@ class KubernetesApiSource:
             # carries kubeconfig content, a path or a credential.
             raise NotConnectedError(f"the kubeconfig is not usable: {error}") from error
 
-    def _list(self, resource: str, path: str) -> list[dict]:
+    def _get(self, verb: str, resource: str, path: str) -> Any:
         http = self._open()
         try:
-            body = http.get_json(path)
+            return http.get_json(path)
         except rest.HttpStatusError as error:
             if error.status == 401:
                 raise AuthFailedError("the cluster rejected the credential") from None
             if error.status == 403:
-                raise ForbiddenError("list", resource) from None
+                raise ForbiddenError(verb, resource) from None
             raise ApiFailedError(error.status) from None
         except rest.TransportFailure as error:
             raise ConnectionFailedError(error.name) from None
         finally:
             http.close()
+
+    def server_version(self) -> dict:
+        """The API server's own version document (``GET /version``: ``gitVersion``, ``major``, ``minor``). Read-only.
+
+        Kubernetes grants this path to every authenticated client (``system:public-info-viewer``). A cluster that removed that
+        grant answers 403, which is raised like any other refused read; the caller then treats the version as unknown.
+        """
+        body = self._get("get", "version", "/version")
+        if not isinstance(body, dict):
+            raise ApiFailedError(None)
+        return body
+
+    def _list(self, resource: str, path: str) -> list[dict]:
+        body = self._get("list", resource, path)
         items = body.get("items") if isinstance(body, dict) else None
         if not isinstance(items, list):
             raise ApiFailedError(None)

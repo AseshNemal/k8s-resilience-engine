@@ -10,6 +10,7 @@
  */
 (function (global) {
     "use strict";
+    const workflowLabel = (id) => (global.ResilienceWorkflowNames ? global.ResilienceWorkflowNames.label(id) : id);   // display name; the id stays the key
 
     const list = (value) => (Array.isArray(value) ? value : []);
 
@@ -80,7 +81,7 @@
             const tr = element(doc, "tr");
             const label = element(doc, "th", undefined, "rec-wf__name", { scope: "row" });
             const who = element(doc, "div", undefined, "rec-wf__who");
-            who.append(element(doc, "span", workflow.id, "rec-wf__id"));
+            who.append(element(doc, "span", workflowLabel(workflow.id), "rec-wf__id"));
             if (Number.isFinite(workflow.criticality)) {
                 who.append(element(doc, "span", `criticality ${workflow.criticality}`, "rec-wf__crit",
                     { style: `--crit:${Math.max(0, Math.min(1, workflow.criticality)) * 100}%` }));
@@ -91,7 +92,7 @@
                 const state = workflow[which][node];
                 const cell = element(doc, "td", undefined, "rec-wf__td");
                 const chip = element(doc, "div", undefined, "rec-wf__cell", { "data-state": state,
-                    title: `${workflow.id} ${state === "breaks" ? "breaks" : state === "survives" ? "survives" : "is not known"} if ${node} fails` });
+                    title: `${workflowLabel(workflow.id)} ${state === "breaks" ? "breaks" : state === "survives" ? "survives" : "is not known"} if ${node} fails` });
                 chip.append(element(doc, "span", MARKS[state], "rec-wf__mark", { "aria-hidden": "true" }), element(doc, "span", WORDS[state]));
                 cell.append(chip);
                 tr.append(cell);

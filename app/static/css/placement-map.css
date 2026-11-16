@@ -1,0 +1,67 @@
+/* Placement map (shared by Assessment and Failure impact). Tokens only, so the standalone app and the Docker theme both work. */
+.pm, .pm-wfs { --pm-bad: var(--color-danger); --pm-warn: var(--color-warning); --pm-ok: var(--color-success); }
+.pm { display: flex; flex-direction: column; gap: 12px; }
+.pm-grid { display: flex; flex-direction: column; overflow-x: auto; }
+.pm-row { display: grid; grid-template-columns: var(--pm-cols); align-items: stretch; min-width: 520px; border-top: 1px solid var(--color-border); }
+.pm-row--head { border-top: 0; align-items: end; }
+.pm-corner { padding: 0 8px 8px 0; font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
+.pm-corner--end { text-align: right; padding-right: 4px; }
+
+/* node headers: the failure domain, coloured by what its loss would do */
+.pm-node { position: relative; display: flex; flex-direction: column; gap: 2px; text-align: left; margin: 0 3px 6px; padding: 9px 10px 8px; border: 1px solid var(--color-border); border-top: 3px solid var(--tone, var(--color-border)); border-radius: 8px; background: var(--color-surface-soft); color: inherit; font: inherit; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+.pm-node[data-tone="bad"] { --tone: var(--pm-bad); }
+.pm-node[data-tone="warn"] { --tone: var(--pm-warn); }
+.pm-node[data-tone="ok"] { --tone: color-mix(in srgb, var(--pm-ok) 70%, var(--color-border)); }
+.pm-node:hover { border-color: var(--color-text-muted); border-top-color: var(--tone); }
+.pm-node:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.pm-node[data-failing="true"] { background: color-mix(in srgb, var(--pm-bad) 12%, var(--color-surface)); border-color: var(--pm-bad); }
+.pm-node__name { font-size: 13px; overflow-wrap: anywhere; }
+.pm-node__hint { font-size: 11.5px; color: var(--color-text-muted); }
+.pm-node[data-failing="true"] .pm-node__hint { color: var(--pm-bad); font-weight: 650; }
+
+/* service rows */
+.pm-svc { display: flex; align-items: center; gap: 8px; padding: 10px 8px 10px 0; font-size: 13.5px; font-weight: 600; }
+.pm-svc__name { overflow-wrap: anywhere; }
+.pm-swatch { flex: none; width: 10px; height: 10px; border-radius: 3px; background: hsl(var(--hue) 62% 50%); }
+.pm-cell { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 0 3px; padding: 8px 8px; min-height: 44px; }
+.pm-cell[data-failing="true"] { background: color-mix(in srgb, var(--pm-bad) 9%, transparent); border-left: 1px dashed color-mix(in srgb, var(--pm-bad) 55%, transparent); border-right: 1px dashed color-mix(in srgb, var(--pm-bad) 55%, transparent); }
+.pm-row:last-of-type .pm-cell[data-failing="true"] { border-bottom: 1px dashed color-mix(in srgb, var(--pm-bad) 55%, transparent); border-radius: 0 0 8px 8px; }
+
+/* a replica */
+.pm-pod { position: relative; flex: none; width: 20px; height: 20px; border-radius: 6px; background: hsl(var(--hue) 62% 50%); box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.16); }
+.pm-pod[data-kind="new"] { background: color-mix(in srgb, hsl(var(--hue) 62% 50%) 28%, var(--color-surface)); box-shadow: none; outline: 2px dashed hsl(var(--hue) 62% 50%); outline-offset: -2px; }
+.pm-pod[data-kind="gone"] { background: transparent; box-shadow: none; outline: 2px dashed var(--color-border); outline-offset: -2px; }
+.pm-pod[data-lost="true"] { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pm-bad) 80%, transparent) 0 3px, transparent 3px 6px); box-shadow: none; outline: 2px solid var(--pm-bad); outline-offset: -2px; }
+.pm-pod--sample { width: 14px; height: 14px; border-radius: 4px; }
+
+/* what happens to the service */
+.pm-state { display: flex; align-items: center; justify-content: flex-end; padding: 8px 4px 8px 8px; font-size: 12.5px; font-weight: 650; text-align: right; color: var(--color-text-muted); }
+.pm-state[data-state="down"] { color: var(--pm-bad); }
+.pm-state[data-state="degraded"] { color: var(--pm-warn); }
+.pm-state[data-state="ok"] { color: var(--pm-ok); }
+.pm-state[data-state="none"] { color: var(--color-text-muted); font-weight: 500; }
+.pm-state[data-change="better"] { color: var(--pm-ok); }
+.pm-state[data-change="worse"] { color: var(--pm-bad); }
+.pm-state[data-change="less"] { color: var(--pm-warn); }
+
+.pm-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.pm-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+
+/* workflow pills */
+.pm-wfs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; }
+.pm-wf__label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
+.pm-wf { padding: 3px 10px; border-radius: 99px; font-size: 12.5px; font-weight: 600; border: 1px solid var(--color-border); }
+.pm-wf[data-state="ok"] { background: color-mix(in srgb, var(--pm-ok) 14%, var(--color-surface)); border-color: color-mix(in srgb, var(--pm-ok) 35%, var(--color-border)); }
+.pm-wf[data-state="bad"] { background: var(--pm-bad); border-color: var(--pm-bad); color: #fff; }
+
+@media (prefers-reduced-motion: reduce) { .pm-node { transition: none; } }
+
+/* Now / after bars for one predicted figure. */
+.pm-meter { display: flex; flex-direction: column; gap: 7px; margin: 6px 0 2px; }
+.pm-meter__row { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; gap: 10px; font-size: 13px; }
+.pm-meter__name { color: var(--color-text-muted); }
+.pm-meter__value { text-align: right; }
+.pm-meter__track { height: 9px; border-radius: 99px; background: var(--color-border); overflow: hidden; }
+.pm-meter__fill { display: block; height: 100%; border-radius: 99px; }
+.pm-meter__fill[data-kind="before"] { background: var(--color-danger); }
+.pm-meter__fill[data-kind="after"] { background: var(--color-success); }

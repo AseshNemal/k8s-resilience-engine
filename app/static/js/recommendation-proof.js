@@ -129,7 +129,7 @@
             probe: { url: "", status: "200", contain: "", notContain: "" },
         };
         const state = {
-            phase: "loading", targets: null, blockingRun: null, plan: null, run: null, probeTest: null, message: null, alert: false,
+            phase: "loading", targets: null, blockingRun: null, plan: null, run: null, probeTest: null, entry: null, message: null, alert: false,
             acknowledged: new Set(), desktopAcknowledged: false, confirmAbort: false, busy: false,
             lastOkAt: null, failing: false, backoff: 1, assessment: null, researchIndex: 0, researchTab: "charts",
         };
@@ -275,6 +275,44 @@
             }
             state.busy = false;
             draw();
+        }
+
+        /** Is there an address the workflow check can call? Reads the namespace's Services once the person asks; creates nothing. */
+        async function findEntryPoint() {
+            if (state.busy) return;
+            const ctx = context();
+            if (!ctx.namespace) { setMessage("Choose an application in step 1 first.", true); draw(); return; }
+            state.entry = { pending: true };
+            draw();
+            try {
+                const result = await request("GET", `/entry-point?namespace=${encodeURIComponent(ctx.namespace)}`);
+                state.entry = result.ok ? result.payload : { error: errorMessage(result, "The address could not be looked up.") };
+            } catch (_error) {
+                state.entry = { error: "The backend cannot be reached." };
+            }
+            draw();
+        }
+
+        function drawEntryPoint() {
+            const box = make(doc, "div", undefined, "prf-entry", { "data-role": "prf-entry" });
+            const entry = state.entry && state.entry.namespace && state.entry.namespace !== context().namespace ? null : state.entry;
+            if (!entry) return box;
+            if (entry.pending) { box.append(make(doc, "p", "Looking for the entry point…", "prf-caption")); return box; }
+            if (entry.error) { box.append(make(doc, "p", entry.error, "prf-caption")); return box; }
+            const usable = (entry.entries || []).filter((item) => item.portAllowed);
+            if (entry.state === "none") {
+                box.append(make(doc, "p", "No entry point yet. Create it once; it adds one Service and changes no workload:", "prf-caption"),
+                    make(doc, "code", entry.applyCommand, "prf-entry__command"));
+            } else if (!usable.length) {
+                box.append(make(doc, "p", "An entry point exists, but its port is not one the check may reach. Use port 8080, or ask for the port to be allowed.", "prf-caption"));
+            } else if (entry.state === "pending") {
+                box.append(make(doc, "p", "The entry Service exists, but the cluster has not given it an address yet. Look again in a moment.", "prf-caption"));
+            } else {
+                const first = usable.find((item) => item.address) || usable[0];
+                box.append(make(doc, "p", `Entry point ${first.service} found (${first.address}). Add the page's path after the address, then press Test it; that is what shows it answers.`, "prf-caption"));
+                box.append(button(`Use ${first.url}`, "secondary-button", () => { form.probe.url = first.url; draw(); }, false, "btn-prf-use-entry"));
+            }
+            return box;
         }
 
         /** Can this computer hold a disposable test cluster? Reads Docker's memory through the proxy; creates nothing. */
@@ -463,9 +501,10 @@
             grid.append(field("Page address", url, "prf-probe-url"), field("Status", status, "prf-probe-status"),
                 field("Must contain", contain, "prf-probe-contain"), field("Must not contain", notContain, "prf-probe-not"));
             const probeRow = make(doc, "div", undefined, "prf-row");
+            probeRow.append(button("Find the address", "secondary-button", findEntryPoint, state.busy, "btn-prf-entry"));
             probeRow.append(button("Test it", "secondary-button", testProbe, state.busy || !form.probe.url.trim(), "btn-prf-probe"));
             if (state.probeTest) probeRow.append(drawProbeResult());
-            probe.append(grid, probeRow, make(doc, "p", "Without it a change passes on Kubernetes readiness alone.", "prf-caption"));
+            probe.append(grid, probeRow, drawEntryPoint(), make(doc, "p", "Without it a change passes on Kubernetes readiness alone.", "prf-caption"));
             container.append(probe);
 
             const baseline = make(doc, "label", undefined, "prf-check");
