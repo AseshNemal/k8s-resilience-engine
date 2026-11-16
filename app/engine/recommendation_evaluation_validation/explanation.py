@@ -108,6 +108,7 @@ def _feasibility(entry: dict[str, Any] | None, reason: str | None) -> dict[str, 
         "explanation": reason or None,
         "findings": entry.get("findings", []),
         "missingEvidence": entry.get("missingEvidence", []),
+        "rollout": entry.get("rollout"),
     }
 
 
@@ -191,6 +192,7 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
     selected = report.selected_recommendation_id
     before = evidence.get("blastRadiusBefore")
 
+    labels = {item.id: f"{item.type.replace('_', ' ').lower()} for {item.service}" for item in report.recommendations}
     candidates: list[dict[str, Any]] = []
     for item in report.recommendations:
         detail = per_candidate.get(item.id, {})
@@ -200,6 +202,14 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
         notes: list[str] = []
         if item.type == TOPOLOGY_SPREAD and detail.get("declaredReplicas") == 1:
             notes.append(SINGLE_REPLICA_NOTE)
+        dominated_by = (ranking_entries.get(item.id) or {}).get("dominatedBy")
+        if dominated_by:
+            notes.append(f"A better-ranked change for {item.service} does at least as well on everything the model measures "
+                         f"({labels.get(dominated_by, dominated_by)}): the same or lower predicted blast radius at every node, with "
+                         f"no more pods moved, replicas added or cost. Under the model this candidate buys nothing extra.")
+        compatibility = proposal.compatibility
+        if compatibility.get("status") in ("UNKNOWN", "UNSUPPORTED"):
+            notes.append(compatibility["detail"])
         candidates.append({
             "id": item.id,
             "type": item.type,
@@ -259,6 +269,9 @@ def describe_live_recommendation(live: LiveRecommendation) -> dict[str, Any]:
             "blastRadiusBefore": before,
             "confidenceMeaning": evidence.get("confidenceMeaning"),
             "skippedUnsupportedTypes": evidence.get("skippedUnsupportedTypes", []),
+            "servicesWithoutCandidates": evidence.get("servicesWithoutCandidates"),
+            "rankingObjective": (evidence.get("ranking") or {}).get("objective"),
+            "kubernetesVersion": (evidence.get("schedulingFacts") or {}).get("kubernetesVersion"),
             "isPrediction": True,
         },
         "candidates": candidates,

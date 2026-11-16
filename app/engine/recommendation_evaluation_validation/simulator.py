@@ -1,6 +1,27 @@
+from collections import Counter
 from collections.abc import Mapping
 
-from app.shared.schemas.deployment import DeploymentGraph
+from app.shared.schemas.deployment import DeploymentGraph, ServicePlacement
+
+# The node name the graph builder gives a pod the scheduler has not placed.
+_UNSCHEDULED = "unscheduled"
+
+
+def refresh_placement_summary(service: ServicePlacement) -> None:
+    """Recompute the fields a ServicePlacement derives from its pods, after a virtual change moved or added pods.
+
+    Component 2's definitions (``placement_metrics``), over ready replicas that are bound to a node: concentrated means
+    they all share one node, the concentration is the largest share on one node, and an exposed failure domain is a node
+    whose loss leaves none (so there is one only when they all share it). Without this a simulated graph would show its
+    pods on several nodes while still describing the service as concentrated on the old one.
+    """
+    per_node = Counter(pod.node for pod in service.pods if pod.ready and pod.node != _UNSCHEDULED)
+    total = sum(per_node.values())
+    service.ready_replicas = sum(1 for pod in service.pods if pod.ready)
+    service.hosting_nodes = sorted({pod.node for pod in service.pods if pod.node != _UNSCHEDULED})
+    service.concentrated = len(per_node) == 1 if per_node else None
+    service.replica_concentration = max(per_node.values()) / total if total else None
+    service.exposed_failure_domains = sorted(per_node) if len(per_node) == 1 else []
 
 
 def simulate_topology_spread(
@@ -60,4 +81,5 @@ def simulate_topology_spread(
         pod.node = target_node.name
         pod.zone = target_node.zone
 
+    refresh_placement_summary(service)
     return deployment

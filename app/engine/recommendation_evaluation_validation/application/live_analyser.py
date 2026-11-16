@@ -29,8 +29,9 @@ from app.engine.recommendation_evaluation_validation.declared_workflow import ge
 from app.engine.recommendation_evaluation_validation.live_pipeline import impact_detail, require_complete_topology
 from app.engine.recommendation_evaluation_validation.ranking import SINGLE_WORKFLOW
 
-METRIC = ("Blast radius of the one workflow for the one assessed node failure, in percentage points of the workflow's "
-          "weighted services (Component 3's definition, unchanged).")
+METRIC = ("Blast radius of the one workflow for the one assessed node failure (Component 3's definition, unchanged): the "
+          "share of the evaluated workflows that fail, in percentage points. For one workflow it is 100 when a mandatory "
+          "service is left with no ready replica and 0 otherwise.")
 OBSERVED_KIND = "recalculated-from-live-topology"
 
 

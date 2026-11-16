@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException, Query
 from app.engine.workflow_dependency_modeling import service
 from app.shared.schemas.workflow_management import WorkflowEdit, RecordingStart, WorkflowDecision
 
+from app.shared.schemas.workflow_test_evidence import TestEvidenceImport, HttpTestRun
+
 router = APIRouter(prefix="/management")
 
 
@@ -79,3 +81,23 @@ def recording(identity: str):
 @router.post("/recordings/{identity}/stop")
 def stop_recording(identity: str):
     return _call(service.stop_workflow_recording, identity)
+
+
+@router.get("/test-evidence")
+def test_evidence_list():
+    return service.list_managed_documents("test")
+
+
+@router.post("/test-evidence/import")
+def import_tests(request: TestEvidenceImport):
+    return _call(service.import_workflow_test_evidence, request)
+
+
+@router.post("/test-evidence/run")
+def run_test(request: HttpTestRun):
+    return _call(service.run_workflow_http_test, request)
+
+
+@router.post("/test-evidence/{identity}/refresh")
+def refresh_tests(identity: str):
+    return _call(service.refresh_workflow_test_evidence, identity)

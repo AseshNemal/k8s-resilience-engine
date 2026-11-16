@@ -87,3 +87,42 @@ Every write/install/fault step below requires explicit developer approval. Do no
 - Legacy applied changes with no after-snapshot cannot identify outside drift. Recovery spec-generation safeguards can require manual reconciliation after uncertain writes or outside edits.
 
 Read `docs/AGENT_HANDOFF.md` for the full changed-file inventory, test commands and current limitations. Readiness: prepared for supervised real-cluster acceptance, not empirically validated and not a production-readiness claim.
+
+
+## Workflow Manager redesign follow-up — 2026-11-16
+
+- [x] Manager, guided recording, shared canvas editor, review/save confirmation and risk-analysis navigation implemented without backend changes.
+- [x] Advanced infrastructure, evidence/history, reviewer/criticality and existing research tools remain accessible through progressive disclosure.
+- [x] Incoming-edge service classification never invents calls; new/imported calls remain Unknown; observations never become experimental validation.
+- [x] Targeted editor model tests: 5 passed. Existing management integration and extension rendering tests: 91 passed. Syntax and diff whitespace checks passed. Full suite not rerun.
+- [x] Isolated browser: manual graph/save, native service drop and connection drag, node move/undo/redo, synthetic Start/Stop/import/save with trace provenance, history and manager rename/duplicate/delete.
+- [x] Browser layouts inspected at 1440, 1024 and 390px; mobile had no horizontal overflow. Docker CSS dark theme inspected locally; final browser console had no errors.
+- [ ] Updated UI tested inside the installed Docker Desktop extension: not performed; update remains separately approved work.
+- [ ] Real application Start/Stop, exact trace-to-workload mapping and unrelated-traffic isolation: still outstanding. Synthetic browser checks do not satisfy this acceptance step.
+
+The isolated browser servers were stopped; generated logs/screenshots/harnesses stay under ignored `tmp/`. This follow-up does not change the outstanding migration, deployment or real-cluster approval boundaries above.
+
+
+## Additive methods and application-test evidence — 2026-11-16
+
+- [x] One editor supports manual additions, recorded activity and test evidence; merges preserve graph metadata, positions and labels, with undo/redo and the existing version history.
+- [x] Test-case identity/target/timestamps/request trace IDs, exact-ID fetch or normalized Jaeger import, existing call extraction and success-condition evaluation integrated through the owning service.
+- [x] Imported and recorded calls stay Unknown by default; conflicting declarations need visual review. Server-attested validated classifications/references cannot be overwritten or removed here.
+- [x] Evidence references pin source revision and candidate. A selected test/operation does not pool unrelated source candidates. Legacy recording references are retained explicitly.
+- [x] Trace refresh never reruns tests, preserves historical call references, and leaves missing/current outcomes indeterminate.
+- [x] Python and Node export helpers produce metadata accepted by the backend contract; the Playwright interceptor was checked against a context double. Application tests still require integration in their own repository.
+- [x] Isolated browser: manual Optional + conflicting test Required, blocked review, explicit decision, draft v1, recorded merge, reviewed v2, source provenance and history. Mobile/desktop layout checked; 390px had no horizontal overflow.
+- [ ] Actual external Pytest/Playwright suite, real Jaeger ingestion and customer instrumentation: not run.
+- [ ] New native HTTP probe flow against the real application and installed extension: not run.
+- [ ] Ordinary recording's namespace/cluster and concurrent-traffic attribution: existing limitations remain; no new guarantee.
+
+The shared WorkflowGraph and existing research algorithms are reused. Test artifacts use the existing revision table; no migration was added or applied. All development changes remain uncommitted; deployment and cluster operations still require separate explicit approval.
+
+Final additive-workflow verification: **102 passed** in the focused management/test-evidence/extension-renderer Python checks; **7 passed** editor Node checks; exporter contract/interception smoke checks, JavaScript syntax and `git diff --check` passed. No full-suite rerun. Concurrent recommendation-engine edits are outside these checks.
+
+
+## User-authorized combined source commit — 2026-11-16
+
+The user subsequently requested “commit all”. This source snapshot includes the visual/additive workflow identification work and the concurrent recommendation audit fixes, including API-server version evidence. Earlier “uncommitted” statements above describe implementation-time state. Final commit preparation rechecked all staged/unstaged/untracked source, both retained handoff files, the two intended unused-strategy deletions, and credential/generated-file patterns; local databases, kubeconfigs, credentials and ignored scratch artifacts are excluded.
+
+New focused commit checks: **98 Python tests passed** across recommendation audit/rollout/combinations/YAML/offline/boundary checks, and **84 Node tests passed** for recommendation operation/rendering. Earlier workflow identification checks remain **102 Python / 7 Node passed**, plus isolated browser and exporter checks. No full-suite rerun. No extension update, persistent migration, connected-cluster modification or fault injection was performed. Installed-extension and real-cluster verification remain pending separate approval.

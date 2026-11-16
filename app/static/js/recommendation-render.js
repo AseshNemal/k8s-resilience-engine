@@ -531,14 +531,31 @@
         return rows.length ? rows.join("; ") : null;
     }
 
+    /**
+     * Two plain sentences above the candidates, both the engine's own words: what the ranking optimises (and that lowering the worst
+     * case is not the same as lowering the average), and which services were left without a candidate and why. Empty when not reported.
+     */
+    function reasoningPreface(doc, detail) {
+        const evidence = (detail && detail.evidence) || {};
+        const notes = [];
+        if (evidence.rankingObjective) notes.push(element(doc, "p", `How candidates are ranked: ${evidence.rankingObjective}`, "ui-note"));
+        const without = evidence.servicesWithoutCandidates;
+        if (without && Array.isArray(without.services) && without.services.length) {
+            notes.push(element(doc, "p", `No candidate for ${without.services.join(", ")}: ${without.reason}`, "ui-note"));
+        }
+        return notes;
+    }
+
     /** For each candidate: what is wrong, what to change, whether it is feasible and why, the effect, the cost, the ranking. */
     function renderCandidateDetails(container, detail, options) {
         const doc = documentOf(options);
         container.replaceChildren();
+        const preface = reasoningPreface(doc, detail);
         if (!detail || !Array.isArray(detail.candidates) || detail.candidates.length === 0) {
-            container.append(missingState(doc, "No candidate was generated", detail && detail.outcome ? detail.outcome.message : "The engine has no candidate for this workflow and failure."));
+            container.append(missingState(doc, "No candidate was generated", detail && detail.outcome ? detail.outcome.message : "The engine has no candidate for this workflow and failure."), ...preface);
             return;
         }
+        container.append(...preface);
         for (const candidate of detail.candidates) {
             const card = element(doc, "div", undefined, "card rec-detail", { "data-ready": String(candidate.approval.ready) });
             card.append(element(doc, "h4", `${candidate.service} · ${strategyName(candidate.type)}`, "rec-detail__title"));
@@ -550,6 +567,7 @@
                 card.append(labelled(doc, "  finding", `${finding.constraint}: ${finding.status} — ${finding.detail}`));
             }
             if ((feasibility.missingEvidence || []).length) card.append(labelled(doc, "Evidence missing", feasibility.missingEvidence.join("; ")));
+            if (feasibility.status === "FEASIBLE" && feasibility.rollout && feasibility.rollout.reason) card.append(labelled(doc, "Rollout", `Not evaluated — ${feasibility.rollout.reason}`));
             card.append(labelled(doc, "Current placement", placementText(candidate.currentPlacement)));
             card.append(labelled(doc, "Blast radius", `${percent(candidate.predicted.blastRadiusBefore)} now → ${percent(candidate.predicted.blastRadiusAfter)} predicted (${candidate.predicted.riskReduction} points)`));
             card.append(labelled(doc, "Cost", `${codeLabel(candidate.cost.resource)} — ${candidate.cost.note || "no note"}; ${candidate.cost.configuration}`));

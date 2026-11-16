@@ -137,10 +137,18 @@ def test_an_infeasible_candidate_never_gets_yaml():
 
 
 def test_a_candidate_that_is_not_ranked_gets_no_yaml():
-    live = bookinfo_scenario("concentrated").evaluate()
-    ratings = "rec-productpage-view-ratings-topology-spread"      # feasible, but no predicted improvement
+    from tests.support.member4_harness import evaluate_offline, make_deployment, make_node, make_service, make_workflow
 
-    proposal = build_yaml_proposal(live, ratings)
+    # Two mandatory services share w1. Spreading one alone is feasible but leaves the other there: no predicted improvement.
+    live = evaluate_offline(
+        make_workflow("pair", ["cart", "db"], [("cart", "db")]),
+        make_deployment([make_service("cart", ["w1", "w1"]), make_service("db", ["w1", "w1"])],
+                        [make_node(name) for name in ("w1", "w2", "w3")]), failed_node="w1")
+    alone = "rec-pair-db-topology-spread"
+    assert live.evidence["feasibility"][alone]["status"] == "FEASIBLE"
+    assert live.evidence["ranking"]["candidates"][alone]["excluded"] == "NO_PREDICTED_IMPROVEMENT"
+
+    proposal = build_yaml_proposal(live, alone)
 
     assert proposal.status == "REFUSED" and proposal.code == "NOT_ELIGIBLE"
     assert proposal.yaml is None

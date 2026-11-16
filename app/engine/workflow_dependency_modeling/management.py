@@ -136,10 +136,65 @@ def _graph(edit, identity):
         edges=[WorkflowEdge(source=edge.source, target=edge.target) for edge in edit.edges])
 
 
+def candidate_identity(candidate):
+    """A stable selector for legacy recording candidates without a saved candidateId."""
+    return candidate.get("candidateId") or hashlib.sha256(json.dumps({
+        "name": candidate.get("name"), "entry": candidate.get("entryService"),
+        "traces": sorted(candidate.get("traceIds", []))}, sort_keys=True).encode()).hexdigest()[:24]
+
+
+def evidence_key(ref):
+    return f"{ref.kind}:{ref.id}:{ref.version}:{ref.candidate_id}"
+
+
+def selected_evidence(edit, repo):
+    """Pin evidence to a source revision and candidate, rather than pooling other tests/operations."""
+    observations, suggestions, sources = {}, {}, []
+    scoped = set()
+    for ref in edit.evidence_refs:
+        records = repo.versions(ref.kind, ref.id)
+        record = next((r for r in records if r["version"] == ref.version), None)
+        if record is None:
+            raise ValueError("The selected evidence revision is unavailable")
+        if record["namespace"] != edit.namespace or record["connectionFingerprint"] != edit.connection_fingerprint:
+            raise refuse("WORKFLOW_RECORDING_MISMATCH", "Evidence belongs to another cluster or namespace")
+        if record["state"] != "stopped":
+            raise ValueError("Stop recording before attaching evidence")
+        candidate = next((c for c in record["candidates"] if candidate_identity(c) == ref.candidate_id), None)
+        if candidate is None:
+            raise ValueError("The selected candidate is unavailable in this evidence revision")
+        key = evidence_key(ref)
+        sources.append({**ref.model_dump(by_alias=True), "key": key, "name": candidate["name"],
+                        "execution": candidate.get("execution"), "outcome": candidate.get("outcome"),
+                        "unmappedServices": candidate.get("unmappedServices", []), "coverage": candidate.get("coverage"),
+                        "correlation": record.get("correlation"), "limits": record.get("limits")})
+        for edge in candidate["edges"]:
+            pair = edge["source"], edge["target"]
+            observations.setdefault(pair, []).extend({**e, "evidenceKey": key, "sourceKind": ref.kind} for e in edge["evidence"])
+            suggestions.setdefault(pair, []).extend({**d, "evidenceKey": key, "testName": candidate["name"], "basis": "declared"} for d in edge.get("declarations", []))
+        if ref.kind == "recording":
+            scoped.add(ref.id)
+    # Backward compatibility: legacy documents attached entire recording sessions.
+    for identity in dict.fromkeys(edit.recording_ids):
+        if identity in scoped:
+            continue
+        record = repo.latest("recording", identity)
+        if record["namespace"] != edit.namespace or record["connectionFingerprint"] != edit.connection_fingerprint:
+            raise refuse("WORKFLOW_RECORDING_MISMATCH", "Recording belongs to another cluster or namespace")
+        if record["state"] != "stopped":
+            raise ValueError("Stop recording before attaching evidence")
+        sources.append({"kind": "recording", "id": identity, "version": record["version"], "scope": "legacy whole recording", "correlation": record.get("correlation")})
+        for candidate in record.get("candidates", []):
+            for edge in candidate["edges"]:
+                observations.setdefault((edge["source"], edge["target"]), []).extend(edge["evidence"])
+    return observations, suggestions, sources
+
+
 def save_workflow(edit: WorkflowEdit, identity=None, repo=None):
     repo = repo or repository()
     identity = identity or uuid4().hex
     facts = _bound(edit.namespace, edit.connection_fingerprint)
+    prior = None
     if edit.expected_version:
         prior = repo.latest("workflow", identity)
         if prior["namespace"] != edit.namespace or prior["connectionFingerprint"] != edit.connection_fingerprint:
@@ -150,29 +205,55 @@ def save_workflow(edit: WorkflowEdit, identity=None, repo=None):
     missing = {node.service for node in edit.nodes} - present
     if missing:
         raise refuse("WORKFLOW_SERVICES_UNAVAILABLE", "Services no longer found in the selected namespace: " + ", ".join(sorted(missing)))
-    observations = {}
-    for recording_id in dict.fromkeys(edit.recording_ids):
-        recording = repo.latest("recording", recording_id)
-        if recording["namespace"] != edit.namespace or recording["connectionFingerprint"] != edit.connection_fingerprint:
-            raise refuse("WORKFLOW_RECORDING_MISMATCH", "Recording evidence belongs to another cluster or namespace.")
-        if recording["state"] != "stopped":
-            raise ValueError("Stop recording before attaching its evidence")
-        for candidate in recording.get("candidates", []):
-            for edge in candidate["edges"]:
-                key = (edge["source"], edge["target"])
-                observations.setdefault(key, []).extend(edge["evidence"])
-    edges = []
+    observations, suggestions, sources = selected_evidence(edit, repo)
+    # Older editor versions attached whole recordings. Keep their already-saved
+    # references when a new scoped selection from that session is merged later.
+    retained_legacy = set()
+    for old_edge in (prior or {}).get("edges", []):
+        for item in old_edge.get("evidence", []):
+            if item.get("recordingId") in edit.recording_ids and not item.get("evidenceKey"):
+                pair = old_edge["source"], old_edge["target"]
+                existing = observations.setdefault(pair, [])
+                if item not in existing:
+                    existing.append(deepcopy(item))
+                    retained_legacy.add(item["recordingId"])
+    for recording_id in retained_legacy:
+        sources.append({"kind": "recording", "id": recording_id,
+                        "scope": "legacy references retained from prior workflow revision"})
+    edges, classification_conflicts = [], []
+    protected = {(e["source"], e["target"]): e for e in (prior or {}).get("edges", [])
+                 if e.get("classificationBasis") in {"validated", "experimentally_validated"}}
+    incoming_pairs = {(e.source, e.target) for e in edit.edges}
+    if set(protected) - incoming_pairs:
+        raise ValueError("A validated relationship cannot be removed here; use its controlled assessment workflow")
     for edge in edit.edges:
-        evidence = observations.get((edge.source, edge.target), [])
-        edges.append({**edge.model_dump(by_alias=True), "classificationBasis": "declared",
-                      "interactionBasis": "observed" if evidence else "declared", "evidence": evidence})
+        pair = edge.source, edge.target
+        proven = protected.get(pair)
+        if proven and edge.dependency != proven["dependency"]:
+            raise ValueError("A validated classification cannot be overwritten by an editor import or declaration")
+        evidence = deepcopy(observations.get(pair, []))
+        if proven:
+            for item in proven.get("evidence", []):
+                if item not in evidence:
+                    evidence.append(deepcopy(item))
+        declarations = suggestions.get(pair, [])
+        conflicts = [d for d in declarations if d["dependency"] not in {"Unknown", edge.dependency}
+                     and d["evidenceKey"] not in edge.reviewed_evidence]
+        classification_conflicts.extend({"source": edge.source, "target": edge.target, **d,
+            "reason": f"Imported {d['dependency']} declaration differs from {edge.dependency}; review this connection."} for d in conflicts)
+        edges.append({**(proven or {}), **edge.model_dump(by_alias=True),
+                      "classificationBasis": proven["classificationBasis"] if proven else "declared",
+                      "interactionBasis": "observed" if evidence else "declared", "evidence": evidence,
+                      "declarations": declarations, "classificationConflicts": conflicts})
+    if edit.reviewed and classification_conflicts:
+        raise ValueError("Review conflicting dependency declarations before saving a reviewed workflow")
     chosen = {node.service for node in edit.nodes}
     conflicts = [{"source": source, "target": target, "reason": "An observed connection was omitted from this declaration; omission does not prove absence."}
                  for source, target in observations if source in chosen and target in chosen
                  and (source, target) not in {(edge.source, edge.target) for edge in edit.edges}]
     graph = _graph(edit, identity).model_dump(by_alias=True) if edit.reviewed else None
     document = edit.model_dump(by_alias=True, exclude={"expected_version"})
-    document.update({"edges": edges, "conflicts": conflicts, "graph": graph,
+    document.update({"edges": edges, "conflicts": conflicts, "classificationConflicts": classification_conflicts, "evidenceSources": sources, "graph": graph,
                      "evidenceBasis": "declared", "experimentallyValidated": False,
                      "limits": LIMITS, "deleted": False})
     return repo.append("workflow", identity, edit.expected_version, document)
@@ -249,6 +330,8 @@ def stop_recording(identity, repo=None):
             "traceQuality": {"valid": quality.valid_count, "partial": quality.partial_count, "invalid": quality.invalid_count},
             "edges": [{"source": key[0], "target": key[1], "dependency": "Unknown", "evidence": evidence}
                       for key, evidence in sorted(edges.items())]})
+    for candidate in candidates:
+        candidate["candidateId"] = candidate_identity(candidate)
     return repo.append("recording", identity, record["version"], {**record, "candidates": candidates,
         "coverage": {"gaps": gaps, "servicesQueried": relevant[:12], "tracesFetched": len(traces),
                      "status": "partial" if gaps else "queried",
@@ -274,7 +357,11 @@ def document_digest(record):
 
 
 def list_documents(kind="workflow"):
-    return [row for row in repository().list_latest(kind) if not row.get("deleted")]
+    rows = [row for row in repository().list_latest(kind) if not row.get("deleted")]
+    for row in rows:
+        for candidate in row.get("candidates", []):
+            candidate.setdefault("candidateId", candidate_identity(candidate))
+    return rows
 
 
 def read_document(identity, version=None, kind="workflow"):

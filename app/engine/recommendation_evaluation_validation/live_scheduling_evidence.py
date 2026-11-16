@@ -21,17 +21,61 @@ touched: it stays exactly what the completeness-checked discovery observed. If t
 reason is reported.
 """
 
+import re
 from typing import Any
 
 from app.engine.deployment_topology_modeling import discovery
 from app.engine.deployment_topology_modeling import service as topology
 from app.engine.recommendation_evaluation_validation.feasibility_analyzer import SchedulingEvidence
 from app.integrations.kubernetes.client import ClusterAccessError
-from app.integrations.kubernetes.node_taints import read_node_taints
+from app.integrations.kubernetes.node_taints import read_kubelet_versions, read_node_taints
 from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.deployment import DeploymentGraph
 
 _UNAVAILABLE = (EvidenceError, topology.ClusterUnavailableError, ClusterAccessError)
+
+
+VERSION_BASIS = (
+    "apiServer is the API server's own version, read from its /version endpoint; it is what decides which fields of a patch are "
+    "accepted. atLeast is only a lower bound taken from the nodes: a kubelet is never newer than its API server, so the API "
+    "server is at least as new as the newest kubelet. A kubelet OLDER than some version proves nothing about the API server."
+)
+
+
+def minor_version(text: Any) -> tuple[int, int] | None:
+    """(major, minor) of a Kubernetes version string such as ``v1.31.2-gke.100``; None when it is not one."""
+    match = re.match(r"v?(\d+)\.(\d+)", text) if isinstance(text, str) else None
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def kubernetes_version_fact(source=None) -> dict[str, Any]:
+    """What is known about the cluster's Kubernetes version, read-only. Each figure is None when it could not be read.
+
+    ``apiServer`` (major.minor) is the API server's own answer. ``atLeast`` is the lower bound the nodes give. They are kept
+    apart because only the first can show that a version is too OLD.
+    """
+    def text(version: tuple[int, int] | None) -> str | None:
+        return f"{version[0]}.{version[1]}" if version else None
+
+    try:
+        source = source if source is not None else discovery.get_cluster_source()
+    except _UNAVAILABLE:
+        return {"apiServer": None, "gitVersion": None, "atLeast": None, "kubeletVersions": {}, "basis": VERSION_BASIS}
+    git_version = None
+    read = getattr(source, "server_version", None)
+    if callable(read):
+        try:
+            git_version = (read() or {}).get("gitVersion")
+        except _UNAVAILABLE:
+            git_version = None
+    try:
+        reported = read_kubelet_versions(source)
+    except _UNAVAILABLE:
+        reported = {}
+    parsed = [version for version in map(minor_version, reported.values()) if version is not None]
+    return {"apiServer": text(minor_version(git_version)), "gitVersion": git_version if minor_version(git_version) else None,
+            "atLeast": text(max(parsed) if parsed else None), "kubeletVersions": dict(sorted(reported.items())),
+            "basis": VERSION_BASIS}
 
 
 def _smaller(first: float | None, second: float | None) -> float | None:
@@ -42,7 +86,7 @@ def _smaller(first: float | None, second: float | None) -> float | None:
 def enrich_scheduling_facts(deployment: DeploymentGraph, namespace: str, reader=None) -> tuple[DeploymentGraph, dict[str, Any]]:
     """A copy of ``deployment`` with Component 2's node and intent facts added where it lacks them, and a report of what happened."""
     report: dict[str, Any] = {"source": None, "nodesEnriched": [], "servicesWithIntent": [], "servicesWithoutIntent": [],
-                              "unavailable": None}
+                              "unavailable": None, "kubernetesVersion": kubernetes_version_fact()}
     try:
         analysis = (reader or topology.analyze_live_topology)(namespace=namespace)
     except _UNAVAILABLE as error:

@@ -197,9 +197,10 @@ def test_a_member_that_adds_nothing_is_rejected_and_the_single_change_stays_the_
 
     result = live()
 
-    entry = result.evidence["combinations"]["entries"].get(COMBO)
-    assert entry is not None and entry["excluded"] == "REDUNDANT_MEMBER" and entry["redundantMembers"] == ["cart"]
-    assert COMBO not in by_id(result)
+    # an optional service gets no candidate at all, so there is no pair to form; the evidence says why cart was left out
+    assert COMBO not in result.evidence["combinations"]["entries"] and COMBO not in by_id(result)
+    assert not any(c.service == "cart" for c in result.report.recommendations)
+    assert result.evidence["servicesWithoutCandidates"]["services"] == ["cart"]
     assert result.report.selected_recommendation_id == DB
 
 

@@ -14,7 +14,10 @@ Scheduling feasibility and resilience are reported separately: a spread constrai
 schedulable, yet it cannot make that service survive the loss of the node hosting its only replica.
 
 The proposed change is modelled as ``topologySpreadConstraints`` on ``kubernetes.io/hostname`` with
-``maxSkew`` (default 1) and ``whenUnsatisfiable: DoNotSchedule``. Replicas are placed one at a time, trying
+``maxSkew`` (default 1), ``whenUnsatisfiable: DoNotSchedule``, ``nodeTaintsPolicy: Honor`` and
+``matchLabelKeys: [pod-template-hash]``: exactly the constraint ``yaml_proposal`` writes. The model and the patch
+must describe the same change, so a field added to one is added to the other (and ``STRATEGY_MODEL`` changes).
+Replicas are placed one at a time, trying
 the node with the fewest of them first and backtracking on a dead end, until every ready replica is placed on
 at least two different nodes. A placement found that way is a prediction of what the scheduler could do, not
 a promise of what it will do. ``INFEASIBLE`` is returned only after the whole search space has been ruled
@@ -45,8 +48,13 @@ deliberately optimistic: it drops every node that cannot take pods (untolerated 
 Dropping domains only loosens the skew rule, so a search that fails even then is a sound ``INFEASIBLE``, and
 one that succeeds only then is reported as inconclusive.
 
-The model uses the defaults. Where the answer differs under the other value, or depends on a field the graph
-dropped, it is inconclusive rather than decided on a default.
+Which policy applies to which constraint. The PROPOSED constraint is the one the patch writes, so its policy is
+known: ``Honor``. A node with an untolerated NoSchedule/NoExecute taint is not one of its domains; a node whose
+taints were read and show none still is, even when it is NotReady or cordoned (a real cluster taints such nodes
+itself, and then the taint is in the evidence). The workload's EXISTING constraints did not come from this module
+and their policy is not in the contract, so they are read with the defaults. Where the answer differs under the
+other value, or depends on a field the graph dropped or on taints that were not read, it is inconclusive rather
+than decided on a default.
 
 Model-feasible is not operationally verified. ``FEASIBLE`` means: given the evidence in the graph, a placement
 exists that satisfies every constraint this module models. It is a statement about the model and its inputs.
@@ -84,7 +92,7 @@ import hashlib
 import json
 import math
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -109,11 +117,14 @@ DEFAULT_SEARCH_BUDGET = 20_000
 
 # The strategy a TOPOLOGY_SPREAD verdict is reached under. Changing how the proposal is modelled must change this,
 # so an approval made under the old model is not read as one made under the new.
-STRATEGY_MODEL = "topology-spread/kubernetes.io-hostname/DoNotSchedule/v1"
+STRATEGY_MODEL = "topology-spread/kubernetes.io-hostname/DoNotSchedule/taints-Honor/v2"
 
 ASSUMPTIONS = (
     "The proposal is modelled as a topologySpreadConstraint on kubernetes.io/hostname with "
-    "whenUnsatisfiable=DoNotSchedule.",
+    "whenUnsatisfiable=DoNotSchedule, nodeTaintsPolicy=Honor (a node with a taint the workload does not tolerate is "
+    "not counted as a domain) and matchLabelKeys=[pod-template-hash] (the pods of the new revision are spread among "
+    "themselves), which is the constraint the generated patch writes. Both fields need Kubernetes 1.27 or later; the "
+    "cluster version is not in the evidence.",
     "Placement is a deterministic least-loaded prediction; the real scheduler may place pods differently.",
     "A node record whose Ready condition is absent is treated as unread: its schedulable flag defaults to "
     "True in the contract and so proves nothing.",
@@ -232,6 +243,8 @@ class _NodeState:
     domain: bool | None
     # Most replicas of the service the node can hold; infinite when unconstrained or unknown.
     cap: float
+    # Were the node's taints read? Unread taints leave open whether a nodeTaintsPolicy: Honor constraint counts it.
+    taints_known: bool = True
 
 
 @dataclass
@@ -478,7 +491,7 @@ class _Context:
         if self.request is not None:
             cap = self._check_capacity(node, resident, block)
         self._check_pod_rules(node, block)
-        return _NodeState(node, blockers, domain, cap)
+        return _NodeState(node, blockers, domain, cap, self.evidence.node_taints.get(node.name) is not None)
 
     def _check_taints(self, node: NodeModel, block) -> None:
         taints = self.evidence.node_taints.get(node.name)
@@ -543,9 +556,23 @@ def _taint_excluded(state: _NodeState) -> bool:
     return any(blocker.constraint in _TAINT_EXCLUSIONS for blocker in state.blockers)
 
 
+def _untolerated(state: _NodeState) -> bool:
+    """A verified untolerated taint: what ``nodeTaintsPolicy: Honor`` itself stops counting as a domain."""
+    return any(blocker.constraint == "NODE_TAINT" for blocker in state.blockers)
+
+
+def _maybe_not_a_domain(state: _NodeState) -> bool:
+    """The relaxed reading: every node that might not be a domain (cannot take pods, or its taints were not read)."""
+    return _taint_excluded(state) or not state.taints_known
+
+
 def _rejection(ctx: _Context, state: _NodeState, counts: Counter, planned: Counter,
-               domain: set[str], states: Mapping[str, _NodeState]) -> str | None:
-    """Why the next replica cannot go on this node, or None when it can."""
+               domain: set[str], proposed: set[str], states: Mapping[str, _NodeState]) -> str | None:
+    """Why the next replica cannot go on this node, or None when it can.
+
+    ``domain`` holds the nodes the workload's existing spread constraints count, ``proposed`` the nodes the proposed
+    constraint counts (it honours taints, the existing ones are read with the defaults).
+    """
     name = state.node.name
     if planned[name] >= state.cap:
         return "NODE_CAPACITY"
@@ -562,7 +589,7 @@ def _rejection(ctx: _Context, state: _NodeState, counts: Counter, planned: Count
         floor = 0 if spread.min_domains and len(totals) < spread.min_domains else min(totals.values())
         if totals[_label(state.node, spread.key)] + 1 - floor > spread.max_skew:
             return "TOPOLOGY_SPREAD"
-    if counts[name] + 1 - min(counts[d] for d in domain | {name}) > ctx.max_skew:
+    if counts[name] + 1 - min(counts[d] for d in proposed | {name}) > ctx.max_skew:
         return "TOPOLOGY_SPREAD"
     return None
 
@@ -582,14 +609,18 @@ def _find(ctx: _Context, states: Sequence[_NodeState], replicas: int, fixed: Seq
           honor_taints: bool, need_spread: bool, budget: int, quota: Mapping[str, int] | None = None) -> _Search:
     """Depth-first search for a placement of ``replicas`` identical pods, least-loaded node first.
 
-    ``need_spread`` requires the finished placement to use at least two nodes. ``honor_taints`` reads every
-    spread constraint as ``nodeTaintsPolicy: Honor``: nodes that cannot take pods for taint reasons are then
-    not domains. Unverified facts are assumed favourable, so finding nothing means nothing exists, unless the
+    ``need_spread`` requires the finished placement to use at least two nodes. Without ``honor_taints`` the
+    proposed constraint drops the nodes with a verified untolerated taint (it is written with
+    ``nodeTaintsPolicy: Honor``) and the existing constraints drop none (the default). With it, every constraint
+    drops every node that might not be a domain: one that cannot take pods, or whose taints were not read.
+    Unverified facts are assumed favourable, so finding nothing means nothing exists, unless the
     budget ran out, which is reported as such. ``quota`` (node -> replicas) restricts the search to exactly
     that arrangement, in any valid order: it asks whether a placement that already exists is legal.
     """
     by_name = {s.node.name: s for s in states}
-    domain = {s.node.name for s in states if s.domain is True and not (honor_taints and _taint_excluded(s))}
+    domain = {s.node.name for s in states if s.domain is True and not (honor_taints and _maybe_not_a_domain(s))}
+    proposed = {s.node.name for s in states
+                if s.domain is True and not (_maybe_not_a_domain(s) if honor_taints else _untolerated(s))}
     placeable = [s for s in states if not s.blockers]
     names = [s.node.name for s in placeable]
     fixed_counts = Counter(pod.node for pod in fixed)
@@ -613,7 +644,7 @@ def _find(ctx: _Context, states: Sequence[_NodeState], replicas: int, fixed: Seq
         for i in sorted(range(len(names)), key=lambda i: (counts[names[i]], names[i])):
             if quota is not None and planned_counts[names[i]] >= quota.get(names[i], 0):
                 continue                       # this node already has all the replicas the arrangement gives it
-            reason = _rejection(ctx, placeable[i], counts, planned_counts, domain, by_name)
+            reason = _rejection(ctx, placeable[i], counts, planned_counts, domain, proposed, by_name)
             if reason is not None:
                 rejected.add(reason)
                 continue
@@ -660,6 +691,7 @@ def check_topology_spread_feasibility(
     max_skew: int = DEFAULT_MAX_SKEW,
     search_budget: int = DEFAULT_SEARCH_BUDGET,
     hold_placement: bool = False,
+    added_pods: Collection[str] = (),
 ) -> FeasibilityResult:
     """Whether spreading the ready replicas of ``service_name`` across worker nodes is schedulable and would
     survive the loss of any one node. The deployment is only read.
@@ -667,6 +699,10 @@ def check_topology_spread_feasibility(
     With ``hold_placement`` the replicas are not free to move: the question becomes whether the placement they
     have now satisfies every modelled constraint and spans two nodes. That is how the final state of a virtual
     change is re-checked, including constraints that another change has since made relevant.
+
+    ``added_pods`` names pods of the service that the change would ADD and that do not run yet (a replica increase puts
+    them in a virtual copy). They are placed like any replica, but they hold no capacity anywhere: a node can keep
+    the replicas it already runs plus what is free, and an added replica must fit in what is free.
     """
 
     evidence = evidence if evidence is not None else SchedulingEvidence.from_graph(deployment)
@@ -704,12 +740,14 @@ def check_topology_spread_feasibility(
 
     ctx = _Context(deployment, service, evidence, max_skew, movable)
     resident = Counter(pod.node for pod in movable)
-    states = [ctx.assess(node, resident[node.name]) for node in deployment.nodes]
+    # Capacity already used on each node by this service: the pods that really run there, not the ones a change adds.
+    running = Counter(pod.node for pod in movable if pod.name not in added_pods)
+    states = [ctx.assess(node, running[node.name]) for node in deployment.nodes]
     if ctx.spreads and any(state.domain is False for state in states):
         ctx.need(f"nodeAffinityPolicy of the existing spread constraint of service {service_name} (not captured; "
                  f"Ignore would count the nodes its nodeSelector/affinity filters out as domains with no pods)")
     findings = [blocker for state in states for blocker in state.blockers]
-    excluded = any(_taint_excluded(state) for state in states)
+    excluded = any(_maybe_not_a_domain(state) for state in states)
 
     quota = dict(resident) if hold_placement else None
 
@@ -726,10 +764,11 @@ def check_topology_spread_feasibility(
         return _inconclusive(service_name, ctx, findings,
                              "No placement was found, but the search stopped before it could rule one out.")
     if relaxed is not None and relaxed.nodes is not None:
-        ctx.need("nodeTaintsPolicy: Honor on the spread constraints (Kubernetes >= 1.26): the replicas can only "
-                 "be spread if the nodes that cannot take pods are not counted as domains. Honor drops nodes with "
-                 "an untolerated taint; whether the NotReady or cordoned nodes carry one, the cluster version and "
-                 "the existing constraints' policy are not in the evidence")
+        ctx.need("which nodes count as spread domains: the replicas can only be spread if nodes that cannot take pods "
+                 "are not counted. The proposed constraint sets nodeTaintsPolicy: Honor, which drops a node only for "
+                 "a taint the workload does not tolerate; whether the NotReady or cordoned nodes and the nodes whose "
+                 "taints were not read carry one, and the nodeTaintsPolicy of the workload's existing constraints, "
+                 "are not in the evidence")
         return _inconclusive(service_name, ctx, findings,
                              "A placement exists only if the spread constraint does not count nodes that cannot "
                              "take pods as domains.")

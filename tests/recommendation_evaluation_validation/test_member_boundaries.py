@@ -37,6 +37,10 @@ AUTHORIZED_INTEGRATION_PATHS = {
     "app/engine/failure_impact_prediction/service.py",
     "app/engine/workflow_dependency_modeling/management.py",
     "app/engine/workflow_dependency_modeling/service.py",
+    # New files of the same authorized hybrid-workflow work: service.py (above) imports test_discovery, which imports the
+    # evidence schema. They are named exactly; nothing else under either directory is opened.
+    "app/engine/workflow_dependency_modeling/test_discovery.py",
+    "app/shared/schemas/workflow_test_evidence.py",
     "app/shared/schemas/failure_impact.py", "app/shared/schemas/workflow_management.py",
     "app/static/js/components/failure_impacts.js",
     "app/templates/components/failure_impacts.html", "app/templates/components/workflows.html",

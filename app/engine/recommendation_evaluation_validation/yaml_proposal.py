@@ -60,6 +60,24 @@ from app.engine.recommendation_evaluation_validation.strategy_feasibility import
 from app.shared.schemas.deployment import DeploymentGraph, ServicePlacement
 
 HOSTNAME = "kubernetes.io/hostname"
+# The spread constraint is written with nodeTaintsPolicy (on by default from Kubernetes 1.26) and matchLabelKeys (from 1.27).
+# An older API server drops a field it does not know without an error, and the constraint that is left is NOT the one the
+# feasibility check verified: untolerated nodes count as empty domains again and old and new pods are counted together.
+SPREAD_FIELDS_MIN_VERSION = (1, 27)
+SUPPORTED, UNSUPPORTED, VERSION_UNKNOWN, NOT_REQUIRED = "SUPPORTED", "UNSUPPORTED", "UNKNOWN", "NOT_REQUIRED"
+# What a version check can and cannot show. Said with every verdict, so SUPPORTED is never read as a guarantee.
+VERSION_CHECK_LIMIT = (
+    "This is a check of the version only. Both fields are on by default from that version, but a cluster can turn them off, and "
+    "the API server then drops them without an error. The API server's own validation when the patch is applied, and a check "
+    "afterwards that the Deployment still carries both fields, are what confirm it. Approval is still required before anything "
+    "is applied."
+)
+VERSION_UNKNOWN_DISCLOSURE = (
+    "The API server's Kubernetes version could not be confirmed. The spread constraint uses nodeTaintsPolicy and matchLabelKeys, "
+    "which need Kubernetes 1.27 or later; an older API server drops them silently and the constraint then behaves differently "
+    "from the one that was verified. Confirm the API server version before approving, and after Apply check that the Deployment "
+    "carries both fields."
+)
 TOPOLOGY_SPREAD = "TOPOLOGY_SPREAD"
 POD_ANTI_AFFINITY = "POD_ANTI_AFFINITY"
 REPLICA_INCREASE = "REPLICA_INCREASE"
@@ -115,6 +133,7 @@ class YamlProposal:
     patches: tuple[DeploymentPatch, ...] = ()
     disclosures: tuple[str, ...] = ()
     pod_replacement: dict[str, Any] = field(default_factory=dict)
+    compatibility: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,12 +143,53 @@ class YamlProposal:
             "deployments": [{"service": p.service, "deployment": p.deployment, "namespace": p.namespace}
                             for p in self.patches],
             "disclosures": list(self.disclosures), "podReplacement": dict(self.pod_replacement),
+            "compatibility": dict(self.compatibility),
             "strategyModels": sorted(set(MODELS.values())), "appliesNothing": True,
         }
 
 
-def _refuse(recommendation_id: str, code: str, reason: str, source: str | None = None) -> YamlProposal:
-    return YamlProposal(recommendation_id, REFUSED, False, code=code, reason=reason, evidence_source=source)
+def _refuse(recommendation_id: str, code: str, reason: str, source: str | None = None,
+            compatibility: dict[str, Any] | None = None) -> YamlProposal:
+    return YamlProposal(recommendation_id, REFUSED, False, code=code, reason=reason, evidence_source=source,
+                        compatibility=compatibility or {})
+
+
+def version_compatibility(evidence: dict[str, Any], patches) -> dict[str, Any]:
+    """Whether the cluster is known to accept every field the patches write. Unknown stays UNKNOWN; it is never assumed compatible."""
+    writes_spread = any("topologySpreadConstraints" in p.document["spec"]["template"]["spec"] for p in patches)
+    required = ".".join(map(str, SPREAD_FIELDS_MIN_VERSION))
+    if not writes_spread:
+        return {"status": NOT_REQUIRED, "requires": None, "apiServer": None, "atLeast": None, "basis": None,
+                "detail": "The patch writes no field that needs a particular Kubernetes version."}
+    fact = (evidence.get("schedulingFacts") or {}).get("kubernetesVersion") or {}
+
+    def parsed(key: str) -> tuple[int, ...] | None:
+        value = fact.get(key)
+        try:
+            return tuple(int(part) for part in value.split(".")) if isinstance(value, str) else None
+        except ValueError:
+            return None
+
+    server, lower_bound = parsed("apiServer"), parsed("atLeast")
+    result = {"requires": required, "apiServer": fact.get("apiServer") if server else None,
+              "atLeast": fact.get("atLeast") if lower_bound else None}
+    if server is not None and server < SPREAD_FIELDS_MIN_VERSION:      # only the API server's own version can show "too old"
+        return {**result, "status": UNSUPPORTED, "basis": "api-server-version",
+                "detail": (f"The API server reports Kubernetes {fact['apiServer']}. The spread constraint uses nodeTaintsPolicy and "
+                           f"matchLabelKeys, which need {required} or later; an older API server drops them silently, leaving a "
+                           f"different constraint from the one that was verified, so no YAML is proposed.")}
+    if server is not None:
+        return {**result, "status": SUPPORTED, "basis": "api-server-version",
+                "detail": f"The API server reports Kubernetes {fact['apiServer']}; the spread constraint's fields need {required}. "
+                          + VERSION_CHECK_LIMIT}
+    if lower_bound is not None and lower_bound >= SPREAD_FIELDS_MIN_VERSION:
+        return {**result, "status": SUPPORTED, "basis": "kubelet-lower-bound",
+                "detail": (f"The API server's version was not read, but a node runs kubelet {fact['atLeast']} and a kubelet is never "
+                           f"newer than its API server, so the API server is at least {fact['atLeast']}; the fields need {required}. "
+                           + VERSION_CHECK_LIMIT)}
+    # No API server version, and the nodes either reported nothing or only versions below the requirement. An old kubelet
+    # proves nothing about the API server, so this is unknown, not unsupported.
+    return {**result, "status": VERSION_UNKNOWN, "basis": None, "detail": VERSION_UNKNOWN_DISCLOSURE}
 
 
 def _strategies_of(live: LiveRecommendation, recommendation_id: str, candidate) -> dict[str, str]:
@@ -260,6 +320,10 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
     if not patches:
         return _refuse(recommendation_id, "DEPLOYMENT_UNRESOLVED", "The candidate names no service to patch.", source)
 
+    compatibility = version_compatibility(evidence, patches)
+    if compatibility["status"] == UNSUPPORTED:
+        return _refuse(recommendation_id, "KUBERNETES_VERSION_UNSUPPORTED", compatibility["detail"], source, compatibility)
+
     churn = sorted(plan.get("podsToRecreate") or [])
     models = sorted({MODELS[kind] for kind in strategies.values()})
     text = _render(recommendation_id, standing.fingerprint, patches, churn, models, added_names)
@@ -274,6 +338,8 @@ def build_yaml_proposal(live: LiveRecommendation, recommendation_id: str) -> Yam
             f"and testing only."),
         yaml=text, sha256=hashlib.sha256(text.encode()).hexdigest(), fingerprint=standing.fingerprint,
         evidence_source=source, patches=tuple(patches),
-        disclosures=DISCLOSURES + (REPLICA_DISCLOSURES if any(kind in REPLICA_TYPES for kind in strategies.values()) else ()),
+        disclosures=DISCLOSURES + (REPLICA_DISCLOSURES if any(kind in REPLICA_TYPES for kind in strategies.values()) else ())
+        + ((VERSION_UNKNOWN_DISCLOSURE,) if compatibility["status"] == VERSION_UNKNOWN else ()),
+        compatibility=compatibility,
         pod_replacement={"included": False, "pods": churn, "note": REPLACEMENT_NOTE},
     )

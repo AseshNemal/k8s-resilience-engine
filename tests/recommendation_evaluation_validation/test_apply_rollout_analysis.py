@@ -156,9 +156,12 @@ def test_before_predicted_and_after_are_kept_apart_and_compared_in_percentage_po
     assert analysis["baseline"]["blastRadius"] == 100.0 and analysis["baseline"]["kind"] == "prediction-from-live-topology"
     assert analysis["predicted"]["blastRadius"] == 0.0 and analysis["predicted"]["kind"] == "virtual-simulation"
     assert analysis["observed"]["blastRadius"] == 0.0 and analysis["observed"]["kind"] == "recalculated-from-live-topology"
+    placement = analysis["comparison"].pop("placement")
     assert analysis["comparison"] == {
         "beforeBlastRadius": 100.0, "afterBlastRadius": 0.0, "reductionPoints": 100.0, "direction": "improved",
         "relativeReductionPercent": 100.0, "predictedBlastRadius": 0.0, "predictionDeltaPoints": 0.0}
+    # the observed distribution is compared with the predicted one; a completed rollout alone does not show it was reached
+    assert placement["matchesTarget"] is True and placement["services"]["db"]["readyOnTwoOrMoreNodes"] is True
     assert analysis["baseline"]["placement"]["db"]["pods"] and {p["node"] for p in analysis["baseline"]["placement"]["db"]["pods"]} == {"w1"}
     assert {p["node"] for p in analysis["predicted"]["placement"]["db"]["pods"]} == {"w1", "w2", "w3"}
     assert {p["node"] for p in analysis["observed"]["placement"]["db"]["pods"]} == {"w1", "w2", "w3"}

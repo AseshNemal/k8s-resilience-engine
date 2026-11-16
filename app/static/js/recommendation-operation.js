@@ -206,6 +206,22 @@
         container.replaceChildren(group);
     }
 
+    /**
+     * Whether the replicas ended up where the comparison target (the prediction, or for a reset the state before the change) has them.
+     * A finished rollout does not show that by itself. Null when the engine did not report it: nothing is inferred here.
+     */
+    function placementLine(placement, reset) {
+        if (!placement || placement.matchesTarget === null || placement.matchesTarget === undefined) return null;
+        const target = reset ? "as they were before the change" : "as predicted";
+        if (placement.matchesTarget) return `Placement: the ready replicas are distributed ${target}.`;
+        const services = placement.services || {};
+        const single = Object.keys(services).filter((name) => services[name].readyOnTwoOrMoreNodes === false);
+        if (reset) return "Placement: the ready replicas are not distributed as they were before the change.";
+        return single.length
+            ? `Placement: not reached. ${single.join(", ")} still ${single.length === 1 ? "has" : "have"} every ready replica on one node, so the predicted distribution was not achieved.`
+            : "Placement: different from the prediction, but every changed service has ready replicas on two or more nodes. The scheduler chose another valid arrangement.";
+    }
+
     function drawReduction(doc, container, analysis, reset) {
         const comparison = analysis && analysis.comparison;
         if (!comparison) return container.replaceChildren();
@@ -222,6 +238,8 @@
         if (!reset && comparison.predictionDeltaPoints !== null && comparison.predictionDeltaPoints !== undefined) {
             lines.push(`Recalculated risk against the proposal's prediction: ${comparison.predictionDeltaPoints === 0 ? "the same" : points(comparison.predictionDeltaPoints) + " " + (comparison.predictionDeltaPoints > 0 ? "above" : "below") + " the prediction"}.`);
         }
+        const placement = placementLine(comparison.placement, reset);
+        if (placement) lines.push(placement);
         if (reset && comparison.restoration) {
             lines.push(comparison.restoration.verified ? "The Deployments hold the stored replica count and placement constraints again."
                 : `The Deployments differ from the stored state: ${(comparison.restoration.differences || []).join("; ")}.`);

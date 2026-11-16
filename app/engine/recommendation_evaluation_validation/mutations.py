@@ -12,6 +12,7 @@ Topology-spread placement logic lives here, not in app/engine/simulation/.
 from collections.abc import Mapping, Sequence
 
 from app.engine.recommendation_evaluation_validation.simulator import (
+    refresh_placement_summary,
     simulate_topology_spread,
 )
 from app.shared.schemas.deployment import DeploymentGraph, PodModel
@@ -59,13 +60,7 @@ class ReplicaIncreaseMutation:
             pod.node = self._placement[pod.name]
             pod.zone = nodes[pod.node].zone
         service.declared_replicas += len(self._added)
-        service.ready_replicas = sum(1 for pod in service.pods if pod.ready)
         if service.declared_intent is not None:
             service.declared_intent.declared_replicas += len(self._added)
-        service.hosting_nodes = sorted({pod.node for pod in service.pods})
-        service.exposed_failure_domains = list(service.hosting_nodes)
-        ready_nodes = [pod.node for pod in service.pods if pod.ready]
-        service.concentrated = len(set(ready_nodes)) == 1 if ready_nodes else None
-        service.replica_concentration = (max(ready_nodes.count(n) for n in set(ready_nodes)) / len(ready_nodes)
-                                         if ready_nodes else None)
+        refresh_placement_summary(service)
         return deployment

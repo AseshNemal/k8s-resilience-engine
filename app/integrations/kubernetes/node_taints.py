@@ -32,3 +32,17 @@ def read_node_taints(source: _Source) -> dict[str, list[dict[str, Any]]]:
             continue        # a taint that could not be read makes the node unread, not taint-free
         taints[name] = parsed
     return taints
+
+
+def read_kubelet_versions(source: _Source) -> dict[str, str]:
+    """``node name -> kubelet version`` (``status.nodeInfo.kubeletVersion``, for example ``v1.31.2``) for every node that reports one.
+
+    Read-only, from the same node list. A node that reports no version is left out, never given one.
+    """
+    versions: dict[str, str] = {}
+    for node in source.list_objects("nodes", "/api/v1/nodes"):
+        name = (node.get("metadata") or {}).get("name")
+        version = ((node.get("status") or {}).get("nodeInfo") or {}).get("kubeletVersion")
+        if name and isinstance(version, str) and version:
+            versions[name] = version
+    return versions

@@ -62,9 +62,9 @@ INFEASIBLE, INSUFFICIENT, FEASIBLE = (FeasibilityStatus.INFEASIBLE, FeasibilityS
 # Changing how a strategy is modelled must change this, so an approval made under the old model is not read as one
 # made under the new (it is part of ``scheduling_basis``).
 ANTI_AFFINITY_MODEL = "pod-anti-affinity/required/kubernetes.io-hostname/self-selector/v1"
-REPLICA_INCREASE_MODEL = "replica-increase/+1/with-hostname-spread/v1"
-REPLICA_INCREASE_ANTI_AFFINITY_MODEL = "replica-increase/+1/with-required-anti-affinity/v1"
-REPLICA_INCREASE_PLUS_2_MODEL = "replica-increase/+2/with-hostname-spread/v1"
+REPLICA_INCREASE_MODEL = "replica-increase/+1/with-hostname-spread/v2"
+REPLICA_INCREASE_ANTI_AFFINITY_MODEL = "replica-increase/+1/with-required-anti-affinity/v2"
+REPLICA_INCREASE_PLUS_2_MODEL = "replica-increase/+2/with-hostname-spread/v2"
 
 # The name given to a replica the change would add. It is never a pod that exists.
 ADDED_MARKER = "-added-"
@@ -76,7 +76,8 @@ ANTI_AFFINITY_ASSUMPTIONS = (
 )
 REPLICA_INCREASE_ASSUMPTIONS = (
     "The proposal is modelled as one more replica together with a topologySpreadConstraint on kubernetes.io/hostname "
-    "(maxSkew 1, whenUnsatisfiable DoNotSchedule) so the two replicas are kept on different nodes.",
+    "(maxSkew 1, whenUnsatisfiable DoNotSchedule, nodeTaintsPolicy Honor, matchLabelKeys pod-template-hash: the constraint "
+    "the generated patch writes) so the two replicas are kept on different nodes.",
     "The added replica is placed by a deterministic least-loaded prediction; the real scheduler may place it differently.",
     *ASSUMPTIONS[2:],
 )
@@ -212,7 +213,8 @@ def check_replica_increase_feasibility(
     twin.ready_replicas += added
     if twin.declared_intent is not None:
         twin.declared_intent.declared_replicas += added
-    result = check_topology_spread_feasibility(virtual, service_name, evidence, **options)
+    # The added replica runs nowhere yet, so it must fit in what its node has free (``added_pods``).
+    result = check_topology_spread_feasibility(virtual, service_name, evidence, added_pods=names, **options)
 
     if result.status is FEASIBLE:
         recreate = tuple(pod for pod in result.pods_to_recreate if ADDED_MARKER not in pod)
@@ -239,7 +241,8 @@ VARIANT_ASSUMPTIONS = {
     ),
     REPLICA_INCREASE_PLUS_2_MODEL: (
         "The proposal is modelled as two more replicas together with a topologySpreadConstraint on kubernetes.io/hostname "
-        "(maxSkew 1, whenUnsatisfiable DoNotSchedule) so the replicas are kept spread over the nodes.",
+        "(maxSkew 1, whenUnsatisfiable DoNotSchedule, nodeTaintsPolicy Honor, matchLabelKeys pod-template-hash: the constraint "
+        "the generated patch writes) so the replicas are kept spread over the nodes.",
         "The added replicas are placed by a deterministic least-loaded prediction; the real scheduler may place them differently.",
         *ASSUMPTIONS[2:],
     ),
@@ -299,7 +302,7 @@ def check_replica_increase_variant_feasibility(
         twin.declared_intent.pod_anti_affinity_rules = {
             **twin.declared_intent.pod_anti_affinity_rules,
             "requiredDuringSchedulingIgnoredDuringExecution": [self_anti_affinity_term(twin.declared_intent.selector)]}
-    result = check_topology_spread_feasibility(virtual, service_name, evidence, **options)
+    result = check_topology_spread_feasibility(virtual, service_name, evidence, added_pods=names, **options)
     label = "a required hostname anti-affinity" if hard else "a hostname spread"
 
     if result.status is FEASIBLE:

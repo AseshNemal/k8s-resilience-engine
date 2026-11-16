@@ -56,6 +56,12 @@ class FakeClusterSource:
     template_specs: dict[str, dict] = field(default_factory=dict)
     error: Exception | None = None
     calls: list[str] = field(default_factory=list)
+    # The API server's gitVersion (for example "v1.31.2"); None answers a version document without one (unknown).
+    version: str | None = None
+
+    def server_version(self) -> dict:
+        self._maybe_fail("raw:/version")
+        return {"gitVersion": self.version} if self.version else {}
 
     def _maybe_fail(self, what: str) -> None:
         self.calls.append(what)

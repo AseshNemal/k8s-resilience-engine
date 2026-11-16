@@ -13,11 +13,20 @@ class EditorNode(APIModel):
     y: float = Field(ge=0, le=4000, allow_inf_nan=False)
 
 
+class WorkflowEvidenceRef(APIModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=APIModel.model_config["alias_generator"])
+    kind: Literal["recording", "test"]
+    id: str = Field(min_length=1, max_length=100)
+    version: int = Field(ge=1)
+    candidate_id: str = Field(min_length=1, max_length=160)
+
+
 class EditorEdge(APIModel):
     model_config = ConfigDict(extra="forbid")
     source: str = Field(min_length=1, max_length=253)
     target: str = Field(min_length=1, max_length=253)
     dependency: Literal["Mandatory", "Optional", "Supporting", "Unknown"] = "Unknown"
+    reviewed_evidence: list[str] = Field(default_factory=list, max_length=100, alias="reviewedEvidence")
 
 
 class WorkflowEdit(APIModel):
@@ -32,10 +41,14 @@ class WorkflowEdit(APIModel):
     nodes: list[EditorNode] = Field(default_factory=list, max_length=100)
     edges: list[EditorEdge] = Field(default_factory=list, max_length=500)
     recording_ids: list[str] = Field(default_factory=list, max_length=20)
+    evidence_refs: list[WorkflowEvidenceRef] = Field(default_factory=list, max_length=100)
     reviewed: bool = False
 
     @model_validator(mode="after")
     def valid_graph(self):
+        refs = [(r.kind, r.id, r.version, r.candidate_id) for r in self.evidence_refs]
+        if len(refs) != len(set(refs)):
+            raise ValueError("Each evidence selection may be attached only once")
         names = [node.service for node in self.nodes]
         if len(names) != len(set(names)):
             raise ValueError("A logical service may appear only once in a workflow")

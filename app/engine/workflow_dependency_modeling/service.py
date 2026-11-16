@@ -22,6 +22,12 @@ from app.engine.workflow_dependency_modeling.management import (
     document_digest as managed_workflow_digest,
 )
 
+from app.engine.workflow_dependency_modeling.test_discovery import (
+    import_test_evidence as import_workflow_test_evidence,
+    run_http_test as run_workflow_http_test,
+    refresh_test_evidence as refresh_workflow_test_evidence,
+)
+
 from app.engine.workflow_dependency_modeling.analysis_session_service import (
     configure_analysis_session_repository,
     discover_analysis_workflows,
