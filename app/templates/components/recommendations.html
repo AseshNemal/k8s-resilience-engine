@@ -1,186 +1,136 @@
 {# Recommendation Evaluation and Validation page. Owned by: Member 4 (L.A. Nemal). #}
 {% extends "base.html" %}
-{% from "partials/metric_card.html" import metric_card %}
 {% from "partials/loading_state.html" import loading_state %}
-{% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/recommendations.css') }}">
 {% endblock %}
 
 {% block content %}
-<div class="rec-layout">
-<div class="rec-flow" data-role="rec-flow" data-view="simple" data-all-workflows="true" data-step="1" data-ready="false">
+<div class="rx" data-role="rec-flow" data-all-workflows="true" data-pane="current">
 
-<div class="page-header rec-header">
-    <h2 class="page-header__title">Recommendations</h2>
-    <p class="page-header__subtitle">
-        Select a fix. Apply starts the changes, checks, analysis and full report.
-    </p>
-    <div class="page-header__meta">
-        <span class="component-owner rec-research-only">Owner: <strong>Member 4</strong></span>
-        <span class="contract-chip rec-research-only">In: DeploymentGraph</span>
-        <span class="contract-chip rec-research-only">In: FailureImpactReport</span>
-        <span class="contract-chip contract-chip--out rec-research-only">Out: RecommendationReport</span>
-        <span class="contract-chip contract-chip--out rec-research-only">Out: ValidationReport</span>
-        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="source-badge">Not loaded</span>
-        <div class="rec-view-switch" role="group" aria-label="How much detail to show">
-            <button type="button" class="rec-view-switch__option" data-role="rec-view-simple" data-view-option="simple" aria-pressed="true">Simple</button>
-            <button type="button" class="rec-view-switch__option" data-role="rec-view-research" data-view-option="research" aria-pressed="false">Research</button>
-        </div>
+<header class="rx-head">
+    <div class="rx-head__title">
+        <h2 class="page-header__title">Recommendations</h2>
+        <p class="rx-head__sub" data-role="rec-cluster" role="status" aria-live="polite">Looking for the connected cluster…</p>
     </div>
-</div>
-
-<nav class="rec-nav" aria-label="Steps">
-    <ol class="rec-stepper" data-role="rec-stepper" aria-label="Progress through the recommendation"></ol>
-</nav>
-
-{# What the steps below are about, in one line; the single place a declared workflow is labelled. #}
-<div class="rec-case" data-role="rec-case" hidden>
-    <p class="rec-case__line" data-role="rec-case-line"></p>
-    <button type="button" class="rec-link" data-go="1">Change</button>
-</div>
-<p class="rec-declared" data-role="declared-note" hidden></p>
-<div class="rec-applied" data-role="rec-applied-notice" role="status" hidden>
-    <span data-role="rec-applied-text"></span>
-    <button type="button" class="rec-link" data-go="5">View applied change</button>
-</div>
-
-<section class="card rec-panel rec-context" aria-labelledby="rec-step-1" data-role="rec-context" data-step-panel="1">
-    <header class="rec-panel__head">
-        <h3 class="rec-panel__title" id="rec-step-1">Protect your application</h3>
-        <p class="rec-panel__sub" data-role="rec-cluster" role="status" aria-live="polite">Looking for the connected cluster…</p>
-    </header>
-    <div class="rec-inputs" role="group" aria-label="Application and failure">
-        <label class="rec-inputs__field" for="rec-namespace-select">
-            <span>Application (namespace)</span>
-            <select class="rec-inputs__input" id="rec-namespace-select" data-role="rec-namespace-select" disabled></select>
+    <div class="rx-scope" role="group" aria-label="What to protect">
+        <label class="rx-scope__field" for="rec-namespace-select">
+            <span>Application</span>
+            <select class="rx-scope__input" id="rec-namespace-select" data-role="rec-namespace-select" disabled></select>
         </label>
-        <label class="rec-inputs__field" for="rec-node-select">
-            <span>Failure to protect against</span>
-            <select class="rec-inputs__input" id="rec-node-select" data-role="rec-node-select" disabled></select>
+        <label class="rx-scope__field" for="rec-node-select">
+            <span>If this node stops</span>
+            <select class="rx-scope__input" id="rec-node-select" data-role="rec-node-select" disabled></select>
         </label>
+        <button type="button" class="secondary-button rx-scope__refresh" data-role="reload-button">Refresh</button>
     </div>
-    <p class="rec-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
-    <p class="ui-note">All available workflows are evaluated together. A combined fix is one proposal.</p>
+</header>
+
+<div class="rx-tabs" role="tablist" aria-label="Recommendations">
+    <button type="button" role="tab" class="rx-tabs__tab" id="rec-tab-current" data-pane-tab="current" aria-selected="true" aria-controls="rec-pane-current">Current recommendation</button>
+    <button type="button" role="tab" class="rx-tabs__tab" id="rec-tab-history" data-pane-tab="history" aria-selected="false" aria-controls="rec-pane-history" tabindex="-1">Past tests <span class="rx-tabs__count" data-role="rec-history-count" hidden></span></button>
+    <span class="status-badge status-badge--muted status-badge--no-dot rx-tabs__basis" data-role="source-badge">Not loaded</span>
+</div>
+
+<div class="rx-pane" role="tabpanel" id="rec-pane-current" aria-labelledby="rec-tab-current" data-pane-panel="current">
+
+    <p class="rx-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
     <div data-role="rec-deployment-findings" hidden aria-live="polite"></div>
-    <details class="rec-evidence-details" data-role="rec-evidence-details">
+    <details class="rx-fold rx-evidence" data-role="rec-evidence-details">
         <summary data-role="rec-evidence-summary">Evidence</summary>
         <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
     </details>
-    <footer class="rec-panel__foot">
-        <button type="button" class="primary-button rec-inputs__action" data-role="reload-button">Check for recommendations</button>
-    </footer>
-</section>
+    <p class="rx-basis" data-role="declared-note" hidden></p>
 
+    {# Where the work stands, and the one next thing to do. It follows the page as it scrolls. #}
+    <nav class="rx-rail" aria-label="Progress">
+        <ol class="rx-rail__list" data-role="rec-rail"></ol>
+        <button type="button" class="primary-button rx-rail__next" data-role="rec-next" hidden></button>
+    </nav>
 
-<section class="card rec-panel rec-proof" data-role="rec-proof" data-step-panel="4" aria-labelledby="rec-step-4" aria-busy="false" hidden></section>
-
-<div data-role="page-region">
-    {{ loading_state("Asking for the current live recommendation…") }}
-</div>
-{# The run and the applied change follow the comparison and the approval: choose a fix first, then watch what applying it did. #}
-<section class="rec-operation card rec-panel" data-role="rec-operation" aria-label="Applied change" hidden></section>
-<section class="card rec-panel apply-test" data-role="rec-apply-test" aria-label="Apply and test run" aria-live="polite" hidden></section>
-<section class="card rec-panel apply-test" data-role="rec-selected-data" aria-label="Selected candidate data" hidden>
-    <h3 data-role="rec-selected-data-title">Selected candidate data</h3>
-    <p class="ui-note" data-role="rec-selected-data-note"></p>
-    <div data-role="rec-selected-data-body"></div>
-</section>
-
-{# Research view: the detail that the steps leave out, one tab at a time. Static, so it works before a recommendation exists. #}
-<section class="card rec-workbench rec-research-only" data-role="rec-workbench" aria-label="Research data">
-    <div class="rec-tabs" role="tablist" aria-label="Research data">
-        <button type="button" role="tab" class="rec-tabs__tab" data-tab="ranking" aria-selected="true">Ranking</button>
-        <button type="button" role="tab" class="rec-tabs__tab" data-tab="reasoning" aria-selected="false" tabindex="-1">Candidate reasoning</button>
-        <button type="button" role="tab" class="rec-tabs__tab" data-tab="placement" aria-selected="false" tabindex="-1">Placement</button>
-        <button type="button" role="tab" class="rec-tabs__tab" data-tab="failures" aria-selected="false" tabindex="-1">Every failure</button>
-        <button type="button" role="tab" class="rec-tabs__tab" data-tab="validation" aria-selected="false" tabindex="-1">Post-apply validation</button>
-        <button type="button" role="tab" class="rec-tabs__tab" data-tab="raw" aria-selected="false" tabindex="-1">Proposal and raw data</button>
+    <div class="rx-sections" data-role="page-region">
+        {{ loading_state("Asking for the current live recommendation…") }}
     </div>
 
-    <div class="rec-tabpanel" role="tabpanel" data-pane="ranking">
-        <div class="metric-grid" aria-label="Recommendation metrics">
-            {{ metric_card("rec-baseline-blast-radius", "Baseline blast radius", icon_name="target", icon_color="red") }}
-            {{ metric_card("rec-best-predicted-blast-radius", "Best predicted blast radius", icon_name="target", icon_color="green") }}
-            {{ metric_card("rec-risk-reduction", "Expected risk reduction", icon_name="trend-down", icon_color="teal") }}
-            {{ metric_card("rec-feasible-count", "Feasible candidates", icon_name="check-circle", icon_color="purple") }}
-        </div>
-        <p class="rec-tabpanel__note">Ranked by the reported score; infeasible candidates are not ranked.</p>
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Rank</th>
-                        <th scope="col">Candidate</th>
-                        <th scope="col">Feasible</th>
-                        <th scope="col">Predicted impact</th>
-                        <th scope="col">Reduction</th>
-                        <th scope="col">Cost</th>
-                        <th scope="col">Confidence</th>
-                        <th scope="col">Score</th>
-                    </tr>
-                </thead>
-                <tbody data-role="rec-candidate-table-body"></tbody>
-            </table>
-        </div>
+    {# What applying did: the run, its checks and the keep-or-reset decision. Outside the re-rendered region, so it outlives a selection. #}
+    <div class="rx-result" id="rec-s-result" data-role="rec-result">
+        <section class="card rx-section apply-test" data-role="rec-apply-test" aria-label="Apply and test run" aria-live="polite" hidden></section>
+        <section class="card rx-section apply-test" data-role="rec-selected-data" aria-label="Selected fix: latest saved test" hidden>
+            <h3 class="rx-section__title" data-role="rec-selected-data-title">Selected fix</h3>
+            <p class="ui-note" data-role="rec-selected-data-note"></p>
+            <div data-role="rec-selected-data-body"></div>
+        </section>
+        <section class="rec-operation card rx-section" data-role="rec-operation" aria-label="Applied change" hidden></section>
     </div>
 
-    <div class="rec-tabpanel" role="tabpanel" data-pane="reasoning" hidden>
-        <p class="rec-tabpanel__note">Everything here was computed by the recommendation engine from the live evidence; nothing is applied.</p>
-        <div class="stack-md" data-role="rec-detail-list"></div>
-    </div>
+    <details class="card rx-section rx-experiment">
+        <summary>Experimental validation on a test cluster</summary>
+        <p class="ui-note">Optional research: compare predictions with observations by deliberately stopping worker nodes. Review the plan and authorize a run separately. This tests a workflow and the engine’s candidates; it does not prove the all-workflows proposal above.</p>
+        <label class="rx-scope__field" for="rec-proof-workflow"><span>Workflow to validate</span>
+            <select class="form-input" id="rec-proof-workflow" data-role="rec-proof-workflow"><option value="">Choose a workflow to test…</option></select>
+        </label>
+        <section class="rec-proof" data-role="rec-proof" aria-label="Experimental validation"></section>
+    </details>
 
-    <div class="rec-tabpanel" role="tabpanel" data-pane="placement" hidden>
-        <p class="rec-tabpanel__note">Pod placement of the selected service, now and as the engine's simulation predicts it.</p>
-        <div class="placement-compare">
-            <div>
-                <div class="placement-compare__column-title">Current placement</div>
-                <div data-role="rec-placement-current"></div>
+    {# The detail a researcher needs and a first reading does not: closed until asked for. #}
+    <details class="card rx-research" data-role="rec-research">
+        <summary class="rx-research__summary">
+            <span class="rx-research__title">Research details</span>
+            <span class="rx-research__sub">Ranking and scores, the engine's reasoning for every candidate, each node as its own failure, raw data</span>
+        </summary>
+        <div data-role="rec-workbench">
+            <div class="rec-tabs" role="tablist" aria-label="Research details">
+                <button type="button" role="tab" class="rec-tabs__tab" data-tab="ranking" aria-selected="true">Ranking</button>
+                <button type="button" role="tab" class="rec-tabs__tab" data-tab="reasoning" aria-selected="false" tabindex="-1">Candidate reasoning</button>
+                <button type="button" role="tab" class="rec-tabs__tab" data-tab="failures" aria-selected="false" tabindex="-1">Every failure</button>
+                <button type="button" role="tab" class="rec-tabs__tab" data-tab="raw" aria-selected="false" tabindex="-1">Raw data</button>
             </div>
-            <div>
-                <div class="placement-compare__column-title">Predicted placement</div>
-                <div data-role="rec-placement-predicted"></div>
+            <div class="rec-tabpanel" role="tabpanel" data-pane="ranking">
+                <p class="rec-tabpanel__note" data-role="rec-ranking-note">Ranked by the engine's score; infeasible candidates are not ranked.</p>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Rank</th>
+                                <th scope="col">Candidate</th>
+                                <th scope="col">Feasible</th>
+                                <th scope="col">Predicted impact</th>
+                                <th scope="col">Reduction</th>
+                                <th scope="col">Cost</th>
+                                <th scope="col">Confidence</th>
+                                <th scope="col">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="rec-candidate-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="rec-tabpanel" role="tabpanel" data-pane="reasoning" hidden>
+                <p class="rec-tabpanel__note">Computed by the recommendation engine from the live evidence; nothing is applied.</p>
+                <div class="stack-md" data-role="rec-detail-list"></div>
+            </div>
+            <div class="rec-tabpanel" role="tabpanel" data-pane="failures" hidden>
+                <p class="rec-tabpanel__note">Assess each worker node as its own failure.</p>
+                <div data-role="rec-failures">
+                    <button type="button" class="secondary-button" id="btn-load-failures" data-role="rec-failures-load">Assess every worker node</button>
+                    <div data-role="rec-failures-result" aria-live="polite"></div>
+                </div>
+            </div>
+            <div class="rec-tabpanel" role="tabpanel" data-pane="raw" hidden>
+                <div class="op-subtitle">Recommendation as the engine returned it</div>
+                <pre class="op-pre" data-role="rec-raw-json">Nothing loaded yet.</pre>
             </div>
         </div>
-    </div>
-
-    <div class="rec-tabpanel" role="tabpanel" data-pane="failures" hidden>
-        <p class="rec-tabpanel__note">Assess each worker node as its own failure.</p>
-        <div data-role="rec-failures">
-            <button type="button" class="secondary-button" id="btn-load-failures" data-role="rec-failures-load">Assess every worker node</button>
-            <div data-role="rec-failures-result" aria-live="polite"></div>
-        </div>
-    </div>
-
-    <div class="rec-tabpanel" role="tabpanel" data-pane="validation" hidden>
-        <p class="rec-tabpanel__note">Predicted versus observed after an approved change is applied and measured. Results of test-cluster runs are in step 4.</p>
-        <div data-role="rec-validation"></div>
-    </div>
-
-    <div class="rec-tabpanel" role="tabpanel" data-pane="raw" hidden>
-        <div class="op-subtitle">Generated YAML</div>
-        <div data-role="rec-yaml"></div>
-        <div class="op-subtitle">Recommendation as the engine returned it</div>
-        <pre class="op-pre" data-role="rec-raw-json">Nothing loaded yet.</pre>
-    </div>
-</section>
-
-</div>
-<aside class="card rec-results-sidebar" data-role="rec-results-sidebar" aria-label="Candidate test results"></aside>
+    </details>
 </div>
 
-{# Last on the page, full width: which workflows survive the loss of each worker, today and after the selected fix. #}
-<section class="card rec-panel rec-workflows" data-role="rec-workflow-risk-box" aria-labelledby="rec-workflows-title" hidden>
-    <header class="rec-panel__head">
-        <h3 class="rec-panel__title" id="rec-workflows-title">Workflows at risk</h3>
-        <p class="rec-panel__sub">What survives the loss of each worker.</p>
-    </header>
-    <div data-role="rec-workflow-risk"></div>
-</section>
+{# Every saved test and the side-by-side comparison: history, kept apart from the recommendation on screen. #}
+<div class="rx-pane" role="tabpanel" id="rec-pane-history" aria-labelledby="rec-tab-history" data-pane-panel="history" hidden>
+    <section class="card rx-section test-history" data-role="rec-test-history" aria-label="Saved tests"></section>
+</div>
 
-{# The very last panel: every saved test, and the side-by-side comparison of the ones the person selects. #}
-<section class="card rec-panel test-history" data-role="rec-test-history" aria-label="Saved candidate tests"></section>
+</div>
 
 <template data-role="operation-template">
     <div class="op" data-role="op-body">
@@ -263,83 +213,57 @@
 </template>
 
 <template data-role="page-template">
-    <section class="card rec-panel rec-step--impact" data-step-panel="2" aria-labelledby="rec-step-2">
-        <header class="rec-panel__head">
-            <h3 class="rec-panel__title" id="rec-step-2">Failure impact</h3>
-            <p class="rec-panel__sub">What happens to the workflow if this node fails.</p>
+    <section class="card rx-section" id="rec-s-risk" aria-labelledby="rec-h-risk">
+        <header class="rx-section__head">
+            <h3 class="rx-section__title" id="rec-h-risk">The risk</h3>
+            <p class="rx-section__sub">What losing one worker node does to your workflows.</p>
         </header>
-        <div data-role="rec-impact"></div>
-        <footer class="rec-panel__foot">
-            <button type="button" class="secondary-button" data-go="1">Back</button>
-            <button type="button" class="primary-button" data-go="3">Compare fixes</button>
-        </footer>
+        <div data-role="rec-risk"></div>
     </section>
 
-    <section class="card rec-panel rec-step--candidates" data-step-panel="3" aria-labelledby="rec-step-3">
-        <header class="rec-panel__head">
-            <h3 class="rec-panel__title" id="rec-step-3">Compare candidate improvements</h3>
-            <p class="rec-panel__sub">Predictions from a simulation, not measurements.</p>
+    <section class="card rx-section" id="rec-s-fix" aria-labelledby="rec-h-fix">
+        <header class="rx-section__head">
+            <h3 class="rx-section__title" id="rec-h-fix">The fix</h3>
+            <p class="rx-section__sub">Ranked by the engine. Selecting one changes nothing on the cluster.</p>
         </header>
         <div data-role="rec-outcome"></div>
-        <div class="rec-candidates" data-role="rec-candidate-list"></div>
-        <details class="rec-topo" data-role="rec-topology-box" open hidden>
-            <summary class="rec-panel__sub">See the change on the cluster: now and after</summary>
-            <div data-role="rec-topology"></div>
-        </details>
-        <footer class="rec-panel__foot">
-            <button type="button" class="secondary-button" data-go="2">Back</button>
-            <button type="button" class="primary-button" data-role="rec-prove-action" data-go="4">Prove it on a test cluster</button>
-            <button type="button" class="secondary-button" data-role="rec-review-action" data-go="5">Review approval</button>
-        </footer>
+        <div data-role="rec-fixes"></div>
     </section>
 
-    {# The "Prove it" panel lives outside this re-rendered region and is moved into this slot after each render. #}
-    <div data-role="rec-proof-slot" data-step-panel="4"></div>
-
-    <section class="card rec-panel rec-step--approve" data-step-panel="5" aria-labelledby="rec-step-5">
-        <header class="rec-panel__head">
-            <h3 class="rec-panel__title" id="rec-step-5">Apply and test</h3>
-            <p class="rec-panel__sub">Workflow checks, resource usage and risk analysis.</p>
+    <section class="card rx-section" id="rec-s-review" aria-labelledby="rec-h-review">
+        <header class="rx-section__head">
+            <h3 class="rx-section__title" id="rec-h-review">What it changes</h3>
+            <p class="rx-section__sub">The exact edits, and where the simulation expects the pods to run.</p>
         </header>
+        <div data-role="rec-review"></div>
+        <div class="rx-topo" data-role="rec-topology-box" hidden>
+            <h4 class="rx-subhead">Pods on each node: now and predicted</h4>
+            <div data-role="rec-topology"></div>
+        </div>
+        <details class="rx-fold" data-role="rec-yaml-box">
+            <summary>Kubernetes YAML</summary>
+            <div data-role="rec-yaml"></div>
+        </details>
+    </section>
+
+    <section class="rx-section rx-section--action" id="rec-s-approve" aria-labelledby="rec-h-approve">
         {# The extension build patches this exact opening tag to add its own note, so it must stay as written (tests/test_page_contracts.py). #}
         <div class="card" id="approval-section">
-        <div class="rec-status" data-role="rec-validation-callout" data-state="unknown">
-            <span class="rec-status__mark" aria-hidden="true"></span>
-            <p class="rec-status__text" data-role="rec-validation-note">Checking whether this change was proven on a test cluster…</p>
-            <button type="button" class="rec-link" data-role="rec-validation-go" data-go="4" hidden>Go to step 4</button>
+        <header class="rx-section__head">
+            <h3 class="rx-section__title" id="rec-h-approve">Approve and apply</h3>
+            <p class="rx-section__sub" data-role="rec-validation-note">Approval authorises this exact change. Nothing is applied until a named person clicks Apply.</p>
+        </header>
+        <div class="rx-action">
+            <div class="rx-action__state" data-role="approval-state-container"></div>
+            <div class="approval-actions rx-action__buttons" data-role="approval-actions"></div>
         </div>
-        <div class="rec-approve">
-            <div class="rec-approve__selected">
-                <div class="op-subtitle">What you are applying</div>
-                <div class="rec-selected" data-role="rec-selected"></div>
-            </div>
-            <div class="rec-approve__actions">
-                <div data-role="approval-state-container">
-                    <!-- Approval state goes here -->
-                </div>
-                <div class="approval-actions" data-role="approval-actions">
-                    <button type="button" class="primary-button" id="btn-request-approval">Request approval</button>
-                </div>
-            </div>
+        <ol class="rx-after" aria-label="What Apply and test does">
+            <li>Saves the current configuration</li>
+            <li>Applies the change and waits for the rollout</li>
+            <li>Runs the workflow checks and recalculates the risk</li>
+            <li>Asks you to keep or reset</li>
+        </ol>
         </div>
-        <details class="rec-more">
-            <summary>What happens after Apply</summary>
-            <ol class="rec-plan__steps">
-                <li>Apply changes the selected Deployments and stores their previous state.</li>
-                <li>Wait for the new pods to finish rolling out.</li>
-                <li>Run configured workflow checks, measure resource usage and recalculate risk.</li>
-                <li>Show the full report, including failures and unavailable evidence.</li>
-                <li>Reset restores the previous state.</li>
-            </ol>
-        </details>
-        <details class="rec-more rec-proposal-details">
-            <summary>Proposal details</summary>
-            <div class="rec-proposal" data-role="rec-proposal-summary"></div>
-        </details>
-        </div>
-        <footer class="rec-panel__foot">
-            <button type="button" class="secondary-button" data-go="4">Back</button>
-        </footer>
     </section>
 </template>
 
@@ -381,11 +305,10 @@
 <script src="{{ url_for('static', path='/js/workflow-names.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-topology.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/recommendation-workflow-risk.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-journey.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-proof.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-context.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/recommendation-portfolio.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-operation.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-apply-test.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/recommendation-proof.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/recommendations.js') }}" defer></script>
 {% endblock %}

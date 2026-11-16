@@ -395,7 +395,8 @@
         let message = null;             // { text, alert }
         let confirming = null;          // "reset" or "keep" while the person is being asked once more
         let external = null;            // fields a refused reset found changed outside this application
-        let name = "";                  // the person's name, kept in memory only
+        let name = "";
+        try { name = window.localStorage?.getItem("resilience.audit.name") || ""; } catch (_) { /* Optional audit preference. */ }
         let timer = null;
         let inFlight = false;           // one status poll at a time
         let issued = 0;                 // order requests were sent in
@@ -524,6 +525,7 @@
             slots.keep.disabled = busy;
             const askName = (canReset && confirming === "reset") || (canKeep && confirming === "keep");
             slots["name-wrap"].hidden = !askName;
+            if (!name) { try { name = window.localStorage?.getItem("resilience.audit.name") || ""; } catch (_) { /* Optional preference. */ } }
             if (slots.name.value !== name) slots.name.value = name;       // never rewrite what the person is typing
             slots.name.disabled = busy;
             slots.confirm.hidden = !confirming;

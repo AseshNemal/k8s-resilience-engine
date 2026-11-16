@@ -22,6 +22,7 @@
     const { fetchJson } = window.ResilienceApi;
     const { formatCodeLabel, updateLastRefreshed } = window.ResilienceUi;
     const view = window.ResilienceRecommendations;
+    const journey = window.ResilienceJourney;
     const { describeError, renderStateCard, applyBadge } = window.ResilienceConnection;
 
     const region = document.querySelector('[data-role="page-region"]');
@@ -89,7 +90,7 @@
             const saved = JSON.parse(window.localStorage.getItem(PAGE_STATE_KEY) || "null");
             if (!saved || saved.scope !== pageScope(v)) return;
             if (Number.isInteger(saved.step) && saved.step >= 1 && saved.step <= 5) pinnedStep = saved.step;
-            if (["failures", "ranking", "placement", "raw"].includes(saved.tab)) {
+            if (["failures", "ranking", "reasoning", "raw"].includes(saved.tab)) {
                 tabChosen = true;
                 selectTab(saved.tab, false);
             }
@@ -100,6 +101,33 @@
             }
         } catch (_error) { /* Ignore outdated or malformed page state. */ }
     }
+
+    function goSection(id) {
+        const target = document.getElementById(id);
+        if (!target) return;
+        target.scrollIntoView?.({ block: "start", behavior: "smooth" });
+        target.setAttribute("tabindex", "-1");
+        target.focus?.({ preventScroll: true });
+    }
+
+    function selectPane(name, focus = false) {
+        for (const tab of document.querySelectorAll?.('[data-pane-tab]') || []) {
+            const on = tab.dataset.paneTab === name;
+            tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1;
+            if (on && focus) tab.focus();
+        }
+        for (const pane of document.querySelectorAll?.('[data-pane-panel]') || []) pane.hidden = pane.dataset.panePanel !== name;
+    }
+    flowRoot?.addEventListener("click", (event) => {
+        const tab = event.target.closest?.('[data-pane-tab]');
+        if (tab) selectPane(tab.dataset.paneTab);
+    });
+    flowRoot?.addEventListener("keydown", (event) => {
+        const tab = event.target.closest?.('[data-pane-tab]');
+        if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        selectPane(event.key === "Home" ? "current" : event.key === "End" ? "history" : tab.dataset.paneTab === "current" ? "history" : "current", true);
+    });
 
     function storedView() {
         try {
@@ -132,6 +160,21 @@
 
     function updateStepper() {
         stepFacts.applied = !!currentRecommendation && appliedFor === currentRecommendation.id;
+        if (journey) {
+            const state = applyTestPanel?.state();
+            const r = state?.run;
+            const own = r && r.candidateId === currentRecommendation?.id;
+            const model = journey.stages({ status: stepFacts.status, selected: !!currentRecommendation,
+                approval: stepFacts.approval,
+                run: own ? { busy: state.busy, finished: !state.busy, canDecide: r.canReset,
+                    kept: r.application?.status === "KEPT", reset: r.application?.status === "RESET", failed: r.status === "FAILED" } : null,
+                otherApplied: !!(r?.canReset && !own) });
+            const rail = document.querySelector('[data-role="rec-rail"]');
+            if (rail) journey.renderRail(rail, model, { onGo: goSection });
+            const next = document.querySelector('[data-role="rec-next"]');
+            if (next) { next.hidden = !model.next; next.textContent = model.next?.label || ""; next.onclick = () => goSection(model.next?.target); }
+            return;
+        }
         const steps = view.computeSteps(stepFacts);
         const pin = pinnedStep && steps[pinnedStep - 1];
         // A pinned step stays while it can be opened; the applied-change panel can always be reached, even with no recommendation on screen.
@@ -147,6 +190,7 @@
 
     /** The person opens a step. It stays until the work they chose (the application, the workflow, the failure) changes. */
     function openStep(number) {
+        if (journey) return goSection(number === 3 ? "rec-s-fix" : number === 5 ? "rec-s-approve" : "rec-s-risk");
         pinnedStep = number;
         updateStepper();
         rememberPage();
@@ -181,7 +225,7 @@
             }
             appliedNotice.hidden = hidden;
         }
-        if (!tabChosen) selectTab(STEP_TAB[shownStep], false);
+        if (!tabChosen) selectTab(journey ? "ranking" : STEP_TAB[shownStep], false);
     }
 
     // ---- Research tabs ---------------------------------------------------------------------------------------------
@@ -238,11 +282,20 @@
     // Declared workflows only: the server's offer of the separate research tier for the selected candidate. The production controls
     // above stay off for such a candidate; this is a different door, with its own routes and a named person's acknowledgement.
     let currentResearch = null;
-    let lastResearchName = "";                            // remembered in memory only, to save retyping within this page
+    let lastResearchName = auditName();                            // Reuses the locally configured audit attribution; not authentication.
     let researchNameInput = null;
     let researchAckInput = null;
-    let lastApplierName = "";                             // remembered in memory only, to save retyping within this page
+    let lastApplierName = auditName();                             // Reuses the locally configured audit attribution; not authentication.
     const RESEARCH_PLACEHOLDER = "I understand this workflow is declared by me, not observed, and approve it for research validation only.";
+
+    function auditName() {
+        try { return window.localStorage.getItem("resilience.audit.name") || ""; } catch (_) { return ""; }
+    }
+    function rememberAuditName(value) {
+        if (!value?.trim()) return;
+        lastResearchName = lastApplierName = value.trim();
+        try { window.localStorage.setItem("resilience.audit.name", value.trim()); } catch (_) { /* Optional preference, not authentication. */ }
+    }
 
     function isDeclared() {
         return !!controller && controller.selection().workflowKind === "declared";
@@ -440,7 +493,7 @@
                 stateContainer.append(note("Enter your name: applying a change is done by a named person."));
                 return;
             }
-            lastApplierName = by;
+            rememberAuditName(by);
             const proposal = selected?.yamlProposal;
             if (!proposal?.fingerprint || !proposal?.sha256) return;
             let saved;
@@ -510,7 +563,7 @@
         const by = ((researchNameInput && researchNameInput.value) || "").trim();
         const statement = ((researchAckInput && researchAckInput.value) || "").trim();
         if (!by) return renderApprovalState(null, null, "Enter your name: a research approval is made by a named person.");
-        lastResearchName = by;
+        rememberAuditName(by);
         const result = await callApproval("POST", "/request-approval", {
             recommendationId: currentRecommendation.id,
             proposalVersion: PROPOSAL_VERSION,
@@ -621,7 +674,7 @@
         const by = (whoInput.value || "").trim();
         if (!operationPanel || operationBusy()) return;                        // a second click while one request is in flight does nothing
         if (!by) return fillApplication(box, status, "Enter your name: applying a change is done by a named person.");
-        lastApplierName = by;
+        rememberAuditName(by);
         applyConfirming = false;
         const requestedFor = currentRecommendation.id;
         const started = operationPanel.startApply(requestedFor, isDeclared() ? "research" : "production", by);
@@ -638,13 +691,21 @@
 
     function proofContext() {
         const v = lastView || {};
-        return { namespace: v.namespace || null, workflowId: v.workflowId || null, workflowSource: v.workflowKind === "declared" ? "DECLARED" : "FROZEN" };
+        return { namespace: v.namespace || null, workflowId: allWorkflows ? document.querySelector('[data-role="rec-proof-workflow"]')?.value || null : v.workflowId || null, workflowSource: v.workflowKind === "declared" ? "DECLARED" : "FROZEN" };
     }
 
     /** Put the panel between the comparison and the approval, or take it out of the page when there is nothing to prove. */
     function placeProof() {
         if (!proofRoot) return;
-        if (allWorkflows) { proofRoot.hidden = true; return; }
+        if (allWorkflows) {
+            proofRoot.hidden = false;
+            const select = document.querySelector('[data-role="rec-proof-workflow"]');
+            if (select) {
+                const previous = select.value;
+                fillSelect(select, (lastView?.workflows || []).filter((w) => w.applicable && !!w.declared === isDeclared()).map((w) => ({ value: w.workflowId, label: w.label })), previous, "Choose a workflow to test…");
+            }
+            return;
+        }
         const slot = region.querySelector('[data-role="rec-proof-slot"]');
         if (slot && currentRecommendation) {
             slot.appendChild(proofRoot);
@@ -808,7 +869,7 @@
         if (isDeclared()) {
             const decider = approvalModal.querySelector("#research-decider");
             body.decidedBy = ((decider && decider.value) || "").trim();
-            if (body.decidedBy) lastResearchName = body.decidedBy;
+            if (body.decidedBy) rememberAuditName(body.decidedBy);
         }
         const result = await callApproval("POST", `/${action}`, body);
         hideApprovalModal();
@@ -1058,9 +1119,9 @@
         view.renderRankingTable(tabPart("rec-candidate-table-body"), { recommendations: [] });
         const reasons = tabPart("rec-detail-list");
         if (reasons) reasons.replaceChildren();
-        view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), null, null);
-        view.renderValidation(tabPart("rec-validation"), null);
-        view.renderYaml(tabPart("rec-yaml"), null);
+        if (!journey) view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), null, null);
+        if (!journey) view.renderValidation(tabPart("rec-validation"), null);
+        if (tabPart("rec-yaml")) view.renderYaml(tabPart("rec-yaml"), null);
         const raw = tabPart("rec-raw-json");
         if (raw) raw.textContent = "Nothing loaded yet.";
         showMetrics({ baseline: null, bestPredicted: null, selectedRiskReduction: null, feasibleCount: 0 });
@@ -1096,18 +1157,27 @@
             currentDeployment: detail.currentDeployment,
             simulatedDeployment: selected ? selected.simulatedDeployment : null,   // only a selected, feasible candidate has one
         };
-        view.renderImpactSummary(region.querySelector('[data-role="rec-impact"]'), detail);
+        if (journey) {
+            journey.renderRisk(region.querySelector('[data-role="rec-risk"]'), detail, selected,
+                { onNode: (node) => controller.selectFailedNode(node) });
+            journey.renderFixes(region.querySelector('[data-role="rec-fixes"]'), detail, {
+                selectedId: currentRecommendation?.id, engineId: report.selectedRecommendationId,
+                failedNode: detail.evidence.failedNode, canSelect: canSelectCandidate,
+                whyNot: whyNotSelectable, onSelect: selectCandidate });
+            journey.renderReview(region.querySelector('[data-role="rec-review"]'), detail, selected);
+        }
+        if (!journey) view.renderImpactSummary(region.querySelector('[data-role="rec-impact"]'), detail);
         const outcomeBox = region.querySelector('[data-role="rec-outcome"]');
-        view.renderOutcome(outcomeBox, detail.outcome);
+        if (!journey || !selected) view.renderOutcome(outcomeBox, detail.outcome);
         if (chosen.note && outcomeBox && outcomeBox.append) {
             const note = document.createElement("p");
             note.className = "ui-note rec-chosen-note";
             note.textContent = chosen.note;
             outcomeBox.append(note);
         }
-        view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
+        if (!journey) view.renderProposalSummary(region.querySelector('[data-role="rec-proposal-summary"]'), detail,
             selected || null, v.cluster && v.cluster.identity ? v.cluster.identity : "");
-        view.renderSelectedImprovement(region.querySelector('[data-role="rec-selected"]'), selected || null);
+        if (!journey) view.renderSelectedImprovement(region.querySelector('[data-role="rec-selected"]'), selected || null);
         // Each card says what it changes and, when it cannot be put forward, the engine's own reason.
         const descriptions = {};
         const reasons = {};
@@ -1118,7 +1188,7 @@
             if (!c.feasible && c.approval.reason) reasons[c.id] = c.approval.reason;
         });
         // A declared workflow's cards do not repeat the notice that production approval is unavailable: it is said once, above the steps.
-        view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), shownReport, context, {
+        if (!journey) view.renderCandidateCards(region.querySelector('[data-role="rec-candidate-list"]'), shownReport, context, {
             descriptions, reasons, effects,
             ...(allWorkflows ? {
                 dashboard: true,
@@ -1138,7 +1208,7 @@
         }
 
         // The research tabs.
-        view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
+        if (!journey) view.renderPlacement(tabPart("rec-placement-current"), tabPart("rec-placement-predicted"), shown, context);
         drawWorkflowRisk(detail, selected || null);
         // The whole topology now and after the selected change, from the same two graphs; only drawn when there is one to compare.
         const topologyBox = region.querySelector('[data-role="rec-topology-box"]');
@@ -1149,7 +1219,7 @@
         }
         view.renderRankingTable(tabPart("rec-candidate-table-body"), report);
         view.renderCandidateDetails(tabPart("rec-detail-list"), detail);
-        view.renderValidation(tabPart("rec-validation"), context.validation);
+        if (!journey) view.renderValidation(tabPart("rec-validation"), context.validation);
         view.renderYaml(tabPart("rec-yaml"), context.yaml);
         const raw = tabPart("rec-raw-json");
         if (raw) raw.textContent = JSON.stringify(detail, null, 2);
@@ -1220,7 +1290,7 @@
             : "Declared workflow, not observed. It can be approved for research validation on a test cluster only; production approval is not available for it.";
         if (full) {
             const long = document.createElement("span");
-            long.className = "rec-research-only";
+            long.className = "visually-hidden";
             long.textContent = ` ${full}`;
             declaredNote.replaceChildren(short, long);
         } else {
@@ -1377,7 +1447,7 @@
             if (!latest.has(row.candidateId)) latest.set(row.candidateId, row);
         }
         for (const node of Array.from(region.querySelectorAll("[data-evidence-for]"))) {
-            const predicted = `Predicted ${node.getAttribute("data-predicted")}%`;
+            const predicted = journey ? "Simulation prediction" : `Predicted ${node.getAttribute("data-predicted")}%`;
             const row = latest.get(node.getAttribute("data-evidence-for"));
             node.textContent = row ? `${predicted} · latest test: ${window.ResilienceApplyTest.resultLabel(row)[0].toLowerCase()}`
                 : sidebarHistory.historyLoaded === false ? `${predicted} · reading saved tests…`
@@ -1389,8 +1459,11 @@
     function updateCandidateResults() {
         testHistoryPanel?.redraw?.();             // the comparison marks the selected candidate's column
         updateCardEvidence();
-        updateSelectedData();
+        if (!journey) updateSelectedData();
         const applied = applyTestPanel?.state();
+        if (journey && applyTestRoot) applyTestRoot.setAttribute("data-shows", applied?.active || applied?.busy || applied?.error ? "live" : "other");
+        const count = document.querySelector('[data-role="rec-history-count"]');
+        if (count) { count.textContent = String(sidebarHistory.history.length); count.hidden = !sidebarHistory.history.length; }
         resultsSidebar?.update({ ...sidebarHistory, namespace: lastView?.namespace,
             activeId: applied?.active ? applied.run.candidateId : null, activeRun: applied?.active ? applied.run : null,
             selectedId: lastView?.status === "ready" ? currentRecommendation?.id : null,
@@ -1439,6 +1512,7 @@
                 if (operationRoot) operationRoot.setAttribute("data-managed-run", String(!!run));
                 if (currentRecommendation) loadApprovalState();
                 updateCandidateResults();
+                updateStepper();
                 const stamp = run ? `${run.runId}:${run.status}` : "";
                 if (stamp !== historyStamp) { historyStamp = stamp; testHistoryPanel?.refresh(); }
             },
@@ -1455,10 +1529,11 @@
         });
     }
 
-    if (proofModule && proofRoot && !allWorkflows) {
+    document.querySelector('[data-role="rec-proof-workflow"]')?.addEventListener("change", () => proofPanel?.reset());
+    if (proofModule && proofRoot) {
         proofPanel = proofModule.createProofPanel({
             root: proofRoot, document, fetchImpl: (url, init) => fetch(url, init), getContext: proofContext, onChange: proofChanged,
-            isResearch: () => !!flowRoot && flowRoot.getAttribute("data-view") === "research", onContinue: continueToApproval,
+            isResearch: () => isDeclared(), onContinue: () => goSection("rec-s-approve"),
         });
     }
 

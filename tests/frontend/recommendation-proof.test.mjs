@@ -589,13 +589,11 @@ test("what the stepper is told maps every run state, and a run that needs a pers
     assert.equal(proofFact({ status: "INTERRUPTED" }), "failed");
 });
 
-test("the template provides the proof section and, inside the re-rendered page, a slot between the comparison and the approval", () => {
-    const pageTemplate = HTML.slice(HTML.indexOf('<template data-role="page-template">'));
-    const slot = pageTemplate.indexOf('data-role="rec-proof-slot"');
-
-    assert.ok(SECTION.includes('data-role="rec-proof"') && SECTION.includes("hidden"));
-    assert.ok(slot > pageTemplate.indexOf('id="rec-step-3"') && slot < pageTemplate.indexOf('id="rec-step-5"'));
-    assert.ok(HTML.indexOf('data-role="rec-proof"') < HTML.indexOf('<div data-role="page-region">'), "the panel is outside the region that is redrawn");
+test("experimental validation has a workflow selector and survives candidate redraws", () => {
+    assert.ok(SECTION.includes('data-role="rec-proof"'));
+    assert.ok(HTML.includes('data-role="rec-proof-workflow"'));
+    assert.ok(HTML.indexOf('data-role="rec-proof"') > HTML.indexOf('data-role="page-region"'));
+    assert.ok(HTML.indexOf('data-role="rec-proof"') < HTML.indexOf('<template data-role="page-template">'));
 });
 
 test("every script the page needs is loaded, the proof panel before the page script", () => {

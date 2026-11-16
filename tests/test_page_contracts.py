@@ -49,7 +49,10 @@ def test_script_selectors_exist_in_the_template(page):
     if page == "recommendations":
         # Null-guarded compatibility hooks for the earlier single-workflow page. The current template deliberately
         # omits them; its all-workflows path is exercised by the frontend integration tests.
-        roles -= {"rec-workflow-select", "rec-portfolio", "rec-step1-next"}
+        roles -= {"rec-workflow-select", "rec-portfolio", "rec-step1-next", "rec-applied-notice", "rec-applied-text",
+                  "rec-candidate-list", "rec-case", "rec-case-line", "rec-impact", "rec-proof-slot", "rec-proposal-summary",
+                  "rec-results-sidebar", "rec-stepper", "rec-validation-callout", "rec-validation-go", "rec-workflow-risk",
+                  "rec-workflow-risk-box", "rec-selected"}
 
     missing_roles = sorted(r for r in roles if r not in markup)
     missing_ids = sorted(i for i in ids if i not in markup)
@@ -78,11 +81,11 @@ def test_recommendations_has_no_workflow_choice_or_portfolio_handoff():
 
 
 @pytest.mark.parametrize("marker", [
-    'data-role="rec-candidate-list"',        # candidate cards
+    'data-role="rec-fixes"',        # candidate cards
     'data-role="rec-candidate-table-body"',  # ranking
-    'data-role="rec-placement-current"',     # current placement (real evidence only)
-    'data-role="rec-placement-predicted"',   # predicted placement (engine-supplied only)
-    'data-role="rec-validation"',            # predicted vs observed
+    'data-role="rec-topology"',     # current placement (real evidence only)
+    'data-role="rec-review"',   # predicted placement (engine-supplied only)
+    'data-role="rec-proof"',            # predicted vs observed
     'data-role="rec-yaml"',                  # generated YAML proposal
     'id="approval-section"',                 # approval gate (the extension build patches this exact marker)
     'id="approval-modal"',

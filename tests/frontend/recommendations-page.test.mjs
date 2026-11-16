@@ -702,7 +702,7 @@ test("the declared notice is one short line, with the full explanation kept for 
     const note = env.element('[data-role="declared-note"]');
     assert.equal(note.hidden, false);
     assert.equal(note.children[0].textContent, "Declared workflow, not observed. It can be approved for research validation on a test cluster only; production approval is not available for it.");
-    assert.match(note.children[1].className, /rec-research-only/);
+    assert.match(note.children[1].className, /visually-hidden/);
     assert.ok(note.children[1].textContent.includes("declared, see the research tier"));
     assert.ok(note.attributes.title.includes("declared, see the research tier"));
     assert.equal(env.element('[data-role="rec-outcome"]').attributes["data-declared"], "true", "the repeated outcome sentence is hidden in the plain view");
