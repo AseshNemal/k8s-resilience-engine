@@ -24,6 +24,11 @@ Behaviour worth knowing:
 - Verified on in-memory doubles and by a read-only watch of the real Bookinfo cluster. **No worker has been stopped and no failure has been observed for real.**
 - Tests: `tests/recommendation_evaluation_validation/test_failure_observation.py`, `tests/frontend/failure-observation.test.mjs`.
 
+**Review follow-ups (PR 49):**
+
+- **Member 3, `failure_impact_prediction/service.py`:** `load_application_snapshot` now leaves *incomplete* services out of the assessment (a service with a replica on a node discovery does not model, for example the control plane). Before, their truncated placement was scored, so a service could be reported lost while a replica elsewhere survived, contradicting the page's "not assessed" notice. They are still named in `topology.incompleteServices`. Test: `test_a_service_with_a_replica_on_an_unmodelled_node_is_not_assessed_from_its_truncated_placement`.
+- **Member 4:** a watch is bound to the cluster it started on (`cluster.clusterUid`). A different or unidentifiable cluster is never read as the watched one (`clusterMatch` `other` / `unknown`), and a watch cannot start while the cluster cannot be identified.
+
 For Member 3 and Member 2: on the discovery path the overview's `nodes[].ready` is `None` (unknown), so Member 4 reads node readiness itself. If the overview later reports it, the watch can use it.
 
 ## Earlier work in the same working tree (details in `CLAUDE.md`, "Current State")

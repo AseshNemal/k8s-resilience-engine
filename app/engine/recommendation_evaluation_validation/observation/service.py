@@ -107,10 +107,11 @@ def compare(record: dict[str, Any]) -> dict[str, Any]:
 
 class FailureObservationService:
     def __init__(self, engine: Any, overview: Callable[[str | None], dict[str, Any]],
-                 node_states: Callable[[], dict[str, dict[str, Any]]], *,
+                 node_states: Callable[[], dict[str, dict[str, Any]]], cluster_uid: Callable[[], str | None], *,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc), expires_after: timedelta = EXPIRES_AFTER) -> None:
         self.repo = ObservationRepository(engine)
-        self._overview, self._node_states, self._clock, self._expires_after = overview, node_states, clock, expires_after
+        self._overview, self._node_states, self._cluster_uid = overview, node_states, cluster_uid
+        self._clock, self._expires_after = clock, expires_after
 
     # -- lifecycle ---------------------------------------------------------------------------------------------------
 
@@ -118,7 +119,11 @@ class FailureObservationService:
         """Fix the prediction and the starting state, then watch. One watch at a time."""
         if self.repo.active() is not None:
             raise ObservationRefused("OBSERVATION_ACTIVE", "A failure is already being watched. Stop it before starting another.")
-        snapshot = self._overview(namespace)          # EvidenceError propagates: no cluster read, no observation
+        uid = self._cluster_uid()                     # EvidenceError propagates: no cluster read, no observation
+        if not uid:
+            raise ObservationRefused("CLUSTER_IDENTITY_UNKNOWN", "The connected cluster could not be identified, so a watch cannot be "
+                                     "tied to it. Nothing was recorded.", http_status=503)
+        snapshot = self._overview(namespace)
         baseline_nodes = _ready_nodes(snapshot, self._node_states())
         watched = sorted(name for name, ready in baseline_nodes.items() if ready is True)
         if not watched:
@@ -126,6 +131,7 @@ class FailureObservationService:
         started = self._clock()
         record = {
             "evidence": "developer-initiated failure, observed", "injectedByThisApp": False,
+            "cluster": {"clusterUid": uid}, "clusterMatch": "same",
             "startedBy": (started_by or "").strip() or None, "note": (note or "").strip() or None, "startedAt": _iso(started),
             "predicted": _predicted(snapshot), "predictionScope": snapshot.get("scope"),
             "baseline": {"services": _ready_services(snapshot), "nodes": baseline_nodes},
@@ -166,12 +172,22 @@ class FailureObservationService:
         now = self._clock()
         if now - datetime.fromisoformat(row["startedAt"]) > self._expires_after:
             return self._finish(row, EXPIRED, "expired", "Nothing finished this observation in time.")
+        # The watch belongs to the cluster it started on. A different or unidentifiable cluster is never read as this one: the same
+        # worker and service names on another cluster would otherwise look like this cluster failing or recovering.
+        try:
+            uid = self._cluster_uid()
+        except Exception:
+            uid = None
+        stored = (row.get("cluster") or {}).get("clusterUid")
+        if not uid or not stored:
+            return self._unreadable(row, "CLUSTER_IDENTITY_UNKNOWN", "unknown")
+        if uid != stored:
+            return self._unreadable(row, "CLUSTER_CHANGED", "other")
         try:
             snapshot = self._overview(row["namespace"] or None)
             states = self._node_states()
         except Exception as error:      # unreadable is unknown, never "down" and never "recovered"
-            reads = {**row["reads"], "failed": row["reads"]["failed"] + 1, "lastError": getattr(error, "code", type(error).__name__)}
-            return self._save(row, row["status"], {"reads": reads})
+            return self._unreadable(row, getattr(error, "code", type(error).__name__), "same")
         reads = {**row["reads"], "ok": row["reads"]["ok"] + 1, "lastError": None, "lastReadAt": _iso(now)}
         timeline = list(row["timeline"])
         status, failed, multiple = row["status"], row["failedNode"], row["multipleFailures"]
@@ -199,11 +215,15 @@ class FailureObservationService:
                     if row["baseline"]["services"].get(service, 0) > 0 and ready < row["baseline"]["services"][service]:
                         timeline.append({"at": _iso(now), "kind": "service-replicas-lower", "service": service,
                                          "detail": f"{service}: {ready} of {row['baseline']['services'][service]} replicas ready."})
-        changes = {"reads": reads, "failedNode": failed, "multipleFailures": multiple, "observed": {"leastReady": least},
+        changes = {"reads": reads, "clusterMatch": "same", "failedNode": failed, "multipleFailures": multiple, "observed": {"leastReady": least},
                    "timeline": timeline[-MAX_TIMELINE:]}
         if status == RECOVERED:
             changes["endedAt"] = _iso(now)
         return self._save(row, status, changes)
+
+    def _unreadable(self, row: dict[str, Any], code: str, match: str) -> dict[str, Any]:
+        reads = {**row["reads"], "failed": row["reads"]["failed"] + 1, "lastError": code}
+        return self._save(row, row["status"], {"reads": reads, "clusterMatch": match})
 
     def _finish(self, row: dict[str, Any], status: str, kind: str, detail: str) -> dict[str, Any]:
         now = self._clock()
