@@ -255,18 +255,13 @@ def test_unknown_failed_node_is_rejected(monkeypatch, use_cluster) -> None:
     assert response.status_code == 422
 
 
-def test_failure_impact_page_contains_node_simulation_controls() -> None:
+def test_failure_impact_page_asks_for_no_typed_input_and_exposes_the_overview_hooks() -> None:
     response = client.get("/components/failure-impacts")
 
     assert response.status_code == 200
-    assert 'data-role="input-mode"' in response.text
-    assert 'value="portfolio-demo"' not in response.text
-    assert 'value="demo"' not in response.text
-    assert 'value="runtime"' in response.text
-    assert 'value="portfolio-runtime"' in response.text
-    assert 'data-role="workflow-id"' in response.text
-    assert 'data-role="workflow-id-label"' in response.text
-    assert 'data-role="namespace"' in response.text
-    assert 'data-role="node-selector"' in response.text
-    assert 'data-role="portfolio-workflow-outcomes"' in response.text
-    assert "Simulate Node Failure" in response.text
+    for role in ("namespace-select", "page-region", "ready-template", "node-list", "detail-services", "detail-workflows",
+                 "recommend-link", "workflow-picker", "evidence-badge", "refresh-button"):
+        assert f'data-role="{role}"' in response.text, role
+    for gone in ('data-role="input-mode"', 'data-role="workflow-id"', 'data-role="namespace"', 'data-role="node-selector"'):
+        assert gone not in response.text, gone
+    assert "Simulate Node Failure" not in response.text

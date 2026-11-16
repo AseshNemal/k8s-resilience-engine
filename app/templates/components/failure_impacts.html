@@ -1,7 +1,5 @@
-{# Failure Impact Prediction page. Owned by: Member 3 (K.V.D.Y.R. Karawita). #}
+{# Failure Impact page. Owned by: Member 3 (K.V.D.Y.R. Karawita). One live read answers for every worker node. #}
 {% extends "base.html" %}
-{% from "partials/metric_card.html" import metric_card %}
-{% from "partials/loading_state.html" import loading_state %}
 {% from "partials/raw_json_panel.html" import raw_json_panel %}
 
 {% block page_css %}
@@ -10,273 +8,106 @@
 
 {% block content %}
 <div class="page-header">
-    <h2 class="page-header__title">Failure Impact Prediction</h2>
+    <h2 class="page-header__title">Failure impact</h2>
     <p class="page-header__subtitle">
-        Predict service and workflow disruption after a selected Kubernetes worker-node failure.
+        If a worker node stopped, which services and workflows would go down? A prediction from where pods run now;
+        nothing in the cluster is changed.
     </p>
-    <div class="page-header__meta">
-        <span class="component-owner">Owner: <strong>Member 3</strong></span>
-        <span class="contract-chip" data-role="workflow-contract-chip" hidden>In: WorkflowGraph</span>
-        <span class="contract-chip">In: DeploymentGraph</span>
-        <span class="contract-chip">In: Failed Node</span>
-        <span class="contract-chip contract-chip--out">Out: FailureImpactReport</span>
-        <span
-            class="status-badge status-badge--muted status-badge--no-dot"
-            data-role="input-source-badge"
-        >Not run</span>
+</div>
+
+<section class="card fi-bar" aria-label="What is being assessed">
+    <label class="fi-bar__field" for="fi-namespace">
+        <span>Application</span>
+        <select id="fi-namespace" class="scenario-panel__select" data-role="namespace-select" disabled>
+            <option>Reading the cluster…</option>
+        </select>
+    </label>
+    <div class="fi-bar__badges">
+        <span class="status-badge status-badge--muted" data-role="evidence-badge">Reading…</span>
+        <span class="status-badge status-badge--muted status-badge--no-dot" data-role="basis-badge"></span>
+    </div>
+    <button type="button" class="secondary-button fi-bar__refresh" data-role="refresh-button">Refresh</button>
+</section>
+
+<div data-role="page-region" aria-live="polite">
+    <div class="state empty-state" role="status">
+        <p class="state__title">Reading the cluster…</p>
+        <p>Every worker node is assessed from the pods that are ready right now.</p>
     </div>
 </div>
 
-<section class="card synthetic-portfolio-link" data-role="synthetic-portfolio-link" aria-labelledby="synthetic-portfolio-title">
-    <div class="synthetic-portfolio-link__visual" aria-hidden="true">
-        <svg viewBox="0 0 64 64" role="presentation">
-            <path d="M18 18H32M32 18L45 31M32 18L19 45M45 31V45M19 45H45"></path>
-            <circle cx="18" cy="18" r="7"></circle>
-            <circle cx="32" cy="18" r="5"></circle>
-            <circle cx="45" cy="31" r="5"></circle>
-            <circle cx="19" cy="45" r="7"></circle>
-            <circle cx="45" cy="45" r="7"></circle>
-        </svg>
-    </div>
+<template data-role="ready-template">
+    <p class="fi-lead" data-role="lead"></p>
 
+    <section aria-labelledby="fi-nodes-title">
+        <div class="section-header">
+            <h3 class="section-header__title" id="fi-nodes-title">If this node stops</h3>
+            <span class="section-header__note">Worst first. Select a node to see why.</span>
+        </div>
+        <div class="fi-nodes" data-role="node-list" role="group" aria-label="Worker nodes"></div>
+    </section>
+
+    <section class="card fi-detail" data-role="detail" aria-live="polite">
+        <h3 class="fi-detail__headline" data-role="detail-headline"></h3>
+        <div class="fi-stats" data-role="detail-stats"></div>
+        <p class="fi-caveat" data-role="detail-caveat" hidden></p>
+
+        <h4 class="fi-subtitle">Services on this node</h4>
+        <div class="fi-services" data-role="detail-services"></div>
+
+        <h4 class="fi-subtitle" data-role="workflow-title">Workflows</h4>
+        <div class="fi-workflows" data-role="detail-workflows"></div>
+
+        <div class="fi-detail__next">
+            <a class="action-button" data-role="recommend-link" href="#">See how to reduce this risk</a>
+            <span class="muted" data-role="recommend-note"></span>
+        </div>
+    </section>
+
+    <details class="card fi-more" data-role="workflow-details">
+        <summary>Workflows used <span class="muted" data-role="workflow-count"></span></summary>
+        <p class="ui-note" data-role="workflow-basis-text"></p>
+        <div class="fi-workflow-picker" data-role="workflow-picker"></div>
+        <button type="button" class="secondary-button" data-role="apply-workflows" hidden>Recalculate with these</button>
+    </details>
+
+    <details class="card fi-more">
+        <summary>Where each service runs</summary>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead><tr><th scope="col">Service</th><th scope="col">Ready replicas</th><th scope="col">Nodes</th></tr></thead>
+                <tbody data-role="placement-body"></tbody>
+            </table>
+        </div>
+    </details>
+
+    <details class="card fi-more">
+        <summary>How this was calculated</summary>
+        <ul class="fi-assumptions" data-role="assumptions"></ul>
+        <p class="ui-note" data-role="evidence-note"></p>
+        {{ raw_json_panel("fi-raw-json", "View raw answer") }}
+    </details>
+</template>
+
+<section class="card synthetic-portfolio-link fi-synthetic" data-role="synthetic-portfolio-link" aria-labelledby="synthetic-portfolio-title">
     <div class="synthetic-portfolio-link__content">
         <div class="synthetic-portfolio-link__labels">
             <span class="synthetic-portfolio-link__eyebrow">Viva research demonstration</span>
             <span class="synthetic-portfolio-link__badge">Synthetic &amp; disposable</span>
         </div>
-        <h3 id="synthetic-portfolio-title" class="synthetic-portfolio-link__title">
-            Explore failure impact across four workflows
-        </h3>
+        <h3 id="synthetic-portfolio-title" class="synthetic-portfolio-link__title">Synthetic four-workflow portfolio</h3>
         <p class="synthetic-portfolio-link__note">
-            Build the assumed cross-layer graphs, then virtually fail one worker node or compare
-            every node side by side. Demonstration data is kept separate from live cluster evidence.
+            Invented placements for the viva, kept separate from live cluster evidence and never mixed into it.
+            Virtual simulation only: no cluster changes.
         </p>
-        <ul class="synthetic-portfolio-link__facts" aria-label="Synthetic portfolio contents">
-            <li><strong>4</strong><span>workflows</span></li>
-            <li><strong>3</strong><span>worker nodes</span></li>
-            <li><strong>0</strong><span>cluster changes</span></li>
-        </ul>
     </div>
-
     <div class="synthetic-portfolio-link__action">
-        <a class="action-button synthetic-portfolio-link__button" href="/components/failure-impacts/synthetic-portfolio/">
-            <span>Open Synthetic Portfolio</span>
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path d="M4 10h11M11 6l4 4-4 4"></path>
-            </svg>
-        </a>
-        <span class="synthetic-portfolio-link__safety">Safe virtual simulation</span>
+        <a class="action-button synthetic-portfolio-link__button" href="/components/failure-impacts/synthetic-portfolio/">Open Synthetic Portfolio</a>
     </div>
 </section>
-
-<div class="card" style="margin-bottom: var(--space-lg);">
-    <div class="scenario-panel">
-        <div class="scenario-panel__controls">
-            <div class="section-header__title" style="margin-bottom: 4px;">Failure Scenario</div>
-            <label class="scenario-panel__field" for="failure-input-mode">
-                <span>Input source</span>
-                <select
-                    class="scenario-panel__select"
-                    id="failure-input-mode"
-                    data-role="input-mode"
-                >
-                    <option value="deployment-runtime" selected>Live Deployments (no workflow required)</option>
-                    <option value="runtime">Frozen workflow</option>
-                    <option value="portfolio-runtime">Frozen workflow portfolio</option>
-                </select>
-            </label>
-            <div class="scenario-panel__runtime-fields" data-role="runtime-fields">
-                <label class="scenario-panel__field" for="failure-workflow-id" data-role="workflow-field" hidden>
-                    <span data-role="workflow-id-label">Workflow ID</span>
-                    <input
-                        class="scenario-panel__input"
-                        id="failure-workflow-id"
-                        data-role="workflow-id"
-                        type="text"
-                        value=""
-                        placeholder="ID of an approved, frozen workflow graph"
-                        autocomplete="off"
-                    >
-                </label>
-                <label class="scenario-panel__field" for="failure-namespace">
-                    <span>Namespace</span>
-                    <input
-                        class="scenario-panel__input"
-                        id="failure-namespace"
-                        data-role="namespace"
-                        type="text"
-                        value="default"
-                        placeholder="namespace with applications"
-                        autocomplete="off"
-                    >
-                </label>
-            </div>
-            <label class="scenario-panel__field" for="failure-node-selector">
-                <span>Selected worker node</span>
-                <select
-                    class="scenario-panel__select"
-                    id="failure-node-selector"
-                    data-role="node-selector"
-                ></select>
-            </label>
-            <p class="ui-note scenario-panel__note" data-role="input-mode-note">
-                Runs a virtual node failure on the connected cluster's real topology and an approved workflow.
-                The result is a prediction, not an observation, and nothing in the cluster is changed.
-            </p>
-        </div>
-        <button type="button" class="action-button" data-role="reload-button">
-            Simulate Node Failure
-        </button>
-    </div>
-</div>
-
-<div data-role="page-region">
-    <div class="state empty-state" role="status">
-        <p class="state__title">No prediction yet</p>
-        <p>Choose a worker node and select Simulate Node Failure. Workflow evidence is optional for deployment-level findings.</p>
-    </div>
-</div>
-
-<template data-role="deployment-template">
-    <section class="card" data-role="deployment-evidence-note">
-        <h3>Deployment-level findings</h3>
-        <p data-role="deployment-workflow-note"></p>
-        <p class="ui-note">This is a virtual prediction from live pod placement, not an observed failure. No workflow relationships are inferred.</p>
-    </section>
-    <section class="metric-grid" aria-label="Deployment failure impact metrics">
-        {{ metric_card("deployment-failed-node", "Failed Node", icon_name="node", icon_color="red") }}
-        {{ metric_card("deployment-failed-services", "Services Down", icon_name="alert", icon_color="red") }}
-        {{ metric_card("deployment-service-failure-rate", "Service Failure Share", icon_name="target", icon_color="amber") }}
-        {{ metric_card("deployment-services-evaluated", "Ready Services Assessed", icon_name="service", icon_color="purple") }}
-    </section>
-    <div class="section-header">
-        <h3 class="section-header__title">Service outcomes</h3>
-        <span class="section-header__note">Ready replicas before and after the virtual node failure</span>
-    </div>
-    <div class="card table-scroll">
-        <table class="data-table">
-            <thead><tr><th>Service</th><th>Ready before</th><th>Ready lost</th><th>Ready after</th><th>Outcome</th></tr></thead>
-            <tbody data-role="deployment-service-outcomes"></tbody>
-        </table>
-    </div>
-    <div class="section-header">
-        <h3 class="section-header__title">Node Exposure Ranking</h3>
-        <span class="section-header__note">Ranked by services losing their last ready replica; not workflow blast radius</span>
-    </div>
-    <div class="card table-scroll">
-        <table class="data-table">
-            <thead><tr><th>Rank</th><th>Node</th><th>Services down</th><th>Service failure share</th></tr></thead>
-            <tbody data-role="deployment-node-ranking"></tbody>
-        </table>
-    </div>
-    <div class="section-header"><h3 class="section-header__title">Raw Data</h3></div>
-    {{ raw_json_panel("deployment-impact-raw-json", "View Deployment Failure Impact") }}
-</template>
-
-<template data-role="page-template">
-    <section class="metric-grid" aria-label="Failure impact metrics">
-        {{ metric_card("impact-failed-node", "Failed Node", icon_name="node", icon_color="red") }}
-        {{ metric_card("impact-blast-radius", "Blast Radius", icon_name="target", icon_color="red") }}
-        {{ metric_card("impact-survivability", "Survivability", icon_name="trend-down", icon_color="amber") }}
-        {{ metric_card("impact-failed-workflow-count", "Failed Workflows", icon_name="alert", icon_color="purple") }}
-    </section>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Impact Comparison</h3>
-    </div>
-    <div class="card impact-compare">
-        <div class="impact-stat">
-            <div class="impact-stat__value" data-metric="impact-blast-radius-large" style="color: var(--color-danger);"></div>
-            <div class="impact-stat__label">Workflow Blast Radius</div>
-            <div class="progress-bar" style="margin-top: var(--space-sm);">
-                <div class="progress-bar__fill progress-bar__fill--danger" data-role="impact-blast-radius-bar"></div>
-            </div>
-            <div class="status-badge status-badge--danger impact-stat__tag" data-role="impact-blast-radius-tag"></div>
-        </div>
-        <div class="impact-stat">
-            <div class="impact-stat__value" data-metric="impact-survivability-large" style="color: var(--color-success);"></div>
-            <div class="impact-stat__label">Workflow Survivability</div>
-            <div class="progress-bar" style="margin-top: var(--space-sm);">
-                <div class="progress-bar__fill progress-bar__fill--success" data-role="impact-survivability-bar"></div>
-            </div>
-        </div>
-    </div>
-
-    <section data-role="portfolio-workflow-section" hidden>
-        <div class="section-header">
-            <h3 class="section-header__title">Portfolio Workflow Outcomes</h3>
-            <span class="section-header__note">One result for each workflow in the portfolio</span>
-        </div>
-        <div class="card">
-            <div class="workflow-outcome-list" data-role="portfolio-workflow-outcomes"></div>
-        </div>
-    </section>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Failure Chain</h3>
-        <span class="section-header__note">Derived by matching deployment pods to the failed node</span>
-    </div>
-    <div class="card">
-        <div class="failure-chain" data-role="failure-chain"></div>
-    </div>
-
-    <div class="grid-2" style="margin-top: var(--space-md);">
-        <div class="card">
-            <div class="section-header__title" style="margin-bottom: var(--space-sm);">Failed Services</div>
-            <div class="service-list" data-role="impact-failed-services"></div>
-        </div>
-        <div class="card">
-            <div class="section-header__title" style="margin-bottom: var(--space-sm);">Failed Workflows</div>
-            <div class="service-list" data-role="impact-failed-workflows"></div>
-        </div>
-    </div>
-
-    <section data-role="root-causes-section">
-        <div class="section-header">
-            <h3 class="section-header__title">Root Causes</h3>
-        </div>
-        <div class="card" data-role="impact-root-causes"></div>
-    </section>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Node Risk Ranking</h3>
-        <span class="section-header__note">Risk labels are interface classifications</span>
-    </div>
-    <div class="card">
-        <div class="table-scroll">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Rank</th>
-                        <th scope="col">Node</th>
-                        <th scope="col">Blast Radius</th>
-                        <th scope="col">Risk</th>
-                    </tr>
-                </thead>
-                <tbody data-role="impact-node-ranking-body"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="section-header">
-        <h3 class="section-header__title">Raw Data</h3>
-    </div>
-    {{ raw_json_panel("impact-raw-json", "View Raw FailureImpactReport") }}
-
-    <div class="section-header">
-        <h3 class="section-header__title">Future Work</h3>
-    </div>
-    <div class="card">
-        <ul class="future-work-list">
-            <li>Interactive cross-layer graph view</li>
-            <li>Saved workflow-portfolio definitions</li>
-            <li>Chaos-injection result comparison</li>
-            <li>Prediction accuracy tracking against observed outcomes</li>
-        </ul>
-    </div>
-</template>
 {% endblock %}
 
 {% block page_js %}
+<script src="{{ url_for('static', path='/js/failure-impact-view.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/components/failure_impacts.js') }}" defer></script>
 {% endblock %}

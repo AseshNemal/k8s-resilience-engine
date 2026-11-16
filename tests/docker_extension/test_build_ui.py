@@ -248,9 +248,16 @@ def test_the_trace_bridge_still_loads_after_the_namespace_script_on_the_workflow
     assert page.index('src="namespaces.js"') < page.index('src="trace-service.js"')
 
 
-def test_the_failure_impact_page_still_exposes_the_box_the_suggestions_attach_to(built):
-    # If an owner renames this hook the suggestions would silently stop; this makes that visible.
-    assert 'data-role="namespace"' in html(built, "failure-impacts.html")
+def test_the_failure_impact_page_asks_for_no_typed_input_and_loads_its_scripts_in_order(built):
+    # The application comes from the cluster (a dropdown filled by the script), never a typed namespace or workflow ID.
+    page = html(built, "failure-impacts.html")
+    for role in ("namespace-select", "page-region", "node-list", "recommend-link", "workflow-picker", "evidence-badge"):
+        assert f'data-role="{role}"' in page, role
+    for gone in ('data-role="namespace"', 'data-role="workflow-id"', 'data-role="input-mode"', 'data-role="failed-node"'):
+        assert gone not in page, f"{gone} is a typed technical input the page no longer asks for"
+    assert page.index("failure-impact-view.js") < page.index("failure_impacts.js")
+    # In the extension the hand-off link is the sidebar's own relative link (recommendations.html), never an absolute route.
+    assert 'href="recommendations.html"' in page
 
 
 def test_the_recommendations_page_evaluates_all_workflows_without_a_workflow_dropdown(built):

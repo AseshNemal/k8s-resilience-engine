@@ -378,6 +378,7 @@
 {% endblock %}
 
 {% block page_js %}
+<script src="{{ url_for('static', path='/js/workflow-names.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-render.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-topology.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-workflow-risk.js') }}" defer></script>

@@ -216,6 +216,30 @@ def targets(runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtim
     return {"targets": out, "blockingRun": _brief(runtime[0].blocking_run())}
 
 
+@router.get("/entry-point")
+def entry_point(namespace: str = Query(..., min_length=1)) -> dict:
+    """Is there an address the workflow check can call? Reads the namespace's Services; creates nothing, sends no request.
+
+    On the Docker Desktop cluster every application Service is ClusterIP, so a person creates ONE labelled LoadBalancer Service from
+    the shipped manifest (see ``app/integrations/kubernetes/probe_entry.py``). This says whether it exists, what address the cluster gave
+    it, and the loopback URL to try. Whether that URL answers is for ``Test it`` to show, never assumed here.
+    """
+    from urllib.parse import quote
+
+    from app.engine.deployment_topology_modeling.discovery import ClusterAccessError, _classify, get_cluster_source
+    from app.integrations.kubernetes.probe_entry import MANIFEST_PATH, describe_entry_points
+    from app.integrations.probe.http_fetch import allowed_probe_port
+
+    try:
+        services = get_cluster_source().list_objects("services", f"/api/v1/namespaces/{quote(namespace, safe='')}/services")
+    except ClusterAccessError as error:      # not connected, credential rejected...: the same coded errors discovery gives
+        raise _classify(error) from None
+    entries = describe_entry_points(services, allowed_probe_port)
+    state = "none" if not entries else ("ready" if any(entry["address"] for entry in entries) else "pending")
+    return {"namespace": namespace, "state": state, "entries": entries, "readOnly": True,
+            "manifest": MANIFEST_PATH, "applyCommand": f"kubectl apply -f {MANIFEST_PATH}"}
+
+
 def _brief(run: dict | None) -> dict | None:
     return None if run is None else {"runKey": run["runKey"], "status": run["status"], "targetKind": run["targetKind"]}
 

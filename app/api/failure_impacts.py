@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.engine.failure_impact_prediction.service import (
     RuntimeInputUnavailableError,
+    build_cluster_failure_overview,
     build_portfolio_failure_impact_report,
     predict_runtime_deployment_failure_impact_with_evidence,
     predict_runtime_failure_impact_with_evidence,
@@ -18,6 +19,26 @@ router = APIRouter(
     prefix="/api/failure-impacts",
     tags=["Failure Impact Prediction"],
 )
+
+
+@router.get(
+    "/overview",
+    responses={
+        404: {"description": "The named namespace holds no application"},
+        502: {"description": "The connected cluster could not be read"},
+        503: {"description": "No cluster is connected"},
+    },
+)
+def read_failure_overview(
+    namespace: str | None = Query(None, description="Application namespace; default: the only one with applications"),
+    workflow_id: list[str] = Query(default=[], description="Workflows to evaluate; default: the ones that apply"),
+) -> dict:
+    """Every worker node assessed as the failed node, with the workflows that apply. Read-only and live.
+
+    One call answers the Failure impact page: ranked nodes, the services and workflows each would take down,
+    and the evidence the answer rests on. A prediction from placement, never an observation.
+    """
+    return build_cluster_failure_overview(namespace, tuple(workflow_id))
 
 
 @router.get(

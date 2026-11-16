@@ -192,7 +192,7 @@ def build_declared_portfolio(namespace: str = "default", failed_node: str | None
             first_error = first_error or error
             not_evaluated.append(_not_evaluated(graph.workflow_id, error))
             continue
-        workflows.append({"workflowId": graph.workflow_id, "criticality": graph.criticality, "freezeId": None, "graph": graph})
+        workflows.append({"workflowId": graph.workflow_id, "name": item.display_name, "criticality": graph.criticality, "freezeId": None, "graph": graph})
     return _evaluate(workflows, not_evaluated, first_error, discovery.graph.model_copy(deep=True),
                      EvidenceProvenance(PORTFOLIO_ANALYSIS_SOURCE, namespace, discovery.captured_at, discovery.status, None),
                      failed_node, combination_budget,
@@ -266,7 +266,9 @@ def describe_portfolio(live: LiveRecommendation) -> dict[str, Any]:
     detail["workflowDefinitions"] = (live.details or {}).get("portfolioWorkflows")
     detail["workflowRisk"] = _workflow_risk(live)
     detail["portfolio"] = {
-        "workflows": [{"workflowId": w["workflowId"], "criticality": w["criticality"]} for w in live.evidence.get("workflows", [])],
+        # "name" appears only for a workflow its author named (display only; the id stays the identity)
+        "workflows": [{"workflowId": w["workflowId"], **({"name": w["name"]} if w.get("name") else {}), "criticality": w["criticality"]}
+                      for w in live.evidence.get("workflows", [])],
         "notEvaluated": live.evidence.get("workflowsNotEvaluated", []),
         "basis": live.evidence.get("workflowBasis"),
         "note": NOT_APPROVABLE if analysis_only else "All workflows are evaluated together. A combined fix is approved and applied as one proposal.",

@@ -101,9 +101,11 @@
             return node;
         };
 
+        const workflowLabel = (id) => (window.ResilienceWorkflowNames ? window.ResilienceWorkflowNames.label(id) : id);
+
         function chips(ids, className) {
             const wrap = make("span", null, "rec-portfolio__chips");
-            list(ids, 50).forEach((id) => wrap.append(make("span", text(id, 80), `rec-portfolio__chip ${className || ""}`.trim())));
+            list(ids, 50).forEach((id) => wrap.append(make("span", text(workflowLabel(id), 80), `rec-portfolio__chip ${className || ""}`.trim())));
             return wrap;
         }
 
@@ -124,7 +126,7 @@
             const select = make("select", null, "rec-inputs__input rec-portfolio__select");
             select.setAttribute("aria-label", `Workflow to review ${partName(part)} for`);
             options.forEach((id) => {
-                const option = make("option", id);
+                const option = make("option", workflowLabel(id));
                 option.value = id;
                 select.append(option);
             });
@@ -160,7 +162,7 @@
             } else if (exposed.length) {
                 const at = candidate.workflows.exposedAt || {};
                 const wrap = chips(exposed, "rec-portfolio__chip--warn");
-                wrap.append(make("span", exposed.map((id) => `${id} if ${list(at[id], 20).join(" or ")} fails`).join("; "), "rec-portfolio__muted"));
+                wrap.append(make("span", exposed.map((id) => `${workflowLabel(id)} if ${list(at[id], 20).join(" or ")} fails`).join("; "), "rec-portfolio__muted"));
                 box.append(line("Still exposed", wrap));
             } else {
                 box.append(line("Still exposed", make("span", "nothing", "rec-portfolio__muted")));
@@ -207,9 +209,9 @@
             }
             const detail = s.detail;
             const workflows = list(detail.portfolio && detail.portfolio.workflows, 100);
-            root.append(make("p", `${workflows.length} workflows weighed by criticality: ${workflows.map((w) => `${text(w.workflowId, 80)} (${w.criticality})`).join(", ")}.`, "rec-portfolio__sub"));
+            root.append(make("p", `${workflows.length} workflows weighed by criticality: ${workflows.map((w) => `${text(workflowLabel(w.workflowId), 80)} (${w.criticality})`).join(", ")}.`, "rec-portfolio__sub"));
             list(detail.portfolio && detail.portfolio.notEvaluated, 20).forEach((item) => {
-                root.append(make("p", `Not evaluated: ${text(item.workflowId, 80)}. ${text(item.message, 300)}`, "rec-portfolio__warn"));
+                root.append(make("p", `Not evaluated: ${text(workflowLabel(item.workflowId), 80)}. ${text(item.message, 300)}`, "rec-portfolio__warn"));
             });
             const { ranked, others } = ordered(detail);
             const lead = headline(detail);

@@ -518,3 +518,27 @@ test("a context without any declared workflows behaves exactly as before", async
     assert.equal(view.workflowKind, "frozen");
     assert.deepEqual(plain(view.workflows.map((w) => w.declared)), [false]);
 });
+
+test("a hand-off from the Failure impact page preselects the application and node once, for that cluster only", async () => {
+    const pending = [{ namespace: "shop", failedNode: "worker-2", fingerprint: "cluster-A", at: Date.now() }];
+    const body = context({ workflows: [workflow("a")], workflowId: "a", ready: true, namespace: "shop" });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/live/detail": detailBody() });
+    env.takeHandoff = () => pending.shift() || null;
+    const c = C.createController(env);
+    await c.start();
+    assert.match(calls[0], /namespace=shop/, "the hand-off's application is what the first context read asks for");
+    assert.equal(c.selection().failedNode, "worker-2");
+    assert.match(calls.at(-1), /failed_node=worker-2/);
+    assert.equal(pending.length, 0, "taken once");
+});
+
+test("a hand-off made on another cluster is dropped, never applied", async () => {
+    const body = context({ workflows: [workflow("a")], workflowId: "a", ready: true });
+    const { env, calls } = makeEnv({ "/api/recommendations/context": body, "/api/recommendations/live/detail": detailBody() });
+    const pending = [{ namespace: "shop", failedNode: "worker-2", fingerprint: "SOME-OTHER-CLUSTER", at: Date.now() }];
+    env.takeHandoff = () => pending.shift() || null;     // one-shot, as the page's own reader is
+    const c = C.createController(env);
+    await c.start();
+    assert.equal(c.selection().failedNode, "", "the node chosen on the other cluster is cleared");
+    assert.ok(calls.every((url) => !url.includes("worker-2")), "nothing chosen on one cluster is sent to another");
+});

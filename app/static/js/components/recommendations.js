@@ -1230,6 +1230,7 @@
 
     function render(v) {
         lastView = v;
+        if (window.ResilienceWorkflowNames) window.ResilienceWorkflowNames.use(v && v.detail);
         restorePage(v);
         renderContext(v);
         renderCase(v);
@@ -1474,6 +1475,16 @@
         // Aggregation evaluates every workflow and worker on the server.
         fetchJson: (url) => fetchJson(url, { timeout: allWorkflows ? 120000 : 45000 }),
         clusterIdentity,
+        takeHandoff: () => {
+            // Left by the Failure impact page; used once and only while fresh (see failure-impact-view.js).
+            const key = "resilience.failure-impact.handoff.v1";
+            try {
+                const record = JSON.parse(window.localStorage.getItem(key) || "null");
+                window.localStorage.removeItem(key);
+                const age = record && typeof record.at === "number" ? Date.now() - record.at : Infinity;
+                return age <= 10 * 60 * 1000 ? record : null;
+            } catch (_error) { return null; }
+        },
         onClusterChange: () => {
             preferredChange = null;
             if (portfolioPanel) portfolioPanel.clear();

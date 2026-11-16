@@ -1,0 +1,28 @@
+# The workflow check's entry point on the DOCKER DESKTOP cluster. NOT APPLIED. A person creates it once, by hand, and deletes it after
+# the experiment (the commands are in docs/MEMBER4_KIND_VALIDATION_RUNBOOK.md, section 7). It is ONE new Service: it changes no
+# Deployment, no pod and no existing Service.
+#
+# Every application Service on this cluster is ClusterIP, so nothing is reachable from this computer. A LoadBalancer Service is
+# published on this computer's localhost by Docker Desktop's load-balancer support (expectation: not yet verified on this machine;
+# the "Test it" button on the Prove step makes three GET requests and says whether it worked).
+#
+# Port 8080 is one the probe may reach. It forwards to the application's own port 9080 on pods on ANY worker, so the entry point
+# survives the loss of one worker as long as another worker still has a ready replica.
+#
+# The label marks it as the entry point: topology discovery leaves a Service carrying it out of the application's model, so
+# Overview, Failure impact and Recommendations do not see a second "service" over the same pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: resilience-probe-entry
+  namespace: bookinfo
+  labels:
+    resilience-engine.sliit/probe-entry: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: productpage
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 9080

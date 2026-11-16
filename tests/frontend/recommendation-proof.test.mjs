@@ -720,3 +720,68 @@ test("the observed data is read one tab at a time, charts first, and a tab is on
     assert.equal(t.root.querySelectorAll(".prf-chart").length, 0);
     assert.equal(t.network.calls.length, before);
 });
+
+// ---- the workflow check's entry point ----------------------------------------------------------------------------------------
+
+const ENTRY = `${BASE}/entry-point?namespace=bookinfo`;
+const entryAnswer = (over = {}) => ({ namespace: "bookinfo", state: "ready", readOnly: true, applyCommand: "kubectl apply -f x.yaml",
+    entries: [{ service: "resilience-probe-entry", type: "LoadBalancer", port: 8080, address: "172.18.255.200", url: "http://127.0.0.1:8080/", portAllowed: true }], ...over });
+
+test("opening the step never looks for the entry point; only the explicit button does, and it only reads", async () => {
+    const t = open();
+    await begin(t);
+    assert.equal(t.network.count("GET", ENTRY), 0);
+    await press(t, "btn-prf-entry");
+    assert.equal(t.network.count("GET", ENTRY), 1);
+    t.network.respond("GET", ENTRY, 200, entryAnswer());
+    await flush();
+    assert.ok(t.network.calls.every((c) => c.method === "GET"), "nothing is created or changed by looking");
+});
+
+test("a found entry point offers its address, which fills the field but is never called a working check", async () => {
+    const t = open();
+    await begin(t);
+    await press(t, "btn-prf-entry");
+    t.network.respond("GET", ENTRY, 200, entryAnswer());
+    await flush();
+
+    assert.ok(t.text().includes("resilience-probe-entry") && t.text().includes("that is what shows it answers"));
+    await press(t, "btn-prf-use-entry");
+    assert.equal(t.root.querySelector("#prf-probe-url").value, "http://127.0.0.1:8080/");
+    assert.equal(t.network.count("POST", `${BASE}/probe-test`), 0, "choosing an address sends no request to the application");
+});
+
+test("no entry point says how to create it once; one without an address yet says to look again; a port the check may not reach is said", async () => {
+    let t = open();
+    await begin(t);
+    await press(t, "btn-prf-entry");
+    t.network.respond("GET", ENTRY, 200, entryAnswer({ state: "none", entries: [] }));
+    await flush();
+    assert.ok(t.text().includes("No entry point yet") && t.text().includes("kubectl apply -f x.yaml") && t.text().includes("changes no workload"));
+    assert.equal(t.root.querySelector("#btn-prf-use-entry"), null);
+
+    t = open();
+    await begin(t);
+    await press(t, "btn-prf-entry");
+    t.network.respond("GET", ENTRY, 200, entryAnswer({ state: "pending", entries: [{ service: "s", port: 8080, address: null, url: "http://127.0.0.1:8080/", portAllowed: true }] }));
+    await flush();
+    assert.ok(t.text().includes("has not given it an address yet"));
+
+    t = open();
+    await begin(t);
+    await press(t, "btn-prf-entry");
+    t.network.respond("GET", ENTRY, 200, entryAnswer({ entries: [{ service: "s", port: 9080, address: "1.2.3.4", url: "http://127.0.0.1:9080/", portAllowed: false }] }));
+    await flush();
+    assert.ok(t.text().includes("not one the check may reach"));
+    assert.equal(t.root.querySelector("#btn-prf-use-entry"), null, "an address that would be refused is not offered");
+});
+
+test("a failed lookup is said, never read as 'no entry point'", async () => {
+    const t = open();
+    await begin(t);
+    await press(t, "btn-prf-entry");
+    t.network.respond("GET", ENTRY, 503, { detail: { code: "CLUSTER_NOT_CONNECTED", message: "No Kubernetes cluster is connected." } });
+    await flush();
+    assert.ok(!t.text().includes("No entry point yet"));
+    assert.ok(t.text().includes("connected"));
+});

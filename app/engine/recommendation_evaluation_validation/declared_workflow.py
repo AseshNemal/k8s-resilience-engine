@@ -62,6 +62,7 @@ class DeclaredWorkflow:
     declaration_sha256: str      # of the whole file, so the exact declaration is identifiable
     source_name: str             # the file's name only, never its path
     namespace: str | None = None
+    display_name: str | None = None        # the person's own name for it (editor revisions); the id stays the identity
 
     def to_dict(self) -> dict[str, Any]:
         return {"workflowId": self.graph.workflow_id, "declaredBy": self.declared_by, "note": self.note,
@@ -166,7 +167,8 @@ def load_research_workflows(path: str | Path | None = None) -> list[DeclaredWork
             raise _invalid("A file declaration and a managed workflow share an ID; rename the file declaration")
         workflows.append(DeclaredWorkflow(WorkflowGraph.model_validate(row["graph"]), row["actor"],
             f"Reviewed editor revision {row['version']}. Dependency labels remain declarations.",
-            service.managed_workflow_digest(row), "workflow-editor", row["namespace"]))
+            service.managed_workflow_digest(row), "workflow-editor", row["namespace"],
+            row.get("name") if isinstance(row.get("name"), str) and row.get("name").strip() else None))
     return workflows
 
 

@@ -46,6 +46,13 @@ def _report_for_node(deployment: DeploymentGraph, failed_node: str) -> Deploymen
     )
 
 
+def predict_node_service_impacts(deployment: DeploymentGraph, failed_node: str) -> list[DeploymentServiceImpact]:
+    """Per-service outcome of one virtual node failure, without the all-node ranking (one pass, same rules)."""
+    if failed_node not in {node.name for node in deployment.nodes}:
+        raise ValueError(f"Failed node '{failed_node}' is not present in the deployment graph")
+    return [_service_impact(service, failed_node) for service in deployment.services]
+
+
 def predict_deployment_failure_impact(
     deployment: DeploymentGraph,
     failed_node: str,

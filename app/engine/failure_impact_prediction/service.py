@@ -23,6 +23,7 @@ from app.engine.failure_impact_prediction.models import (
 from app.engine.failure_impact_prediction.node_failure_simulator import (
     simulate_node_failure,
 )
+from app.engine.failure_impact_prediction.overview import build_failure_overview
 from app.engine.failure_impact_prediction.portfolio_impact import (
     predict_portfolio_failure_impact,
 )
@@ -38,6 +39,7 @@ from app.engine.failure_impact_prediction.service_survival import (
 from app.engine.failure_impact_prediction.workflow_survival import (
     calculate_workflow_survival,
 )
+from app.shared.evidence_errors import EvidenceError
 from app.shared.schemas.deployment import DeploymentGraph
 from app.shared.schemas.failure_impact import (
     FailureImpactReport,
@@ -145,6 +147,65 @@ def predict_runtime_deployment_failure_impact_with_evidence(
     return report, discovery
 
 
+def build_cluster_failure_overview(
+    namespace: str | None = None,
+    workflow_ids: tuple[str, ...] = (),
+) -> dict:
+    """Every worker node of the connected cluster's application assessed as the failed node, from one read.
+
+    The application is the requested namespace, or the only namespace that holds applications. With several and
+    none requested, the answer lists them and asks for a choice (it never picks one). Workflows come from
+    ``workflow_basis`` (frozen first, else declared; never invented). Reads only; changes nothing.
+    """
+    from app.engine.deployment_topology_modeling.discovery_all import discover_all
+    from app.engine.failure_impact_prediction import workflow_basis
+
+    overview = discover_all(include_system=False)
+    applications = [result for result in overview.namespaces if result.graph.services]
+    names = [result.namespace for result in applications]
+    requested = (namespace or "").strip() or None
+
+    base = {
+        "readOnly": True,
+        "isPrediction": True,
+        "capturedAt": overview.captured_at,
+        "cluster": {"fingerprint": overview.cluster.connection_fingerprint},
+        "namespaces": names,
+    }
+    if requested and requested not in names:
+        raise EvidenceError(
+            "APPLICATION_NOT_FOUND",
+            f"The namespace {requested} holds no application in the connected cluster.",
+            http_status=404, component="failure_impact",
+        )
+    if not requested:
+        if len(names) == 1:
+            requested = names[0]
+        else:
+            return {**base, "state": "choose-application" if names else "no-application", "namespace": None}
+
+    result = next(item for item in applications if item.namespace == requested)
+    incomplete = sorted(name for name, evidence in result.service_evidence.items() if not evidence.complete)
+    candidates, problems = workflow_basis.resolve_workflows(result, requested, workflow_ids)
+    included = [candidate.basis for candidate in candidates if candidate.included]
+    body = build_failure_overview(result.graph, included)
+    return {
+        **base,
+        "state": "ready",
+        "namespace": requested,
+        "namespaceChoice": "requested" if namespace else "only-application",
+        "topology": {
+            "status": result.status,
+            "complete": not incomplete and result.status != "partial",
+            "incompleteServices": incomplete,
+            "warnings": sorted({warning.code for warning in result.warnings}),
+        },
+        "basis": {**workflow_basis.basis_label(candidates), "workflows": workflow_basis.describe_candidates(candidates),
+                  "problems": problems},
+        **body,
+    }
+
+
 def predict_demo_failure_impact(failed_node: str) -> FailureImpactReport:
     """Run the real predictor over disclosed Component 3 contract fixtures."""
 
@@ -249,6 +310,7 @@ def get_sample_failure_impact() -> FailureImpactReport:
 
 
 __all__ = [
+    "build_cluster_failure_overview",
     "build_portfolio_failure_impact_report",
     "build_current_cross_layer_graph",
     "get_demo_deployment",

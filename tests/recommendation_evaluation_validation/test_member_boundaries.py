@@ -35,6 +35,11 @@ AUTHORIZED_INTEGRATION_PATHS = {
     "app/api/failure_impacts.py", "app/api/workflows.py",
     "app/engine/failure_impact_prediction/deployment_impact.py",
     "app/engine/failure_impact_prediction/service.py",
+    # Member 3's own whole-cluster overview (the Failure impact page's single read) and its page styles.
+    "app/engine/failure_impact_prediction/overview.py", "app/engine/failure_impact_prediction/workflow_basis.py",
+    "app/static/css/pages/failure_impacts.css",
+    # The probe entry point is a Service that selects the application's pods; discovery must leave it out of the topology (two one-line filters).
+    "app/engine/deployment_topology_modeling/discovery.py", "app/engine/deployment_topology_modeling/live_state/ownership_resolver.py",
     "app/engine/workflow_dependency_modeling/management.py",
     "app/engine/workflow_dependency_modeling/service.py",
     # New files of the same authorized hybrid-workflow work: service.py (above) imports test_discovery, which imports the

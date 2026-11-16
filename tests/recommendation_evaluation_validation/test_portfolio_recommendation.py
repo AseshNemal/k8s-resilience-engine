@@ -364,3 +364,21 @@ def test_overview_display_evidence_matches_the_predictor_without_changing_approv
     assert detail["workflowExposure"]["before"] == {"checkout": ["w1"], "browse": ["w2"]}
     assert detail["workflowDefinitions"] == live.details["portfolioWorkflows"]
     assert all(c["approval"]["ready"] is False for c in detail["candidates"])
+
+
+
+def test_a_workflows_own_name_is_reported_beside_its_unchanged_id(use_cluster, tmp_path, monkeypatch):
+    import dataclasses
+    from app.engine.recommendation_evaluation_validation import portfolio_pipeline
+    use_cluster(two_problem_cluster())
+    declared_file(tmp_path, monkeypatch)
+    real = portfolio_pipeline.load_research_workflows
+    monkeypatch.setattr(portfolio_pipeline, "load_research_workflows",
+                        lambda path=None: [dataclasses.replace(w, display_name="Checkout page") if w.graph.workflow_id == "checkout" else w
+                                           for w in real(path)])
+
+    detail = describe_portfolio(portfolio_pipeline.build_declared_portfolio("shop", failed_node="w1"))
+
+    assert detail["portfolio"]["workflows"] == [{"workflowId": "checkout", "name": "Checkout page", "criticality": 0.9},
+                                                {"workflowId": "browse", "criticality": 0.3}]
+    assert detail["baselineImpact"]["failedWorkflows"] == ["checkout"], "ids stay the identity everywhere else"

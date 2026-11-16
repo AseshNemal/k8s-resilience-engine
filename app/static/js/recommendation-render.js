@@ -703,6 +703,9 @@
         return node;
     }
 
+    /** Display name of a workflow (see workflow-names.js); the id is the fallback and stays the key. */
+    function workflowLabel(id) { return typeof window !== "undefined" && window.ResilienceWorkflowNames ? window.ResilienceWorkflowNames.label(id) : id; }
+
     /** The problem in one sentence, from the engine's own failure-impact result. Null when the engine reported none: nothing is guessed. */
     function problemStatement(detail) {
         const impact = detail && detail.baselineImpact;
@@ -748,7 +751,7 @@
         } else {
             lostLine.append(element(doc, "span", "No service is lost when this node fails.", "rec-impact__lost-label"));
         }
-        if (failedWorkflows.length) lostLine.append(element(doc, "p", `Workflow lost: ${failedWorkflows.join(", ")}`, "ui-note"));
+        if (failedWorkflows.length) lostLine.append(element(doc, "p", `Workflow lost: ${failedWorkflows.map(workflowLabel).join(", ")}`, "ui-note"));
 
         // The four figures are the research reading of the same result.
         const tiles = element(doc, "div", undefined, "rec-impact__tiles rec-research-only");
@@ -823,9 +826,9 @@
             const exposed = candidate.workflows.exposed;
             const benefit = candidate.coverage?.protectsEveryWorkflow
                 ? "Predicted to protect every workflow against the loss of any one worker."
-                : `Predicted to protect: ${protectedIds.length ? protectedIds.join(", ") : "no additional workflow against every worker failure"}.`;
+                : `Predicted to protect: ${protectedIds.length ? protectedIds.map(workflowLabel).join(", ") : "no additional workflow against every worker failure"}.`;
             container.append(element(doc, "p", `Why this helps: ${benefit} Protection is checked against every worker's failure.`, "rec-selected__why"));
-            if (Array.isArray(exposed) && exposed.length) container.append(element(doc, "p", `Still exposed: ${exposed.join(", ")}.`, "ui-note"));
+            if (Array.isArray(exposed) && exposed.length) container.append(element(doc, "p", `Still exposed: ${exposed.map(workflowLabel).join(", ")}.`, "ui-note"));
         }
         const predicted = candidate.predicted || {};
         container.append(gauge(doc, predicted.blastRadiusBefore, predicted.blastRadiusAfter), element(doc, "p", "Predicted, not observed.", "ui-note"));

@@ -248,6 +248,14 @@
                 s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; s.ctx = null;
             }
             s.identity = identity;
+            // "See how to reduce this risk" on the Failure impact page leaves the application and node it showed, bound to the cluster
+            // fingerprint it was read from. It is taken once. A different cluster's fingerprint clears it again just below.
+            const handoff = env.takeHandoff ? env.takeHandoff() : null;
+            if (handoff && typeof handoff.fingerprint === "string" && handoff.fingerprint) {
+                s.fingerprint = text(handoff.fingerprint, 200);
+                s.namespace = text(handoff.namespace, 253);
+                s.failedNode = text(handoff.failedNode, 253);
+            }
 
             let ctx;
             try {

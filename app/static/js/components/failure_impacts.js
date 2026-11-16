@@ -1,585 +1,367 @@
 /*
- * Failure Impact Prediction page script.
- * Owned by: Member 3 (K.V.D.Y.R. Karawita).
+ * Failure impact page script. Owned by: Member 3 (K.V.D.Y.R. Karawita).
  *
- * Runs Component 3's deterministic simulation over validated runtime inputs: a
- * frozen workflow from Component 1 and the connected cluster's live topology
- * from Component 2. All survival and blast-radius calculations happen in the
- * Python engine. The result is a prediction about a virtual failure, not an
- * observation, and no live cluster is changed. When the inputs are missing or
- * incomplete the page shows why; it never substitutes other data.
+ * One read (GET /api/failure-impacts/overview) answers for every worker node of the connected cluster's application:
+ * which services lose their last ready replica, which workflows stop, and why. The page asks for nothing the cluster or
+ * the approved/declared workflows already say: the application is the only one with workloads (or a dropdown), the
+ * workflows are the ones that apply, and the node is the worst one until you choose another.
+ *
+ * All research values come from the Python engine. This file draws them. A missing value is "unknown", never zero.
+ * Everything from the cluster (names, reasons) is untrusted and written with textContent only.
+ * Nothing here writes to the cluster. The result is a prediction about a virtual failure, not an observation.
  */
-
 (function () {
-    const DEPLOYMENT_IMPACT_ENDPOINT = "/api/failure-impacts/deployment/runtime";
-    const RUNTIME_IMPACT_ENDPOINT = "/api/failure-impacts/runtime";
-    const PORTFOLIO_RUNTIME_ENDPOINT = "/api/failure-impacts/portfolio/runtime";
-    // The topology is read through the discovery envelope, not the bare graph, so the page can say how
-    // complete it is and show an explicit failure when the cluster cannot be read.
-    const DISCOVERY_ENDPOINT = "/api/deployments/discovery";
+    "use strict";
+
+    const OVERVIEW = "/api/failure-impacts/overview";
+    const NAMESPACE_KEY = "resilience.failure-impact.namespace.v1";
+    const view = window.ResilienceFailureView;
     const { fetchJson } = window.ResilienceApi;
-    const { describeError, describeDiscovery, renderStateCard, applyBadge } = window.ResilienceConnection;
-    const {
-        formatPercentage,
-        formatCodeLabel,
-        initJsonPanel,
-        updateLastRefreshed,
-    } = window.ResilienceUi;
+    const { describeError, renderStateCard, applyBadge } = window.ResilienceConnection;
+    const { initJsonPanel, updateLastRefreshed } = window.ResilienceUi;
 
-    const region = document.querySelector('[data-role="page-region"]');
-    const template = document.querySelector('[data-role="page-template"]');
-    const reloadButton = document.querySelector('[data-role="reload-button"]');
-    const nodeSelector = document.querySelector('[data-role="node-selector"]');
-    const inputMode = document.querySelector('[data-role="input-mode"]');
-    const workflowIdInput = document.querySelector('[data-role="workflow-id"]');
-    const workflowIdLabel = document.querySelector(
-        '[data-role="workflow-id-label"]'
-    );
-    const namespaceInput = document.querySelector('[data-role="namespace"]');
-    const inputModeNote = document.querySelector('[data-role="input-mode-note"]');
-    const inputSourceBadge = document.querySelector(
-        '[data-role="input-source-badge"]'
-    );
-    const lastRefreshed = document.querySelector('[data-role="last-refreshed"]');
+    const $ = (role, root = document) => root.querySelector(`[data-role="${role}"]`);
+    const region = $("page-region");
+    const template = $("ready-template");
+    const namespaceSelect = $("namespace-select");
+    const evidenceBadge = $("evidence-badge");
+    const basisBadge = $("basis-badge");
+    const refreshButton = $("refresh-button");
 
-    function setMetric(root, name, value) {
-        const element = root.querySelector(`[data-metric="${name}"]`);
-        if (element) element.textContent = value;
+    const state = { data: null, selected: null, namespace: "", workflowIds: [], generation: 0 };
+
+    function el(tag, text, className, attributes) {
+        const node = document.createElement(tag);
+        if (text !== undefined && text !== null) node.textContent = text;
+        if (className) node.className = className;
+        for (const [name, value] of Object.entries(attributes || {})) node.setAttribute(name, value);
+        return node;
     }
 
-    function riskLabel(blastRadius) {
-        if (blastRadius >= 80) return { text: "Critical", variant: "danger" };
-        if (blastRadius >= 50) return { text: "High", variant: "warning" };
-        return { text: "Low", variant: "success" };
+    function badge(descriptor, extra) {
+        return el("span", descriptor.text, `status-badge status-badge--${descriptor.variant}${extra ? " " + extra : ""}`);
     }
 
-    function buildChip(text) {
-        const chip = document.createElement("span");
-        chip.className = "contract-chip";
-        chip.textContent = text;
-        return chip;
+    function remember(key, value) { try { window.localStorage.setItem(key, value); } catch (_error) { /* optional */ } }
+    function recall(key) { try { return window.localStorage.getItem(key) || ""; } catch (_error) { return ""; } }
+
+    function time(iso) {
+        const date = new Date(iso);
+        return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString();
     }
 
-    function populateNodeSelector(deployment) {
-        if (!nodeSelector) return;
+    // ---- header ----------------------------------------------------------------------------------------------------
 
-        const previousSelection = nodeSelector.value;
-        nodeSelector.innerHTML = "";
-
-        deployment.nodes.forEach((node) => {
-            const option = document.createElement("option");
-            option.value = node.name;
-            option.textContent = node.zone
-                ? `${node.name} (${node.zone})`
-                : node.name;
-            nodeSelector.appendChild(option);
-        });
-
-        if (
-            previousSelection &&
-            deployment.nodes.some((node) => node.name === previousSelection)
-        ) {
-            nodeSelector.value = previousSelection;
+    function fillNamespaces(names, chosen) {
+        namespaceSelect.replaceChildren();
+        if (!chosen) {
+            namespaceSelect.appendChild(el("option", names.length ? "Choose an application…" : "No application found", "", { value: "" }));
         }
-    }
-
-    // A missing or invalid input is the person's to fix, so it carries a code the page can tell apart from
-    // a cluster or backend failure.
-    function invalid(message) {
-        return Object.assign(new Error(message), { code: "INVALID_INPUT" });
-    }
-
-    function selectedMode() {
-        return ["deployment-runtime", "portfolio-runtime"].includes(inputMode?.value)
-            ? inputMode.value
-            : "runtime";
-    }
-
-    function runtimeNamespace() {
-        const namespace = namespaceInput?.value.trim() || "";
-        if (!namespace) {
-            throw invalid("Enter the Kubernetes namespace.");
+        for (const name of names) {
+            const option = el("option", name, "", { value: name });
+            if (name === chosen) option.selected = true;
+            namespaceSelect.appendChild(option);
         }
-        return namespace;
+        namespaceSelect.disabled = names.length === 0;
     }
 
-    function runtimeSelection() {
-        const workflowId = workflowIdInput?.value.trim() || "";
-        if (!workflowId) {
-            throw invalid("Enter the frozen workflow ID.");
-        }
-        return { workflowId, namespace: runtimeNamespace() };
+    function describeEvidence(data) {
+        if (data.state !== "ready") return { variant: "info", text: "Live cluster" };
+        const when = time(data.capturedAt);
+        if (data.topology.complete) return { variant: "success", text: `Live cluster · placement complete${when ? " · " + when : ""}` };
+        return { variant: "warning", text: `Live cluster · placement partly unresolved${when ? " · " + when : ""}` };
     }
 
-    function portfolioRuntimeSelection() {
-        const rawWorkflowIds = workflowIdInput?.value || "";
-        const workflowIds = rawWorkflowIds
-            .split(",")
-            .map((workflowId) => workflowId.trim());
+    // ---- node list -------------------------------------------------------------------------------------------------
 
-        if (
-            !rawWorkflowIds.trim() ||
-            workflowIds.some((workflowId) => !workflowId)
-        ) {
-            throw invalid(
-                "Enter one or more frozen workflow IDs separated by commas."
-            );
-        }
-        if (new Set(workflowIds).size !== workflowIds.length) {
-            throw invalid("Workflow IDs must not be duplicated.");
-        }
-        return { workflowIds, namespace: runtimeNamespace() };
-    }
-
-    // Where the topology (and so the list of worker nodes) comes from. Only the namespace is needed, so the
-    // node list can be shown before a workflow has been named.
-    function topologySource() {
-        const namespace = runtimeNamespace();
-        return { endpoint: `${DISCOVERY_ENDPOINT}?namespace=${encodeURIComponent(namespace)}` };
-    }
-
-    // Builds the prediction URL for the selected mode, once the inputs it needs are valid.
-    function impactRequest() {
-        const mode = selectedMode();
-
-        if (mode === "deployment-runtime") {
-            const namespace = runtimeNamespace();
-            return (failedNode) => {
-                const params = new URLSearchParams({ failed_node: failedNode, namespace });
-                return `${DEPLOYMENT_IMPACT_ENDPOINT}?${params.toString()}`;
-            };
-        }
-
-        if (mode === "runtime") {
-            const { workflowId, namespace } = runtimeSelection();
-            return (failedNode) => {
-                const params = new URLSearchParams({
-                    workflow_id: workflowId,
-                    failed_node: failedNode,
-                    namespace,
-                });
-                return `${RUNTIME_IMPACT_ENDPOINT}?${params.toString()}`;
-            };
-        }
-
-        const { workflowIds, namespace } = portfolioRuntimeSelection();
-        return (failedNode) => {
-            const params = new URLSearchParams({
-                failed_node: failedNode,
-                namespace,
+    function renderNodeList(container, data) {
+        container.replaceChildren();
+        for (const node of data.nodes) {
+            const button = el("button", null, `fi-node fi-node--${node.verdict}`, {
+                type: "button", "aria-pressed": String(node.node === state.selected), "data-node": node.node,
             });
-            workflowIds.forEach((workflowId) => {
-                params.append("workflow_id", workflowId);
+            const top = el("span", null, "fi-node__top");
+            top.appendChild(el("span", `#${node.rank}`, "fi-node__rank"));
+            top.appendChild(el("span", node.node, "fi-node__name"));
+            button.appendChild(top);
+            button.appendChild(badge(view.verdict(node.verdict), "fi-node__badge"));
+            button.appendChild(el("span", view.cardLine(node), "fi-node__line"));
+            button.addEventListener("click", () => select(node.node));
+            container.appendChild(button);
+        }
+    }
+
+    // ---- detail ----------------------------------------------------------------------------------------------------
+
+    function dots(service) {
+        const { dots: list, hidden } = view.replicaDots(service);
+        const wrap = el("span", null, "fi-dots", { role: "img",
+            "aria-label": `${service.readyBefore} ready replicas before, ${service.readyAfter} after` });
+        for (const kind of list) wrap.appendChild(el("span", null, `fi-dot fi-dot--${kind}`));
+        if (hidden > 0) wrap.appendChild(el("span", `+${hidden}`, "fi-dots__more"));
+        return wrap;
+    }
+
+    function renderServices(container, node) {
+        container.replaceChildren();
+        const affected = node.services.filter((s) => s.outcome === "failed" || s.outcome === "degraded");
+        const rest = node.services.filter((s) => !affected.includes(s));
+        if (!affected.length) container.appendChild(el("p", "No service of this application has a ready replica on this node.", "muted"));
+        for (const service of affected) {
+            const row = el("div", null, `fi-service fi-service--${service.outcome}`);
+            const head = el("div", null, "fi-service__head");
+            head.appendChild(el("strong", service.service));
+            head.appendChild(badge(view.serviceOutcome(service.outcome)));
+            row.appendChild(head);
+            const body = el("div", null, "fi-service__body");
+            body.appendChild(dots(service));
+            body.appendChild(el("span", `${service.readyBefore} → ${service.readyAfter} ready`, "fi-service__count"));
+            row.appendChild(body);
+            row.appendChild(el("p", service.reason, "fi-service__reason muted"));
+            container.appendChild(row);
+        }
+        if (rest.length) {
+            container.appendChild(el("p", `Unaffected: ${rest.map((s) => s.service).join(", ")}.`, "fi-rest muted"));
+        }
+    }
+
+    function renderWorkflows(container, title, node, data) {
+        container.replaceChildren();
+        const workflows = node.workflows;
+        title.textContent = workflows.length ? `Workflows (${workflows.length})` : "Workflows";
+        if (!workflows.length) {
+            container.appendChild(el("p", data.basis.text, "muted"));
+            return;
+        }
+        for (const workflow of workflows) {
+            const row = el("div", null, `fi-workflow fi-workflow--${workflow.survives ? "survives" : "stops"}`);
+            const head = el("div", null, "fi-service__head");
+            head.appendChild(el("strong", view.workflowLabel(workflow)));
+            head.appendChild(badge(workflow.survives ? { variant: "success", text: "Keeps working" } : { variant: "danger", text: "Stops" }));
+            if (workflow.kind === "declared") head.appendChild(el("span", "declared", "fi-tag", { title: "Declared by a person; not observed or approved." }));
+            row.appendChild(head);
+            row.appendChild(el("p", view.workflowLine(workflow), "fi-service__reason muted"));
+            container.appendChild(row);
+        }
+    }
+
+    function renderStats(container, node) {
+        container.replaceChildren();
+        for (const stat of view.nodeStats(node)) {
+            const tile = el("div", null, `fi-stat fi-stat--${stat.tone}`);
+            tile.appendChild(el("div", stat.value, "fi-stat__value"));
+            tile.appendChild(el("div", stat.label, "fi-stat__label"));
+            if (stat.hint) tile.setAttribute("title", stat.hint);
+            container.appendChild(tile);
+        }
+    }
+
+    function recommendationsHref() {
+        const link = document.querySelector('.sidebar__link[href*="recommendations"]');
+        return link ? link.getAttribute("href") : "/components/recommendations";
+    }
+
+    function renderRecommend(root, node, data) {
+        const link = $("recommend-link", root);
+        const note = $("recommend-note", root);
+        const actionable = node.verdict === "workflow-lost" || node.verdict === "service-down";
+        link.hidden = !actionable;
+        link.setAttribute("href", recommendationsHref());
+        link.onclick = () => {
+            try {
+                window.localStorage.setItem(view.HANDOFF_KEY, JSON.stringify(
+                    view.handoffRecord(data.namespace, node.node, data.cluster.fingerprint)));
+            } catch (_error) { /* The Recommendations page then asks again; nothing is lost. */ }
+        };
+        note.textContent = actionable
+            ? "Opens Recommendations for this node and application."
+            : "Nothing goes down when this node stops, so there is nothing to fix for it.";
+    }
+
+    function renderDetail(root, data) {
+        const node = data.nodes.find((n) => n.node === state.selected) || data.nodes[0];
+        $("detail-headline", root).textContent = node.headline;
+        renderStats($("detail-stats", root), node);
+        const caveat = $("detail-caveat", root);
+        caveat.textContent = data.basis.kind === "frozen" || data.basis.kind === "none" ? "" : data.basis.text +
+            " Whether a workflow really needs each service has not been tested on the cluster.";
+        caveat.hidden = !caveat.textContent;
+        renderServices($("detail-services", root), node);
+        renderWorkflows($("detail-workflows", root), $("workflow-title", root), node, data);
+        renderRecommend(root, node, data);
+    }
+
+    function select(name) {
+        state.selected = name;
+        const root = region;
+        for (const button of root.querySelectorAll(".fi-node")) {
+            button.setAttribute("aria-pressed", String(button.getAttribute("data-node") === name));
+        }
+        renderDetail(root, state.data);
+    }
+
+    // ---- secondary panels --------------------------------------------------------------------------------------------
+
+    function renderWorkflowPicker(root, data) {
+        const picker = $("workflow-picker", root);
+        const apply = $("apply-workflows", root);
+        const list = data.basis.workflows;
+        $("workflow-count", root).textContent = list.length ? `(${list.filter((w) => w.included).length} of ${list.length})` : "(none found)";
+        $("workflow-basis-text", root).textContent = data.basis.text + (data.basis.problems.length ? " " + data.basis.problems.join(" ") : "");
+        picker.replaceChildren();
+        if (!list.length) {
+            picker.appendChild(el("p", "No approved or declared workflow was found. Add one on Workflow dependencies to see which workflows would stop.", "muted"));
+            return;
+        }
+        const initial = new Set(list.filter((w) => w.included).map((w) => w.workflowId));
+        for (const workflow of list) {
+            const label = el("label", null, "fi-pick");
+            const box = el("input", null, "", { type: "checkbox", value: workflow.workflowId });
+            box.checked = workflow.included;
+            box.disabled = !workflow.applicable;
+            label.appendChild(box);
+            const text = el("span", null, "fi-pick__text");
+            text.appendChild(el("strong", view.workflowLabel(workflow)));
+            text.appendChild(el("span", workflow.kind === "declared" ? `declared by ${workflow.declaredBy || "a person"} · not observed` : "approved and frozen", "muted"));
+            if (!workflow.applicable) text.appendChild(el("span", workflow.reason, "muted"));
+            label.appendChild(text);
+            box.addEventListener("change", () => {
+                const chosen = new Set([...picker.querySelectorAll("input:checked")].map((input) => input.value));
+                apply.hidden = chosen.size === initial.size && [...chosen].every((id) => initial.has(id));
             });
-            return `${PORTFOLIO_RUNTIME_ENDPOINT}?${params.toString()}`;
+            picker.appendChild(label);
+        }
+        apply.onclick = () => {
+            state.workflowIds = [...picker.querySelectorAll("input:checked")].map((input) => input.value);
+            load();
         };
     }
 
-    // Badge and note for a runtime mode, taken from how complete the discovered topology is.
-    function describeInput(discovery) {
-        const described = describeDiscovery(discovery);
-        applyBadge(inputSourceBadge, described.badge);
-        if (inputModeNote) {
-            const scope = selectedMode() === "deployment-runtime"
-                ? " Workflow dependencies are not inferred; workflow survival and blast radius are not reported."
-                : "";
-            inputModeNote.textContent =
-                `${described.headline} ${described.provenance} ` +
-                `The result below is a prediction for a virtual failure, not an observation.${scope}`;
-        }
-    }
-
-    function updateInputModeUi() {
-        const mode = selectedMode();
-        const deploymentOnly = mode === "deployment-runtime";
-        const workflowField = document.querySelector('[data-role="workflow-field"]');
-        const workflowContract = document.querySelector('[data-role="workflow-contract-chip"]');
-        if (workflowField) workflowField.hidden = deploymentOnly;
-        if (workflowContract) workflowContract.hidden = deploymentOnly;
-        if (workflowIdLabel) {
-            workflowIdLabel.textContent = mode === "portfolio-runtime"
-                ? "Workflow IDs"
-                : "Workflow ID";
-        }
-        // Shown until the topology has been read; describeInput() then replaces both with the real status.
-        if (inputSourceBadge) {
-            inputSourceBadge.textContent = {
-                "deployment-runtime": "Live Deployments",
-                runtime: "Frozen Workflow",
-                "portfolio-runtime": "Frozen Workflow Portfolio",
-            }[mode];
-        }
-        if (inputModeNote) {
-            inputModeNote.textContent = {
-                "deployment-runtime": "Uses live pod placement only. No tracing or workflow declaration is required; workflow survival and blast radius remain unknown.",
-                runtime: "Requires an approved frozen workflow and live topology; simulation remains virtual.",
-                "portfolio-runtime": "Enter comma-separated frozen workflow IDs to evaluate them against one live topology; simulation remains virtual.",
-            }[mode];
-        }
-    }
-
-    function renderChipList(container, values) {
-        container.innerHTML = "";
-        if (!values.length) {
-            const empty = document.createElement("span");
-            empty.className = "muted";
-            empty.textContent = "None";
-            container.appendChild(empty);
-            return;
-        }
-        values.forEach((value) => container.appendChild(buildChip(value)));
-    }
-
-    function renderFailureChain(container, impact, deployment) {
-        container.innerHTML = "";
-
-        const lostPods = deployment.services
-            .flatMap((service) =>
-                service.pods
-                    .filter((pod) => pod.node === impact.failedNode)
-                    .map((pod) => pod.name)
-            );
-
-        const steps = [`${impact.failedNode} failed`];
-        if (lostPods.length) {
-            steps.push(`${lostPods.join(" and ")} lost`);
-        }
-        impact.failedServices.forEach((service) => {
-            steps.push(`${service} unavailable`);
-        });
-        impact.failedWorkflows.forEach((workflow) => {
-            steps.push(`${workflow} workflow failed`);
-        });
-
-        steps.forEach((step, index) => {
-            const stepElement = document.createElement("div");
-            stepElement.className =
-                "failure-chain__step" + (index === 0 ? " failure-chain__step--origin" : "");
-            stepElement.textContent = step;
-            container.appendChild(stepElement);
-
-            if (index < steps.length - 1) {
-                const arrow = document.createElement("div");
-                arrow.className = "failure-chain__arrow";
-                arrow.setAttribute("aria-hidden", "true");
-                arrow.textContent = "↓";
-                container.appendChild(arrow);
-            }
-        });
-    }
-
-    function renderRootCauses(root, rootCauses) {
-        const section = root.querySelector('[data-role="root-causes-section"]');
-        const container = root.querySelector('[data-role="impact-root-causes"]');
-        if (!section || !container) return;
-
-        const hasRootCauseContract = Array.isArray(rootCauses);
-        section.hidden = !hasRootCauseContract;
-        container.innerHTML = "";
-        if (!hasRootCauseContract) return;
-
-        if (!rootCauses.length) {
-            const empty = document.createElement("p");
-            empty.className = "muted";
-            empty.textContent = "No root causes reported.";
-            container.appendChild(empty);
-            return;
-        }
-
-        rootCauses.forEach((cause) => {
-            const item = document.createElement("div");
-            item.className = "stack-sm";
-            item.style.marginBottom = "var(--space-md)";
-
-            const rows = [
-                ["Type", formatCodeLabel(cause.type)],
-                ["Service", cause.service],
-                ["Failure Domain", cause.failureDomain],
-                [
-                    "Concentration",
-                    cause.concentration !== null && cause.concentration !== undefined
-                        ? formatPercentage(cause.concentration * 100)
-                        : "—",
-                ],
-            ];
-
-            rows.forEach(([label, value]) => {
-                const row = document.createElement("div");
-                row.style.display = "flex";
-                row.style.justifyContent = "space-between";
-                row.style.fontSize = "13px";
-                row.style.padding = "4px 0";
-
-                const labelSpan = document.createElement("span");
-                labelSpan.className = "muted";
-                labelSpan.textContent = label;
-
-                const valueSpan = document.createElement("span");
-                valueSpan.style.fontWeight = "600";
-                valueSpan.textContent = value;
-
-                row.append(labelSpan, valueSpan);
-                item.appendChild(row);
-            });
-
-            container.appendChild(item);
-        });
-    }
-
-    function renderPortfolioOutcomes(root, workflowImpacts) {
-        const section = root.querySelector(
-            '[data-role="portfolio-workflow-section"]'
-        );
-        const container = root.querySelector(
-            '[data-role="portfolio-workflow-outcomes"]'
-        );
-        if (!section || !container) return;
-
-        const hasPortfolio = Array.isArray(workflowImpacts);
-        section.hidden = !hasPortfolio;
-        container.innerHTML = "";
-        if (!hasPortfolio) return;
-
-        workflowImpacts.forEach((impact) => {
-            const item = document.createElement("div");
-            item.className = "workflow-outcome";
-
-            const identity = document.createElement("div");
-            identity.className = "workflow-outcome__identity";
-
-            const name = document.createElement("strong");
-            name.textContent = impact.workflowId;
-
-            const badge = document.createElement("span");
-            badge.className = impact.survives
-                ? "status-badge status-badge--success"
-                : "status-badge status-badge--danger";
-            badge.textContent = impact.survives ? "Survived" : "Failed";
-            identity.append(name, badge);
-
-            const explanation = document.createElement("span");
-            explanation.className = "workflow-outcome__explanation muted";
-            if (impact.failedMandatoryServices.length) {
-                explanation.textContent = `Mandatory failures: ${impact.failedMandatoryServices.join(", ")}`;
-            } else if (impact.failedServices.length) {
-                explanation.textContent = `Optional unavailable services: ${impact.failedServices.join(", ")}`;
-            } else {
-                explanation.textContent = "All required services survived.";
-            }
-
-            item.append(identity, explanation);
-            container.appendChild(item);
-        });
-    }
-
-    function renderNodeRanking(tbody, ranking) {
-        tbody.innerHTML = "";
-
-        ranking.forEach((entry, index) => {
-            const risk = riskLabel(entry.blastRadius);
+    function renderPlacement(root, data) {
+        const body = $("placement-body", root);
+        body.replaceChildren();
+        for (const service of data.services) {
             const row = document.createElement("tr");
-
-            const rankCell = document.createElement("td");
-            rankCell.textContent = String(index + 1);
-
-            const nodeCell = document.createElement("td");
-            nodeCell.textContent = entry.node;
-
-            const blastCell = document.createElement("td");
-            blastCell.textContent = formatPercentage(entry.blastRadius);
-
-            const riskCell = document.createElement("td");
-            const badge = document.createElement("span");
-            badge.className = `status-badge status-badge--${risk.variant}`;
-            badge.textContent = risk.text;
-            riskCell.appendChild(badge);
-
-            row.append(rankCell, nodeCell, blastCell, riskCell);
-            tbody.appendChild(row);
-        });
+            const name = el("td", service.service);
+            if (service.singleNode) name.appendChild(el("span", "single node", "fi-tag", { title: "All ready replicas run on one node." }));
+            row.appendChild(name);
+            row.appendChild(el("td", `${service.readyReplicas} of ${service.declaredReplicas}`));
+            row.appendChild(el("td", service.nodes.map((n) => `${n.node} (${n.readyPods})`).join(", ") || "none ready"));
+            body.appendChild(row);
+        }
     }
 
-    function renderDeploymentImpact(impact) {
-        const deploymentTemplate = document.querySelector('[data-role="deployment-template"]');
-        region.replaceChildren(deploymentTemplate.content.cloneNode(true));
-        setMetric(region, "deployment-failed-node", impact.failedNode);
-        setMetric(region, "deployment-failed-services", String(impact.failedServices.length));
-        setMetric(
-            region,
-            "deployment-service-failure-rate",
-            impact.serviceFailureRate == null ? "n/a" : formatPercentage(impact.serviceFailureRate)
-        );
-        setMetric(region, "deployment-services-evaluated", String(impact.servicesEvaluated));
-        const note = region.querySelector('[data-role="deployment-workflow-note"]');
-        if (note) note.textContent = impact.workflowEvidenceNote;
+    // ---- page --------------------------------------------------------------------------------------------------------
 
-        const outcomes = region.querySelector('[data-role="deployment-service-outcomes"]');
-        impact.serviceImpacts.forEach((service) => {
-            const row = document.createElement("tr");
-            [service.service, service.readyBefore, service.lostReady, service.readyAfter,
-                formatCodeLabel(service.outcome)].forEach((value) => {
-                const cell = document.createElement("td");
-                cell.textContent = String(value);
-                row.appendChild(cell);
-            });
-            outcomes.appendChild(row);
-        });
+    function lead(data) {
+        const risky = data.singlePointsOfFailure.length;
+        const total = data.nodes.length;
+        if (!risky) {
+            return `No single worker node takes a service down on its own: every service of ${data.namespace} keeps a ready replica if any one node stops.`;
+        }
+        const worst = data.nodes[0];
+        return `${risky} of ${total} worker nodes are a single point of failure for ${data.namespace}. The worst is ${worst.node}.`;
+    }
 
-        const ranking = region.querySelector('[data-role="deployment-node-ranking"]');
-        impact.nodeRiskRanking.forEach((entry, index) => {
-            const row = document.createElement("tr");
-            [index + 1, entry.node, entry.failedServices.join(", ") || "None",
-                entry.serviceFailureRate == null ? "n/a" : formatPercentage(entry.serviceFailureRate)]
-                .forEach((value) => {
-                    const cell = document.createElement("td");
-                    cell.textContent = String(value);
-                    row.appendChild(cell);
-                });
-            ranking.appendChild(row);
-        });
-        initJsonPanel(region.querySelector("#deployment-impact-raw-json"), impact);
+    function renderReady(data) {
+        const root = template.content.cloneNode(true);
+        state.selected = view.chooseNode(data.nodes, state.selected);
+        $("lead", root).textContent = lead(data);
+        const notices = [];
+        if (!data.topology.complete) {
+            notices.push(`Placement is not fully known for: ${data.topology.incompleteServices.join(", ") || "part of the namespace"}. Those services are not assessed, so a node that looks harmless may not be.`);
+        }
+        const broken = data.workflowsAlreadyBroken || [];
+        if (broken.length) {
+            const detail = broken.map((b) => `${view.workflowLabel(b)}: ${b.services.join(", ")} has no ready replica`).join("; ");
+            notices.push(`${broken.length === 1 ? "1 workflow is" : broken.length + " workflows are"} not working even before a node fails (${detail}). ` +
+                `${broken.length === 1 ? "It is" : "They are"} left out of the counts below, so no node is blamed for it.`);
+        }
+        $("lead", root).after(...notices.map((text) => el("p", text, "fi-warning", { role: "status" })));
+        renderNodeList($("node-list", root), data);
+        renderDetail(root, data);
+        renderWorkflowPicker(root, data);
+        renderPlacement(root, data);
+        const assumptions = $("assumptions", root);
+        for (const line of data.assumptions) assumptions.appendChild(el("li", line));
+        $("evidence-note", root).textContent =
+            `Read from the connected cluster at ${data.capturedAt}. Topology status: ${data.topology.status}.` +
+            (data.topology.warnings.length ? ` Notes: ${data.topology.warnings.join(", ")}.` : "") +
+            " The result is a prediction, not an observation.";
+        initJsonPanel($("fi-raw-json", root) || root.querySelector("#fi-raw-json"), data);
+        region.replaceChildren(root);
+        // select() reads the live DOM, so keep the pressed state in step with the model.
+        for (const button of region.querySelectorAll(".fi-node")) {
+            button.setAttribute("aria-pressed", String(button.getAttribute("data-node") === state.selected));
+        }
+    }
+
+    function renderChoose(data) {
+        region.replaceChildren(el("div", null, "state empty-state", { role: "status" }));
+        const box = region.firstChild;
+        if (data.state === "no-application") {
+            box.appendChild(el("p", "No application found", "state__title"));
+            box.appendChild(el("p", "The connected cluster has no namespace with workloads. Deploy an application, then refresh."));
+        } else {
+            box.appendChild(el("p", "Choose an application", "state__title"));
+            box.appendChild(el("p", `${data.namespaces.length} namespaces hold applications, so none was chosen for you. Pick one above.`));
+        }
     }
 
     function setBusy(busy) {
-        [reloadButton, nodeSelector, inputMode, workflowIdInput, namespaceInput].forEach((control) => {
-            if (control) control.disabled = busy;
-        });
+        refreshButton.disabled = busy;
+        if (busy) region.setAttribute("aria-busy", "true"); else region.removeAttribute("aria-busy");
     }
 
-    // Reads the topology for the selected mode and fills the node selector. Never keeps a previous
-    // cluster's nodes: a failed read empties the selector and shows the failure.
-    async function loadTopology() {
-        if (nodeSelector) nodeSelector.replaceChildren();
-        try {
-            const source = topologySource();
-            const discovery = await fetchJson(source.endpoint);
-            populateNodeSelector(discovery.graph);
-            describeInput(discovery);
-            return discovery.graph;
-        } catch (error) {
-            applyBadge(inputSourceBadge, { variant: "danger", text: "Not showing live data" });
-            renderStateCard(region, describeError(error), { onRetry: loadTopology });
-            return null;
-        }
-    }
-
-    async function loadPage() {
+    async function load() {
+        const generation = ++state.generation;
         setBusy(true);
-        const previousNode = nodeSelector?.value;
-
+        const params = new URLSearchParams();
+        if (state.namespace) params.set("namespace", state.namespace);
+        for (const id of state.workflowIds) params.append("workflow_id", id);
         try {
-            const impactEndpoint = impactRequest();
-            const deployment = await loadTopology();
-            if (!deployment) return;
-            if (previousNode && deployment.nodes.some((node) => node.name === previousNode)) {
-                nodeSelector.value = previousNode;
+            const data = await fetchJson(`${OVERVIEW}${params.toString() ? "?" + params.toString() : ""}`, { timeout: 60000 });
+            if (generation !== state.generation) return;
+            state.data = data;
+            fillNamespaces(data.namespaces, data.namespace);
+            applyBadge(evidenceBadge, describeEvidence(data));
+            if (data.state === "ready") {
+                state.namespace = data.namespace;
+                remember(NAMESPACE_KEY, data.namespace);
+                applyBadge(basisBadge, view.basisBadge(data.basis));
+                renderReady(data);
+            } else {
+                applyBadge(basisBadge, { variant: "muted", text: "" });
+                renderChoose(data);
             }
-
-            const failedNode = nodeSelector?.value || deployment.nodes[0]?.name;
-            if (!failedNode) {
-                throw new Error("The discovered topology contains no worker nodes.");
-            }
-            const impact = await fetchJson(impactEndpoint(failedNode));
-            if (selectedMode() === "deployment-runtime") {
-                renderDeploymentImpact(impact);
-                updateLastRefreshed(lastRefreshed);
-                return;
-            }
-
-            region.innerHTML = "";
-            region.appendChild(template.content.cloneNode(true));
-
-            const risk = riskLabel(impact.blastRadius);
-
-            setMetric(region, "impact-failed-node", impact.failedNode);
-            setMetric(region, "impact-blast-radius", formatPercentage(impact.blastRadius));
-            setMetric(
-                region,
-                "impact-survivability",
-                formatPercentage(impact.survivability)
-            );
-            setMetric(
-                region,
-                "impact-failed-workflow-count",
-                String(impact.failedWorkflows.length)
-            );
-            setMetric(
-                region,
-                "impact-blast-radius-large",
-                formatPercentage(impact.blastRadius)
-            );
-            setMetric(
-                region,
-                "impact-survivability-large",
-                formatPercentage(impact.survivability)
-            );
-
-            const blastBar = region.querySelector('[data-role="impact-blast-radius-bar"]');
-            if (blastBar) blastBar.style.width = formatPercentage(impact.blastRadius);
-
-            const survivalBar = region.querySelector(
-                '[data-role="impact-survivability-bar"]'
-            );
-            if (survivalBar) survivalBar.style.width = formatPercentage(impact.survivability);
-
-            const blastTag = region.querySelector('[data-role="impact-blast-radius-tag"]');
-            if (blastTag) {
-                blastTag.textContent = `${risk.text} Impact`;
-                blastTag.className = `status-badge status-badge--${risk.variant} impact-stat__tag`;
-            }
-
-            renderFailureChain(
-                region.querySelector('[data-role="failure-chain"]'),
-                impact,
-                deployment
-            );
-            renderChipList(
-                region.querySelector('[data-role="impact-failed-services"]'),
-                impact.failedServices
-            );
-            renderChipList(
-                region.querySelector('[data-role="impact-failed-workflows"]'),
-                impact.failedWorkflows
-            );
-            renderRootCauses(
-                region,
-                impact.rootCauses
-            );
-            renderPortfolioOutcomes(region, impact.workflowImpacts);
-            renderNodeRanking(
-                region.querySelector('[data-role="impact-node-ranking-body"]'),
-                impact.nodeRiskRanking
-            );
-
-            initJsonPanel(region.querySelector("#impact-raw-json"), impact);
-
-            updateLastRefreshed(lastRefreshed);
+            updateLastRefreshed($("last-refreshed"));
         } catch (error) {
-            renderStateCard(region, describeError(error), { onRetry: loadPage });
+            if (generation !== state.generation) return;
+            // A remembered application that no longer exists is not an error the person caused: ask again without it.
+            if (error && error.code === "APPLICATION_NOT_FOUND" && state.namespace) {
+                state.namespace = "";
+                remember(NAMESPACE_KEY, "");
+                return load();
+            }
+            applyBadge(evidenceBadge, { variant: "danger", text: "Not showing live data" });
+            applyBadge(basisBadge, { variant: "muted", text: "" });
+            namespaceSelect.disabled = true;
+            renderStateCard(region, describeError(error), { onRetry: load });
         } finally {
-            setBusy(false);
+            if (generation === state.generation) setBusy(false);
         }
     }
 
-    if (reloadButton) {
-        reloadButton.addEventListener("click", loadPage);
-    }
+    namespaceSelect.addEventListener("change", () => {
+        state.namespace = namespaceSelect.value;
+        state.workflowIds = [];
+        state.selected = null;
+        load();
+    });
+    refreshButton.addEventListener("click", load);
 
-    if (namespaceInput) {
-        namespaceInput.addEventListener("change", loadTopology);
-    }
-
-    if (inputMode) {
-        inputMode.addEventListener("change", () => {
-            updateInputModeUi();
-            loadTopology();
-        });
-    }
-
-    // On open: read the topology so a node can be chosen. No prediction runs until Run is pressed with
-    // valid inputs (a workflow ID for the runtime modes).
     document.addEventListener("DOMContentLoaded", () => {
-        updateInputModeUi();
-        loadTopology();
+        state.namespace = recall(NAMESPACE_KEY);
+        load();
     });
 })();

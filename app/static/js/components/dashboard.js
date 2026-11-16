@@ -161,7 +161,7 @@
 
     function showFocus() {
         sections.focusSummary.textContent = focused ? focused.message : "Select a node or workflow cell to highlight its placement.";
-        sections.placementFocus.textContent = focused ? `Highlighted: ${focused.workflow ? `${focused.workflow} · ` : ""}${focused.node}. The assessed failure remains unchanged.` : "";
+        sections.placementFocus.textContent = focused ? `Highlighted: ${focused.workflow ? `${window.ResilienceWorkflowNames ? window.ResilienceWorkflowNames.label(focused.workflow) : focused.workflow} · ` : ""}${focused.node}. The assessed failure remains unchanged.` : "";
         sections.placementFocus.hidden = !focused;
         sections.focusClear.hidden = !focused;
         sections.focusView.hidden = !focused;
@@ -317,11 +317,11 @@
             sections.workflows.append(make("p", "ui-note", reason || "Workflow exposure is unavailable.")); return;
         }
         const grid = table(["Workflow", ...model.nodes.map((r) => r.node)], model.workflows.map((w) => [
-            w.name, ...model.nodes.map((r) => {
+            w.label || w.name, ...model.nodes.map((r) => {
                 const failed = w.failures === null ? null : w.failures.includes(r.node);
                 const cell = focusButton(make("button", "overview-survival-cell", failed === null ? "? Unknown" : failed ? "× Fails" : "✓ Survives"), r.node, w.name);
                 cell.setAttribute("data-state", failed === null ? "unknown" : failed ? "failed" : "passed");
-                cell.setAttribute("aria-label", `${w.name}: ${failed === null ? "unknown" : failed ? "fails" : "survives"} if ${r.node} fails. Highlight placement`);
+                cell.setAttribute("aria-label", `${w.label || w.name}: ${failed === null ? "unknown" : failed ? "fails" : "survives"} if ${r.node} fails. Highlight placement`);
                 return cell;
             }),
         ]));
@@ -372,7 +372,7 @@
         marker("Resource usage", run.afterResources === true ? "Measured" : "Unavailable", run.afterResources === true ? "available" : "missing");
         sections.latest.append(evidence);
         sections.latest.append(help("Recorded workflow checks", Array.isArray(checks) && checks.length
-            ? checks.map((w) => `${w.workflowId}: ${w.httpStatus || "Unavailable"}`).join("; ") : "Post-apply workflow checks were not collected."),
+            ? checks.map((w) => `${window.ResilienceWorkflowNames ? window.ResilienceWorkflowNames.label(w.workflowId) : w.workflowId}: ${w.httpStatus || "Unavailable"}`).join("; ") : "Post-apply workflow checks were not collected."),
             help("About this saved result", `Model risk: ${row.baseline} before → ${row.predicted} proposed → ${row.after} after rollout. Recalculated risk is a model result, not experimental proof. This saved run may use a different proposal or cluster.`));
     }
 
@@ -454,6 +454,7 @@
         }
         const detail = await attempt(url, { timeout: 120000 });
         if (!current()) return;
+        if (window.ResilienceWorkflowNames) window.ResilienceWorkflowNames.use(detail.body || null);
         state.risk = OV.describeRisk(detail.body || null, detail.error ? { message: detail.error.message } : null);
         drawRisk(state.risk);
         drawPlacement(detail.body || null, detail.error ? detail.error.message : null);

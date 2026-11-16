@@ -145,3 +145,22 @@ real components with a measured baseline.
 * timing: the node-monitor grace period, endpoint propagation, and what the probe sees in the detection window;
 * the resource figures for the new cluster and the application;
 * that the engine's prediction agrees with any of it.
+
+
+## 7. Workflow-check entry point on the Docker Desktop cluster (added 2026-11-17; not yet created anywhere)
+
+The Docker Desktop cluster publishes nothing on this computer: every Bookinfo Service is ClusterIP, so the optional workflow check has no
+address to call. The entry point is one extra Service, `resilience-probe-entry`, in `bookinfo`
+(`experiments/member4_real_validation/manifests/probe-entry-docker-desktop.yaml`): a LoadBalancer on port 8080 forwarding to the entry service's
+port 9080, labelled `resilience-engine.sliit/probe-entry: "true"`.
+
+* **It is created by a person, never by the app.** `kubectl apply -f <manifest>`; remove it afterwards with `kubectl delete -f <manifest>`. It adds
+  one Service and changes no Deployment or pod.
+* **Discovery ignores it** (the label), so Overview, Failure impact and Recommendations never see a second "service" over the same pods
+  (`app/integrations/kubernetes/probe_entry.py`).
+* **The Prove step reads it** (`GET /api/recommendations/validation-loop/entry-point?namespace=`, read-only), shows its address and offers
+  `http://127.0.0.1:8080/` for the "Page address" box. The page path is the person's to add.
+* **Not verified:** that Docker Desktop's load-balancer support publishes this Service on this computer's localhost, and that the page prints
+  the strings the check judges. "Test it" (three GET requests) is what shows both; nothing in this section is a result until it has been run.
+* **If the entry point's only pod sits on the worker that is stopped,** the load balancer has nothing to answer with for the failure window.
+  That is the workflow failing, which is what the check is for; it is not an entry-point fault.
