@@ -113,11 +113,14 @@ def _card_from_live(candidate: dict) -> dict[str, Any]:
         "limitation": notes[0] if notes else feasibility,
         "feasible": bool(candidate.get("feasible")),
         "selected": bool(candidate.get("selected")),
+        "metric": {"label": "Predicted workflow loss, worst case", "before": before, "after": after}
+        if before is not None and after is not None else None,
     }
 
 
 def _pct(value: float) -> str:
-    return f"{value:.1f}".removesuffix(".0")
+    """Whole percent, the same rounding the Recommendations page uses for these exposures."""
+    return f"{value:.0f}"
 
 
 def _move(label: str, before: float | None, after: float | None) -> str | None:
@@ -126,15 +129,26 @@ def _move(label: str, before: float | None, after: float | None) -> str | None:
     return f"{label} moves from {_pct(before)}% to {_pct(after)}%."
 
 
+def _deployment_metric(row: dict) -> dict[str, Any] | None:
+    before, after = _number(row.get("averageServiceExposureBefore")), _number(row.get("averageServiceExposureAfter"))
+    if not row.get("feasible") or before is None or after is None:
+        return None
+    return {"label": "Services lost when a worker stops, on average", "before": before, "after": after}
+
+
 def _card_from_deployment(row: dict) -> dict[str, Any]:
     benefit = None
     if row.get("feasible"):
+        worst_before, worst_after = _number(row.get("worstCaseBefore")), _number(row.get("worstCaseAfter"))
         parts = [text for text in (
-            _move("Worst-case service exposure", _number(row.get("worstCaseBefore")), _number(row.get("worstCaseAfter"))),
-            _move("Average service exposure", _number(row.get("averageServiceExposureBefore")), _number(row.get("averageServiceExposureAfter"))),
+            _move("Average service exposure across worker-node failures", _number(row.get("averageServiceExposureBefore")), _number(row.get("averageServiceExposureAfter"))),
+            _move("Worst-case service exposure", worst_before, worst_after),
         ) if text]
-        worst = _number(row.get("worstCaseBefore"))
-        benefit = " ".join(parts) if parts else (f"Worst-case service exposure stays {_pct(worst)}%." if worst is not None else None)
+        if not parts and worst_before is not None:
+            parts.append(f"Worst-case service exposure stays {_pct(worst_before)}%.")
+        elif worst_before is not None and worst_after is not None and abs(worst_before - worst_after) < 0.05 and parts:
+            parts.append(f"Worst-case service exposure stays {_pct(worst_before)}%.")
+        benefit = " ".join(parts) if parts else None
     ranking = row.get("ranking") or {}
     detail = ranking.get("detail") or ""
     why = row.get("rootCause") if not detail or detail.lower().startswith("ranked") else detail
@@ -150,14 +164,38 @@ def _card_from_deployment(row: dict) -> dict[str, Any]:
         "limitation": row.get("reason") if not row.get("feasible") else "This suggestion cannot be applied from the assessment. Workflow survival stays unknown.",
         "feasible": bool(row.get("feasible")),
         "selected": False,
+        "metric": _deployment_metric(row),
     }
 
 
-def _pack(cards: list[dict], *, mode: str, failed_node: str | None, note: str, approval_allowed: bool) -> dict[str, Any]:
+COST_ORDER = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+
+
+def _cost_rank(card: dict) -> int:
+    return COST_ORDER.get(card.get("cost"), 3)
+
+
+def _pack(cards: list[dict], *, mode: str, failed_node: str | None, note: str, approval_allowed: bool,
+          exposed: dict[str, str] | None = None) -> dict[str, Any]:
+    """Lead change, the same service's other options, and (service scope) the other exposed services' cheapest fix.
+
+    ``exposed`` maps each service that is lost when one worker stops to that worker. A change that fixes one of
+    them does not fix the rest, and saying so is part of the answer.
+    """
     selected = next((card for card in cards if card["selected"] and card["feasible"]), None)
     if selected is None:
         selected = next((card for card in cards if card["feasible"]), None)
-    alternatives = [card for card in cards if card is not selected and card["feasible"]][:3]
+    feasible = [card for card in cards if card["feasible"] and card is not selected]
+    alternatives = [card for card in feasible
+                    if selected and card["service"] == selected["service"] and _cost_rank(card) <= _cost_rank(selected)][:3]
+    follow_ups = []
+    if selected and exposed:
+        for service, node in sorted(exposed.items()):
+            if service == selected["service"]:
+                continue
+            options = [card for card in feasible if card["service"] == service]
+            if options:
+                follow_ups.append({**min(options, key=_cost_rank), "node": node})
     blocked = [{"title": card["title"], "limitation": card["limitation"]}
                for card in cards if not card["feasible"] and card["limitation"]][:3]
     if selected is None and blocked:
@@ -169,6 +207,7 @@ def _pack(cards: list[dict], *, mode: str, failed_node: str | None, note: str, a
         "failedNode": failed_node,
         "best": selected,
         "alternatives": alternatives,
+        "followUps": follow_ups,
         "blocked": blocked,
         "considered": len(cards),
         "note": note,
@@ -204,18 +243,21 @@ def _workflow_recommendation(snapshot) -> dict[str, Any]:
     )
 
 
-def _deployment_recommendation(snapshot) -> dict[str, Any]:
+def _deployment_recommendation(snapshot, failed_node: str | None = None) -> dict[str, Any]:
     from app.engine.recommendation_evaluation_validation.deployment_recommendations import (
         NOTE,
         build_deployment_recommendations,
     )
 
-    findings = build_deployment_recommendations(snapshot.discovery)
+    findings = build_deployment_recommendations(snapshot.discovery, failed_node)
     cards = [_card_from_deployment(row) for row in findings.get("recommendations") or []]
     selected = findings.get("selectedCandidateId")
     for card in cards:
         card["selected"] = card["id"] == selected
-    return _pack(cards, mode="deployment", failed_node=findings.get("failedNode"), approval_allowed=False, note=NOTE)
+    exposed = {name: node["node"] for node in snapshot.public.get("nodes") or []
+               for name in node.get("servicesDown") or []}
+    return _pack(cards, mode="deployment", failed_node=findings.get("failedNode"), approval_allowed=False, note=NOTE,
+                 exposed=exposed)
 
 
 def _recommend(snapshot) -> dict[str, Any]:
@@ -229,7 +271,7 @@ def _recommend(snapshot) -> dict[str, Any]:
         if snapshot.evaluated_workflows:
             return _workflow_recommendation(snapshot)
         if overview.get("scope") == "service":
-            return _deployment_recommendation(snapshot)
+            return _deployment_recommendation(snapshot, (overview.get("nodes") or [{}])[0].get("node"))
     except EvidenceError as error:
         return {"available": False, "mode": overview.get("scope"), "approvalAllowed": False, "best": None,
                 "alternatives": [], "note": error.message, "code": error.code}
@@ -248,12 +290,14 @@ def compose_assessment(snapshot) -> dict[str, Any]:
     basis = overview.get("basis") or {}
     best = recommendation.get("best") or {}
     continuation = {
-        "label": "Review this change" if recommendation.get("available") else "Open recommendations",
+        "label": ("Review this change" if recommendation.get("mode") == "workflow" else "Compare all options")
+        if recommendation.get("available") else "Open recommendations",
         "href": "/components/recommendations",
         "namespace": overview.get("namespace"),
         "failedNode": recommendation.get("failedNode") or risk.get("worstNode"),
         "fingerprint": (overview.get("cluster") or {}).get("fingerprint"),
-        "note": "Opens Recommendations for this application and node. That page checks the change again. Nothing is applied until a person approves it.",
+        "note": "Opens Recommendations for this application, node, and change. That page checks it again. Nothing is applied until a person approves it.",
+        "candidate": {"id": best.get("id"), "service": best.get("service"), "type": best.get("type")} if best.get("service") and best.get("type") else None,
     }
     nodes = [{
         "node": row.get("node"), "rank": row.get("rank"), "verdict": row.get("verdict"), "headline": row.get("headline"),
@@ -283,6 +327,9 @@ def compose_assessment(snapshot) -> dict[str, Any]:
         "risk": risk,
         "nodes": nodes,
         "vulnerableServices": _services(overview),
+        "placement": [{"service": row.get("service"), "readyReplicas": row.get("readyReplicas"),
+                       "declaredReplicas": row.get("declaredReplicas"), "nodes": row.get("nodes") or []}
+                      for row in overview.get("services") or []],
         "singlePointsOfFailure": overview.get("singlePointsOfFailure") or [],
         "recommendation": recommendation,
         "continuation": continuation,

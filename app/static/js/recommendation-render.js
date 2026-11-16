@@ -942,38 +942,48 @@
         return { text: list.length ? `Evidence: ${available} of ${list.length} available` : "Evidence", attention };
     }
 
-    function renderDeploymentFindings(container, findings) {
+    function renderDeploymentFindings(container, findings, highlight) {
         if (!container) return;
         container.replaceChildren();
         container.hidden = !findings;
         if (!findings) return;
         const doc = container.ownerDocument;
-        container.append(element(doc, "h3", "Deployment risk and suggested improvements"),
-            element(doc, "p", findings.note, "ui-note"),
-            element(doc, "p", "Workflow survival: unknown. Workflow blast radius: unknown. Workflow-dependent approval is unavailable."));
+        container.append(element(doc, "h3", "Service-level assessment"),
+            element(doc, "p", findings.note, "ui-note"));
         const table = element(doc, "table", "", "op-table");
         const head = element(doc, "tr");
-        for (const title of ["Assumed failed node", "Services losing all ready replicas", "Services losing ready replicas"]) head.append(element(doc, "th", title));
+        for (const title of ["If this worker stops", "Goes offline", "Loses replicas"]) head.append(element(doc, "th", title));
         table.append(head);
         for (const node of findings.nodes || []) {
             const row = element(doc, "tr");
-            for (const value of [node.node, (node.failedServices || []).join(", ") || "None", (node.affectedServices || []).join(", ") || "None"]) row.append(element(doc, "td", value));
+            for (const value of [node.node, (node.failedServices || []).join(", ") || "Nothing", (node.affectedServices || []).filter((name) => !(node.failedServices || []).includes(name)).join(", ") || "Nothing"]) row.append(element(doc, "td", value));
             table.append(row);
         }
         container.append(table);
         const candidates = findings.recommendations || [];
         const ranked = candidates.filter((c) => c.ranking?.rank != null);
-        container.append(element(doc, "h4", "Compare placement improvements"),
-            element(doc, "p", "The same feasibility checks and virtual simulations are used here. The percentages below describe services losing all ready replicas, not business workflows.", "ui-note"));
-        const shownServices = new Set();
+        // One option per service: the cheapest that is predicted to do as well as the best-ranked one, then rank.
+        const bestPerService = new Map();
         for (const candidate of ranked) {
-            if (shownServices.has(candidate.service)) continue;
-            shownServices.add(candidate.service);
+            const held = bestPerService.get(candidate.service);
+            const cost = COST_ORDER[candidate.resourceCost] ?? 3;
+            if (!held || cost < (COST_ORDER[held.resourceCost] ?? 3)) bestPerService.set(candidate.service, candidate);
+        }
+        const chosen = highlight && ranked.find((c) => c.service === highlight.service && c.type === highlight.type);
+        const lead = chosen || ranked.find((c) => c.id === findings.selectedCandidateId) || null;
+        const rest = [...bestPerService.values()].filter((c) => c.service !== (lead && lead.service));
+        rest.sort((a, b) => a.ranking.rank - b.ranking.rank);
+        const shown = lead ? [lead, ...rest] : rest;
+        container.append(element(doc, "h4", "Changes that would help"),
+            element(doc, "p", "Percentages count services that lose every ready replica, not business workflows. The first change is the one Assessment recommends; the others protect a different service.", "ui-note"));
+        for (const candidate of shown) {
             const card = element(doc, "article", undefined, "rx-lead");
+            if (candidate === lead) card.setAttribute("data-selected", "true");
             const title = window.ResilienceJourney?.strategyTitle(candidate.type) || strategyName(candidate.type);
-            card.append(element(doc, "h4", `${title} · ${candidate.service}`),
-                element(doc, "p", `Average service exposure across node failures: ${percent(candidate.averageServiceExposureBefore)} → ${percent(candidate.averageServiceExposureAfter)} (predicted).`),
-                element(doc, "p", `Worst single-node service exposure: ${percent(candidate.worstCaseBefore)} → ${percent(candidate.worstCaseAfter)}. ${candidate.resourceCost} resource cost.`, "ui-note"));
+            card.append(element(doc, "h4", `${title} · ${candidate.service}`));
+            if (candidate === lead) card.append(element(doc, "p", "Recommended on Assessment.", "ui-note"));
+            card.append(element(doc, "p", `Services lost on average when a worker stops: ${percent(candidate.averageServiceExposureBefore)} → ${percent(candidate.averageServiceExposureAfter)} (predicted).`),
+                element(doc, "p", `Worst single worker: ${percent(candidate.worstCaseBefore)} → ${percent(candidate.worstCaseAfter)}. Resource cost: ${String(candidate.resourceCost || "unknown").toLowerCase()}.`, "ui-note"));
             const why = element(doc, "details");
             why.append(element(doc, "summary", "Placement and rollout details"), element(doc, "p", candidate.reason || "Placement verified feasible under the model.", "ui-note"));
             card.append(why);
@@ -982,12 +992,12 @@
         if (!ranked.length) container.append(element(doc, "p", "No placement improvement could be ranked from the available evidence. This is not proof of resilience."));
         if (candidates.length) {
             const details = element(doc, "details");
-            details.append(element(doc, "summary", `All ${candidates.length} evaluated options and feasibility results`));
+            details.append(element(doc, "summary", `All ${candidates.length} options that were checked`));
             const list = element(doc, "ul");
             for (const c of candidates) list.append(element(doc, "li", `${strategyName(c.type)} · ${c.service}: ${c.feasibility?.status || "Unknown"}. ${c.reason || ""} ${c.ranking?.detail || ""}`));
             details.append(list); container.append(details);
         }
-        container.append(element(doc, "p", "Review a real workflow definition in Workflow Discovery to enable workflow-aware approval. Existing applied changes can still be recovered from change history.", "ui-note"));
+        container.append(element(doc, "p", "To get business impact and approval, review a workflow in Workflow Discovery. Changes already applied can still be recovered from history.", "ui-note"));
     }
 
     window.ResilienceRecommendations = {

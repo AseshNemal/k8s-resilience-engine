@@ -20,9 +20,18 @@ test("deployment exposure renders read-only nodes and explicitly unknown workflo
     const doc = makeDocument(), container = doc.container(); container.ownerDocument = doc;
     view.renderDeploymentFindings(container, { note: "Placement only", nodes: [{ node: "worker-a", failedServices: ["orders"], affectedServices: ["orders", "catalog"] }] });
     assert.match(text(container), /worker-a/);
-    assert.match(text(container), /orders, catalog/);
-    assert.match(text(container), /Workflow survival: unknown/);
-    assert.match(text(container), /approval is unavailable/);
+    assert.match(text(container), /orders \| catalog/);   // goes offline | loses replicas (offline ones are not repeated)
+    assert.match(text(container), /not business workflows/);
+    assert.match(text(container), /review a workflow in Workflow Discovery/);
+    view.renderDeploymentFindings(container, {
+        note: "Placement only",
+        recommendations: [
+            { service: "orders", type: "TOPOLOGY_SPREAD", ranking: { rank: 2 }, averageServiceExposureBefore: 40, averageServiceExposureAfter: 20, worstCaseBefore: 50, worstCaseAfter: 50, resourceCost: "LOW" },
+            { service: "payments", type: "REPLICA_INCREASE", ranking: { rank: 1 }, averageServiceExposureBefore: 40, averageServiceExposureAfter: 10, worstCaseBefore: 50, worstCaseAfter: 25, resourceCost: "MEDIUM" },
+        ],
+    }, { service: "orders", type: "TOPOLOGY_SPREAD" });
+    assert.match(text(container), /Recommended on Assessment/);
+    assert.match(text(container), /Topology spread · orders/);
     view.renderDeploymentFindings(container, null);
     assert.equal(container.hidden, true);
     assert.equal(container.children.length, 0);

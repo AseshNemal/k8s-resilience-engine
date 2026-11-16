@@ -85,17 +85,25 @@ async function initHealthStatus() {
     const badge = document.querySelector('[data-role="health-badge"]');
     if (!badge || !window.ResilienceApi) return;
 
-    try {
-        const data = await window.ResilienceApi.fetchJson("/api/health");
-        window.ResilienceUi.setStatusBadge(
-            badge,
-            "success",
-            data.status === "healthy" ? "System Healthy" : data.status
-        );
-    } catch (error) {
-        window.ResilienceUi.setStatusBadge(badge, "danger", "System Unavailable");
-        console.error("Health check failed:", error);
+    // The first request after a page load can land while the backend is still waking up (a 502 through
+    // Docker Desktop's proxy). Try a few times before calling the system unavailable.
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        try {
+            const data = await window.ResilienceApi.fetchJson("/api/health");
+            window.ResilienceUi.setStatusBadge(
+                badge,
+                "success",
+                data.status === "healthy" ? "System Healthy" : data.status
+            );
+            return;
+        } catch (error) {
+            lastError = error;
+            await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+        }
     }
+    window.ResilienceUi.setStatusBadge(badge, "danger", "System Unavailable");
+    console.error("Health check failed:", lastError);
 }
 
 document.addEventListener("DOMContentLoaded", () => {

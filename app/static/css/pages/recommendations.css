@@ -1008,3 +1008,13 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .rx-fold, .rx-research, .rx-experiment { overflow-wrap: anywhere; }
 .rx pre { max-width: 100%; }
 .rx-rail[hidden] { display: none; }
+
+/* Service-level (no workflow) view: a quiet table, one lead change, the rest muted. */
+[data-role="rec-deployment-findings"] { display: flex; flex-direction: column; gap: 10px; }
+[data-role="rec-deployment-findings"] h3, [data-role="rec-deployment-findings"] h4, [data-role="rec-deployment-findings"] p { margin: 0; }
+[data-role="rec-deployment-findings"] .op-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 4px 0 8px; }
+[data-role="rec-deployment-findings"] .op-table th { text-align: left; font-weight: 600; color: var(--color-text-muted); padding: 6px 10px; border-bottom: 1px solid var(--color-border); }
+[data-role="rec-deployment-findings"] .op-table td { padding: 8px 10px; border-bottom: 1px solid var(--color-border); }
+[data-role="rec-deployment-findings"] .rx-lead { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; border-color: var(--color-border); border-left-width: 1px; }
+[data-role="rec-deployment-findings"] .rx-lead h4 { font-size: 15px; }
+[data-role="rec-deployment-findings"] .rx-lead[data-selected="true"] { border-color: var(--color-primary); border-left-width: 4px; }

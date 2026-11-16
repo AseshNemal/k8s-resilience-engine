@@ -137,11 +137,16 @@ def test_assessment_script_reads_the_assessment_endpoint_only():
     assert "discovery?namespace" not in script
     assert "method:" not in script and "POST" not in script
     assert not re.search(r"sample|demo|fixture|Math\.random", script, re.I)
+    # The Docker extension serves pages as x.html, not /components/x: links must come from the sidebar, never a fixed path alone.
+    assert 'pageHref("recommendations"' in script and 'pageHref("workflows"' in script
+    assert not re.search(r"link\.href = \"/", script)
 
 
 def test_assessment_keeps_the_result_visible_and_specialist_pages_secondary():
     markup = client.get("/").text
     assert 'data-role="assess-nodes"' in markup
     assert 'data-role="assess-fix-body"' in markup
-    assert markup.index('data-role="assess-result"') < markup.index("assess-more")
+    # The specialist pages are reached from the sidebar; the result does not repeat them as a second navigation.
+    assert "assess-more" not in markup
+    assert markup.index('data-role="assess-result"') < markup.index('data-role="assess-evidence"')
     assert 'data-role="overview-matrix"' not in markup

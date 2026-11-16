@@ -2,87 +2,77 @@
 {% extends "base.html" %}
 
 {% block page_css %}
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/assessment.css') }}?v=assessment-20261116">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/assessment.css') }}?v=assessment-20261117">
 {% endblock %}
 
 {% block content %}
 <div class="assess">
-    <div class="page-header assess-header">
+    <div class="page-header assess-top">
         <div>
-            <h2 class="page-header__title">Application resilience</h2>
-            <p class="assess-lead">Connect a cluster, choose an application, and read one assessment. It covers placement, every single worker-node failure, and the strongest feasible improvement. Nothing is changed.</p>
+            <h2 class="page-header__title">Resilience assessment</h2>
+            <p class="assess-lead" data-role="assess-lead">Pick an application. You get what breaks when a worker node stops, and the best fix.</p>
         </div>
         <form class="assess-toolbar" data-role="assess-form">
-            <label class="assess-field" for="assess-application">Application
+            <label class="assess-field" for="assess-application">
+                <span>Application</span>
                 <select id="assess-application" data-role="assess-application" disabled>
                     <option value="">Reading applications…</option>
                 </select>
             </label>
-            <button type="submit" class="primary-button" data-role="assess-run" disabled>Assess</button>
+            <button type="submit" class="secondary-button" data-role="assess-run" disabled>Reassess</button>
         </form>
     </div>
 
     <div data-role="assess-error"></div>
 
-    <section class="assess-empty card" data-role="assess-empty">
-        <h3 data-role="assess-empty-title">Preparing the assessment…</h3>
-        <p data-role="assess-empty-text">Reading the connected cluster.</p>
+    <section class="assess-state card" data-role="assess-empty" aria-live="polite">
+        <div class="assess-state__spinner" data-role="assess-spinner" aria-hidden="true"></div>
+        <div>
+            <h3 data-role="assess-empty-title">Assessing…</h3>
+            <p data-role="assess-empty-text">Reading the connected cluster.</p>
+        </div>
     </section>
 
-    <div data-role="assess-result" hidden>
-        <section class="assess-verdict" data-role="assess-verdict" data-level="unknown">
-            <div>
-                <p class="assess-kicker" data-role="assess-kicker">Predicted impact</p>
-                <h3 data-role="assess-headline"></h3>
-                <p class="assess-scope" data-role="assess-scope"></p>
+    <div class="assess-result" data-role="assess-result" hidden>
+        <section class="assess-hero" data-role="assess-verdict" data-level="unknown">
+            <div class="assess-hero__main">
+                <p class="assess-kicker"><span class="assess-dot"></span><span data-role="assess-level">Unknown</span><span class="assess-sep">·</span><span data-role="assess-kicker"></span></p>
+                <h3 class="assess-hero__title" data-role="assess-headline"></h3>
+                <p class="assess-hero__sub" data-role="assess-scope"></p>
             </div>
-            <p class="assess-level" data-role="assess-level"></p>
+            <dl class="assess-stats" data-role="assess-stats"></dl>
         </section>
 
-        <div class="assess-grid">
-            <section class="card assess-panel">
-                <header class="assess-panel__head">
-                    <h3>If a worker stops</h3>
-                    <span class="assess-tag">Predicted</span>
-                </header>
-                <ol class="assess-nodes" data-role="assess-nodes"></ol>
-            </section>
-            <section class="card assess-panel">
-                <header class="assess-panel__head">
-                    <h3>Services at risk</h3>
-                    <span class="assess-tag">Observed placement</span>
-                </header>
-                <div data-role="assess-services"></div>
-            </section>
-        </div>
+        <section class="card assess-map" data-role="assess-map-card">
+            <header class="assess-head">
+                <div>
+                    <h3>Where it runs</h3>
+                    <p class="assess-hint">Pick a worker to see what stops if it fails. This is a prediction; nothing is stopped.</p>
+                </div>
+                <div class="assess-legend" aria-hidden="true">
+                    <span><i class="lg lg--ok"></i>Running</span><span><i class="lg lg--warn"></i>Fewer replicas</span><span><i class="lg lg--bad"></i>Offline</span>
+                </div>
+            </header>
+            <div class="assess-nodes" data-role="assess-nodes" role="group" aria-label="Worker nodes"></div>
+            <p class="assess-consequence" data-role="assess-consequence" aria-live="polite"></p>
+        </section>
 
         <section class="card assess-fix" data-role="assess-fix">
-            <header class="assess-panel__head">
-                <h3>Strongest feasible improvement</h3>
+            <header class="assess-head">
+                <h3>Best fix</h3>
                 <span class="assess-tag" data-role="assess-fix-tag">Predicted</span>
             </header>
             <div data-role="assess-fix-body"></div>
         </section>
 
-        <section class="card assess-panel" data-role="assess-evidence">
-            <header class="assess-panel__head">
-                <h3>Evidence</h3>
-                <span class="assess-tag">How this answer was reached</span>
-            </header>
+        <details class="assess-evidence" data-role="assess-evidence">
+            <summary>How this was worked out</summary>
             <div data-role="assess-evidence-body"></div>
-        </section>
+        </details>
     </div>
-
-    <nav class="assess-more" aria-label="Specialist pages">
-        <span>Detail pages</span>
-        <a href="/components/workflows">Workflow Discovery</a>
-        <a href="/components/deployments">Deployment Topology</a>
-        <a href="/components/failure-impacts">Failure Impact</a>
-        <a href="/components/recommendations">Recommendations</a>
-    </nav>
 </div>
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', path='/js/components/assessment.js') }}?v=assessment-20261116" defer></script>
+<script src="{{ url_for('static', path='/js/components/assessment.js') }}?v=assessment-20261117" defer></script>
 {% endblock %}

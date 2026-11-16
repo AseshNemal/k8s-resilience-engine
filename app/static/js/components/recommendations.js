@@ -1010,8 +1010,8 @@
     function chosenFromComparison(detail, report) {
         if (!preferredChange) return { recommendation: null, note: null };
         const wording = `${view.strategyName(preferredChange.type)} on ${preferredChange.service}`;
-        const wanted = detail.candidates.find((c) => preferredChange.id ? c.id === preferredChange.id
-            : c.service === preferredChange.service && c.type === preferredChange.type);
+        const wanted = (preferredChange.id && detail.candidates.find((c) => c.id === preferredChange.id))
+            || detail.candidates.find((c) => c.service === preferredChange.service && c.type === preferredChange.type);
         const recommendation = wanted && wanted.feasible ? report.recommendations.find((r) => r.id === wanted.id) || null : null;
         if (!recommendation) {
             return { recommendation: null, note: `The change you chose (${wording}) is not an option for this workflow, so this workflow's own top-ranked change is shown.` };
@@ -1046,8 +1046,19 @@
         fillSelect(workflowSelect,
             v.workflows.map((w) => ({ value: w.value, label: w.label, disabled: !w.applicable })),
             v.workflowValue, v.workflowChoice === "choose" || !v.workflowId ? (v.workflows.length ? "Choose a workflow…" : "No approved frozen workflow") : null);
-        fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case node");
-        if (nodeSelect) nodeSelect.setAttribute("title", "The node whose loss hurts most is assessed unless you choose one.");
+        if (v.deploymentFindings) {
+            // Service-level view: every worker is already listed in the table below, so the control only states which one the
+            // lead change protects (the same worker Assessment named) and cannot pick another.
+            const names = (v.deploymentFindings.nodes || []).map((row) => row.node);
+            fillSelect(nodeSelect, names.map((name) => ({ value: name, label: name })), v.deploymentFindings.failedNode, "");
+            if (nodeSelect) {
+                nodeSelect.disabled = true;
+                nodeSelect.setAttribute("title", "The worker the lead change protects. Every worker is listed below.");
+            }
+        } else {
+            fillSelect(nodeSelect, v.failedNodes.map((name) => ({ value: name, label: name })), v.failedNode, "Worst case node");
+            if (nodeSelect) nodeSelect.setAttribute("title", "The node whose loss hurts most is assessed unless you choose one.");
+        }
         // While the page waits for a choice, the field to use is marked and said in words.
         const hint = allWorkflows && v.namespace ? null : view.nextActionHint(v);
         [["namespace", namespaceSelect], ["workflow", workflowSelect]].forEach(([name, select]) => {
@@ -1066,7 +1077,7 @@
             hintLine.hidden = !hint;
         }
         updatePortfolio(v);
-        view.renderDeploymentFindings(document.querySelector('[data-role="rec-deployment-findings"]'), v.deploymentFindings);
+        view.renderDeploymentFindings(document.querySelector('[data-role="rec-deployment-findings"]'), v.deploymentFindings, preferredChange);
         const workflowProgress = document.querySelector('.rx-rail');
         if (workflowProgress) workflowProgress.hidden = !!v.deploymentFindings;
         view.renderEvidenceChecklist(evidenceList, v.evidence);
@@ -1353,6 +1364,12 @@
         } else if (v.deploymentFindings) {
             applyBadge(sourceBadge, { variant: "warning", text: "Deployment analysis · workflows unknown" });
             region.replaceChildren();
+            if (preferredChange && preferredChange.service && preferredChange.type) {
+                const carried = document.createElement("p");
+                carried.className = "ui-note";
+                carried.textContent = `From Assessment: ${view.strategyName(preferredChange.type)} for ${preferredChange.service}. Workflow survival is still unknown, so this change cannot be approved yet.`;
+                region.append(carried);
+            }
         } else if (view.nextActionHint(v)) {
             // Only a declared workflow exists: nothing is broken, a choice is waiting, and the hint under step 1 says so.
             applyBadge(sourceBadge, { variant: "muted", text: "Choose to continue" });
@@ -1564,7 +1581,11 @@
                 const record = JSON.parse(window.localStorage.getItem(key) || "null");
                 window.localStorage.removeItem(key);
                 const age = record && typeof record.at === "number" ? Date.now() - record.at : Infinity;
-                return age <= 10 * 60 * 1000 ? record : null;
+                if (!(age <= 10 * 60 * 1000)) return null;
+                if (record && typeof record.service === "string" && record.service && typeof record.type === "string" && record.type) {
+                    preferredChange = { service: record.service, type: record.type };
+                }
+                return record;
             } catch (_error) { return null; }
         },
         onClusterChange: () => {
