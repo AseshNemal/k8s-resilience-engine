@@ -191,7 +191,30 @@
         return { start: refresh, refresh, refreshIfStale, connectionChanged, stop, snapshot };
     }
 
-    window.__resilienceNamespaces = { DISCOVERY_URL, REFRESH_MS, summarize, optionLabel, options, statusText, describeFailure, createRefresher };
+    // What the list under a namespace box offers. It is a list of its own, not the browser's <datalist>: that
+    // popup is drawn by the browser, which inside Docker Desktop placed it away from the box and repeated the name,
+    // and it hides every namespace except the one already typed. Here the list is always under the box and shows
+    // every namespace the cluster reported. While the box holds text that is not (yet) a namespace, it narrows to
+    // the namespaces containing that text; an exact namespace in the box means "this one is chosen", so all show.
+    function suggestions(summary, typed) {
+        const all = summary.rows.map((row) => ({
+            value: row.namespace,
+            detail: `${row.serviceCount === 0 ? "no services resolved" : plural(row.serviceCount, "service")}${row.incomplete ? " · incomplete evidence" : ""}`,
+        }));
+        const text = String(typed || "").trim().toLowerCase();
+        if (!text || all.some((entry) => entry.value.toLowerCase() === text)) return all;
+        return all.filter((entry) => entry.value.toLowerCase().includes(text));
+    }
+
+    // The next highlighted row for an arrow key: it stops at the ends instead of wrapping, so a held key is predictable.
+    function moveActive(current, count, key) {
+        if (count <= 0) return -1;
+        if (key === "ArrowDown") return current < 0 ? 0 : Math.min(current + 1, count - 1);
+        if (key === "ArrowUp") return current < 0 ? count - 1 : Math.max(current - 1, 0);
+        return current;
+    }
+
+    window.__resilienceNamespaces = { DISCOVERY_URL, REFRESH_MS, summarize, optionLabel, options, statusText, describeFailure, createRefresher, suggestions, moveActive };
     if (!window.document || !window.document.addEventListener) return;
 
     // ---- browser wiring: only on a page that has something to fill in; every other page never reads the cluster ----
@@ -208,17 +231,91 @@
         return node;
     }
 
-    const datalist = el("datalist");
-    datalist.id = "resilience-namespaces";
-    document.body.append(datalist);
+    let lastSummary = null;
+
+    // One suggestion list per namespace box, directly under it. It follows the same rules for every page that has a
+    // box: choosing a row fills the box and announces the "change" the page already listens for, so the page reloads
+    // at once; typing still reloads when the box loses focus, as before.
+    function createCombo(input, index) {
+        const list = el("ul", "ns-suggest");
+        list.id = `resilience-ns-${index}`;
+        list.hidden = true;
+        list.setAttribute("role", "listbox");
+        input.setAttribute("role", "combobox");
+        input.setAttribute("aria-autocomplete", "list");
+        input.setAttribute("aria-expanded", "false");
+        input.setAttribute("aria-controls", list.id);
+        input.insertAdjacentElement("afterend", list);
+
+        let items = [];
+        let active = -1;
+
+        function close() {
+            list.hidden = true;
+            active = -1;
+            input.setAttribute("aria-expanded", "false");
+        }
+
+        function choose(value) {
+            input.value = value;
+            close();
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        function draw() {
+            list.replaceChildren(...items.map((entry, position) => {
+                const row = el("li", "ns-suggest__item");
+                row.setAttribute("role", "option");
+                row.setAttribute("aria-selected", String(position === active));
+                row.dataset.current = String(entry.value === input.value);
+                row.append(el("strong", "ns-suggest__name", entry.value), el("span", "ns-suggest__detail", entry.detail));
+                // mousedown, not click, and the default is cancelled: the box must keep focus (blur would close the list
+                // before the click arrives), and a click inside a <label> would otherwise re-focus and reopen the box.
+                row.addEventListener("mousedown", (event) => { event.preventDefault(); choose(entry.value); });
+                row.addEventListener("click", (event) => event.preventDefault());
+                return row;
+            }));
+        }
+
+        function open() {
+            items = lastSummary ? suggestions(lastSummary, input.value) : [];
+            if (items.length === 0) { close(); return; }
+            draw();
+            list.hidden = false;
+            input.setAttribute("aria-expanded", "true");
+        }
+
+        input.addEventListener("focus", open);
+        input.addEventListener("click", open);
+        input.addEventListener("input", () => { active = -1; open(); });
+        input.addEventListener("blur", close);
+        input.addEventListener("keydown", (event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                if (list.hidden) open();
+                active = moveActive(active, items.length, event.key);
+                draw();
+            } else if (event.key === "Enter" && !list.hidden && active >= 0 && items[active]) {
+                event.preventDefault();
+                choose(items[active].value);
+            } else if (event.key === "Escape" && !list.hidden) {
+                event.preventDefault();
+                close();
+            }
+        });
+
+        // The cluster's answer changed: a list that is open is redrawn, or closed when nothing is offered any more.
+        return { refresh() { if (!list.hidden) open(); }, close };
+    }
+
     const hints = inputs.map((input) => {
-        input.setAttribute("list", datalist.id);
         const hint = el("p", "namespace-hint");
         hint.setAttribute("role", "status");
         hint.dataset.role = "namespace-hint";
         input.insertAdjacentElement("afterend", hint);
         return hint;
     });
+    const combos = inputs.map((input, index) => createCombo(input, index));
 
     function serviceLine(service) {
         const replicas = service.ready === null || service.declared === null ? "replicas not reported" : `${service.ready}/${service.declared} ready`;
@@ -253,14 +350,8 @@
             kind = "error";
             text = snap.failure.message;
         }
-        datalist.replaceChildren();
-        if (snap.state === "ok") {
-            for (const option of options(snap.summary)) {
-                const node = el("option", "", option.label);
-                node.value = option.value;
-                datalist.append(node);
-            }
-        }
+        lastSummary = snap.state === "ok" ? snap.summary : null;   // a failed read removes the names at once
+        combos.forEach((combo) => combo.refresh());
         hints.forEach((hint) => { hint.textContent = text; hint.dataset.kind = kind; });
         if (appsCard) appsCard.hidden = false;
         if (appsStatus) { appsStatus.textContent = text; appsStatus.dataset.kind = kind; }

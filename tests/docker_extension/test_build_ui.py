@@ -117,22 +117,25 @@ def test_every_page_runs_autoconnect_after_chrome(built, name):
     assert page.index('src="chrome.js"') < page.index('src="autoconnect.js"')
 
 
-def test_only_the_workflows_page_loads_the_trace_service_bridge_and_after_autoconnect(built):
+def test_only_the_workflows_and_connect_pages_load_the_trace_service_bridge_and_after_autoconnect(built):
+    # The Connect page joined the Workflows page when the tracing card was added; no other page may start anything.
     for name in PAGE_FILES:
         page = html(built, name)
-        if name == "workflows.html":
-            assert 'src="trace-service.js"' in page
-            assert page.index('src="autoconnect.js"') < page.index('src="trace-service.js"')
+        if name in ("workflows.html", "connect.html"):
+            assert 'src="trace-service.js"' in page, name
+            assert page.index('src="autoconnect.js"') < page.index('src="trace-service.js"'), name
         else:
             assert 'src="trace-service.js"' not in page, name
 
 
-def test_the_trace_service_bridge_only_ever_asks_the_helper_for_its_three_fixed_commands():
+def test_the_trace_service_bridge_only_ever_asks_the_helper_for_its_six_fixed_commands():
     code = (UI_SRC / "trace-service.js").read_text(encoding="utf-8")
     code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
     code = re.sub(r"(?m)^\s*//.*$", "", code)
-    commands = set(re.findall(r'"(trace-(?:status|start|stop))"', code))
-    assert commands == {"trace-status", "trace-start", "trace-stop"}
+    commands = set(re.findall(r'"(trace-(?:status|start|stop|enable|ensure|validate))"', code))
+    assert commands == {"trace-status", "trace-start", "trace-stop", "trace-enable", "trace-ensure", "trace-validate"}
+    # Any other trace-* name in the bridge would be a command this test does not know about.
+    assert set(re.findall(r'"(trace-[a-z]+)"(?=\s*:\s*\d)', code)) == commands
     # The helper is never given a page-supplied value: exec is called with a file and a one-item array.
     assert code.count("env.exec(") == 1
     assert code.count("env.exec(helperFile(env.platform), [command])") == 1
@@ -160,7 +163,7 @@ def test_the_page_says_nothing_happens_without_approval_in_a_system_dialog(built
     assert "nothing is changed unless you approve there" in page
 
 
-@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js", "namespaces.js"])
+@pytest.mark.parametrize("script", ["autoconnect.js", "connect-auto.js", "trace-service.js", "namespaces.js", "tracing-panel.js", "bookinfo-tracing.js"])
 def test_the_new_scripts_never_write_html_or_log(script):
     source = (UI_SRC / script).read_text(encoding="utf-8")
     # Comments may discuss these APIs (they explain why they are not used); only code is checked.
@@ -308,3 +311,73 @@ def test_the_sample_data_demo_is_not_offered_inside_the_extension(built):
     page = html(built, "failure-impacts.html")
     assert "synthetic-portfolio" not in page and "Viva research demonstration" not in page
     assert "data-role=\"scenario-select\"" in page or "scenario-panel" in page, "the rest of the page is still there"
+
+
+# ---- the tracing card ----------------------------------------------------------------------------------------------
+
+def test_the_connect_page_has_every_hook_the_tracing_script_uses(built):
+    # If a hook is renamed here, the card would silently stop working; this makes that visible.
+    page = html(built, "connect.html")
+    code = (UI_SRC / "tracing-panel.js").read_text(encoding="utf-8")
+    roles = set(re.findall(r'part\("([a-z-]+)"\)', code)) | {"tracing-card"}
+    assert len(roles) >= 12
+    for role in roles:
+        assert f'data-role="{role}"' in page, role
+
+
+def test_only_the_connect_page_carries_the_tracing_card_and_script(built):
+    for name in PAGE_FILES:
+        page = html(built, name)
+        assert ('data-role="tracing-card"' in page) == (name == "connect.html"), name
+        assert ('src="tracing-panel.js"' in page) == (name == "connect.html"), name
+
+
+def test_the_tracing_script_loads_after_the_bridge_and_the_namespace_list_it_reads(built):
+    page = html(built, "connect.html")
+    assert page.index('src="namespaces.js"') < page.index('src="trace-service.js"') < page.index('src="tracing-panel.js"')
+
+
+def test_the_tracing_card_says_what_it_will_not_do(built):
+    page = html(built, "connect.html")
+    assert "nothing starts unless you approve there" in page
+    assert "never sends, seeds or invents a trace" in page
+    assert "does not change your cluster" in page
+
+
+def test_the_image_ships_the_tracing_routes_and_script():
+    dockerfile = (UI_SRC.parents[1] / "extension" / "Dockerfile").read_text(encoding="utf-8")
+    assert "extension/tracing_routes.py" in dockerfile
+    assert "extension/ui-src/tracing-panel.js" in dockerfile
+
+
+# ---- the Bookinfo tracing card ----------------------------------------------------------------------------------
+
+def test_the_connect_page_has_every_hook_the_bookinfo_script_uses(built):
+    page = (built / "connect.html").read_text(encoding="utf-8")
+    code = (UI_SRC / "bookinfo-tracing.js").read_text(encoding="utf-8")
+    roles = set(re.findall(r'part\("([a-z-]+)"\)', code)) | {"bookinfo-card"}
+    assert roles, "the script names no hooks"
+    for role in roles:
+        assert f'data-role="{role}"' in page, f"the Connect page lacks data-role={role!r}"
+
+
+def test_only_the_connect_page_carries_the_bookinfo_card_and_script(built):
+    for name in ("index.html", "workflows.html", "deployments.html", "failure-impacts.html", "recommendations.html", "connect.html"):
+        page = (built / name).read_text(encoding="utf-8")
+        assert ('data-role="bookinfo-card"' in page) == (name == "connect.html"), name
+        assert ('src="bookinfo-tracing.js"' in page) == (name == "connect.html"), name
+
+
+def test_the_four_controls_start_disabled_and_the_card_says_what_it_does_not_do(built):
+    page = (built / "connect.html").read_text(encoding="utf-8")
+    for role in ("bookinfo-plan", "bookinfo-enable", "bookinfo-verify", "bookinfo-traffic", "bookinfo-undo"):
+        assert re.search(rf'<button[^>]*data-role="{role}"[^>]*disabled', page), f"{role} must start disabled"
+    text = " ".join(page.split())  # the markup wraps lines in the middle of sentences
+    for sentence in ("Plan only reads the cluster", "nothing is changed unless you approve there", "nothing is simulated or invented", "the extension's own access is not changed",
+                     "Verify only reads", "Run test traffic is separate and has its own system dialog"):
+        assert sentence in text, sentence
+
+
+def test_the_image_ships_the_bookinfo_script():
+    dockerfile = (UI_SRC.parent / "Dockerfile").read_text(encoding="utf-8")
+    assert "extension/ui-src/bookinfo-tracing.js" in dockerfile

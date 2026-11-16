@@ -3,8 +3,10 @@ package kube
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,6 +99,10 @@ func (r Resource) path(namespace, name string) (string, error) {
 }
 
 func (c *httpClient) do(ctx context.Context, method, path string, in, out any) error {
+	return c.doType(ctx, method, path, "application/json", in, out)
+}
+
+func (c *httpClient) doType(ctx context.Context, method, path, contentType string, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		encoded, err := json.Marshal(in)
@@ -111,7 +117,7 @@ func (c *httpClient) do(ctx context.Context, method, path string, in, out any) e
 	}
 	req.Header.Set("Accept", "application/json")
 	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	if c.bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
@@ -211,6 +217,54 @@ func (c *httpClient) Delete(ctx context.Context, r Resource, namespace, name str
 	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
+func (c *httpClient) CreateRaw(ctx context.Context, r Resource, namespace string, body map[string]any) (string, error) {
+	if r.Namespaced && namespace == "" {
+		return "", fmt.Errorf("a %s needs a namespace", r.Kind)
+	}
+	path, err := r.path(namespace, "")
+	if err != nil {
+		return "", err
+	}
+	var created struct {
+		Metadata struct {
+			UID string `json:"uid"`
+		} `json:"metadata"`
+	}
+	if err := c.do(ctx, http.MethodPost, path, body, &created); err != nil {
+		return "", err
+	}
+	return created.Metadata.UID, nil
+}
+
+func (c *httpClient) DeleteRaw(ctx context.Context, r Resource, namespace, name, uid string) error {
+	path, err := r.path(namespace, name)
+	if err != nil {
+		return err
+	}
+	var options any
+	if uid != "" {
+		options = map[string]any{"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": map[string]any{"uid": uid}}
+	}
+	return c.do(ctx, http.MethodDelete, path, options, nil)
+}
+
+func (c *httpClient) PatchLabels(ctx context.Context, r Resource, namespace, name string, set map[string]*string) error {
+	path, err := r.path(namespace, name)
+	if err != nil {
+		return err
+	}
+	labels := make(map[string]any, len(set))
+	for k, v := range set {
+		if v == nil {
+			labels[k] = nil
+		} else {
+			labels[k] = *v
+		}
+	}
+	patch := map[string]any{"metadata": map[string]any{"labels": labels}}
+	return c.doType(ctx, http.MethodPatch, path, "application/merge-patch+json", patch, nil)
+}
+
 func (c *httpClient) CreateToken(ctx context.Context, namespace, serviceAccount string, expirationSeconds int64) (Token, error) {
 	path, err := ServiceAccounts.path(namespace, serviceAccount)
 	if err != nil {
@@ -241,6 +295,12 @@ func (c *httpClient) CreateToken(ctx context.Context, namespace, serviceAccount 
 	return token, nil
 }
 
+// ObjectFromRaw builds an Object from a server document. It is what Get and List use, exported so a fake cluster can
+// answer exactly as the server would.
+func ObjectFromRaw(raw map[string]any) (*Object, error) { return objectFromRaw(raw) }
+
+var _ RawWriter = (*httpClient)(nil)
+
 // ---- translating between Object and the server's JSON --------------------------------------------
 
 func objectFromRaw(raw map[string]any) (*Object, error) {
@@ -253,10 +313,30 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 			Name      string            `json:"name"`
 			Namespace string            `json:"namespace"`
 			Labels    map[string]string `json:"labels"`
+			UID       string            `json:"uid"`
 		} `json:"metadata"`
 		Spec struct {
 			ProviderID string `json:"providerID"`
+			Replicas   *int   `json:"replicas"`
+			Containers []struct {
+				Name string `json:"name"`
+			} `json:"containers"`
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name string `json:"name"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
 		} `json:"spec"`
+		Status struct {
+			Phase         string `json:"phase"`
+			ReadyReplicas *int   `json:"readyReplicas"`
+			Conditions    []struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			} `json:"conditions"`
+		} `json:"status"`
 		Rules           []PolicyRule    `json:"rules"`
 		AggregationRule json.RawMessage `json:"aggregationRule"`
 		RoleRef         RoleRef         `json:"roleRef"`
@@ -265,16 +345,46 @@ func objectFromRaw(raw map[string]any) (*Object, error) {
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		return nil, err
 	}
+	var containers []string
+	for _, c := range wire.Spec.Containers {
+		containers = append(containers, c.Name)
+	}
+	if len(containers) == 0 { // a Deployment keeps its containers in the Pod template
+		for _, c := range wire.Spec.Template.Spec.Containers {
+			containers = append(containers, c.Name)
+		}
+	}
+	var ready *bool
+	for _, c := range wire.Status.Conditions {
+		if c.Type == "Ready" {
+			value := c.Status == "True"
+			ready = &value
+		}
+	}
+	specDigest := ""
+	if spec, ok := raw["spec"]; ok {
+		if canonical, err := json.Marshal(spec); err == nil { // encoding/json sorts map keys: the same spec gives the same digest
+			sum := sha256.Sum256(canonical)
+			specDigest = hex.EncodeToString(sum[:])
+		}
+	}
 	aggregation := len(wire.AggregationRule) > 0 && string(wire.AggregationRule) != "null"
 	return &Object{
 		Name:            wire.Metadata.Name,
 		Namespace:       wire.Metadata.Namespace,
 		Labels:          wire.Metadata.Labels,
+		UID:             wire.Metadata.UID,
 		Rules:           wire.Rules,
 		AggregationRule: aggregation,
 		RoleRef:         wire.RoleRef,
 		Subjects:        wire.Subjects,
 		ProviderID:      wire.Spec.ProviderID,
+		Containers:      containers,
+		Replicas:        wire.Spec.Replicas,
+		ReadyReplicas:   wire.Status.ReadyReplicas,
+		Phase:           wire.Status.Phase,
+		Ready:           ready,
+		SpecDigest:      specDigest,
 		raw:             raw,
 	}, nil
 }

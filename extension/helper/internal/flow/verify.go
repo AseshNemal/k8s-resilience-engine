@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"resilience-engine/helper/internal/approve"
+	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/kube"
 	"resilience-engine/helper/internal/kubeconfig"
 )
@@ -74,4 +75,53 @@ func verified(ctx context.Context, cmd string, name string, cs kube.Client, clus
 	r := fail(cmd, StateUnsupportedContext, v.Reason)
 	r.Context = approve.Sanitize(name, 80)
 	return v, &r
+}
+
+// ReadOnlyCluster returns a read-only view of a verified local cluster, for planning commands that must never
+// change it. The administrator credential stays in this process, as everywhere else; what is returned is a
+// kube.Reader, which has no Create, Update, Delete or token request, so a write cannot be written against it.
+// A refusal (an unsupported or unverifiable cluster) is returned as a Result and nothing is touched.
+func ReadOnlyCluster(ctx context.Context, d Deps, cmd, name string) (kube.Reader, string, *Result) {
+	c, refusal := d.supported(cmd, name)
+	if refusal != nil {
+		return nil, "", refusal
+	}
+	cs, cluster, err := d.Clusters.Client(c.Name)
+	if err != nil {
+		r := fail(cmd, StateError, err.Error())
+		return nil, "", &r
+	}
+	if _, refusal := verified(ctx, cmd, c.Name, cs, cluster); refusal != nil {
+		return nil, "", refusal
+	}
+	return cs, c.Name, nil
+}
+
+// Admin is a verified local cluster reached with the person's own kubeconfig credential. The credential lives inside
+// Client for the length of one command and is never printed, stored or passed on. Only the installation mechanism for
+// the Bookinfo tracing setup (package traceinstall) uses it, and only after a native approval dialog.
+type Admin struct {
+	Client      kube.Client
+	ContextName string
+	Server      string // host:port of the API server, for the cluster identity
+	CASha256    string // fingerprint of the cluster's certificate authority, for the cluster identity
+}
+
+// AdminCluster returns the person's own connection to a verified local cluster, for the commands that change it after
+// an approval. An unsupported or unverifiable cluster is refused as a Result and nothing is touched, exactly as for
+// ReadOnlyCluster.
+func AdminCluster(ctx context.Context, d Deps, cmd, name string) (*Admin, *Result) {
+	c, refusal := d.supported(cmd, name)
+	if refusal != nil {
+		return nil, refusal
+	}
+	cs, cluster, err := d.Clusters.Client(c.Name)
+	if err != nil {
+		r := fail(cmd, StateError, err.Error())
+		return nil, &r
+	}
+	if _, refusal := verified(ctx, cmd, c.Name, cs, cluster); refusal != nil {
+		return nil, refusal
+	}
+	return &Admin{Client: cs, ContextName: c.Name, Server: clusters.HostPort(c.Server), CASha256: caFingerprint(cluster.CAData)}, nil
 }

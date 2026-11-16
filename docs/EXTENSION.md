@@ -196,6 +196,14 @@ Then open **Resilience Engine** in Docker Desktop, choose **Connect cluster**, a
 `.kube/extension-readonly.kubeconfig`. Until a cluster is connected every page that needs the cluster
 says so explicitly (`CLUSTER_NOT_CONNECTED`); the app never substitutes sample data.
 
+## Tracing in one click
+
+The Connect page has a *Tracing service* card: **Enable tracing** once (a system dialog asks first), and the
+extension keeps one small Jaeger container running, tests its addresses, and shows whether real traces are arriving
+and whether each application in the cluster is producing them. It never sends or invents a trace and never
+changes your cluster or applications. See [TRACING_INFRASTRUCTURE.md](TRACING_INFRASTRUCTURE.md) for the connection
+interface other components can use, the safety rules, and the Bookinfo investigation.
+
 ## Jaeger (optional)
 
 The Workflows page can read call traces from a Jaeger server. The extension does not start one. Inside the

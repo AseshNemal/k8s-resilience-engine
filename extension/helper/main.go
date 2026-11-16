@@ -13,7 +13,11 @@
 //	resilience-helper renew-managed
 //	resilience-helper reconnect
 //	resilience-helper agent-status | agent-enable <context> | agent-disable
-//	resilience-helper trace-status | trace-start | trace-stop
+//	resilience-helper trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop
+//	resilience-helper trace-bookinfo-plan <context>      (read-only: previews the Bookinfo tracing setup, changes nothing)
+//	resilience-helper trace-bookinfo-apply | -undo | -traffic <context>   (change the cluster only after a native approval; see main_bookinfo.go)
+//	resilience-helper trace-bookinfo-verify <context>    (read-only checks: no Pod, no dialog)
+//	resilience-helper trace-bookinfo-status <context>    (reads the saved record only)
 //	resilience-helper revoke <context>
 //	resilience-helper version
 package main
@@ -22,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,6 +35,7 @@ import (
 	"time"
 
 	"resilience-engine/helper/internal/approve"
+	"resilience-engine/helper/internal/bookinfotrace"
 	"resilience-engine/helper/internal/clusters"
 	"resilience-engine/helper/internal/execx"
 	"resilience-engine/helper/internal/flow"
@@ -42,6 +48,48 @@ const version = "0.1.0"
 
 // traceDeps is replaced in tests so no test ever reaches Docker or the network.
 var traceDeps = realTrace
+
+// bookinfoDeps is the host's side of the Bookinfo tracing plan: Docker, to read memory and the cluster nodes, and
+// the swap figure. Replaced in tests.
+var bookinfoDeps = realBookinfo
+
+func realBookinfo() bookinfotrace.Deps {
+	home, _ := os.UserHomeDir()
+	return bookinfotrace.Deps{
+		Runner: execx.Real{},
+		FindDocker: func() (string, error) {
+			return transport.FindDocker(exec.LookPath, os.Stat, runtime.GOOS, home)
+		},
+		GOOS:     runtime.GOOS,
+		ReadFile: os.ReadFile,
+		Getenv:   os.Getenv,
+	}
+}
+
+// planOutput is what trace-bookinfo-plan prints: the usual Result plus the plan. Like every Result it has no field
+// that can carry a credential.
+type planOutput struct {
+	flow.Result
+	Plan *bookinfotrace.PlanResult `json:"plan,omitempty"`
+}
+
+// bookinfoPlan previews the Bookinfo tracing setup. It only reads: the cluster is reached through a read-only view
+// and nothing here asks the person, creates, changes or deletes anything.
+func bookinfoPlan(ctx context.Context, d flow.Deps, name string) planOutput {
+	const command = "trace-bookinfo-plan"
+	reader, contextName, refusal := flow.ReadOnlyCluster(ctx, d, command, name)
+	if refusal != nil {
+		return planOutput{Result: *refusal}
+	}
+	plan := bookinfotrace.Plan(ctx, bookinfoDeps(), reader, contextName)
+	result := flow.Result{OK: plan.Ready, Command: command, Context: contextName}
+	if plan.Ready {
+		result.State, result.Message = "bookinfo-plan-ready", "Nothing has been changed. This is the exact plan."
+	} else {
+		result.State, result.Message = "bookinfo-plan-blocked", "The setup is blocked for the reasons listed. Nothing has been changed."
+	}
+	return planOutput{Result: result, Plan: &plan}
+}
 
 // Deadlines. Docker Desktop on a busy machine can need 30 seconds for a single `docker exec`, and one
 // renewal makes several Docker and cluster calls, so a short limit turns "slow" into "never renews".
@@ -84,8 +132,24 @@ func realDeps() flow.Deps {
 func realTrace() tracesvc.Deps {
 	home, _ := os.UserHomeDir()
 	client := &http.Client{Timeout: 2 * time.Second}
+	config, err := os.UserConfigDir()
+	if err != nil {
+		config = os.TempDir()
+	}
 	return tracesvc.Deps{
-		Runner: execx.Real{},
+		Runner:   execx.Real{},
+		Store:    tracesvc.FileStore{Path: filepath.Join(config, "resilience-engine", "tracing.json")},
+		Prompter: approve.Default(),
+		Agent:    realAgent(home),
+		// A connection test only: it opens the port and closes it, and sends nothing.
+		Dial: func(ctx context.Context, address string) bool {
+			conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", address)
+			if err != nil {
+				return false
+			}
+			_ = conn.Close()
+			return true
+		},
 		FindDocker: func() (string, error) {
 			return transport.FindDocker(exec.LookPath, os.Stat, runtime.GOOS, home)
 		},
@@ -121,12 +185,24 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		return usage(stderr)
 	}
 	command, rest := args[0], args[1:]
-	needsContext := command == "authorize" || command == "renew" || command == "revoke" || command == "agent-enable"
+	needsContext := command == "authorize" || command == "renew" || command == "revoke" || command == "agent-enable" || command == "trace-bookinfo-plan" || isBookinfoInstall(command)
 	switch {
 	case needsContext && len(rest) != 1:
 		return usage(stderr)
 	case !needsContext && len(rest) != 0:
 		return usage(stderr)
+	}
+
+	if isBookinfoInstall(command) {
+		emit(stdout, runBookinfoInstall(command, rest[0], deps))
+		return 0
+	}
+
+	if command == "trace-bookinfo-plan" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		emit(stdout, bookinfoPlan(ctx, deps(), rest[0]))
+		return 0
 	}
 
 	var (
@@ -143,7 +219,12 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 	case "renew":
 		timeout, do = renewTimeout, func(ctx context.Context, d flow.Deps) flow.Result { return flow.Renew(ctx, d, rest[0]) }
 	case "renew-managed":
-		timeout, do = renewTimeout, flow.RenewManaged
+		// The background job runs this. It also keeps the trace service up, but only if the person turned it on.
+		timeout, do = renewTimeout, func(ctx context.Context, d flow.Deps) flow.Result {
+			result := flow.RenewManaged(ctx, d)
+			_ = tracesvc.Ensure(ctx, traceDeps())
+			return result
+		}
 	case "reconnect":
 		timeout, do = renewTimeout, flow.Reconnect
 	case "revoke":
@@ -156,6 +237,13 @@ func run(args []string, stdout, stderr io.Writer, deps func() flow.Deps) (code i
 		timeout, do = 30*time.Second, flow.DisableBackground
 	case "trace-status":
 		timeout, do = 30*time.Second, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Status(ctx, traceDeps()) }
+	case "trace-enable":
+		// Shows the approval dialog and may pull the image, so it gets the same long limit as a first start.
+		timeout, do = 5*time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Enable(ctx, traceDeps()) }
+	case "trace-ensure":
+		timeout, do = 5*time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Ensure(ctx, traceDeps()) }
+	case "trace-validate":
+		timeout, do = time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Validate(ctx, traceDeps()) }
 	case "trace-start":
 		// The first start may pull the image, so this is the longest of the three.
 		timeout, do = 5*time.Minute, func(ctx context.Context, _ flow.Deps) flow.Result { return tracesvc.Start(ctx, traceDeps()) }
@@ -182,6 +270,6 @@ func emit(w io.Writer, v any) {
 }
 
 func usage(stderr io.Writer) int {
-	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-status | trace-start | trace-stop | revoke <context> | version\n")
+	_, _ = io.WriteString(stderr, "usage: resilience-helper discover | status | authorize <context> | renew <context> | renew-managed | reconnect | agent-status | agent-enable <context> | agent-disable | trace-bookinfo-plan <context> | trace-bookinfo-apply <context> | trace-bookinfo-undo <context> | trace-bookinfo-verify <context> | trace-bookinfo-traffic <context> | trace-bookinfo-status <context> | trace-status | trace-enable | trace-ensure | trace-validate | trace-start | trace-stop | revoke <context> | version\n")
 	return 2
 }

@@ -1,0 +1,16 @@
+# Turns tracing on for the "bookinfo" namespace only, with the provider defined in install-minimal.yaml.
+# 100% sampling: Istio's default is 1%, which would hide most of a short demo. Namespace-scoped, so no other
+# namespace in the cluster is affected.
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: trace-demo
+  namespace: bookinfo
+  labels:
+    app.kubernetes.io/managed-by: resilience-tracing
+    resilience.sliit/tracing-setup: bookinfo
+spec:
+  tracing:
+    - providers:
+        - name: jaeger-otlp
+      randomSamplingPercentage: 100

@@ -64,7 +64,9 @@ test("only the state is taken from the helper; the wording shown is this file's 
 
 test("every state the helper can print has its own message", () => {
     for (const state of ["trace-running", "trace-running-external", "trace-stopped", "trace-not-created", "trace-not-ready",
-        "trace-port-in-use", "trace-start-failed", "docker-unavailable"]) {
+        "trace-port-in-use", "trace-start-failed", "docker-unavailable", "trace-image-unavailable", "trace-not-enabled",
+        "trace-recovery-wait", "trace-endpoints-ok", "trace-endpoints-failed", "trace-approval-timed-out", "declined",
+        "approval-unavailable"]) {
         assert.notEqual(T.messageFor(state), T.messageFor("not-a-state"), state);
     }
 });
@@ -134,4 +136,74 @@ test("the platform comes from Docker Desktop, with the browser's own hint as a f
     assert.equal(T.platformOf({}, { platform: "MacIntel" }), "darwin");
     assert.equal(T.platformOf({}, { platform: "Linux x86_64" }), "linux");
     assert.equal(T.platformOf(null, {}), "");
+});
+
+test("enable, ensure and validate run the helper with exactly their own fixed command", async () => {
+    const { svc, calls } = service({ exec: () => ({ stdout: reply("trace-running") }) });
+    await svc.enable();
+    await svc.ensure();
+    await svc.validate();
+    assert.deepEqual(plain(calls), [
+        { file: "resilience-helper", args: ["trace-enable"] },
+        { file: "resilience-helper", args: ["trace-ensure"] },
+        { file: "resilience-helper", args: ["trace-validate"] },
+    ]);
+});
+
+test("a click on enable is never answered with a routine status check that happened to be running", async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const order = [];
+    const { svc } = service({ exec: async (_file, args) => { order.push(args[0]); if (args[0] === "trace-status") await gate; return { stdout: reply(args[0] === "trace-enable" ? "trace-running" : "trace-stopped") }; } });
+    const status = svc.status();
+    const enable = svc.enable();
+    release();
+    const [s, e] = await Promise.all([status, enable]);
+    assert.deepEqual(order, ["trace-status", "trace-enable"]);
+    assert.equal(s.state, "trace-stopped");
+    assert.equal(e.state, "trace-running");
+});
+
+test("two clicks on enable share one helper run, and a failure of the earlier call does not block the next", async () => {
+    let n = 0;
+    const { svc, calls } = service({ exec: async () => { n += 1; if (n === 1) throw new Error("boom"); return { stdout: reply("trace-running") }; } });
+    const first = svc.validate();
+    const again = svc.validate();
+    await Promise.all([first, again]);
+    assert.equal(calls.length, 1);
+    const next = await svc.enable();
+    assert.equal(next.state, "trace-running");
+});
+
+test("the helper's trace details are reduced to the fields the page knows", async () => {
+    const trace = {
+        enabled: true,
+        endpoints: [
+            { name: "otlp-http", address: "127.0.0.1:4318", reachable: true, evidence: "host", note: "n", extra: "dropped" },
+            { name: "pods-otlp-http", address: "host.docker.internal:4318", reachable: "yes", evidence: "node" },
+            { name: "something-else", address: "x", reachable: true, evidence: "host" },
+            { name: "query", address: "x", reachable: true, evidence: "invented" },
+        ],
+    };
+    const { svc } = service({ exec: () => ({ stdout: reply("trace-endpoints-ok", true, { trace, background: "on" }) }) });
+    const r = await svc.validate();
+    assert.equal(r.trace.enabled, true);
+    assert.deepEqual(plain(r.trace.endpoints.map((e) => [e.name, e.reachable, e.evidence])), [["otlp-http", true, "host"], ["pods-otlp-http", null, "node"]]);
+    assert.equal("extra" in r.trace.endpoints[0], false);
+    assert.equal(r.background, "on");
+    assert.equal(r.message, "The trace service's query and OTLP receivers answer on this computer.");
+});
+
+test("an unknown background value or a missing trace object becomes nothing, not something invented", async () => {
+    const { svc } = service({ exec: () => ({ stdout: reply("trace-running", true, { background: "weird" }) }) });
+    const r = await svc.status();
+    assert.equal(r.trace, null);
+    assert.equal(r.background, "");
+});
+
+test("the new states have the page's own wording, and an unanswered dialog is not mistaken for a slow Docker", () => {
+    assert.match(T.messageFor("trace-approval-timed-out"), /No answer was given, so nothing was started/);
+    assert.match(T.messageFor("declined"), /You declined, so nothing was started/);
+    assert.notEqual(T.messageFor("trace-approval-timed-out"), T.messageFor("timed-out"));
+    assert.match(T.messageFor("trace-not-enabled"), /not turned on/);
 });

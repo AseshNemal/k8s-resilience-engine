@@ -10,6 +10,9 @@
 //   - it never starts an application, sends traffic, or changes a Kubernetes workload.
 //
 // Docker's own error text is never printed: a result carries a fixed state and a fixed message.
+//
+// Turning tracing on is a separate, approved step (enable.go): the person confirms in a native dialog once, and
+// from then on Ensure may restart or recreate that one container. Nothing here touches the cluster.
 package tracesvc
 
 import (
@@ -17,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"resilience-engine/helper/internal/agent"
+	"resilience-engine/helper/internal/approve"
 	"resilience-engine/helper/internal/execx"
 	"resilience-engine/helper/internal/flow"
 )
@@ -42,14 +47,20 @@ const (
 
 // States are the machine-readable outcomes the extension UI turns into messages.
 const (
-	StateRunning         flow.State = "trace-running"          // up, and started by this helper
-	StateRunningExternal flow.State = "trace-running-external" // up, started by someone else
-	StateStopped         flow.State = "trace-stopped"          // our container exists and is not running
-	StateNotCreated      flow.State = "trace-not-created"      // nothing answers and our container does not exist
-	StateNotReady        flow.State = "trace-not-ready"        // started, but did not answer in time
-	StatePortInUse       flow.State = "trace-port-in-use"      // something else holds the Jaeger ports
-	StateStartFailed     flow.State = "trace-start-failed"     // Docker refused for another reason
-	StateDockerMissing   flow.State = "docker-unavailable"     // the Docker CLI could not be found or run
+	StateRunning          flow.State = "trace-running"            // up, and started by this helper
+	StateRunningExternal  flow.State = "trace-running-external"   // up, started by someone else
+	StateStopped          flow.State = "trace-stopped"            // our container exists and is not running
+	StateNotCreated       flow.State = "trace-not-created"        // nothing answers and our container does not exist
+	StateNotReady         flow.State = "trace-not-ready"          // started, but did not answer in time
+	StatePortInUse        flow.State = "trace-port-in-use"        // something else holds the Jaeger ports
+	StateStartFailed      flow.State = "trace-start-failed"       // Docker refused for another reason
+	StateDockerMissing    flow.State = "docker-unavailable"       // the Docker CLI could not be found or run
+	StateImageUnavailable flow.State = "trace-image-unavailable"  // Docker could not download the image
+	StateNotEnabled       flow.State = "trace-not-enabled"        // the person has not turned tracing on, so nothing was done
+	StateApprovalTimedOut flow.State = "trace-approval-timed-out" // the dialog was not answered, so nothing was started
+	StateRecoveryWait     flow.State = "trace-recovery-wait"      // our container was recreated a moment ago; not again yet
+	StateEndpointsOK      flow.State = "trace-endpoints-ok"       // the query and both OTLP receivers answered
+	StateEndpointsFailed  flow.State = "trace-endpoints-failed"   // at least one of them did not answer
 )
 
 // Deps are the host operations, behind interfaces so tests never touch Docker or the network.
@@ -60,6 +71,21 @@ type Deps struct {
 	Probe func(ctx context.Context) bool
 	// Sleep waits between probes; nil means time.Sleep honouring the context.
 	Sleep func(ctx context.Context, d time.Duration)
+
+	// The rest belong to the approved, automatic part (enable.go). All may be nil: no Store means tracing is
+	// never "turned on", no Prompter means it cannot be turned on, and so on.
+	Store    Store                                          // remembers that the person turned tracing on
+	Prompter approve.Prompter                               // the native approval dialog
+	Agent    agent.Controller                               // the per-user background job that also keeps the service up
+	Dial     func(ctx context.Context, address string) bool // a TCP connection test; sends no data
+	Now      func() time.Time
+}
+
+func (d Deps) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
 }
 
 func (d Deps) sleep(ctx context.Context, wait time.Duration) {
@@ -122,7 +148,9 @@ func docker(d Deps) (string, bool) {
 }
 
 // Status reports whether the trace service answers, and whether this helper started it.
-func Status(ctx context.Context, d Deps) flow.Result { return status(ctx, d, "trace-status") }
+func Status(ctx context.Context, d Deps) flow.Result {
+	return attach(d, status(ctx, d, "trace-status"))
+}
 
 func status(ctx context.Context, d Deps, command string) flow.Result {
 	answering := d.Probe(ctx)
@@ -154,8 +182,14 @@ func status(ctx context.Context, d Deps, command string) flow.Result {
 }
 
 // Start brings the trace service up and waits until it answers. If one already answers, nothing is done.
+// It is what a person's own click runs, so it may recreate a silent container of ours without waiting.
 func Start(ctx context.Context, d Deps) flow.Result {
-	const command = "trace-start"
+	return attach(d, start(ctx, d, "trace-start", func() bool { return true }))
+}
+
+// start is Start for any caller. mayRecreate is asked before a silent container of ours is removed and created
+// again, so an automatic caller can refuse (and say so) instead of cycling Docker.
+func start(ctx context.Context, d Deps, command string, mayRecreate func() bool) flow.Result {
 	current := status(ctx, d, command)
 	switch current.State {
 	case StateRunning, StateRunningExternal, StateDockerMissing:
@@ -179,6 +213,10 @@ func Start(ctx context.Context, d Deps) flow.Result {
 		if waitFor(ctx, d, int(revivalWait/readyInterval)) {
 			return result(command, StateRunning, true, "The trace service is running.")
 		}
+		if !mayRecreate() {
+			return result(command, StateRecoveryWait, false,
+				"The trace service is not answering. It was recreated a moment ago, so it is not recreated again yet.")
+		}
 		path, _ := docker(d)
 		_, _ = d.Runner.Run(ctx, path, []string{"rm", "-f", ContainerName}, nil)
 		if failed := create(ctx, d, command); failed != nil {
@@ -198,8 +236,12 @@ func create(ctx context.Context, d Deps, command string) *flow.Result {
 	}
 	_, _ = d.Runner.Run(ctx, path, []string{"rm", "-f", ContainerName}, nil)
 	failed := result(command, StateStartFailed, false, "Docker could not start the trace service.")
-	if portTaken(res) {
+	switch {
+	case portTaken(res):
 		failed = portInUse(command)
+	case imageUnavailable(res):
+		failed = result(command, StateImageUnavailable, false,
+			"Docker could not download the trace service image. Check the network (a proxy or TLS inspection can block it), or run `docker pull "+Image+"`, then try again.")
 	}
 	return &failed
 }
@@ -232,19 +274,24 @@ func waitReady(ctx context.Context, d Deps, command string) flow.Result {
 		"The trace service was started but is not answering yet. Give it a moment, then try again.")
 }
 
-// Stop stops the trace service this helper started. A Jaeger started by anything else is left alone.
+// Stop stops the trace service this helper started. A Jaeger started by anything else is left alone. Stopping
+// is also "turn it off": the automatic restart stops too, until the person enables tracing again.
 func Stop(ctx context.Context, d Deps) flow.Result {
 	const command = "trace-stop"
 	current := status(ctx, d, command)
 	switch current.State {
-	case StateRunningExternal, StateDockerMissing, StateStopped, StateNotCreated:
-		return current
+	case StateRunningExternal, StateDockerMissing:
+		return attach(d, current)
+	case StateStopped, StateNotCreated:
+		turnOff(d)
+		return attach(d, current)
 	}
 	path, _ := docker(d)
 	if !succeeded(d.Runner.Run(ctx, path, []string{"stop", "-t", stopGrace, ContainerName}, nil)) {
-		return result(command, StateStartFailed, false, "Docker could not stop the trace service.")
+		return attach(d, result(command, StateStartFailed, false, "Docker could not stop the trace service."))
 	}
-	return result(command, StateStopped, true, "The trace service is stopped.")
+	turnOff(d)
+	return attach(d, result(command, StateStopped, true, "The trace service is stopped."))
 }
 
 func succeeded(res execx.Result, err error) bool { return err == nil && res.ExitCode == 0 }
@@ -255,4 +302,21 @@ func portTaken(res execx.Result) bool {
 	text := strings.ToLower(string(res.Stderr) + string(res.Stdout))
 	return strings.Contains(text, "port is already allocated") || strings.Contains(text, "address already in use") ||
 		strings.Contains(text, "ports are not available")
+}
+
+// imageUnavailable recognises Docker failing to download the image (no network, a proxy or TLS inspection it does
+// not trust, a rate limit, or its credential helper not being found), so the person is told what to try. Only the
+// verdict is used; the text itself is never returned. These are the usual wordings of Docker's errors, so an
+// unfamiliar one is reported as the generic failure, never as this.
+func imageUnavailable(res execx.Result) bool {
+	text := strings.ToLower(string(res.Stderr) + string(res.Stdout))
+	for _, marker := range []string{
+		"pull access denied", "failed to resolve", "x509", "no such host", "tls handshake", "i/o timeout",
+		"error getting credentials", "toomanyrequests", "failed to do request",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }

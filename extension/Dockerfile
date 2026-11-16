@@ -32,7 +32,7 @@ COPY app ./app
 COPY experiments ./experiments
 # sample_data/ and deploy/ are deliberately not copied: the extension never serves fixture data, and
 # declared deployment intent must come from an explicitly selected source, not a folder in the image.
-COPY extension/__init__.py extension/asgi.py extension/cluster_connection.py extension/cluster_ingest.py extension/error_envelope.py extension/healthcheck.py ./extension/
+COPY extension/__init__.py extension/asgi.py extension/cluster_connection.py extension/cluster_ingest.py extension/error_envelope.py extension/healthcheck.py extension/tracing_routes.py ./extension/
 
 # --- Host helper: one static Go binary per operating system, for this image's own architecture ---
 # Docker Desktop copies the binary for the user's operating system onto their computer. metadata.json
@@ -78,7 +78,7 @@ LABEL org.opencontainers.image.title="K8s Resilience Engine" \
 
 COPY extension/metadata.json extension/compose.yaml extension/icon.svg /
 COPY --from=render /out /ui
-COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoconnect.js extension/ui-src/namespaces.js extension/ui-src/trace-service.js extension/ui-src/connect.js extension/ui-src/connect-auto.js extension/ui-src/docker.css /ui/
+COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoconnect.js extension/ui-src/namespaces.js extension/ui-src/trace-service.js extension/ui-src/tracing-panel.js extension/ui-src/bookinfo-tracing.js extension/ui-src/connect.js extension/ui-src/connect-auto.js extension/ui-src/docker.css /ui/
 COPY --from=helper --chmod=0755 /out/darwin/resilience-helper /darwin/resilience-helper
 COPY --from=helper --chmod=0755 /out/linux/resilience-helper /linux/resilience-helper
 COPY --from=helper --chmod=0755 /out/windows/resilience-helper.exe /windows/resilience-helper.exe
