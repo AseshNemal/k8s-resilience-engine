@@ -445,3 +445,15 @@ def test_a_kept_change_is_still_resettable_from_the_run_view(world):
     assert kept["application"]["status"] == "KEPT"
     assert kept["canKeep"] is False and kept["canReset"] is False and kept["canResetKept"] is True
     assert gateway.restores == [], "keeping restored nothing"
+    patches = list(gateway.patches)
+    with Session(service.engine) as db:
+        application = get_research_application_service(db, lambda: gateway, ResearchAnalyser())
+        restored = application.reset(run["candidateId"], "asesh")
+    assert restored.status == "RESET"
+    assert set(gateway.restores) == {"db", "cache"}
+    assert gateway.patches == patches, "Reset never reapplies the candidate"
+    after_reset = service.read(run["runId"])
+    assert after_reset["application"]["status"] == "RESET"
+    assert not after_reset["canReset"] and not after_reset["canKeep"] and not after_reset["canResetKept"]
+    assert after_reset["report"] == kept["report"], "prediction and observations survive both decisions"
+    assert service.history()["runs"][0]["runId"] == run["runId"]

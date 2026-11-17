@@ -26,11 +26,11 @@ test("deployment exposure renders read-only nodes and explicitly unknown workflo
     view.renderDeploymentFindings(container, {
         note: "Placement only",
         recommendations: [
-            { service: "orders", type: "TOPOLOGY_SPREAD", ranking: { rank: 2 }, averageServiceExposureBefore: 40, averageServiceExposureAfter: 20, worstCaseBefore: 50, worstCaseAfter: 50, resourceCost: "LOW" },
-            { service: "payments", type: "REPLICA_INCREASE", ranking: { rank: 1 }, averageServiceExposureBefore: 40, averageServiceExposureAfter: 10, worstCaseBefore: 50, worstCaseAfter: 25, resourceCost: "MEDIUM" },
+            { service: "orders", type: "TOPOLOGY_SPREAD", feasible: true, ranking: { rank: 2 }, averageServiceExposureBefore: 40, averageServiceExposureAfter: 20, worstCaseBefore: 50, worstCaseAfter: 50, resourceCost: "LOW" },
+            { service: "payments", type: "REPLICA_INCREASE", feasible: true, ranking: { rank: 1 }, averageServiceExposureBefore: 40, averageServiceExposureAfter: 10, worstCaseBefore: 50, worstCaseAfter: 25, resourceCost: "MEDIUM" },
         ],
     }, { service: "orders", type: "TOPOLOGY_SPREAD" });
-    assert.match(text(container), /Recommended on Assessment/);
+    assert.match(text(container), /Selected preview/);
     assert.match(text(container), /Topology spread · orders/);
     view.renderDeploymentFindings(container, null);
     assert.equal(container.hidden, true);

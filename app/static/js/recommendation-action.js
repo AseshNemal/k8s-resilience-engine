@@ -58,10 +58,23 @@
         if (facts.status === "loading") return { ...out, phase: "loading", title: "Reading the cluster…", text: "Checking placement and the reviewed workflows." };
         if (facts.status === "needs-input") return { ...out, phase: "needs-input", title: "Choose an application", text: "Pick one above to see its best change." };
 
+        if (run && run.busy) {
+            return { ...out, phase: "running", title: run.resetting ? "Putting the previous configuration back…" : "Applying and checking…",
+                text: run.message || "Follow the rollout below. Nothing else can change the cluster meanwhile.",
+                primary: action("busy", run.resetting ? "Restoring…" : "Running…", { disabled: true, reason: "A run is in progress." }) };
+        }
+        if (run && run.canReset && run.finished) {
+            return { ...out, phase: "decide", title: facts.runIsOther ? "A different change is still applied. Keep it or reset it first."
+                    : run.failed ? "The run stopped with the change in place" : "The change is on the cluster. Keep it or put it back?",
+                text: run.canKeep ? "Reset restores the saved configuration. Keep leaves it as it is and records that you decided so. Results stay in history either way."
+                    : "Reset restores the saved configuration. Results stay in history.",
+                primary: action("reset", "Reset now"), secondary: run.canKeep ? action("keep", "Keep changes") : null };
+        }
+
         if (facts.blockedBy === "workflow") {
             return { ...out, phase: "needs-workflow", title: "This change can't be applied yet",
                 text: facts.mode === "deployment"
-                    ? "The change is predicted to help, but without a reviewed workflow the business impact is unknown, so it cannot be approved or applied. Review the workflows this application runs, then check again."
+                    ? "This is a service-level simulation. Without a current operational workflow review, business impact is unknown and approval and Apply stay blocked. Open Workflow Manager, review or create the real definition and its dependency roles, then use Review & Save → Use this real workflow for operational analysis. Record how it was verified, save, and check again here. Saving a research declaration alone does not establish operational evidence."
                     : (facts.blockedMessage || "A reviewed workflow definition is required before a change can be approved."),
                 primary: action("workflows", "Review a workflow"), secondary: action("recheck", "I've reviewed one — check again") };
         }
@@ -77,18 +90,6 @@
 
         const status = facts.approval || "none";
 
-        if (run && run.busy) {
-            return { ...out, phase: "running", title: run.resetting ? "Putting the previous configuration back…" : "Applying and checking…",
-                text: run.message || "Follow the rollout below. Nothing else can change the cluster meanwhile.",
-                primary: action("busy", run.resetting ? "Restoring…" : "Running…", { disabled: true, reason: "A run is in progress." }) };
-        }
-        if (run && run.canReset && run.finished) {
-            return { ...out, phase: "decide", title: facts.runIsOther ? "A different change is still applied. Keep it or reset it first."
-                    : run.failed ? "The run stopped with the change in place" : "The change is on the cluster. Keep it or put it back?",
-                text: run.canKeep ? "Reset restores the saved configuration. Keep leaves it as it is and records that you decided so. Results stay in history either way."
-                    : "Reset restores the saved configuration. Results stay in history.",
-                primary: action("reset", "Reset now"), secondary: run.canKeep ? action("keep", "Keep changes") : null };
-        }
         if (run && run.kept) {
             // The change is settled and no longer blocks another one; the list below was recalculated from the cluster as it is now.
             const canReset = run.canReset || run.canResetKept;
@@ -99,6 +100,16 @@
         if (run && run.reset) {
             return { ...out, phase: "restored", title: "Previous configuration restored", text: "The results are saved in history. You can apply this change again or choose another.",
                 primary: status === "APPROVED" ? action("apply", "Apply again") : action("choose", "Choose another change") };
+        }
+        if (facts.approvalLoaded === false) {
+            return { ...out, phase: "checking-approval", title: "Checking this proposal's saved approval",
+                text: "Approval and Apply wait until the saved decision for this selection can be read.",
+                primary: facts.message ? action("recheck", "Check again") : null };
+        }
+        if (facts.approvalStale && status === "PENDING_APPROVAL") {
+            return { ...out, phase: "stale", title: "The proposal changed since this request",
+                text: "This earlier request cannot authorize the selected proposal. Reject it, then review and request approval for the current change.",
+                primary: action("reject", "Reject earlier request"), secondary: action("recheck", "Refresh evidence") };
         }
         if (status === "APPROVED") {
             const blocked = facts.canApply === false;
@@ -242,7 +253,7 @@
         headSlot.append(act);
         if (facts.map && global.ResiliencePlacement && (facts.map.current || []).length) {
             const details = el("details", undefined, "rx-dock__map", { "data-role": "rec-dock-map" });
-            if (["review", "pending", "approved", "research", "restored"].includes(model.phase)) details.open = true;
+            if (["review", "pending", "approved", "research", "restored", "needs-workflow", "not-approvable"].includes(model.phase)) details.open = true;
             const summary = el("summary", facts.map.after ? "Where the pods run: now and after the change" : "Where the pods run");
             const holder = el("div", undefined, "rx-dock__map-body");
             details.append(summary, holder);

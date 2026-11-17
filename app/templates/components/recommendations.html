@@ -36,15 +36,25 @@
 
 <div class="rx-pane" role="tabpanel" id="rec-pane-current" aria-labelledby="rec-tab-current" data-pane-panel="current">
 
-    {# The selected change and the ONE next thing to do with it: approve, apply, keep or reset, or why none of that is possible yet. #}
+    <div class="rx-decision">
+    <section class="card rx-section rx-options" id="rec-s-fix" aria-labelledby="rec-h-fix">
+        <header class="rx-section__head">
+            <h3 class="rx-section__title" id="rec-h-fix">Choose a recommendation</h3>
+            <p class="rx-section__sub">All feasible alternatives, ranked by the engine. Select one to review its effects and next action. Selection changes nothing on the cluster.</p>
+        </header>
+        <div data-role="rec-deployment-findings" hidden></div>
+        <div data-role="rec-outcome"></div>
+        <div data-role="rec-fixes"></div>
+    </section>
+    {# The selected proposal stays beside its list, including when evidence blocks approval. #}
     <section class="rx-dock" data-role="rec-dock" aria-label="Selected change and next step" aria-live="polite" hidden>
         <div data-role="rec-dock-head"></div>
         <ol class="rx-rail__list rx-dock__rail" data-role="rec-rail" aria-label="Progress"></ol>
         <div class="rx-dock__body" data-role="rec-dock-body"></div>
     </section>
+    </div>
 
     <p class="rx-hint" id="rec-next-hint" data-role="rec-hint" role="status" hidden></p>
-    <div data-role="rec-deployment-findings" hidden aria-live="polite"></div>
     <details class="rx-fold rx-evidence" data-role="rec-evidence-details">
         <summary data-role="rec-evidence-summary">Evidence</summary>
         <ul class="rec-evidence" data-role="rec-evidence" aria-label="Evidence needed for a recommendation" aria-live="polite"></ul>
@@ -221,15 +231,6 @@
             <p class="rx-section__sub">What losing one worker node does to your workflows.</p>
         </header>
         <div data-role="rec-risk"></div>
-    </section>
-
-    <section class="card rx-section" id="rec-s-fix" aria-labelledby="rec-h-fix">
-        <header class="rx-section__head">
-            <h3 class="rx-section__title" id="rec-h-fix">The fix</h3>
-            <p class="rx-section__sub">Ranked by the engine. Selecting one changes nothing on the cluster.</p>
-        </header>
-        <div data-role="rec-outcome"></div>
-        <div data-role="rec-fixes"></div>
     </section>
 
     <section class="card rx-section" id="rec-s-review" aria-labelledby="rec-h-review">

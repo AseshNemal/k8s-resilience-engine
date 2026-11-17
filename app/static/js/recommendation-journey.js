@@ -320,13 +320,13 @@
 
     function partition(detail) {
         const candidates = (detail && Array.isArray(detail.candidates) && detail.candidates) || [];
-        const feasible = candidates.filter((c) => c.feasible);
+        const feasible = candidates.filter((c) => c.feasible).sort((a, b) => (a.ranking?.rank ?? Infinity) - (b.ranking?.rank ?? Infinity));
         return { useful: feasible.filter(improves), noGain: feasible.filter((c) => !improves(c)), ruledOut: candidates.filter((c) => !c.feasible) };
     }
 
     /**
-     * The selected fix as the lead card, and the other options as rows to choose from. Options the engine predicts no gain from, and
-     * options it ruled out, are behind their own disclosures with the engine's reason.
+     * The selected fix as the lead card, and every feasible alternative as a visible row, including no-gain previews.
+     * Ruled-out options keep their reasons in a disclosure. Selection and approval are separate gates.
      * options: { selectedId, engineId, canSelect(candidate), whyNot(candidate), onSelect(id), failedNode }
      */
     function renderFixes(container, detail, options) {
@@ -380,7 +380,7 @@
             const item = el(doc, "li", undefined, "rx-fix", { "data-candidate": c.id, "data-feasible": String(!!c.feasible) });
             const text = el(doc, "div", undefined, "rx-fix__text");
             const heading = el(doc, "div", undefined, "rx-fix__heading");
-            heading.append(el(doc, "span", name.title, "rx-fix__name"));
+            heading.append(el(doc, "span", `${c.ranking?.rank != null ? `#${c.ranking.rank} · ` : ""}${name.title}`, "rx-fix__name"));
             if (c.id === o.engineId) heading.append(el(doc, "span", "Top ranked", "rx-tag"));
             text.append(heading, el(doc, "span", name.target, "rx-fix__target"));
             item.append(text);
@@ -395,6 +395,8 @@
                     choose.addEventListener("click", () => o.onSelect(c.id));
                 }
                 item.append(choose);
+                if (o.whyNot && o.whyNot(c)) item.append(el(doc, "p", `Preview available. Approval: ${o.whyNot(c)}`, "rx-fix__reason"));
+                if (c.cost?.note) item.append(el(doc, "p", c.cost.note, "rx-fix__reason"));
             } else {
                 const reason = (c.approval && c.approval.reason) || (c.feasibility && c.feasibility.explanation) || "The engine could not verify a placement for this change.";
                 item.append(el(doc, "p", reason, "rx-fix__reason"));
@@ -419,8 +421,9 @@
             box.append(listOf(list, "rx-fixes--quiet"));
             container.append(box);
         };
-        fold(groups.noGain, groups.noGain.length === 1 ? "option with no predicted gain" : "options with no predicted gain",
-            "Feasible, but the simulation predicts the same blast radius: on their own they do not remove a single point of failure.");
+        const noGain = groups.noGain.filter((c) => c.id !== o.selectedId);
+        if (noGain.length) container.append(el(doc, "h4", "Feasible alternatives with no predicted gain", "rx-subhead"),
+            el(doc, "p", "Select to inspect their limits. Feasibility alone does not make a change approvable.", "rx-fineprint"), listOf(noGain));
         fold(groups.ruledOut, groups.ruledOut.length === 1 ? "option ruled out" : "options ruled out", null);
         if (!all.length) container.append(el(doc, "p", "The engine generated no candidate change. That is not a finding that the application is resilient.", "rx-empty"));
         return { useful: groups.useful.length, noGain: groups.noGain.length, ruledOut: groups.ruledOut.length, selected: selected ? selected.id : null };
@@ -480,6 +483,15 @@
             list.append(...notes.map((text) => el(doc, "li", text)));
             box.append(list);
             container.append(box);
+        }
+        if (proposal?.yaml) {
+            const yaml = el(doc, "details", undefined, "rx-fold");
+            yaml.append(el(doc, "summary", "Exact Kubernetes patch for this selection"),
+                el(doc, "pre", proposal.yaml, "op-pre"),
+                el(doc, "p", `Proposal SHA-256: ${proposal.sha256 || "not reported"}. Review only; nothing is applied.`, "rx-fineprint"));
+            container.append(yaml);
+        } else {
+            container.append(el(doc, "p", proposal?.reason || "No applicable Kubernetes patch is available for this candidate.", "rx-fineprint"));
         }
         return { edited, added, notes: notes.length };
     }

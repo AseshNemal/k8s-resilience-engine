@@ -245,6 +245,11 @@
                         s.failedNode = text(saved.failedNode, 253);
                     }
                 } catch (_error) { /* Ignore malformed or inaccessible storage. */ }
+                // A return link from Workflow Manager is an application hint only. The server still checks live evidence.
+                if (env.initialNamespace) {
+                    s.namespace = text(env.initialNamespace, 253);
+                    s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = "";
+                }
             }
             if (s.identity !== null && identity !== s.identity) {   // a different cluster than the choices were made on
                 s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; s.ctx = null;

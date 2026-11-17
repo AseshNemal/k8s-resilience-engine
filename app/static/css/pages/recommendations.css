@@ -1116,3 +1116,18 @@ textarea.form-input { resize: vertical; min-height: 4.5rem; }
 .rx-dock__validation { margin: 0; padding: 8px 12px; border-radius: 8px; font-size: 13.5px; background: var(--color-surface-soft); border: 1px solid var(--color-border); }
 .rx-dock__validation[data-tone="ok"] { border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border)); background: color-mix(in srgb, var(--color-success) 8%, var(--color-surface)); }
 .rx-dock__validation[data-tone="warn"] { border-color: color-mix(in srgb, var(--color-warning) 50%, var(--color-border)); background: color-mix(in srgb, var(--color-warning) 9%, var(--color-surface)); }
+
+/* Keep the decision and its exact next action in the same view. */
+.rx-decision { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.rx-decision > * { min-width: 0; }
+.rx-decision .rx-dock { position: sticky; top: 12px; margin: 0; max-height: calc(100vh - 24px); overflow: auto; }
+.rx-options .rx-lead { margin: 12px 0; }
+.rx-options .rx-lead[data-picked="true"] { border-color: var(--color-primary); box-shadow: inset 3px 0 var(--color-primary); }
+.rx-options .rx-fix__reason { flex-basis: 100%; margin: 0; }
+.rx-options .rx-lead__head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.rx-options pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 1000px) {
+    .rx-decision { grid-template-columns: minmax(0, 1fr); }
+    .rx-decision .rx-dock { position: static; max-height: none; }
+    .rx-options { max-height: 48vh; overflow: auto; }
+}

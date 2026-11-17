@@ -542,3 +542,17 @@ test("a hand-off made on another cluster is dropped, never applied", async () =>
     assert.equal(c.selection().failedNode, "", "the node chosen on the other cluster is cleared");
     assert.ok(calls.every((url) => !url.includes("worker-2")), "nothing chosen on one cluster is sent to another");
 });
+
+test("the workflow-manager return namespace is a one-time hint and still requires current operational evidence", async () => {
+    const { env, calls } = makeEnv({
+        "/api/recommendations/context": context({ workflows: [], workflowId: null, workflowChoice: "none", ready: false }),
+    });
+    env.allWorkflows = true;
+    env.initialNamespace = "bookinfo";
+    const c = C.createController(env);
+    const v = await c.start();
+    assert.equal(calls[0], "/api/recommendations/context?namespace=bookinfo");
+    assert.equal(v.status, "blocked");
+    assert.equal(v.workflowId, "");
+    assert.ok(calls.every(url => !url.includes("/detail")), "a link cannot establish or manufacture workflow eligibility");
+});

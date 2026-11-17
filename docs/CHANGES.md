@@ -3,6 +3,18 @@
 Newest first. Each entry says whose area it touches, what it changed outside its owner's folder, and what it did **not** change.
 Shared schemas (`app/shared/schemas/`), `app/main.py` and every other member's algorithm are untouched unless an entry says so.
 
+## 2026-11-17 — Member 4: selectable recommendations and proposal-specific actions
+
+Based on main `6bcf2ae`. No version bump or release.
+
+- **Member 4 UI:** the complete feasible list sits beside the selected change's action dock. Deployment-only variants now share one selection with the dock and map; workflow candidates remain previewable even when approval is blocked. Existing combination recommendations remain intact. Selection persistence includes deployment-only analysis.
+- **Approval UX:** exact patch review, required justification for alternatives, fingerprint/YAML matching for saved decisions, and guards against stale reads and confirmations (including A → B → A). An unseen proposal generated during an approval request is never automatically approved. Recovery actions remain available when workflow evidence is missing; settled runs do not obscure another proposal.
+- **Member 1 page handoff only:** `workflow-editor.js` and `workflow_editor.html` accept the application namespace and display review instructions when reached from Recommendations. Operational attestations remain explicit and use the existing review API. No Member 1 evidence logic changed.
+- **Policy unchanged:** deployment-only candidates remain read-only; business impact stays unknown without a current operational review. No real cluster workloads were changed, no failures were injected, and no deployment-only approval policy was enabled.
+- **Tests:** Python **3759 passed, 22 skipped**; JavaScript **865 passed**; every Go package passed. The expanded fake-gateway Apply → Keep → Reset and operational-review tests also passed in a focused backend run (**38 passed**). Native Docker Desktop is unavailable and browser automation could not initialize; visual UI acceptance remains unverified.
+
+Details and optional future policy decision: [WORKFLOW_EVIDENCE_POLICY.md](WORKFLOW_EVIDENCE_POLICY.md#recommendation-selection-and-the-review-handoff-2026-11-17).
+
 ## 2026-11-17 — Member 4: Keep refreshes the page, and "Watch a real failure"
 
 Branch `feat/production-readiness`, committed together with the earlier work listed below. Extension build 0.1.710.
