@@ -740,7 +740,8 @@ const READY_ROUTES = (extra = {}) => ({ [DETAIL]: { status: 200, body: { ...deta
 
 const approvedApply = (id, over = {}) => ({
     status: "APPROVED", recommendationId: id, decidedBy: "asesh", decidedAt: "2026-10-24T10:00:00Z",
-    requestedBy: "asesh", requestedAt: "2026-10-24T09:00:00Z", proposalVersion: "v1", ...over,
+    requestedBy: "asesh", requestedAt: "2026-10-24T09:00:00Z", proposalVersion: "v1",
+    evaluationSnapshot: { proposal: { fingerprint: "a".repeat(64), yaml: { sha256: "b".repeat(64) } } }, ...over,
 });
 
 test("without a workflow dropdown Apply and test still needs a persisted approval and a named applier", async () => {

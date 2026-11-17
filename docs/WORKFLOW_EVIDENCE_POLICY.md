@@ -35,3 +35,24 @@ The installed host helper's read-only tracing plan passed its preparation checks
 ## Release limitations
 
 The prepared disposable acceptance suite exercises the explicit research approval/lifecycle path with declared test inputs; it does not establish Bookinfo business dependencies or production workflow survivability. Real Kubernetes writes, restart/crash recovery during writes, controlled failure validation and native Docker write interactions still require authorized acceptance. Local and browser verification are recorded separately in `tmp/workflow-evidence-verification.json` after execution; test success is not a production-ready declaration.
+
+
+## Recommendation selection and the review handoff (2026-11-17)
+
+The Recommendations list exposes every verified feasible alternative, including variants for the same service and preview-only candidates without ranked benefit. Combined workflow proposals remain one selection. The list and action dock share the selected candidate; selecting updates the prediction, exact workflow patch, before/after placement and saved approval lookup. Assessment initializes selection, and a developer can override it. Reloads always fetch fresh evidence; saved selection is scoped to the cluster and analysis.
+
+The **Review a workflow** link carries the application namespace into Workflow Manager. Open or create the real definition, review its entry service, dependency roles and importance against the application, and choose **Review & Save**. Enter the reviewer, explicitly select **Use this real workflow for operational analysis**, and describe how the exact definition was verified. The checkbox is never preselected by the handoff. Return to Recommendations and reassess, or use **I've reviewed one — check again** in the original tab. Saving a research declaration alone does not qualify.
+
+Selection changes nothing on the cluster. Deployment-only suggestions remain read-only; business impact remains unknown. The existing YAML generator requires approval-eligible workflow evidence, so deployment-only previews do not manufacture an applicable patch. After a current operational review, all remaining eligibility, compatibility, cluster-identity, write-authorization and operation-conflict checks still apply.
+
+The approval dialog shows the exact patch and requires justification for an alternative. A saved decision enables Apply only when its proposal fingerprint and YAML digest match the selection. A stale pending request must be explicitly rejected before requesting a fresh one. Late reads, refreshes, A → B → A selection changes and changed proposals during an approval request cannot automatically authorize an unseen proposal. Apply requires its own confirmation and sends the exact candidate, fingerprint and YAML digest. Recovery actions remain available for an unresolved change even when current workflow evidence is missing. After Keep or Reset, the page rereads the cluster before further recommendations. Saved runs are historical results; post-rollout risk is still a model recalculation over observed placement.
+
+### Optional deployment-only authorization policy — not enabled
+
+A separately authorized deployment-only lifecycle could be considered. It would require its own evidence scope and proposal contract, cluster/namespace binding, approval/audit tier, fresh feasibility and drift checks, write authorization, rollout and recovery behavior, and validation of service placement/exposure without claiming workflow survival. It must not borrow a workflow approval or synthesize a WorkflowGraph. This task does not enable that policy.
+
+### Verification scope
+
+The current-template frontend tests cover synchronized switching, same-service variants, preview-only eligibility, persistence, exact proposal binding, alternative justification, separate Apply confirmation, stale reads/dialogs, unreadable approvals and busy/settled runs. Fake-cluster backend tests cover the operational-review path, approval and Apply refusals, persistence and Apply/Keep/Reset recovery; the kept-change regression now resets it afterwards and verifies that reports and history survive both decisions.
+
+Native Docker Desktop is unavailable in the Linux execution environment. Browser automation could not initialize; visual/responsive behavior and the clicked handoff are unverified. The separately running local web service requires authorization and was not used for UI verification. No real Kubernetes workload was modified and no failure was injected. No backend policies, schemas or migrations changed.

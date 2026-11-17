@@ -269,12 +269,14 @@ const researchOnly = [...templateHtml.matchAll(/<section[^>]*rec-research-only[^
 const inResearchOnly = (role) => researchOnly.some((block) => block.includes(`data-role="${role}"`));
 
 test("the journey shows risk, comparison, review and approval without hidden wizard steps", () => {
-    assert.equal([...pageTemplate.matchAll(/<section class="/g)].length, 4);
+    assert.equal([...pageTemplate.matchAll(/<section class="/g)].length, 3);
+    assert.ok(templateHtml.indexOf('id="rec-s-fix"') < templateHtml.indexOf('data-role="rec-dock"'), "the list precedes its adjacent action dock");
     assert.ok(!pageTemplate.includes('data-step-panel='));
 });
 
 test("research details are optional and candidate choice appears once", () => {
-    for (const role of ["rec-risk", "rec-fixes", "rec-review", "approval-state-container", "approval-actions"]) assert.ok(pageTemplate.includes(`data-role="${role}"`));
+    for (const role of ["rec-risk", "rec-review", "approval-state-container", "approval-actions"]) assert.ok(pageTemplate.includes(`data-role="${role}"`));
+    assert.ok(templateHtml.includes('data-role="rec-fixes"'));
     assert.ok(templateHtml.includes('<details class="card rx-research"'));
     assert.equal(templateHtml.split('data-role="rec-fixes"').length - 1, 1);
 });

@@ -254,6 +254,13 @@
     const root = document.getElementById("workflow-editor");
     if (!root) return;
     const q = (name) => root.querySelector(`[data-we="${name}"]`);
+    const handoff = new URLSearchParams(window.location?.search || "");
+    const fromRecommendations = handoff.get("purpose") === "recommendations";
+    const reviewHelp = q("recommendation-review-help");
+    if (reviewHelp) reviewHelp.hidden = !fromRecommendations;
+    const recommendationsLink = q("recommendations-return");
+    if (recommendationsLink && handoff.get("namespace"))
+        recommendationsLink.setAttribute("href", `/components/recommendations?namespace=${encodeURIComponent(handoff.get("namespace"))}`);
     const BASE = "/api/workflows/management",
         model = createModel();
     const labels = {
@@ -621,7 +628,7 @@
             const namespaces = overview.namespaces
                 .filter((r) => r.graph?.services?.length)
                 .map((r) => [r.namespace, r.namespace]);
-            const prior = q("namespace").value,
+            const prior = q("namespace").value || handoff.get("namespace"),
                 ns = namespaces.some((r) => r[0] === prior)
                     ? prior
                     : namespaces.length === 1

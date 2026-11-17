@@ -942,6 +942,9 @@
         return { text: list.length ? `Evidence: ${available} of ${list.length} available` : "Evidence", attention };
     }
 
+    const exposurePercent = (value) => typeof value === "number" && Number.isFinite(value)
+        ? `${Number(value.toFixed(2))}%` : "not reported";
+
     /** Two bars, now and after, for one predicted figure (percent of services lost on average). */
     function exposureMeter(doc, before, after) {
         const box = element(doc, "div", undefined, "pm-meter");
@@ -949,30 +952,23 @@
             const row = element(doc, "div", undefined, "pm-meter__row");
             const track = element(doc, "span", undefined, "pm-meter__track");
             const fill = element(doc, "span", undefined, "pm-meter__fill", { "data-kind": kind });
-            fill.style.width = `${Math.max(2, Math.min(100, Number(value) || 0))}%`;
+            fill.style.width = barWidth(value);
             track.append(fill);
-            row.append(element(doc, "span", name, "pm-meter__name"), track, element(doc, "strong", percent(value), "pm-meter__value"));
+            row.append(element(doc, "span", name, "pm-meter__name"), track, element(doc, "strong", exposurePercent(value), "pm-meter__value"));
             box.append(row);
         }
         return box;
     }
 
-    /** Which change leads, which others are shown (one per service, cheapest first), from the engine's ranking. */
+    /** A single selection rule for the list, dock and placement preview. Never hide feasible variants. */
     function chooseFindings(findings, highlight) {
         const candidates = findings.recommendations || [];
-        const ranked = candidates.filter((c) => c.ranking?.rank != null);
-        // One option per service: the cheapest that is predicted to do as well as the best-ranked one, then rank.
-        const bestPerService = new Map();
-        for (const candidate of ranked) {
-            const held = bestPerService.get(candidate.service);
-            const cost = COST_ORDER[candidate.resourceCost] ?? 3;
-            if (!held || cost < (COST_ORDER[held.resourceCost] ?? 3)) bestPerService.set(candidate.service, candidate);
-        }
-        const chosen = highlight && ranked.find((c) => c.service === highlight.service && c.type === highlight.type);
-        const lead = chosen || ranked.find((c) => c.id === findings.selectedCandidateId) || null;
-        const rest = [...bestPerService.values()].filter((c) => c.service !== (lead && lead.service));
-        rest.sort((a, b) => a.ranking.rank - b.ranking.rank);
-        return { candidates, ranked, lead, shown: lead ? [lead, ...rest] : rest };
+        const feasible = candidates.filter((c) => c.feasible === true);
+        const ranked = feasible.filter((c) => c.ranking?.rank != null).sort((a, b) => a.ranking.rank - b.ranking.rank);
+        const chosen = highlight && (feasible.find((c) => c.id === highlight.id)
+            || feasible.find((c) => c.service === highlight.service && c.type === highlight.type));
+        const lead = chosen || feasible.find((c) => c.id === findings.selectedCandidateId) || ranked[0] || feasible[0] || null;
+        return { candidates, ranked, lead, shown: [...ranked, ...feasible.filter((c) => c.ranking?.rank == null)] };
     }
 
     function candidateCard(doc, candidate, lead, visual) {
@@ -983,19 +979,19 @@
         head.append(element(doc, "h4", `${title} · ${candidate.service}`));
         if (visual) {
             const tags = element(doc, "span", undefined, "rx-tags");
-            if (candidate === lead) tags.append(element(doc, "span", "Recommended on Assessment", "rx-pill rx-pill--lead"));
+            if (candidate === lead) tags.append(element(doc, "span", "Selected preview", "rx-pill rx-pill--lead"));
             tags.append(element(doc, "span", `Cost: ${String(candidate.resourceCost || "unknown").toLowerCase()}`, "rx-pill"));
             head.append(tags);
         }
         card.append(head);
-        if (candidate === lead && !visual) card.append(element(doc, "p", "Recommended on Assessment.", "ui-note"));
+        if (candidate === lead && !visual) card.append(element(doc, "p", "Selected preview.", "ui-note"));
         if (visual) {
-            card.append(element(doc, "p", `Services lost on average: ${percent(candidate.averageServiceExposureBefore)} → ${percent(candidate.averageServiceExposureAfter)}`, "rx-lead__sum"),
+            card.append(element(doc, "p", `Services lost on average: ${exposurePercent(candidate.averageServiceExposureBefore)} → ${exposurePercent(candidate.averageServiceExposureAfter)}`, "rx-lead__sum"),
                 exposureMeter(doc, candidate.averageServiceExposureBefore, candidate.averageServiceExposureAfter),
-                element(doc, "p", `Services lost on average when a worker stops. Worst single worker: ${percent(candidate.worstCaseBefore)} → ${percent(candidate.worstCaseAfter)}.`, "ui-note"));
+                element(doc, "p", `Services lost on average when a worker stops. Worst single worker: ${exposurePercent(candidate.worstCaseBefore)} → ${exposurePercent(candidate.worstCaseAfter)}.`, "ui-note"));
         } else {
-            card.append(element(doc, "p", `Services lost on average when a worker stops: ${percent(candidate.averageServiceExposureBefore)} → ${percent(candidate.averageServiceExposureAfter)} (predicted).`),
-                element(doc, "p", `Worst single worker: ${percent(candidate.worstCaseBefore)} → ${percent(candidate.worstCaseAfter)}. Resource cost: ${String(candidate.resourceCost || "unknown").toLowerCase()}.`, "ui-note"));
+            card.append(element(doc, "p", `Services lost on average when a worker stops: ${exposurePercent(candidate.averageServiceExposureBefore)} → ${exposurePercent(candidate.averageServiceExposureAfter)} (predicted).`),
+                element(doc, "p", `Worst single worker: ${exposurePercent(candidate.worstCaseBefore)} → ${exposurePercent(candidate.worstCaseAfter)}. Resource cost: ${String(candidate.resourceCost || "unknown").toLowerCase()}.`, "ui-note"));
         }
         const why = element(doc, "details");
         why.append(element(doc, "summary", "Placement and rollout details"), element(doc, "p", candidate.reason || "Placement verified feasible under the model.", "ui-note"));
@@ -1003,72 +999,18 @@
         return card;
     }
 
-    /** The picture: observed placement, and the simulated placement after the change the person has selected. */
-    function drawFindingsMap(container, findings, picked, state) {
-        const Placement = window.ResiliencePlacement;
-        const after = picked && Array.isArray(picked.afterPlacement) ? picked.afterPlacement : null;
-        if (!after) state.view = "today";
-        const toggle = container.querySelector("[data-role='rec-map-view']");
-        toggle.hidden = !after;
-        toggle.querySelectorAll("button").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.view === state.view)));
-        container.querySelector("[data-role='rec-map-hint']").textContent = state.view === "after"
-            ? `Simulated placement after "${strategyName(picked.type)} · ${picked.service}". The scheduler decides where a new replica really lands.`
-            : "Observed placement. Pick a worker to see what stops if it fails; nothing is stopped.";
-        Placement.draw(container.querySelector("[data-role='rec-map']"), {
-            nodes: findings.nodes || [], placement: Placement.fromDeployment(findings.currentDeployment), after, view: state.view,
-            failedNode: state.failed, onSelect(node) { state.failed = node; drawFindingsMap(container, findings, picked, state); },
-        });
-    }
-
-    function renderDeploymentFindings(container, findings, highlight) {
+    function renderDeploymentFindings(container, findings, highlight, options = {}) {
         if (!container) return;
         container.replaceChildren();
         container.hidden = !findings;
         if (!findings) return;
         const doc = container.ownerDocument;
         const { candidates, ranked, lead, shown } = chooseFindings(findings, highlight);
-        const visual = Boolean(window.ResiliencePlacement && findings.currentDeployment && Array.isArray(findings.currentDeployment.services));
-        container.append(element(doc, "h3", "Service-level assessment"), element(doc, "p", findings.note, "ui-note"));
+        container.append(element(doc, "p", findings.note, "ui-note"),
+            element(doc, "p", "Percentages count services that lose every ready replica, not business workflows. Each change protects only its named service. Equal benefits can have different resource costs and rollout constraints.", "ui-note"));
 
-        if (visual) {
-            const state = { view: "today", failed: findings.failedNode || ((findings.nodes || [])[0] || {}).node || null };
-            let picked = lead || shown[0] || null;
-            const region = element(doc, "div", undefined, "rx-map");
-            const head = element(doc, "div", undefined, "rx-map__head");
-            head.append(element(doc, "p", "", "ui-note", { "data-role": "rec-map-hint" }));
-            const toggle = element(doc, "div", undefined, "rx-seg", { "data-role": "rec-map-view", role: "group", "aria-label": "Placement shown" });
-            for (const [view, label] of [["today", "Now"], ["after", "After the change"]]) {
-                const button = element(doc, "button", label, "rx-seg__btn", { type: "button", "data-view": view });
-                button.addEventListener("click", () => { state.view = view; drawFindingsMap(region, findings, picked, state); });
-                toggle.append(button);
-            }
-            head.append(toggle);
-            region.append(head, element(doc, "div", undefined, undefined, { "data-role": "rec-map" }));
-            container.append(region);
-            if (picked && Array.isArray(picked.afterPlacement)) state.view = "after";
-            drawFindingsMap(region, findings, picked, state);
-
-            if (shown.length) container.append(element(doc, "h4", "Changes that would help"),
-                element(doc, "p", "Select one to preview it above. Percentages count services that lose every ready replica, not business workflows. Each change protects one service.", "ui-note"));
-            const cards = [];
-            for (const candidate of shown) {
-                const card = candidateCard(doc, candidate, lead, true);
-                card.setAttribute("role", "button");
-                card.setAttribute("tabindex", "0");
-                card.setAttribute("aria-pressed", String(candidate === picked));
-                if (candidate === picked) card.setAttribute("data-picked", "true");
-                const choose = () => {
-                    picked = candidate;
-                    state.view = Array.isArray(candidate.afterPlacement) ? "after" : "today";
-                    cards.forEach((entry) => { entry.card.setAttribute("aria-pressed", String(entry.candidate === picked)); entry.card.toggleAttribute("data-picked", entry.candidate === picked); });
-                    drawFindingsMap(region, findings, picked, state);
-                };
-                card.addEventListener("click", (event) => { if (!event.target.closest("details")) choose(); });
-                card.addEventListener("keydown", (event) => { if ((event.key === "Enter" || event.key === " ") && event.target === card) { event.preventDefault(); choose(); } });
-                cards.push({ card, candidate });
-                container.append(card);
-            }
-        } else {
+        // In the page the selected preview belongs to the adjacent action dock. Keep the observed-node table for other callers.
+        if (!options.onSelect) {
             const table = element(doc, "table", "", "op-table");
             const head = element(doc, "tr");
             for (const title of ["If this worker stops", "Goes offline", "Loses replicas"]) head.append(element(doc, "th", title));
@@ -1079,16 +1021,32 @@
                 table.append(row);
             }
             container.append(table);
-            container.append(element(doc, "h4", "Changes that would help"),
-                element(doc, "p", "Percentages count services that lose every ready replica, not business workflows. The first change is the one Assessment recommends; the others protect a different service.", "ui-note"));
-            for (const candidate of shown) container.append(candidateCard(doc, candidate, lead, false));
+        }
+        for (const candidate of shown) {
+            const card = candidateCard(doc, candidate, lead, Boolean(options.onSelect));
+            card.setAttribute("data-candidate", candidate.id);
+            if (candidate === lead) card.setAttribute("data-picked", "true");
+            card.append(element(doc, "p", candidate.ranking?.rank != null ? `Rank ${candidate.ranking.rank} · feasible` : "Feasible · no ranked improvement", "ui-note"),
+                element(doc, "p", `Targets ${candidate.service} only; other services may still stop. Workflow survival is unknown.`, "ui-note"));
+            if (candidate.ranking?.detail) card.append(element(doc, "p", candidate.ranking.detail, "ui-note"));
+            if (candidate.id === findings.selectedCandidateId) card.append(element(doc, "p", `Engine default. ${findings.selectionNote || ""}`, "ui-note"));
+            if (options.onSelect) {
+                const select = element(doc, "button", candidate === lead ? "Selected" : "Select recommendation", "secondary-button", {
+                    type: "button", "data-select": candidate.id, "aria-pressed": String(candidate === lead),
+                    "aria-label": `Select ${strategyName(candidate.type)} for ${candidate.service}`,
+                });
+                select.addEventListener("click", () => options.onSelect(candidate.id));
+                card.append(select);
+            }
+            container.append(card);
         }
         if (!ranked.length) container.append(element(doc, "p", "No placement improvement could be ranked from the available evidence. This is not proof of resilience."));
-        if (candidates.length) {
+        const unavailable = candidates.filter((c) => c.feasible !== true);
+        if (unavailable.length) {
             const details = element(doc, "details");
-            details.append(element(doc, "summary", `All ${candidates.length} options that were checked`));
+            details.append(element(doc, "summary", `${unavailable.length} options ruled out or missing evidence`));
             const list = element(doc, "ul");
-            for (const c of candidates) list.append(element(doc, "li", `${strategyName(c.type)} · ${c.service}: ${c.feasibility?.status || "Unknown"}. ${c.reason || ""} ${c.ranking?.detail || ""}`));
+            for (const c of unavailable) list.append(element(doc, "li", `${strategyName(c.type)} · ${c.service}: ${c.feasibility?.status || "Unknown"}. ${c.reason || ""} ${c.ranking?.detail || ""}`));
             details.append(list); container.append(details);
         }
         container.append(element(doc, "p", "To get business impact and approval, review a workflow in Workflow Discovery. Changes already applied can still be recovered from history.", "ui-note"));
@@ -1096,6 +1054,7 @@
 
     window.ResilienceRecommendations = {
         renderDeploymentFindings,
+        chooseFindings,
         renderSelectedImprovement,
         renderImpactSummary,
         computeSteps,
