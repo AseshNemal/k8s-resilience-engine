@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 # Docker Desktop extension image. Build from the repository root:
 #   docker build -f extension/Dockerfile -t k8s-resilience-engine:0.1.0 .
+# Public release (multi-architecture, semver tag; see docs/EXTENSION.md, "Publishing a beta to Docker Hub"):
+#   docker buildx build --platform linux/amd64,linux/arm64 -f extension/Dockerfile -t <hub-user>/k8s-resilience-engine:0.1.0-beta.1 --push .
 
 # --- Backend runtime: the unmodified application plus the extension wrapper -----------------
 FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
@@ -76,10 +78,14 @@ FROM runtime
 RUN python -m pip uninstall -y pip setuptools
 LABEL org.opencontainers.image.title="K8s Resilience Engine" \
       org.opencontainers.image.description="Dependency-aware resilience assessment for Kubernetes deployments, inside Docker Desktop. Nothing is applied or stopped without your approval of exactly what will happen." \
-      org.opencontainers.image.vendor="K8s Resilience Engine research project (SLIIT J26-SE-311)" \
+      org.opencontainers.image.vendor="K8s Resilience Engine" \
       com.docker.desktop.extension.api.version=">= 0.2.3" \
       com.docker.extension.detailed-description="Reads a local Kubernetes cluster and shows which workflows survive worker-node failures. A change is applied, or a worker node stopped on a test run, only after you approve exactly what will happen; everything is put back afterwards." \
-      com.docker.extension.changelog="Automatic cluster setup and credential renewal through a host helper (verified on macOS only). Initial local build. Not published; the Marketplace-only labels (icon URL, screenshots, publisher URL) are intentionally omitted." \
+      com.docker.extension.changelog="First public beta. Read-only assessment of the Docker Desktop Kubernetes cluster, ranked recommendations, and an optional approved Apply, Reset and node-failure test. Verified on macOS (Apple silicon); Windows and Linux are built but not yet tested on real machines." \
+      com.docker.desktop.extension.icon="https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/icon.svg" \
+      com.docker.extension.publisher-url="https://github.com/AseshNemal/k8s-resilience-engine" \
+      com.docker.extension.additional-urls="[{\"title\":\"Source code and issues\",\"url\":\"https://github.com/AseshNemal/k8s-resilience-engine\"},{\"title\":\"Install and troubleshooting guide\",\"url\":\"https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/docs/EXTENSION.md\"}]" \
+      com.docker.extension.screenshots="[{\"alt\":\"Failure impact: which services go down if each worker stops\",\"url\":\"https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/screenshots/1-failure-impact.png\"},{\"alt\":\"Ranked recommendations\",\"url\":\"https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/screenshots/2-recommendations.png\"},{\"alt\":\"Fail a node: choose workers and watch the application\",\"url\":\"https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/screenshots/3-fail-a-node.png\"}]" \
       com.docker.extension.categories="kubernetes,utility-tools"
 
 COPY extension/metadata.json extension/compose.yaml extension/icon.svg /

@@ -18,9 +18,6 @@
     </div>
 
     <div class="topbar__meta">
-        {% if show_environment_label | default(true) %}
-        <span class="pill-badge pill-badge--blue">{{ icon("flask", 14) }} Research Environment</span>
-        {% endif %}
         {% if source_label is defined %}
         <span class="pill-badge pill-badge--teal" data-custom="true">{{ icon("database", 14) }} {{ source_label }}</span>
         {% else %}

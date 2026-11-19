@@ -122,8 +122,8 @@ This is an early-stage scaffold, not a working system yet:
   `docker-proxy` service (`app/integrations/docker/`, the only container with the Docker socket; it authorizes the CONTAINER by name, kind labels
   and an allow-list, and trims every answer). The Docker Desktop cluster is blocked unless a run carries an explicit acknowledgement and a
   `ResearchClusterAuthorization` for its exact UID. Runs and recovery need `RESILIENCE_ALLOW_CLUSTER_WRITES=1`. A recommendation computed on a
-  test cluster is labelled `validation-target` and can never be approved. **It has only ever run against in-memory doubles; no real node has been
-  stopped by it, the disposable kind cluster is not created by the product (a manual, separately approved step), and readiness uses bounded polling,
+  test cluster is labelled `validation-target` and can never be approved. **Automated tests use in-memory doubles; the one real run so far (2026-11-19, one worker of the Docker Desktop cluster, started from the Fail a Node page and ended early)
+  restored the worker and left the Deployments unchanged, and that is the only real evidence. The disposable kind cluster is not created by the product (a manual, separately approved step), and readiness uses bounded polling,
   not a Kubernetes watch.** Design and decisions: the plan file of the branch `feat/fault-injection-validation`.
 
 - **Recommendations page UI** (`app/templates/components/recommendations.html`, `components/recommendations.js`, `recommendation-render.js`, `css/pages/recommendations.css`):
