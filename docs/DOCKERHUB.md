@@ -32,6 +32,15 @@ docker extension uninstall aseshnemal/k8s-resilience-engine          # remove
 
 Images are multi-architecture (`linux/amd64`, `linux/arm64`). There is no `latest` tag during the beta: always name the version.
 
+## Release details
+
+| Version | Notes |
+| --- | --- |
+| `0.1.0-beta.2` | Image metadata (version, source, documentation, license labels), license and third-party notices at `/licenses/` inside the image, and this overview. Same extension as beta.1. |
+| `0.1.0-beta.1` | First public beta. |
+
+Each image carries its source commit in the `org.opencontainers.image.revision` label, so any tag can be traced to the exact code it was built from.
+
 ## Safety and permissions
 
 - **You approve every change.** Apply, Reset and Fail a Node each show exactly what will happen first. Stopping nodes on your everyday cluster needs an extra explicit confirmation, nodes of the control plane are never stopped, and essential workloads must be accepted by name.
