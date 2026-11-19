@@ -9,16 +9,50 @@
     "use strict";
 
     const SERVER = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="7.25" r="1" fill="currentColor"/><circle cx="7" cy="16.75" r="1" fill="currentColor"/></svg>';
-    const STATE_TEXT = { pick: "Tap to stop", picked: "Will stop", up: "Running", down: "Stopped", keep: "Keeps running", unknown: "State unknown", locked: "Never stopped here" };
+    const STATE_TEXT = { pick: "Tap to stop", picked: "Will stop", up: "Running", down: "Stopped", keep: "Keeps running", unknown: "State unknown", locked: "Never stopped here",
+        stopping: "Stopping…", held: "Stopped (cluster not updated yet)", returning: "Starting again…" };
 
     // ---- pure (exported for tests) -----------------------------------------------------------------------------------------------
 
-    /** What a node tile says: picking, picked, or (while a test runs) up / down / unknown. A control plane is locked. */
-    function tileState(node, { picked, stopped, running, locked, preview }) {
+    /**
+     * Where a running test is, from the run itself: "stopping" (the workers are being stopped now), "holding" (they were stopped and are being
+     * held), "restoring" (they are being started again) or "other". The cluster is slower than the test: Kubernetes keeps reporting a stopped
+     * node as Ready for about a minute, so the test's own stage, not the cluster's node state, says what is happening to a worker.
+     */
+    function runPhase(run) {
+        if (!run) return "other";
+        if (run.status === "ABORTING") return "restoring";
+        const stage = String((run.lab && run.lab.stage) || run.stage || "").toUpperCase();
+        if (stage === "INJECT_FAILURE") return "stopping";
+        if (stage === "PROBE") return "holding";
+        if (stage === "RECOVER_WORKER") return "restoring";
+        return "other";
+    }
+
+    /**
+     * What a node tile says: picking, picked, or (while a test runs) stopping / held / down / returning / up / unknown. A control plane is locked.
+     * ``phase`` is ``runPhase``; without it a running tile follows the cluster's reading alone. ``held`` is a worker the test has stopped that the
+     * cluster still reports as Ready: drawn as stopped (it is), and labelled as not yet seen by Kubernetes, never as "Running".
+     */
+    function tileState(node, { picked, stopped, running, locked, preview, phase }) {
         if (locked) return "locked";
-        if (running) return stopped === true ? "down" : stopped === false ? "up" : "unknown";
+        if (running) {
+            if (phase === "stopping") return "stopping";
+            if (phase === "holding") return stopped === true ? "down" : "held";
+            if (phase === "restoring") return stopped === false ? "up" : "returning";
+            return stopped === true ? "down" : stopped === false ? "up" : "unknown";
+        }
         if (picked) return "picked";
         return preview ? "keep" : "pick";
+    }
+
+    /** True while the cluster's own readings cannot be trusted yet: a test is stopping or holding workers and not every watched worker reads NotReady. */
+    function awaitingCluster(run) {
+        const phase = runPhase(run);
+        if (phase !== "stopping" && phase !== "holding") return false;
+        const nodes = liveNodes(run);
+        const watched = (run.lab && run.lab.nodes) || [];
+        return !watched.length || watched.some((name) => nodes[name] !== false);
     }
 
     /** The pods of one node: [{service, count}] from the placement rows ({service, nodes:[{node, readyPods}]}). */
@@ -73,13 +107,13 @@
     }
 
     /** The row of node tiles. ``nodes``: [{name, locked}]. ``stoppedOf(name)``: true | false | null while a test runs. */
-    function nodeTiles(doc, { nodes, placement, hues, picked, running, stoppedOf, onToggle, disabled }) {
+    function nodeTiles(doc, { nodes, placement, hues, picked, running, stoppedOf, onToggle, disabled, phase }) {
         const row = make(doc, "div", undefined, "fv-nodes", { role: running ? "list" : "group", "aria-label": running ? "Worker nodes" : "Pick the workers to stop" });
         const colour = hues || {};
         for (const node of nodes) {
             const chosen = picked ? picked.has(node.name) : false;
             const stopped = running ? stoppedOf(node.name) : null;
-            const state = tileState(node, { picked: chosen, stopped, running, locked: node.locked, preview: !!disabled });
+            const state = tileState(node, { picked: chosen, stopped, running, locked: node.locked, preview: !!disabled, phase });
             const interactive = !running && !node.locked && !disabled;
             const tile = make(doc, interactive ? "button" : "div", undefined, `fv-node fv-node--${state}`, interactive
                 ? { type: "button", "aria-pressed": String(chosen), "data-node": node.name } : { "data-node": node.name, ...(running ? { role: "listitem" } : {}) });
@@ -90,7 +124,7 @@
             const here = node.locked ? [] : podsOf(placement, node.name);
             for (const group of here) {
                 for (let i = 0; i < group.count; i += 1) {
-                    pods.append(make(doc, "span", undefined, `fv-pod${state === "down" || state === "picked" ? " fv-pod--lost" : ""}`,
+                    pods.append(make(doc, "span", undefined, `fv-pod${state === "down" || state === "held" || state === "picked" ? " fv-pod--lost" : ""}`,
                         { title: group.service, style: `background:hsl(${colour[group.service] === undefined ? 215 : colour[group.service]} 62% 50%)` }));
                 }
             }
@@ -123,5 +157,5 @@
         return list;
     }
 
-    global.ResilienceFailVisual = { tileState, podsOf, liveNodes, liveServices, nodeTiles, serviceChips, legend };
+    global.ResilienceFailVisual = { runPhase, awaitingCluster, tileState, podsOf, liveNodes, liveServices, nodeTiles, serviceChips, legend };
 })(typeof window !== "undefined" ? window : globalThis);

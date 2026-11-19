@@ -1,5 +1,14 @@
 # Changes other members should know about
 
+## 2026-11-19 (release): 0.1.0-beta.3
+
+- Fail a Node page truth and clarity (stopped workers drawn as stopped, counts marked not updated until Kubernetes notices, banner with Restore, summary and next step on top, hold presets from 2 minutes), plus the Workflow editor and Recommendations fixes and Topology dark-mode styling (done in the extension stylesheet; Member 2's page files are untouched), and the product-logo extension icon and Docker Desktop screenshot. Version labels and docs bumped to beta.3. No schema, route or research-logic change.
+
+## 2026-11-19 (release): extension icon is the product logo
+
+- `extension/icon.svg` now shows the product logo (the blue gear, same artwork as `app/static/img/logo.png`, scaled to 256 px and embedded in the SVG) instead of the earlier teal hexagon. Docker Desktop shows the icon baked into an image, so it appears with the next published version. The logo's trademark and provenance question remains open (`docs/LICENSING.md`).
+- Added `extension/screenshots/0-docker-desktop.png`, a real screenshot of the extension inside Docker Desktop (it still shows the earlier hexagon icon in the sidebar; retake after the new icon ships), as the first screenshot label and the Hub overview image.
+
 ## 2026-11-19 (license): NOTICE and third-party notices
 
 - Added `NOTICE` (Copyright 2026 K8s Resilience Engine Contributors, plus the attribution go.yaml.in/yaml/v3 requires) and `THIRD_PARTY_NOTICES.md` (Go helper

@@ -1406,3 +1406,9 @@
 .we-evidence-row:first-child {
     border-top: 0;
 }
+
+/* The review dialog's two labels ran into each other on one line: stack them. */
+.we-dialog [data-we="operational-review-wrap"] { display: grid; gap: 10px; margin-top: 12px; }
+.we-dialog [data-we="operational-review-wrap"] > label { display: block; }
+.we-dialog [data-we="operational-review-wrap"] > label:first-child { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.we-dialog [data-we="operational-review-wrap"] textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; }

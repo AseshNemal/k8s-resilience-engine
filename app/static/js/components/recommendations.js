@@ -1531,6 +1531,7 @@
                 { onNode: (node) => controller.selectFailedNode(node) });
             journey.renderFixes(document.querySelector('[data-role="rec-fixes"]'), detail, {
                 selectedId: currentRecommendation?.id, engineId: report.selectedRecommendationId,
+                appliedChangeOnCluster: (() => { const f = runFacts(); return !!(f.other && f.run && f.run.canReset); })(),
                 failedNode: detail.evidence.failedNode, canSelect: canSelectCandidate,
                 whyNot: whyNotSelectable, onSelect: selectCandidate });
             journey.renderReview(region.querySelector('[data-role="rec-review"]'), detail, selected);

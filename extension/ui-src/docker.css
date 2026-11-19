@@ -27,6 +27,13 @@
 
     --dd-text: light-dark(#000000, #ffffff);
     --dd-text-2: light-dark(#677285, #7794ab);
+    /* Deployment Topology and its tokens (app/static/css/pages/deployments_tokens.css) are light-only: follow Docker's appearance. */
+    --c2-glass-bg: light-dark(rgba(255, 255, 255, 0.85), rgba(22, 29, 36, 0.92));
+    --c2-glass-border: light-dark(rgba(226, 232, 240, 0.8), rgba(255, 255, 255, 0.12));
+    --c2-surface-subtle: light-dark(#f8fafc, #161d24);
+    --c2-text-main: light-dark(#0f172a, #ffffff);
+    --c2-text-muted: light-dark(#64748b, #7794ab);
+    --c2-border-light: light-dark(#e2e8f0, rgba(255, 255, 255, 0.12));
 
     --dd-success: light-dark(#2e7f74, #00a58c);
     --dd-warning: light-dark(#b85504, #db7512);
@@ -624,3 +631,8 @@ body[data-page="overview"] .overview-matrix-cell[data-state="placed"] { backgrou
 [data-role="tracing-card"] > .ui-note:last-child { margin-top: 16px; }
 [data-role="tracing-card"] [data-role="tracing-message"] { margin: 0 0 8px; }
 [data-role="tracing-card"] [data-role="tracing-detail"] { margin: 6px 0 0; }
+
+/* ---- Deployment Topology (another member's page): fixes made here, for Docker's dark mode only, so that page's own files stay untouched ---- */
+.topo-svc { background: light-dark(hsl(var(--svc-hue) 80% 97%), hsl(var(--svc-hue) 32% 16%)); border-color: light-dark(hsl(var(--svc-hue) 55% 80%), hsl(var(--svc-hue) 30% 32%)); }
+.placement-snap { background: var(--c2-surface-subtle); }
+.tab-icon { display: none; }      /* the tabs name themselves; the emoji clashed with every other page */

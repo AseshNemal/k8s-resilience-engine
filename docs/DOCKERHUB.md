@@ -4,6 +4,8 @@
 
 Open it inside Docker Desktop, connect your local Kubernetes cluster, and see where every replica really runs, what a node failure would take down, and what to change. Nothing is applied and no node is stopped without you approving exactly what will happen.
 
+![The extension inside Docker Desktop](https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/screenshots/0-docker-desktop.png)
+
 ![Failure impact](https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/screenshots/1-failure-impact.png)
 
 ## What you get
@@ -20,7 +22,7 @@ Open it inside Docker Desktop, connect your local Kubernetes cluster, and see wh
 Requires Docker Desktop with extensions and Kubernetes enabled.
 
 ```bash
-docker extension install aseshnemal/k8s-resilience-engine:0.1.0-beta.2
+docker extension install aseshnemal/k8s-resilience-engine:0.1.0-beta.3
 ```
 
 Because this beta is not in the Docker Marketplace, first untick **Settings → Extensions → "Allow only extensions distributed through the Docker Marketplace"** (on a managed computer this setting may be locked by your administrator). Then open **Resilience Engine** in the Docker Desktop sidebar and choose **Connect cluster**.
@@ -36,6 +38,7 @@ Images are multi-architecture (`linux/amd64`, `linux/arm64`). There is no `lates
 
 | Version | Notes |
 | --- | --- |
+| `0.1.0-beta.3` | Fail a Node shows the truth while a test runs: stopped workers are drawn as stopped (Kubernetes takes about a minute to notice), with a plain banner that has Restore now in it, and a short summary of what happened with the next step directly under it. Clearer Workflow Discovery, Recommendations and Deployment Topology screens, and the extension icon is now the product logo. |
 | `0.1.0-beta.2` | Image metadata (version, source, documentation, license labels), license and third-party notices at `/licenses/` inside the image, and this overview. Same extension as beta.1. |
 | `0.1.0-beta.1` | First public beta. |
 
@@ -51,7 +54,7 @@ Each image carries its source commit in the `org.opencontainers.image.revision` 
 
 ## Status
 
-`0.1.0-beta.2` is a public beta. It is verified on macOS (Apple silicon) with Docker Desktop's Kubernetes. The Windows and Linux builds are tested in CI but have not yet been run on real machines. Fail a Node has been run for real once, on one worker, so start with one worker and a short hold. Please report problems at https://github.com/AseshNemal/k8s-resilience-engine/issues.
+`0.1.0-beta.3` is a public beta. It is verified on macOS (Apple silicon) with Docker Desktop's Kubernetes. The Windows and Linux builds are tested in CI but have not yet been run on real machines. Fail a Node has been run for real once, on one worker, so start with one worker and a short hold. Please report problems at https://github.com/AseshNemal/k8s-resilience-engine/issues.
 
 ## Links
 

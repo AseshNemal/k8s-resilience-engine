@@ -76,7 +76,7 @@ test("a change that cannot be kept is offered only a reset, and a failed run sti
 
 test("a different change that is still applied must be decided first, and is said to be a different one", () => {
     const model = action.plan(ready({ approval: "APPROVED", runIsOther: true, run: { finished: true, canReset: true, canKeep: true } }));
-    assert.match(model.title, /different change/i);
+    assert.match(model.title, /change you applied is still on the cluster/i);
     assert.deepEqual(labels(model), ["Reset now", "Keep changes"]);
 });
 

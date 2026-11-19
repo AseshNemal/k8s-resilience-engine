@@ -66,3 +66,20 @@ button.fv-node:focus-visible { outline: 3px solid var(--color-primary); outline-
 .fv-custom__problem { flex-basis: 100%; }
 .fv-custom__problem--bad { color: var(--tint-red-fg); font-weight: 600; }
 .fv-nocluster__list { margin: 0; padding-left: 18px; }
+
+/* A running test: states the test itself knows before Kubernetes does, a plain banner with the Restore button in it, and the next step under the result. */
+.fv-node--stopping, .fv-node--returning { border-color: var(--tint-amber-fg); border-style: dashed; }
+.fv-node--held { border-color: var(--color-danger); border-style: dashed; background: var(--tint-red-bg); }
+.fv-node__state--stopping, .fv-node__state--returning, .fv-node__state--held { background: var(--tint-amber-bg); color: var(--tint-amber-fg); }
+.fl-status { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.fl-status__words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-status .danger-button { flex: none; }
+.fl-row--top { margin: 12px 0 8px; display: flex; flex-wrap: wrap; gap: 10px; }
+.fl-row--top .primary-button { padding: 12px 22px; font-size: 1rem; }
+.fl-wait { margin: 10px 0 0; }
+.fl-outcome { margin: 14px 0; padding: 14px 16px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-soft); }
+.fl-outcome__list { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+.fv-holds__hint { margin: 8px 0 0; }
+.fn-steps li.fn-steps__on { color: var(--color-text); font-weight: 600; }
+.fn-steps li.fn-steps__on::before { background: var(--color-primary); color: #fff; }
+.fl-outcome__list { list-style: disc; }

@@ -15,7 +15,8 @@
 
     const BASE = "/api/recommendations/validation-loop";
     const POLL_MS = 2000;
-    const HOLDS = [[30, "30 seconds"], [60, "1 minute"], [120, "2 minutes"], [300, "5 minutes"]];
+    // Kubernetes marks a stopped node NotReady only after about a minute, so shorter holds would show no outage at all: the choices start at 2 minutes.
+    const HOLDS = [[120, "2 minutes"], [300, "5 minutes"], [600, "10 minutes"]];
     const LIMITS = { min: 10, max: 1800 };       // seconds; the server enforces the same bounds (``lab_hold_min_s`` / ``lab_hold_max_s``)
     const TARGETS = { DOCKER_DESKTOP: "My cluster (Docker Desktop)", DISPOSABLE: "A separate test cluster" };
     const OUTCOME = { down: "goes offline", degraded: "loses some replicas", ok: "unaffected", none: "has no ready replica today" };
@@ -83,7 +84,7 @@
     /** ``visual``: the simple page ("Fail a node"): workers drawn as servers with their pods, services as chips, and the application read here. */
     function createPanel({ root, document: doc = global.document, fetchImpl = (...a) => global.fetch(...a), namespace = () => null, visual = false,
                           timers = { set: (fn, ms) => global.setTimeout(fn, ms), clear: (id) => global.clearTimeout(id) } }) {
-        const form = { target: "DOCKER_DESKTOP", nodes: new Set(), hold: 60, url: "", custom: false, customAmount: "", customUnit: "seconds" };
+        const form = { target: "DOCKER_DESKTOP", nodes: new Set(), hold: 120, url: "", custom: false, customAmount: "", customUnit: "seconds" };
         const state = { phase: "loading", targets: null, plan: null, run: null, message: null, busy: false, ack: new Set(), desktopAck: false,
             timelines: {}, asked: new Set(), pick: null, placement: null, ns: null, namespaces: [] };
         const ns = () => namespace() || state.ns;
@@ -199,6 +200,7 @@
             });
             group.append(custom);
             box.append(group);
+            box.append(make(doc, "p", "Kubernetes takes about a minute to notice a stopped node, so choose 2 minutes or more to see your services go down.", "fl-hint fv-holds__hint"));
             if (!form.custom) return;
             const row = make(doc, "div", undefined, "fv-custom");
             const amount = make(doc, "input", undefined, "form-input fv-custom__amount", { type: "number", min: "1", step: "any", inputmode: "decimal", "aria-label": "How long", "aria-describedby": "fv-custom-hint", "data-role": "fl-custom-amount" });
@@ -430,13 +432,77 @@
         }
         const ResilienceFailureMonitor = () => global.ResilienceFailureMonitor;
 
+        /** The person pressed Restore now and the app confirmed every worker is back: a normal end, not a warning. */
+        function endedByRequest(run) {
+            return run.status === "INTERRUPTED" && /ended early on request/i.test(run.stopReason || "") && !!run.safety && run.safety.workersRestored === "confirmed";
+        }
+        function finishedTitle(run) {
+            return endedByRequest(run) ? "You ended the test early · every worker was restored" : (run.statusLabel || run.status);
+        }
+
+        /** The text of the four steps under the page title: mark the one the person is on. */
+        function markStep() {
+            const items = doc.querySelectorAll ? doc.querySelectorAll(".fn-steps li") : null;
+            if (!items || !items.length) return;
+            const run = state.run;
+            const at = state.phase === "run" && run ? (["RUNNING", "ABORTING"].includes(run.status) ? 3 : 4) : state.phase === "plan" ? 2 : 1;
+            Array.prototype.forEach.call(items, (li, i) => {
+                const on = i + 1 === at;
+                if (li.classList && li.classList.toggle) li.classList.toggle("fn-steps__on", on);
+                if (on) li.setAttribute("aria-current", "step"); else li.removeAttribute && li.removeAttribute("aria-current");
+            });
+        }
+
+        /** The banner words for a running test, in plain language, from the test's own stage (not from the lagging cluster reading). */
+        function bannerText(run) {
+            const lab = run.lab || {}, names = lab.nodes || [], n = names.length;
+            const which = n === 1 ? names[0] : `${n} workers`;
+            const phase = V() ? V().runPhase(run) : "other";      // fail-visual.js is not loaded on every page that hosts this panel
+            if (phase === "restoring") return { title: "Restoring the workers…", sub: `Starting ${which} again. ${elapsedText(run)}` };
+            if (phase === "stopping") return { title: `Stopping ${which}…`, sub: `This usually takes under a minute. ${elapsedText(run)}` };
+            if (phase === "holding") return { title: `${which} ${n === 1 ? "is" : "are"} stopped`, sub: `Held for ${humanSeconds(lab.holdS || 0)} · ${elapsedText(run)}. Press “Restore now” to start ${n === 1 ? "it" : "them"} sooner.` };
+            return { title: "A test is running", sub: elapsedText(run) };
+        }
+
+        /** What the finished test showed, as a few plain sentences, from the measured summary only. Says so when the cluster never noticed the stop. */
+        function outcomeLines(run) {
+            const episodes = (run.monitor && run.monitor.episodes) || [];
+            const sum = episodes[0] && episodes[0].summary;
+            if (!sum) return [];
+            const lines = [], down = sum.servicesDown || [], seen = sum.nodeNotReadyAfterS;
+            if (seen === null || seen === undefined) lines.push("Kubernetes never marked a stopped worker NotReady, so the cluster’s own readings show no outage. It usually takes about a minute: choose 2 minutes or more next time.");
+            else lines.push(`Kubernetes noticed the stopped workers after ${Math.round(seen)} seconds; until then it kept reporting them as Ready.`);
+            if (down.length) {
+                const secs = Math.max(...down.map((name) => (sum.services && sum.services[name] && sum.services[name].downS) || 0));
+                lines.push(`${down.join(", ")} lost every ready replica${secs ? ` (offline about ${Math.round(secs)} seconds from when Kubernetes saw it)` : ""}.`);
+            } else if (seen !== null && seen !== undefined) lines.push("No service lost every ready replica.");
+            if (sum.recoveryAfterRestoreS !== null && sum.recoveryAfterRestoreS !== undefined) lines.push(`Everything was back ${Math.round(sum.recoveryAfterRestoreS)} seconds after the workers were restored.`);
+            if (!sum.requests) lines.push("No requests were sent to your application, so its real outage began when the workers were stopped, earlier than these readings.");
+            return lines;
+        }
+
         function drawRun(box) {
             const run = state.run, lab = run.lab || {};
             const going = ["RUNNING", "ABORTING"].includes(run.status);
-            const head = make(doc, "div", undefined, `fl-status fl-status--${going ? "run" : run.status === "COMPLETED" ? "ok" : "warn"}`, { role: "status" });
-            head.append(make(doc, "strong", going ? (run.status === "ABORTING" ? "Restoring the workers…" : `Workers are being stopped and held: ${(lab.nodes || []).join(", ")}`) : (run.statusLabel || run.status)));
-            if (going) head.append(make(doc, "span", `${(lab.stage || "").toLowerCase().replace(/_/g, " ")} ${lab.detail ? "· " + lab.detail : ""} · ${elapsedText(run)}`, "fl-hint"));
+            const head = make(doc, "div", undefined, `fl-status fl-status--${going ? "run" : run.status === "COMPLETED" || endedByRequest(run) ? "ok" : "warn"}`, { role: "status" });
+            const words = make(doc, "div", undefined, "fl-status__words");
+            if (going) {
+                const text = bannerText(run);
+                words.append(make(doc, "strong", text.title), make(doc, "span", text.sub, "fl-hint"));
+            } else words.append(make(doc, "strong", finishedTitle(run)));
+            head.append(words);
+            if (going) head.append(button(state.busy || run.status === "ABORTING" ? "Restoring…" : "Restore now", "danger-button", restoreNow, state.busy || run.status === "ABORTING", "fl-restore"));
             box.append(head);
+            if (!going) {
+                // The next step sits directly under the result, not after the long measurements.
+                const actions = make(doc, "div", undefined, "fl-row fl-row--top");
+                const base = `${BASE}/runs/${encodeURIComponent(run.runKey)}/report`;
+                if (run.status === "NEEDS_MANUAL_RESTORE") actions.append(button("Try recovery again", "primary-button", recover, state.busy));
+                actions.append(button("Run another test", run.status === "NEEDS_MANUAL_RESTORE" ? "secondary-button" : "primary-button", another, state.busy, "fl-another"),
+                    make(doc, "a", "Open report", "secondary-button fl-a", { href: base, target: "_blank", rel: "noopener", "data-role": "fl-report" }),
+                    make(doc, "a", "Download report", "secondary-button fl-a", { href: `${base}?download=true`, "data-role": "fl-download" }));
+                box.append(actions);
+            }
             if (run.stopReason) box.append(make(doc, "p", run.stopReason, "fl-hint"));
             if (run.safety && run.safety.level === "alert") {
                 const alert = make(doc, "div", undefined, "fl-alert", { role: "alert" });
@@ -445,31 +511,34 @@
                 box.append(alert);
             }
             if (visual && going) {
-                const now = V().liveNodes(run);
-                box.append(V().nodeTiles(doc, { nodes: allNodes(), placement: state.placement, hues: hues(), running: true, stoppedOf: (name) => (name in now ? (now[name] === null ? null : now[name] === false) : null) }));
+                const now = V().liveNodes(run), phase = V().runPhase(run), waiting = V().awaitingCluster(run);
+                box.append(V().nodeTiles(doc, { nodes: allNodes(), placement: state.placement, hues: hues(), running: true, phase,
+                    stoppedOf: (name) => (name in now ? (now[name] === null ? null : now[name] === false) : null) }));
+                if (waiting) box.append(make(doc, "p", "The workers are stopped, but Kubernetes keeps showing them as Ready for about a minute before it notices. The counts below update once it does.", "fl-hint fl-wait", { role: "status" }));
                 const services = V().liveServices(run);
-                if (services.length) box.append(V().serviceChips(doc, services.map((x) => ({ service: x.service, state: x.state,
-                    text: x.state === "unknown" ? "unknown" : `${x.ready} of ${x.before} ready` }))));
+                if (services.length) box.append(V().serviceChips(doc, services.map((x) => ({ service: x.service, state: waiting ? "unknown" : x.state,
+                    text: x.state === "unknown" ? "unknown" : waiting ? `${x.ready} of ${x.before} · not updated yet` : `${x.ready} of ${x.before} ready` }))));
+            }
+            if (!going) {
+                const lines = outcomeLines(run);
+                if (lines.length) {
+                    const card = make(doc, "section", undefined, "fl-outcome", { "aria-label": "What happened, in short" });
+                    card.append(make(doc, "h4", "What happened, in short", "fl-sub"));
+                    const list = make(doc, "ul", undefined, "fl-outcome__list");
+                    lines.forEach((line) => list.append(make(doc, "li", line)));
+                    card.append(list);
+                    box.append(card);
+                }
             }
             const monitor = run.monitor, M = global.ResilienceFailureMonitor;
             if (M && monitor) {
-                const picks = M.choices(monitor); const chosen = picks.find((p) => p.key === state.pick) || picks[0];
+                const picks = M.choices(monitor, { lab: true }); const chosen = picks.find((p) => p.key === state.pick) || picks[0];
                 if (chosen && chosen.episode) wantTimeline(run, chosen.episode);
                 const holder = make(doc, "div");
-                M.render(doc, holder, monitor, { selected: chosen && chosen.key, running: going, onSelect: (key) => { state.pick = key; draw(); }, timelineFor: (ep) => state.timelines[M.episodeKey(ep)] || null });
+                M.render(doc, holder, monitor, { lab: true, selected: chosen && chosen.key, running: going, onSelect: (key) => { state.pick = key; draw(); }, timelineFor: (ep) => state.timelines[M.episodeKey(ep)] || null });
                 box.append(holder);
             }
             msg(box);
-            const row = make(doc, "div", undefined, "fl-row");
-            if (going) row.append(button(state.busy || run.status === "ABORTING" ? "Restoring…" : "Restore now", "danger-button", restoreNow, state.busy || run.status === "ABORTING", "fl-restore"));
-            else {
-                if (run.status === "NEEDS_MANUAL_RESTORE") row.append(button("Try recovery again", "secondary-button", recover, state.busy));
-                const base = `${BASE}/runs/${encodeURIComponent(run.runKey)}/report`;
-                row.append(make(doc, "a", "Open report", "primary-button fl-a", { href: base, target: "_blank", rel: "noopener", "data-role": "fl-report" }),
-                    make(doc, "a", "Download report", "secondary-button fl-a", { href: `${base}?download=true`, "data-role": "fl-download" }),
-                    button("Run another test", "secondary-button", another, state.busy, "fl-another"));
-            }
-            box.append(row);
         }
 
         function draw() {
@@ -480,6 +549,7 @@
             else if (state.phase === "run" && state.run) drawRun(box);
             else drawSetup(box);
             root.replaceChildren(box);
+            markStep();
         }
 
         draw();

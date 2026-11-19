@@ -111,8 +111,10 @@
             const ids = new Set([...before.keys(), ...after.map((r) => r.workflowId)]);
             details.append(table(["Workflow", "Readiness before → after", "HTTP check before → after", "Details"], [...ids].map((id) => {
                 const b = before.get(id), a = after.find((r) => r.workflowId === id);
-                return [id, `${b?.readiness || "Unavailable"} → ${a?.readiness || "Unavailable"}`,
-                    `${b?.httpStatus || "Not tested"} → ${a?.httpStatus || "Not tested"}`,
+                const plain = (word, fallback) => (word ? String(word).toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : fallback);
+                const label = (a && (a.workflowName || a.name)) || (b && (b.workflowName || b.name)) || (/^[0-9a-f]{24,}$/i.test(String(id)) ? `Workflow ${String(id).slice(0, 8)}…` : id);
+                return [label, `${plain(b?.readiness, "Unavailable")} → ${plain(a?.readiness, "Unavailable")}`,
+                    `${plain(b?.httpStatus === "NOT_CONFIGURED" ? "No check set" : b?.httpStatus, "Not tested")} → ${plain(a?.httpStatus === "NOT_CONFIGURED" ? "No check set" : a?.httpStatus, "Not tested")}`,
                     a?.reason || b?.reason || (a?.unreadyServices?.length ? a.unreadyServices.join(", ") : "See response samples in the downloaded report.")];
             })));
             details.append(make("p", "Pod readiness is separate from end-to-end HTTP results. No node failure was injected.", "ui-note"));

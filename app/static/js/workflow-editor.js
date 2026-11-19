@@ -828,17 +828,26 @@
             y: (y - r.top - viewport.y) / viewport.k,
         };
     }
+    /** The first grid slot (three across) that no existing node covers, so a new service never lands on top of another. */
+    function freeSpot() {
+        const nodes = model.state().nodes, W = 250, H = 130, COLS = 3;
+        for (let i = 0; ; i += 1) {
+            const x = 35 + (i % COLS) * W, y = 100 + Math.floor(i / COLS) * H;
+            if (!nodes.some((n) => Math.abs(n.x - x) < W - 40 && Math.abs(n.y - y) < H - 30)) return { x, y };
+        }
+    }
+    /** After the side panel opens the canvas is narrower: bring any node that is now out of view back with Fit. */
+    function keepInView() {
+        const canvas = q("canvas").getBoundingClientRect();
+        const hidden = [...q("nodes").children].some((n) => {
+            const r = n.getBoundingClientRect();
+            return r.right > canvas.right - 8 || r.left < canvas.left || r.bottom > canvas.bottom || r.top < canvas.top;
+        });
+        if (hidden) fit();
+    }
     function addService(service, point) {
         if (busy || !isBound() || model.state().nodes.some((n) => n.service === service)) return;
-        const count = model.state().nodes.length,
-            center = world(
-                q("canvas").getBoundingClientRect().left + q("canvas").clientWidth / 2,
-                q("canvas").getBoundingClientRect().top + q("canvas").clientHeight / 2,
-            );
-        const p = point || {
-            x: count < 3 ? 35 + count * 250 : center.x - 98 + (count % 3) * 25,
-            y: count < 3 ? 100 : center.y - 50 + (count % 3) * 30,
-        };
+        const p = point || freeSpot();
         model.change((s) => {
             s.nodes.push({
                 service,
@@ -1120,6 +1129,7 @@
         const edge = selected?.edge != null ? state.edges[selected.edge] : null,
             node = state.nodes.find((n) => n.service === selected?.service);
         q("layout").dataset.inspector = String(!!edge || !!node);
+        if ((edge || node) && typeof requestAnimationFrame === "function") requestAnimationFrame(keepInView);
         if ((edge || node) && root.clientWidth <= 850) q("layout").dataset.library = "false";
         if (!edge && !node) return;
         q("inspector-heading").textContent = edge ? "Connection" : "Service";
