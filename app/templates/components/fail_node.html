@@ -4,14 +4,15 @@
 {% block page_css %}
 <link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/failure-monitor.css') }}?v=monitor-20261120">
-<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/fail-node.css') }}?v=failnode-20261124">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/fail-node.css') }}?v=failnode-20261127">
 {% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h2 class="page-header__title">Fail a node</h2>
     <p class="page-header__subtitle">
-        Stop worker nodes on purpose and watch what your application does. Pick, stop, watch, restore.
+        Check that a fix works. After you apply a recommendation, stop worker nodes on purpose and watch what your application does.
+        You can also run it first, to see how the application behaves before any change.
     </p>
 </div>
 
@@ -30,6 +31,6 @@
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/placement-map.js') }}?v=placement-20261117" defer></script>
 <script src="{{ url_for('static', path='/js/failure-monitor.js') }}?v=monitor-20261120" defer></script>
-<script src="{{ url_for('static', path='/js/fail-visual.js') }}?v=failnode-20261124" defer></script>
-<script src="{{ url_for('static', path='/js/failure-lab.js') }}?v=lab-20261125" defer></script>
+<script src="{{ url_for('static', path='/js/fail-visual.js') }}?v=failnode-20261127" defer></script>
+<script src="{{ url_for('static', path='/js/failure-lab.js') }}?v=lab-20261126" defer></script>
 {% endblock %}

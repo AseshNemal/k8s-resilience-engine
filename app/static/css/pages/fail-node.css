@@ -59,3 +59,10 @@ button.fv-node:focus-visible { outline: 3px solid var(--color-primary); outline-
 .fn-steps { gap: var(--space-sm) var(--space-md); }
 
 .fv-node__state--keep { background: var(--tint-green-bg); color: var(--tint-green-fg); }
+
+/* Custom time and the "no cluster" explanation. */
+.fv-custom { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); margin-top: var(--space-sm); font-size: 14px; }
+.fv-custom__amount { width: 96px; }
+.fv-custom__problem { flex-basis: 100%; }
+.fv-custom__problem--bad { color: var(--tint-red-fg); font-weight: 600; }
+.fv-nocluster__list { margin: 0; padding-left: 18px; }

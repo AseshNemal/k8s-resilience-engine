@@ -145,6 +145,15 @@ test("a running run found at load is shown at once, and no plan form is offered 
     assert.deepEqual(plain(t.facts.at(-1)), ["running", "RUNNING"]);
 });
 
+test("a Failure lab run is not shown as the proof of a recommendation", async () => {
+    const t = open();
+    await begin(t, { run: run({ mode: "LAB", status: "COMPLETED", statusLabel: "Completed" }) });
+
+    assert.equal(t.text().includes("1 of 2 experiments"), false);
+    assert.ok(button(t, "btn-prf-plan"), "the plan form is offered as if no run had been recorded");
+    assert.deepEqual(plain(t.facts.at(-1)).slice(1), [null]);
+});
+
 // ---- planning and the one approval --------------------------------------------------------------------------------------------
 
 test("the plan is asked for with exactly what the form and the page hold, and nothing else is sent", async () => {

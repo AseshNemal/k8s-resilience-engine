@@ -76,7 +76,7 @@ class LoopSettings:
     monitor_tail_max_s: float = 60.0
     # The Failure lab: the longest a chosen set of workers may be held down in one run, and the shortest.
     lab_hold_min_s: float = 10.0
-    lab_hold_max_s: float = 900.0
+    lab_hold_max_s: float = 1800.0
 
 
 @dataclass(frozen=True)

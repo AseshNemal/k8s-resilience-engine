@@ -1,5 +1,15 @@
 # Changes other members should know about
 
+## 2026-11-19 (later): Fail a Node follow-ups (Member 4)
+
+- **Custom time**: the hold time can be typed (seconds or minutes), validated as it is typed, and the server's bound is now 10 seconds to 30 minutes
+  (`LoopSettings.lab_hold_max_s`, was 15 minutes). Longer holds keep an application down longer; **Restore now** still ends it at any moment.
+- **"No cluster can be tested right now"** now lists the server's own reason for each cluster and has **Check again** (and a Connect link in the extension).
+  Before, it only said that none was available and hid why.
+- The Recommendations "Prove it" panel ignores a Failure lab run: it proves no recommendation, and its view has no candidates to draw.
+- **Sidebar order**: Fail a Node now comes after Recommendations (fix first, then test it); the page text says so.
+- Error sweep of every page against a real, migrated backend: no script errors. The only 404s are the extension-only `/_extension/cluster` (handled) and `favicon.ico`.
+
 ## 2026-11-19: Fail a Node page, and the full monitor on "Watch a real failure" (Member 4)
 
 - New sidebar page **Fail a Node** (`/components/fail-a-node`, `fail_node.html`, `fail-visual.js`, `css/pages/fail-node.css`): the Failure lab in a simple, visual form.
