@@ -42,18 +42,18 @@
             <span class="sidebar__link-label">Failure Impact</span>
         </a>
         <a
-            class="sidebar__link {{ 'is-active' if active_page == 'fail_node' else '' }}"
-            href="/components/fail-a-node"
-        >
-            <span class="sidebar__link-icon">{{ icon("server", 18) }}</span>
-            <span class="sidebar__link-label">Fail a Node</span>
-        </a>
-        <a
             class="sidebar__link {{ 'is-active' if active_page == 'recommendations' else '' }}"
             href="/components/recommendations"
         >
             <span class="sidebar__link-icon">{{ icon("shield-check", 18) }}</span>
             <span class="sidebar__link-label">Recommendations</span>
+        </a>
+        <a
+            class="sidebar__link {{ 'is-active' if active_page == 'fail_node' else '' }}"
+            href="/components/fail-a-node"
+        >
+            <span class="sidebar__link-icon">{{ icon("server", 18) }}</span>
+            <span class="sidebar__link-label">Fail a Node</span>
         </a>
 
         <button

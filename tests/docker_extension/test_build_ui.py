@@ -76,7 +76,7 @@ def test_each_page_has_a_key_and_a_readable_sentence_case_title(built, name, key
 def test_navigation_has_every_label_and_one_active_item(built, name):
     page = html(built, name)
     labels = re.findall(r'<span class="sidebar__link-label">([^<]+)</span>', page)
-    assert labels == ["Assessment", "Workflow Discovery", "Deployment Topology", "Failure Impact", "Fail a Node", "Recommendations", "Connect cluster"]
+    assert labels == ["Assessment", "Workflow Discovery", "Deployment Topology", "Failure Impact", "Recommendations", "Fail a Node", "Connect cluster"]
     assert len(re.findall(r"sidebar__link is-active", page)) == 1
 
 

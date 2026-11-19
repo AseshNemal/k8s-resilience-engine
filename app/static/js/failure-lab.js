@@ -16,6 +16,7 @@
     const BASE = "/api/recommendations/validation-loop";
     const POLL_MS = 2000;
     const HOLDS = [[30, "30 seconds"], [60, "1 minute"], [120, "2 minutes"], [300, "5 minutes"]];
+    const LIMITS = { min: 10, max: 1800 };       // seconds; the server enforces the same bounds (``lab_hold_min_s`` / ``lab_hold_max_s``)
     const TARGETS = { DOCKER_DESKTOP: "My cluster (Docker Desktop)", DISPOSABLE: "A separate test cluster" };
     const OUTCOME = { down: "goes offline", degraded: "loses some replicas", ok: "unaffected", none: "has no ready replica today" };
 
@@ -27,7 +28,27 @@
     }
 
     function canPreview(form) {
-        return form.nodes.size > 0 && Number(form.hold) >= 10 && Number(form.hold) <= 900;
+        return form.nodes.size > 0 && Number(form.hold) >= LIMITS.min && Number(form.hold) <= LIMITS.max;
+    }
+
+    /** A typed time as whole seconds: {seconds} when it is allowed, {problem} (in words) when it is not. Nothing is guessed. */
+    function parseHold(amount, unit) {
+        const typed = String(amount === undefined || amount === null ? "" : amount).trim();
+        if (!typed) return { seconds: null, problem: "Type how long to keep the workers stopped." };
+        const n = Number(typed);
+        if (!Number.isFinite(n) || n <= 0) return { seconds: null, problem: "Use a number greater than zero." };
+        const seconds = Math.round(unit === "minutes" ? n * 60 : n);
+        if (seconds < LIMITS.min) return { seconds: null, problem: `Too short. Use at least ${LIMITS.min} seconds.` };
+        if (seconds > LIMITS.max) return { seconds: null, problem: `Too long. Use at most ${LIMITS.max / 60} minutes.` };
+        return { seconds, problem: null };
+    }
+
+    /** "45 seconds", "1 minute", "2 minutes 30 seconds". */
+    function humanSeconds(total) {
+        const t = Math.round(Number(total));
+        const m = Math.floor(t / 60), s = t % 60;
+        const part = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+        return m && s ? `${part(m, "minute")} ${part(s, "second")}` : m ? part(m, "minute") : part(s, "second");
     }
 
     function planBody(form, namespace) {
@@ -62,7 +83,7 @@
     /** ``visual``: the simple page ("Fail a node"): workers drawn as servers with their pods, services as chips, and the application read here. */
     function createPanel({ root, document: doc = global.document, fetchImpl = (...a) => global.fetch(...a), namespace = () => null, visual = false,
                           timers = { set: (fn, ms) => global.setTimeout(fn, ms), clear: (id) => global.clearTimeout(id) } }) {
-        const form = { target: "DOCKER_DESKTOP", nodes: new Set(), hold: 60, url: "" };
+        const form = { target: "DOCKER_DESKTOP", nodes: new Set(), hold: 60, url: "", custom: false, customAmount: "", customUnit: "seconds" };
         const state = { phase: "loading", targets: null, plan: null, run: null, message: null, busy: false, ack: new Set(), desktopAck: false,
             timelines: {}, asked: new Set(), pick: null, placement: null, ns: null, namespaces: [] };
         const ns = () => namespace() || state.ns;
@@ -161,14 +182,43 @@
             b.disabled = !!disabled; b.addEventListener("click", onClick); return b;
         }
 
-        function holdButtons(box) {
+        /** The time choices. ``changed`` runs after a typed time changes, so the caller can update its button without a redraw (which would lose focus). */
+        function holdButtons(box, changed) {
             const group = make(doc, "div", undefined, "fv-holds", { role: "group", "aria-label": "How long to keep them stopped" });
             HOLDS.forEach(([seconds, text]) => {
-                const b = make(doc, "button", text, `fv-hold${Number(form.hold) === seconds ? " fv-hold--on" : ""}`, { type: "button", "aria-pressed": String(Number(form.hold) === seconds) });
-                b.addEventListener("click", () => { form.hold = seconds; draw(); });
+                const on = !form.custom && Number(form.hold) === seconds;
+                const b = make(doc, "button", text, `fv-hold${on ? " fv-hold--on" : ""}`, { type: "button", "aria-pressed": String(on) });
+                b.addEventListener("click", () => { form.custom = false; form.hold = seconds; draw(); });
                 group.append(b);
             });
+            const custom = make(doc, "button", "Custom", `fv-hold${form.custom ? " fv-hold--on" : ""}`, { type: "button", "aria-pressed": String(form.custom), "data-role": "fl-custom" });
+            custom.addEventListener("click", () => {
+                form.custom = true;
+                if (!form.customAmount) { form.customAmount = String(form.hold); form.customUnit = "seconds"; }
+                const typed = parseHold(form.customAmount, form.customUnit); form.hold = typed.seconds === null ? NaN : typed.seconds; draw();
+            });
+            group.append(custom);
             box.append(group);
+            if (!form.custom) return;
+            const row = make(doc, "div", undefined, "fv-custom");
+            const amount = make(doc, "input", undefined, "form-input fv-custom__amount", { type: "number", min: "1", step: "any", inputmode: "decimal", "aria-label": "How long", "aria-describedby": "fv-custom-hint", "data-role": "fl-custom-amount" });
+            amount.value = form.customAmount;
+            const unit = make(doc, "select", undefined, "form-input", { "aria-label": "Unit", "data-role": "fl-custom-unit" });
+            [["seconds", "seconds"], ["minutes", "minutes"]].forEach(([v, t]) => { const o = make(doc, "option", t, undefined, { value: v }); if (form.customUnit === v) o.setAttribute("selected", ""); unit.append(o); });
+            unit.value = form.customUnit;
+            const problem = make(doc, "span", undefined, "fl-hint fv-custom__problem", { id: "fv-custom-hint", role: "status" });
+            const apply = () => {
+                form.customAmount = amount.value; form.customUnit = unit.value;
+                const typed = parseHold(amount.value, unit.value);
+                form.hold = typed.seconds === null ? NaN : typed.seconds;
+                problem.textContent = typed.problem || `${humanSeconds(typed.seconds)}. Allowed: ${LIMITS.min} seconds to ${LIMITS.max / 60} minutes.`;
+                problem.className = `fl-hint fv-custom__problem${typed.problem ? " fv-custom__problem--bad" : ""}`;
+                if (changed) changed();
+            };
+            amount.addEventListener("input", apply); unit.addEventListener("change", apply);
+            row.append(make(doc, "span", "Keep them stopped for"), amount, unit, problem);
+            box.append(row);
+            apply();
         }
 
         function allNodes() {
@@ -182,7 +232,7 @@
             box.append(make(doc, "h4", "1 · Pick the workers to stop", "fl-sub"));
             box.append(make(doc, "p", "Each square is a running copy of one of your services. Tap a worker to choose it.", "fl-hint"));
             const available = (state.targets || []).filter((t) => t.available);
-            if (!available.length) box.append(make(doc, "p", "No cluster is available to test on. Connect one, then reload this page.", "fl-alert", { role: "alert" }));
+            if (!available.length) return drawNoCluster(box);
             const colours = hues();
             box.append(V().nodeTiles(doc, { nodes: allNodes(), placement: state.placement, hues: colours, picked: form.nodes, running: false,
                 onToggle: (name) => { if (form.nodes.has(name)) form.nodes.delete(name); else form.nodes.add(name); draw(); } }));
@@ -197,7 +247,8 @@
                 field.append(select); box.append(field);
             }
             box.append(make(doc, "h4", "2 · How long?", "fl-sub"));
-            holdButtons(box);
+            let previewButton = null;
+            holdButtons(box, () => { if (previewButton) previewButton.disabled = state.busy || !canPreview(form); });
             const more = make(doc, "details", undefined, "fv-more");
             more.append(make(doc, "summary", "More options"));
             if (available.length > 1) {
@@ -216,12 +267,29 @@
             more.append(url);
             box.append(more);
             msg(box);
-            box.append(button(state.busy ? "Checking…" : "3 · See what would happen", "primary-button", preview, state.busy || !canPreview(form), "fl-preview"));
+            previewButton = button(state.busy ? "Checking…" : "3 · See what would happen", "primary-button", preview, state.busy || !canPreview(form), "fl-preview");
+            box.append(previewButton);
+        }
+
+        /** Nothing can be tested: say why, in the server's own words for each cluster, and offer to look again. */
+        function drawNoCluster(box) {
+            const panel = make(doc, "div", undefined, "fl-alert fv-nocluster", { role: "alert" });
+            panel.append(make(doc, "strong", "No cluster can be tested right now."));
+            const list = make(doc, "ul", undefined, "fv-nocluster__list");
+            (state.targets || []).forEach((t) => list.append(make(doc, "li", `${TARGETS[t.kind] || t.label}: ${t.reason || "not available"}`)));
+            if (!(state.targets || []).length) list.append(make(doc, "li", state.message ? `The clusters could not be read: ${state.message}` : "No cluster was listed."));
+            panel.append(list);
+            const row = make(doc, "div", undefined, "fl-row");
+            row.append(button(state.busy ? "Checking…" : "Check again", "secondary-button", async () => { state.busy = true; state.phase = "loading"; draw(); await load(); state.busy = false; draw(); }, state.busy, "fl-recheck"));
+            const link = Array.from(doc.querySelectorAll ? doc.querySelectorAll(".sidebar a[href]") : []).find((a) => /connect/.test(a.getAttribute("href") || ""));
+            if (link) row.append(make(doc, "a", "Connect a cluster", "secondary-button fl-a", { href: link.getAttribute("href") }));
+            panel.append(row);
+            box.append(panel);
         }
 
         function drawVisualPlan(box) {
             const plan = state.plan;
-            box.append(make(doc, "h4", `If ${plan.lab.nodes.join(", ")} stop${plan.lab.nodes.length === 1 ? "s" : ""} for ${plan.lab.holdS} seconds`, "fl-sub"));
+            box.append(make(doc, "h4", `If ${plan.lab.nodes.join(", ")} stop${plan.lab.nodes.length === 1 ? "s" : ""} for ${humanSeconds(plan.lab.holdS)}`, "fl-sub"));
             box.append(V().nodeTiles(doc, { nodes: allNodes(), placement: state.placement, hues: hues(), picked: new Set(plan.lab.nodes), running: false, disabled: true }));
             if (plan.lab.allWorkersStopped) box.append(make(doc, "p", "Every worker would be stopped. Nothing is left to run your application until they start again.", "fl-alert", { role: "alert" }));
             box.append(V().serviceChips(doc, plan.lab.impact.services.map((x) => ({ service: x.service, state: x.state,
@@ -418,7 +486,7 @@
         return { load, preview, begin, restoreNow, recover, another, form, state: () => state, poll, destroy: () => { destroyed = true; unwatch(); } };
     }
 
-    global.ResilienceFailureLab = { createPanel, chooseable, canPreview, canStart, planBody };
+    global.ResilienceFailureLab = { createPanel, chooseable, canPreview, canStart, planBody, parseHold, humanSeconds, LIMITS };
 
     if (global.document && typeof global.document.querySelector === "function") {
         const mount = () => {

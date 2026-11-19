@@ -96,3 +96,74 @@ test("the visual page reads the application, offers only workers, and still prev
     assert.match(text(root), /details/); assert.match(text(root), /goes offline/);
     assert.match(text(root), /Keeps running/);                                // the workers that were not picked say so
 });
+
+test("a typed time is whole seconds inside the bounds, and the reason is said in words when it is not", () => {
+    const { ResilienceFailureLab: L } = load();
+    const ok = (a, u) => JSON.parse(JSON.stringify(L.parseHold(a, u)));
+    assert.deepEqual(ok("90", "seconds"), { seconds: 90, problem: null });
+    assert.deepEqual(ok("2.5", "minutes"), { seconds: 150, problem: null });
+    assert.deepEqual(ok("30", "minutes"), { seconds: 1800, problem: null });
+    assert.match(ok("5", "seconds").problem, /at least 10/);
+    assert.match(ok("31", "minutes").problem, /at most 30 minutes/);
+    assert.match(ok("", "seconds").problem, /Type how long/);
+    assert.match(ok("abc", "seconds").problem, /greater than zero/);
+    assert.match(ok("-3", "minutes").problem, /greater than zero/);
+    assert.equal(L.humanSeconds(60), "1 minute"); assert.equal(L.humanSeconds(150), "2 minutes 30 seconds"); assert.equal(L.humanSeconds(45), "45 seconds");
+    assert.equal(L.canPreview({ nodes: new Set(["w"]), hold: 1800 }), true);
+    assert.equal(L.canPreview({ nodes: new Set(["w"]), hold: 1801 }), false);
+    assert.equal(L.canPreview({ nodes: new Set(["w"]), hold: NaN }), false);
+});
+
+test("the Custom time is typed, validated as it is typed, and sent exactly", async () => {
+    const window = load();
+    const doc = new Document(); const root = doc.createElement("div"); doc.body.append(root);
+    const calls = [];
+    const routes = {
+        "GET /api/failure-impacts/overview": { namespace: "bookinfo", namespaces: ["bookinfo"], services: PLACEMENT },
+        [`GET ${BASE}/targets`]: { targets: [{ kind: "DOCKER_DESKTOP", label: "Docker Desktop", available: true, warning: "x", identity: { nodes: ["w1", "w2"] } }] },
+        [`GET ${BASE}/current`]: { run: null },
+        [`POST ${BASE}/plan`]: { canApprove: true, planDigest: "d", acknowledgementsNeeded: [], issues: [], notes: [], target: { kind: "DISPOSABLE" },
+            lab: { nodes: ["w1"], holdS: 150, allWorkersStopped: false, impact: { services: [] } } },
+    };
+    const fetchImpl = async (url, init = {}) => {
+        const method = init.method || "GET"; calls.push([method, url, init.body ? JSON.parse(init.body) : null]);
+        const body = routes[`${method} ${url.split("?")[0]}`];
+        return body ? { ok: true, status: 200, json: async () => body } : { ok: false, status: 404, json: async () => ({}) };
+    };
+    const panel = window.ResilienceFailureLab.createPanel({ root, document: doc, fetchImpl, visual: true, timers: { set: () => 1, clear: () => {} } });
+    await panel.load();
+    panel.form.nodes.add("w1");
+    find(root, (n) => n.getAttribute && n.getAttribute("data-role") === "fl-custom")[0].click();
+    const amount = find(root, (n) => n.getAttribute && n.getAttribute("data-role") === "fl-custom-amount")[0];
+    const preview = () => find(root, (n) => n.getAttribute && n.getAttribute("data-role") === "fl-preview")[0];
+    amount.value = "5"; amount.dispatchEvent({ type: "input" });
+    assert.equal(preview().disabled, true);                                   // too short: the button waits, and the reason is shown
+    assert.match(text(root), /at least 10 seconds/);
+    const unit = find(root, (n) => n.getAttribute && n.getAttribute("data-role") === "fl-custom-unit")[0];
+    amount.value = "2.5"; unit.value = "minutes"; unit.dispatchEvent({ type: "change" });
+    assert.equal(preview().disabled, false);
+    assert.match(text(root), /2 minutes 30 seconds/);
+    await panel.preview();
+    assert.equal(calls.find((c) => c[0] === "POST")[2].holdSeconds, 150);
+});
+
+test("when no cluster can be tested the page says why for each one and offers to look again", async () => {
+    const window = load();
+    const doc = new Document(); const root = doc.createElement("div"); doc.body.append(root);
+    let reads = 0;
+    const fetchImpl = async (url) => {
+        if (url.includes("/overview")) return { ok: true, status: 200, json: async () => ({ namespace: "bookinfo", services: [] }) };
+        if (url.endsWith("/targets")) { reads += 1; return { ok: true, status: 200, json: async () => ({ targets: [
+            { kind: "DOCKER_DESKTOP", label: "Docker Desktop cluster", available: false, reason: "No cluster is connected." },
+            { kind: "DISPOSABLE", label: "Disposable test cluster", available: false, reason: "The disposable test cluster has not been prepared." }] }) }; }
+        return { ok: true, status: 200, json: async () => ({ run: null }) };
+    };
+    const panel = window.ResilienceFailureLab.createPanel({ root, document: doc, fetchImpl, visual: true, timers: { set: () => 1, clear: () => {} } });
+    await panel.load();
+    assert.match(text(root), /No cluster can be tested right now/);
+    assert.match(text(root), /Docker Desktop cluster|My cluster/); assert.match(text(root), /No cluster is connected\./);
+    assert.match(text(root), /has not been prepared/);
+    find(root, (n) => n.getAttribute && n.getAttribute("data-role") === "fl-recheck")[0].click();
+    await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0));
+    assert.equal(reads, 2);
+});

@@ -174,6 +174,8 @@
         function adopt(run, order) {
             if (destroyed || order < shown) return false;
             shown = order;
+            // A Failure lab run (Fail a Node page) stops workers to watch an application. It proves no recommendation, so it is not this panel's run.
+            if (run && run.mode === "LAB") run = null;
             state.run = run;
             state.lastOkAt = now();
             state.failing = false;
@@ -222,7 +224,8 @@
                         form.targetKind = usable ? usable.kind : "";
                     }
                 }
-                const run = current.ok && current.payload ? current.payload.run : null;
+                const latest = current.ok && current.payload ? current.payload.run : null;
+                const run = latest && latest.mode === "LAB" ? null : latest;      // a Failure lab run is not a proof run (see adopt)
                 // The latest run is always shown when there is one: a run that finished while the extension was closed is still the answer
                 // the person came back for. "Plan another run" leads to the settings.
                 state.phase = run ? "run" : "setup";
