@@ -631,3 +631,8 @@ body[data-page="overview"] .overview-matrix-cell[data-state="placed"] { backgrou
 [data-role="tracing-card"] > .ui-note:last-child { margin-top: 16px; }
 [data-role="tracing-card"] [data-role="tracing-message"] { margin: 0 0 8px; }
 [data-role="tracing-card"] [data-role="tracing-detail"] { margin: 6px 0 0; }
+
+/* ---- Deployment Topology (another member's page): fixes made here, for Docker's dark mode only, so that page's own files stay untouched ---- */
+.topo-svc { background: light-dark(hsl(var(--svc-hue) 80% 97%), hsl(var(--svc-hue) 32% 16%)); border-color: light-dark(hsl(var(--svc-hue) 55% 80%), hsl(var(--svc-hue) 30% 32%)); }
+.placement-snap { background: var(--c2-surface-subtle); }
+.tab-icon { display: none; }      /* the tabs name themselves; the emoji clashed with every other page */

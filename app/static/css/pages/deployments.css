@@ -341,10 +341,8 @@
     column-gap: 10px;
     padding: 10px 12px;
     border: 1px solid hsl(var(--svc-hue) 55% 80%);
-    border: 1px solid light-dark(hsl(var(--svc-hue) 55% 80%), hsl(var(--svc-hue) 30% 32%));
     border-radius: var(--c2-radius-md);
     background: hsl(var(--svc-hue) 80% 97%);
-    background: light-dark(hsl(var(--svc-hue) 80% 97%), hsl(var(--svc-hue) 32% 16%));   /* a dark card in Docker's dark mode, so the white name stays readable */
     cursor: default;
     transition: var(--c2-transition);
 }
@@ -1048,7 +1046,7 @@
 .live-exp-detail__config h5 { margin: 4px 0; font-size: 13px; }
 .placement-pair { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
 .placement-pair__arrow { align-self: center; font-size: 22px; color: var(--color-text-muted); }
-.placement-snap { flex: 1 1 320px; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px; background: var(--c2-surface-subtle, #fff); }
+.placement-snap { flex: 1 1 320px; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px; background: #fff; }
 .placement-snap__title { font-size: 12px; margin-bottom: 6px; }
 .placement-snap__cols { display: flex; gap: 8px; flex-wrap: wrap; }
 .placement-snap__col { flex: 1 1 90px; border: 1px solid var(--color-border); border-radius: 6px; padding: 6px; min-height: 60px; }
