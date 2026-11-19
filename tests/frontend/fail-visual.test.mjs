@@ -167,3 +167,117 @@ test("when no cluster can be tested the page says why for each one and offers to
     await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0));
     assert.equal(reads, 2);
 });
+
+// ---- a running test says what the test knows, not what the lagging cluster still reports ----------------------------------------
+
+test("a worker the test has stopped is never drawn as Running while Kubernetes still reads it Ready", () => {
+    const V = load().ResilienceFailVisual;
+    assert.equal(V.runPhase({ status: "RUNNING", lab: { stage: "INJECT_FAILURE" } }), "stopping");
+    assert.equal(V.runPhase({ status: "RUNNING", lab: { stage: "PROBE" } }), "holding");
+    assert.equal(V.runPhase({ status: "RUNNING", lab: { stage: "RECOVER_WORKER" } }), "restoring");
+    assert.equal(V.runPhase({ status: "ABORTING", lab: { stage: "PROBE" } }), "restoring");
+    assert.equal(V.tileState({}, { running: true, phase: "stopping", stopped: false }), "stopping");
+    assert.equal(V.tileState({}, { running: true, phase: "holding", stopped: false }), "held");      // cluster still says Ready
+    assert.equal(V.tileState({}, { running: true, phase: "holding", stopped: null }), "held");
+    assert.equal(V.tileState({}, { running: true, phase: "holding", stopped: true }), "down");       // cluster agrees
+    assert.equal(V.tileState({}, { running: true, phase: "restoring", stopped: true }), "returning");
+    assert.equal(V.tileState({}, { running: true, phase: "restoring", stopped: false }), "up");
+});
+
+test("the cluster's service counts are marked not updated while its workers still read Ready", () => {
+    const V = load().ResilienceFailVisual;
+    const run = (nodes) => ({ status: "RUNNING", lab: { stage: "PROBE", nodes: ["w1", "w2"] },
+        monitor: { live: { timeline: { baseline: { details: 1 }, samples: [{ t: 1, ready: { details: 1 }, nodes }] } } } });
+    assert.equal(V.awaitingCluster(run({ w1: true, w2: true })), true);
+    assert.equal(V.awaitingCluster(run({ w1: false, w2: true })), true);        // one still reads Ready
+    assert.equal(V.awaitingCluster(run({ w1: false, w2: false })), false);      // the cluster has noticed every worker
+    assert.equal(V.awaitingCluster({ status: "COMPLETED", lab: { stage: "DONE", nodes: ["w1"] } }), false);
+});
+
+async function panelWithRun(run) {
+    const window = load();
+    const doc = new Document(); const root = doc.createElement("div"); doc.body.append(root);
+    const routes = {
+        "GET /api/failure-impacts/overview": { namespace: "bookinfo", namespaces: ["bookinfo"], services: PLACEMENT },
+        [`GET ${BASE}/targets`]: { targets: [{ kind: "DOCKER_DESKTOP", label: "Docker Desktop", available: true, warning: "x", identity: { nodes: ["cp-control-plane", "w1", "w2"] } }] },
+        [`GET ${BASE}/current`]: { run },
+    };
+    const fetchImpl = async (url, init = {}) => {
+        const body = routes[`${init.method || "GET"} ${url.split("?")[0]}`];
+        return body ? { ok: true, status: 200, json: async () => body } : { ok: false, status: 404, json: async () => ({}) };
+    };
+    const panel = window.ResilienceFailureLab.createPanel({ root, document: doc, fetchImpl, visual: true, timers: { set: () => 1, clear: () => {} } });
+    await panel.load();
+    return root;
+}
+
+test("a running test shows a plain banner with Restore now in it, stopped workers as stopped, and counts marked not updated", async () => {
+    const live = { timeline: { baseline: { details: 2, reviews: 3 }, samples: [{ t: 3, ready: { details: 2, reviews: 3 }, nodes: { w1: true, w2: true } }] } };
+    const root = await panelWithRun({ runKey: "r1", status: "RUNNING", statusLabel: "Running", mode: "LAB", timing: { elapsedS: 12 },
+        lab: { nodes: ["w1", "w2"], holdS: 300, stage: "PROBE" }, monitor: { live, episodes: [] } });
+    const status = find(root, (n) => cls(n, "fl-status"))[0];
+    assert.match(text(status), /2 workers are stopped/);
+    assert.match(text(status), /Held for 5 minutes/);
+    assert.equal(find(status, (n) => n.getAttribute && n.getAttribute("data-role") === "fl-restore").length, 1);   // Restore is in the banner, not at the bottom
+    const tiles = find(root, (n) => n.getAttribute && n.getAttribute("data-node"));
+    assert.match(text(tiles[1]), /Stopped \(cluster not updated yet\)/); assert.doesNotMatch(text(tiles[1]), /Running/);
+    assert.match(text(root), /keeps showing them as Ready for about a minute/);
+    assert.match(text(root), /2 of 2 · not updated yet/);
+    assert.doesNotMatch(text(root), /2 of 2 ready/);
+});
+
+test("a finished test puts the next step directly under the result and says in words what happened", async () => {
+    const summary = { nodeNotReadyAfterS: 60, servicesDown: ["details"], services: { details: { downS: 27.1 } }, recoveryAfterRestoreS: 7.7, requests: null };
+    const root = await panelWithRun({ runKey: "r1", status: "INTERRUPTED", statusLabel: "Stopped early", stopReason: "The hold was ended early on request; every worker was restored.", mode: "LAB",
+        lab: { nodes: ["w1"], holdS: 300, stage: "DONE" }, monitor: { live: null, episodes: [{ kind: "baseline", worker: "w1+w2", repeat: 1, summary }] } });
+    const body = root.children[0];
+    const order = body.children.map((n) => n.className || "");
+    const statusAt = order.findIndex((c) => c.includes("fl-status")), actionsAt = order.findIndex((c) => c.includes("fl-row--top")), outcomeAt = order.findIndex((c) => c.includes("fl-outcome"));
+    assert.ok(statusAt >= 0 && actionsAt === statusAt + 1, "the actions follow the banner immediately");
+    const another = find(root, (n) => n.getAttribute && n.getAttribute("data-role") === "fl-another")[0];
+    assert.ok(cls(another, "primary-button"), "Run another test is the main button");
+    assert.ok(outcomeAt > actionsAt);
+    assert.match(text(root), /Kubernetes noticed the stopped workers after 60 seconds/);
+    assert.match(text(root), /details lost every ready replica \(offline about 27 seconds/);
+    assert.match(text(root), /back 8 seconds after/);
+    assert.match(text(root), /No requests were sent to your application/);
+});
+
+test("when the run ended before Kubernetes noticed, the page says so instead of reporting no outage", async () => {
+    const root = await panelWithRun({ runKey: "r1", status: "INTERRUPTED", statusLabel: "Stopped early", mode: "LAB", lab: { nodes: ["w1"], holdS: 300, stage: "DONE" },
+        monitor: { live: null, episodes: [{ kind: "baseline", worker: "w1", repeat: 1, summary: { nodeNotReadyAfterS: null, servicesDown: [], services: {}, recoveryAfterRestoreS: null, requests: null } }] } });
+    assert.match(text(root), /never marked a stopped worker NotReady/);
+    assert.match(text(root), /choose 2 minutes or more/);
+    assert.doesNotMatch(text(root), /No service lost every ready replica/);
+});
+
+function loadMonitor() {
+    const sandbox = { window: {}, console, Math, JSON, Number, String, Object, Array, Set, Promise, Infinity };
+    vm.createContext(sandbox);
+    vm.runInContext(read("failure-monitor.js"), sandbox, { filename: "failure-monitor.js" });
+    return sandbox.window.ResilienceFailureMonitor;
+}
+
+test("a test with no change applied names the stopped workers, never 'before the change'", () => {
+    const M = loadMonitor();
+    const monitor = { live: null, episodes: [{ kind: "baseline", candidateId: null, worker: "w1+w2", repeat: 1 }] };
+    assert.match(M.choices(monitor, { lab: true })[0].label, /^Stopped workers: w1, w2$/);
+    assert.match(M.choices(monitor)[0].label, /^Before the change/);                    // other pages keep their wording
+});
+
+test("the availability chart draws the stretch between the stop and Kubernetes noticing as stopped, not as up", () => {
+    const M = loadMonitor();
+    const doc = new Document();
+    const ready = (n) => ({ details: n });
+    const timeline = { intervalS: 2, baseline: { details: 1 }, samples: [
+        { t: 0, ready: ready(1), nodes: {} }, { t: 4, ready: ready(1), nodes: {} }, { t: 30, ready: ready(1), nodes: {} }, { t: 64, ready: ready(0), nodes: {} }, { t: 98, ready: ready(1), nodes: {} }],
+        marks: [{ t: 4, kind: "stop", detail: "" }, { t: 63, kind: "node-not-ready", detail: "w1" }, { t: 90, kind: "restore", detail: "" }] };
+    const holder = doc.createElement("div");
+    M.render(doc, holder, { live: null, episodes: [{ kind: "baseline", worker: "w1", repeat: 1, summary: { nodeNotReadyAfterS: 59, servicesDown: ["details"], services: {}, requests: null, recoveryAfterRestoreS: 8 } }] },
+        { lab: true, selected: "baseline||w1|1", timelineFor: () => timeline });
+    const cells = find(holder, (n) => n.tag === "rect" && (n.className || n.getAttribute("class") || "").toString().includes("fm-cell"));
+    const tones = cells.map((c) => (c.getAttribute("class") || c.className || "").toString().replace("fm-cell fm-cell--", ""));
+    assert.ok(tones.includes("stale"), "cells after the stop and before Kubernetes noticed are stale");
+    assert.ok(tones.indexOf("stale") > tones.indexOf("ok"), "the cells before the stop are still plain up");
+    assert.match(text(holder), /stopped, Kubernetes had not noticed yet/);
+});

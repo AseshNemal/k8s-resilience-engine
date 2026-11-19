@@ -74,7 +74,7 @@
         if (facts.blockedBy === "workflow") {
             return { ...out, phase: "needs-workflow", title: "This change can't be applied yet",
                 text: facts.mode === "deployment"
-                    ? "This is a service-level simulation. Without a current operational workflow review, business impact is unknown and approval and Apply stay blocked. Open Workflow Manager, review or create the real definition and its dependency roles, then use Review & Save → Use this real workflow for operational analysis. Record how it was verified, save, and check again here. Saving a research declaration alone does not establish operational evidence."
+                    ? "Apply stays off until you review a workflow, because without one the real business impact is unknown. Open Workflow Discovery, review or create how your services depend on each other, then come back and press “I’ve reviewed one — check again”."
                     : (facts.blockedMessage || "A reviewed workflow definition is required before a change can be approved."),
                 primary: action("workflows", "Review a workflow"), secondary: action("recheck", "I've reviewed one — check again") };
         }

@@ -27,6 +27,13 @@
 
     --dd-text: light-dark(#000000, #ffffff);
     --dd-text-2: light-dark(#677285, #7794ab);
+    /* Deployment Topology and its tokens (app/static/css/pages/deployments_tokens.css) are light-only: follow Docker's appearance. */
+    --c2-glass-bg: light-dark(rgba(255, 255, 255, 0.85), rgba(22, 29, 36, 0.92));
+    --c2-glass-border: light-dark(rgba(226, 232, 240, 0.8), rgba(255, 255, 255, 0.12));
+    --c2-surface-subtle: light-dark(#f8fafc, #161d24);
+    --c2-text-main: light-dark(#0f172a, #ffffff);
+    --c2-text-muted: light-dark(#64748b, #7794ab);
+    --c2-border-light: light-dark(#e2e8f0, rgba(255, 255, 255, 0.12));
 
     --dd-success: light-dark(#2e7f74, #00a58c);
     --dd-warning: light-dark(#b85504, #db7512);

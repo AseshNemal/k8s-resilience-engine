@@ -39,18 +39,20 @@
         return e ? `${e.kind}|${e.candidateId || ""}|${e.worker}|${e.repeat}` : "";
     }
 
-    function episodeLabel(e, repeats) {
+    function episodeLabel(e, repeats, options) {
+        // A Fail a Node test applies no change, so "before the change" would be wrong there: name the workers that were stopped.
+        if (options && options.lab) return `Stopped workers: ${String(e.worker).split("+").join(", ")}${repeats > 1 ? ` · run ${e.repeat}` : ""}`;
         const base = e.kind === "watch" ? "The failure you caused" : e.kind === "baseline" ? "Before the change" : "After the change";
         return `${base} · ${e.worker}${repeats > 1 ? ` · run ${e.repeat}` : ""}`;
     }
 
     /** The choices of the picker: the failure in progress first, then each finished one in the order it ran. */
-    function choices(monitor) {
+    function choices(monitor, options) {
         const out = [];
-        if (monitor && monitor.live) out.push({ key: "live", label: monitor.live.worker ? `Now · ${monitor.live.worker}` : "Now", live: true });
+        if (monitor && monitor.live) out.push({ key: "live", label: monitor.live.worker ? `Now · ${options && options.lab ? "stopped workers: " + String(monitor.live.worker).split("+").join(", ") : monitor.live.worker}` : "Now", live: true });
         const episodes = (monitor && monitor.episodes) || [];
         const repeats = Math.max(1, ...episodes.map((e) => e.repeat || 1));
-        episodes.forEach((e) => out.push({ key: episodeKey(e), label: episodeLabel(e, repeats), episode: e }));
+        episodes.forEach((e) => out.push({ key: episodeKey(e), label: episodeLabel(e, repeats, options), episode: e }));
         return out;
     }
 
@@ -153,6 +155,12 @@
         const chart = svg(doc, "svg", { viewBox: `0 0 ${W} ${height}`, role: "img", class: "fm-svg", "aria-label": "Ready replicas of each service over time, measured" });
         const scale = xScale(timeline);
         const g = svg(doc, "g");
+        // Between the stop and the moment Kubernetes noticed, its readings still say Ready: those cells are drawn as "stopped, not yet seen", never as up.
+        const stopAt = (timeline.marks.find((m) => m.kind === "stop") || {}).t;
+        const seenAt = (timeline.marks.find((m) => m.kind === "node-not-ready") || {}).t;
+        const restoreAt = (timeline.marks.find((m) => m.kind === "restore") || {}).t;
+        const staleEnd = seenAt !== undefined ? seenAt : restoreAt !== undefined ? restoreAt : Infinity;
+        let hasStale = false;
         services.forEach(([service, baseline], index) => {
             const y = top + index * (lane + gap);
             const label = svg(doc, "text", { x: LEFT - 6, y: y + lane - 4, "text-anchor": "end", class: "fm-lane__label" });
@@ -160,14 +168,15 @@
             g.append(label);
             laneCells(timeline.samples, service, baseline, timeline.intervalS || 1).forEach((c) => {
                 const x = scale.px(c.t0), w = Math.max(scale.px(c.t1) - x, 1);
-                const detail = c.ready === null || c.ready === undefined ? "not read" : `${c.ready} of ${baseline} ready`;
-                g.append(titled(doc, svg(doc, "rect", { x: x.toFixed(1), y, width: w.toFixed(1), height: lane, class: `fm-cell fm-cell--${laneTone(c.ratio)}` }), `${service}: ${detail} at ${seconds(scale.rel(c.t0))}`));
+                let tone = laneTone(c.ratio), detail = c.ready === null || c.ready === undefined ? "not read" : `${c.ready} of ${baseline} ready`;
+                if (tone === "ok" && stopAt !== undefined && c.t0 >= stopAt && c.t0 < staleEnd) { tone = "stale"; hasStale = true; detail = `${detail} as Kubernetes still reported it; the workers were already stopped`; }
+                g.append(titled(doc, svg(doc, "rect", { x: x.toFixed(1), y, width: w.toFixed(1), height: lane, class: `fm-cell fm-cell--${tone}` }), `${service}: ${detail} at ${seconds(scale.rel(c.t0))}`));
             });
         });
         drawMarks(doc, g, scale, timeline, 2, top + services.length * (lane + gap));
         axis(doc, g, scale, height - 3);
         chart.append(g);
-        figure.append(chart, legend(doc, [["ok", "all replicas ready"], ["part", "some lost"], ["down", "none ready"], ["unk", "not read"]]));
+        figure.append(chart, legend(doc, [["ok", "all replicas ready"], ["part", "some lost"], ["down", "none ready"], ["unk", "not read"]].concat(hasStale ? [["stale", "stopped, Kubernetes had not noticed yet"]] : [])));
         return figure;
     }
 
@@ -269,7 +278,7 @@
         return node;
     }
 
-    function tiles(doc, summary) {
+    function tiles(doc, summary, running) {
         const row = make(doc, "div", undefined, "fm-tiles");
         if (!summary) { row.append(make(doc, "p", "Waiting for the first measurements…", "fm-note", { role: "status" })); return row; }
         const req = summary.requests;
@@ -280,8 +289,11 @@
                 req && req.windowSuccessRatio !== null ? (req.windowSuccessRatio >= 1 ? "pass" : req.windowSuccessRatio >= 0.5 ? "warn" : "fail") : "wait"),
             tile(doc, "Longest stretch without an answer", req ? seconds(req.longestOutageS) : UNKNOWN, req && req.firstFailureS !== null ? `first failure ${seconds(req.firstFailureS)} after the stop` : "",
                 req ? (req.longestOutageS > 0 ? "fail" : "pass") : "wait"),
-            tile(doc, "Services that lost every ready replica", String(down.length), down.length ? down.join(", ") : (summary.servicesDegraded.length ? `${summary.servicesDegraded.join(", ")} lost some` : "none"),
-                down.length ? "fail" : summary.servicesDegraded.length ? "warn" : "pass"),
+            // While a test runs, Kubernetes has not yet noticed a stopped node (about a minute): "0, none" would read as a good result, so say it is not known yet.
+            running && !down.length && (summary.nodeNotReadyAfterS === null || summary.nodeNotReadyAfterS === undefined)
+                ? tile(doc, "Services that lost every ready replica", "not yet", "Kubernetes has not noticed the stop yet (about a minute)", "wait")
+                : tile(doc, "Services that lost every ready replica", String(down.length), down.length ? down.join(", ") : (summary.servicesDegraded.length ? `${summary.servicesDegraded.join(", ")} lost some` : "none"),
+                    down.length ? "fail" : summary.servicesDegraded.length ? "warn" : "pass"),
             tile(doc, "Back to normal", summary.recoveryAfterRestoreS === null || summary.recoveryAfterRestoreS === undefined ? UNKNOWN : seconds(summary.recoveryAfterRestoreS),
                 summary.recoveryAfterRestoreS === null || summary.recoveryAfterRestoreS === undefined ? "after the worker was started again" : "after the worker was started again",
                 summary.recoveryAfterRestoreS === null || summary.recoveryAfterRestoreS === undefined ? "wait" : "pass"));
@@ -399,7 +411,7 @@
      */
     function render(doc, container, monitor, options) {
         const opts = options || {};
-        const picks = choices(monitor);
+        const picks = choices(monitor, { lab: !!opts.lab });
         const section = make(doc, "section", undefined, "fm-section", { "data-role": "failure-monitor", "aria-label": "Measured behaviour during the failure" });
         const head = make(doc, "div", undefined, "fm-head");
         const title = make(doc, "div");
@@ -425,8 +437,11 @@
 
         const summary = chosen.live ? monitor.live.summary : chosen.episode.summary;
         const timeline = chosen.live ? monitor.live.timeline : (opts.timelineFor ? opts.timelineFor(chosen.episode) : null);
-        if (chosen.live) section.append(make(doc, "p", `Live — ${monitor.live.kind === "watch" ? "status" : "stage"}: ${String(monitor.live.stage || "").toLowerCase().replace(/_/g, " ")}. Updated every few seconds.`, "fm-live", { role: "status" }));
-        section.append(tiles(doc, summary));
+        if (chosen.live) {
+            const stage = String(monitor.live.stage || "").toLowerCase().replace(/_/g, " ");
+            section.append(make(doc, "p", `Live${stage ? ` — ${monitor.live.kind === "watch" ? "status" : "stage"}: ${stage}` : ""}. Updated every few seconds.`, "fm-live", { role: "status" }));
+        }
+        section.append(tiles(doc, summary, !!opts.running));
         if (!timeline || !timeline.samples || !timeline.samples.length) {
             section.append(make(doc, "p", chosen.live ? "Waiting for the first measurements…" : "Loading the measured samples…", "fm-note", { role: "status" }));
         } else {

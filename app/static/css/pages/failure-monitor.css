@@ -35,6 +35,7 @@
 .fm-cell--part { fill: var(--color-warning); }
 .fm-cell--down { fill: var(--color-danger); }
 .fm-cell--unk { fill: var(--color-border); }
+.fm-cell--stale { fill: var(--color-warning); opacity: 0.55; }
 .fm-lane__label, .fm-tick, .fm-marklabel { fill: var(--color-text-muted); font-size: 10px; }
 .fm-marklabel { fill: var(--color-text); font-weight: 600; }
 .fm-grid { stroke: var(--color-border); stroke-width: 1; }
@@ -52,6 +53,7 @@
 .fm-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .fm-swatch--ok { background: var(--color-success); } .fm-swatch--part { background: var(--color-warning); }
 .fm-swatch--down { background: var(--color-danger); } .fm-swatch--unk { background: var(--color-border); }
+.fm-swatch--stale { background: var(--color-warning); opacity: 0.55; }
 .fm-swatch--node { border-radius: 50%; }
 
 .fm-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-md); }
