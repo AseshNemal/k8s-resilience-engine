@@ -51,4 +51,4 @@ Images are multi-architecture (`linux/amd64`, `linux/arm64`). There is no `lates
 
 ## License
 
-Apache License 2.0.
+Copyright 2026 K8s Resilience Engine Contributors. Licensed under the Apache License, Version 2.0. The license, `NOTICE` and third-party notices are inside the image at `/licenses/`.

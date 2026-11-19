@@ -1,5 +1,11 @@
 # Changes other members should know about
 
+## 2026-11-19 (license): NOTICE and third-party notices
+
+- Added `NOTICE` (Copyright 2026 K8s Resilience Engine Contributors, plus the attribution go.yaml.in/yaml/v3 requires) and `THIRD_PARTY_NOTICES.md` (Go helper
+  components with their license texts; Python packages, Debian base image and web pages summarised). Both are copied to `/licenses/` in the extension image.
+  README and the Docker Hub overview carry the copyright line. `LICENSE` is the unmodified official Apache-2.0 text. No code changed.
+
 ## 2026-11-19 (release): 0.1.0-beta.2, image metadata and Docker Hub overview
 
 - `extension/Dockerfile` labels only: `org.opencontainers.image.version` (build argument `VERSION`), `.source`, `.url`, `.documentation`, and a changelog for beta.2. No functional change from beta.1.
