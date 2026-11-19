@@ -1,5 +1,9 @@
 # Changes other members should know about
 
+## 2026-11-19 (license): Apache License 2.0
+
+- Added `LICENSE` (Apache-2.0, unmodified official text), the `org.opencontainers.image.licenses` label and a copy at `/licenses/LICENSE` in the extension image, and a README line. No code changed.
+
 ## 2026-11-19 (release): first public beta `0.1.0-beta.1` prepared for Docker Hub
 
 - `extension/Dockerfile` labels only: added the icon, publisher URL, additional URLs and screenshots labels that `docker extension validate` requires, and

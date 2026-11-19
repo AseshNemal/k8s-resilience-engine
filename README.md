@@ -88,6 +88,10 @@ if the cluster can't be read it says so. Writes (Apply, Reset) happen only on a 
 Reads, prediction, ranked recommendations, approval, Apply, rollout watch, Keep/Reset and a read-only failure watch exist and
 are tested on in-memory doubles. **No Apply, node failure or controlled experiment has run on a real cluster yet.**
 
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
+
 ## Docs
 
 | Read | For |
