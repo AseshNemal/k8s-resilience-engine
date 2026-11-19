@@ -54,7 +54,7 @@ Each image carries its source commit in the `org.opencontainers.image.revision` 
 
 ## Status
 
-`0.1.0-beta.3` is a public beta. It is verified on macOS (Apple silicon) with Docker Desktop's Kubernetes. The Windows and Linux builds are tested in CI but have not yet been run on real machines. Fail a Node has been run for real once, on one worker, so start with one worker and a short hold. Please report problems at https://github.com/AseshNemal/k8s-resilience-engine/issues.
+`0.1.0-beta.3` is a public beta. It is verified on macOS (Apple silicon) with Docker Desktop's Kubernetes. The Windows and Linux builds are tested in CI but have not yet been run on real machines. Fail a Node has so far been run for real only on the author's own cluster, so start with one worker and a short hold. Please report problems at https://github.com/AseshNemal/k8s-resilience-engine/issues.
 
 ## Links
 
