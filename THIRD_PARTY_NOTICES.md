@@ -153,7 +153,8 @@ and are not linked into this project's code.
 
 The pages are plain HTML, CSS and JavaScript written for this project, with hand-authored inline SVG icons. No
 third-party scripts, styles or fonts are bundled or loaded from the network. The one image is the logo
-`app/static/img/logo.png`, whose source is not yet documented in this repository.
+`app/static/img/logo.png`, kept as the product logo by the maintainers. Its source is not documented in this repository and
+it resembles the Kubernetes wheel, so the provenance and trademark question is an open item (see `docs/LICENSING.md`).
 
 Kubernetes is a registered trademark of The Linux Foundation. Docker is a trademark of Docker, Inc. This project is
 not affiliated with or endorsed by either.
