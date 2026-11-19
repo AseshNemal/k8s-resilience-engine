@@ -1,5 +1,9 @@
 # Changes other members should know about
 
+## 2026-11-19 (release): 0.1.0-beta.3
+
+- Fail a Node page truth and clarity (stopped workers drawn as stopped, counts marked not updated until Kubernetes notices, banner with Restore, summary and next step on top, hold presets from 2 minutes), plus the Workflow editor, Recommendations, Topology and wording fixes in the commit "Fix the open UI bugs found walking the real flow", and the product-logo extension icon and Docker Desktop screenshot. Version labels and docs bumped to beta.3. No schema, route or research-logic change.
+
 ## 2026-11-19 (release): extension icon is the product logo
 
 - `extension/icon.svg` now shows the product logo (the blue gear, same artwork as `app/static/img/logo.png`, scaled to 256 px and embedded in the SVG) instead of the earlier teal hexagon. Docker Desktop shows the icon baked into an image, so it appears with the next published version. The logo's trademark and provenance question remains open (`docs/LICENSING.md`).

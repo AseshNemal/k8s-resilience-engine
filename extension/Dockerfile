@@ -2,7 +2,7 @@
 # Docker Desktop extension image. Build from the repository root:
 #   docker build -f extension/Dockerfile -t k8s-resilience-engine:0.1.0 .
 # Public release (multi-architecture, semver tag; see docs/EXTENSION.md, "Publishing a beta to Docker Hub"):
-#   docker buildx build --platform linux/amd64,linux/arm64 -f extension/Dockerfile --build-arg VERSION=0.1.0-beta.2 -t <hub-user>/k8s-resilience-engine:0.1.0-beta.2 --push .
+#   docker buildx build --platform linux/amd64,linux/arm64 -f extension/Dockerfile --build-arg VERSION=0.1.0-beta.3 -t <hub-user>/k8s-resilience-engine:0.1.0-beta.3 --push .
 
 # --- Backend runtime: the unmodified application plus the extension wrapper -----------------
 FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
@@ -85,7 +85,7 @@ LABEL org.opencontainers.image.title="K8s Resilience Engine" \
       org.opencontainers.image.documentation="https://github.com/AseshNemal/k8s-resilience-engine/blob/main/docs/EXTENSION.md" \
       com.docker.desktop.extension.api.version=">= 0.2.3" \
       com.docker.extension.detailed-description="Reads a local Kubernetes cluster and shows which workflows survive worker-node failures. A change is applied, or a worker node stopped on a test run, only after you approve exactly what will happen; everything is put back afterwards." \
-      com.docker.extension.changelog="0.1.0-beta.2: image metadata (version, source, documentation, license) and a Docker Hub overview; no functional change from beta.1. First public beta: read-only assessment of the Docker Desktop Kubernetes cluster, ranked recommendations, and an optional approved Apply, Reset and node-failure test. Verified on macOS (Apple silicon); Windows and Linux are built but not yet tested on real machines." \
+      com.docker.extension.changelog="0.1.0-beta.3: Fail a Node shows the truth while a test runs (stopped workers are drawn as stopped, with a plain banner, Restore now in it, and a short summary of what happened); clearer Workflow, Recommendations and Topology screens; the extension icon is now the product logo. 0.1.0-beta.2: image metadata and a Docker Hub overview. 0.1.0-beta.1: first public beta. Verified on macOS (Apple silicon); Windows and Linux are built but not yet tested on real machines." \
       com.docker.desktop.extension.icon="https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/icon.svg" \
       com.docker.extension.publisher-url="https://github.com/AseshNemal/k8s-resilience-engine" \
       com.docker.extension.additional-urls="[{\"title\":\"Source code and issues\",\"url\":\"https://github.com/AseshNemal/k8s-resilience-engine\"},{\"title\":\"Install and troubleshooting guide\",\"url\":\"https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/docs/EXTENSION.md\"}]" \
