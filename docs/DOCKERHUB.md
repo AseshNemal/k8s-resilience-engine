@@ -4,6 +4,8 @@
 
 Open it inside Docker Desktop, connect your local Kubernetes cluster, and see where every replica really runs, what a node failure would take down, and what to change. Nothing is applied and no node is stopped without you approving exactly what will happen.
 
+![The extension inside Docker Desktop](https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/screenshots/0-docker-desktop.png)
+
 ![Failure impact](https://raw.githubusercontent.com/AseshNemal/k8s-resilience-engine/main/extension/screenshots/1-failure-impact.png)
 
 ## What you get
