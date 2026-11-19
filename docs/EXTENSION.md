@@ -505,7 +505,7 @@ What a tester should know before using it:
   A node is stopped only on a run you approve, for a time you choose, and is restored afterwards (and after a restart of the backend).
 - The extension's role on the connected cluster is full access (`*/*/*`) so Apply and Reset can write; see "Security model".
 - The backend keeps the cluster credential and results in a Docker volume, not in the image. Nothing private is packaged in the image.
-- Fail a Node has been run for real once (one worker of the Docker Desktop cluster, ended early; the worker came back and nothing else changed). That is the only real evidence so far: start with one worker and a short hold.
+- Fail a Node has been run for real twice on the author's own Docker Desktop cluster (2026-11-19): one worker, then all three workers. Both runs were ended early and every worker came back with nothing else changed; in the second, Kubernetes marked the workers NotReady after 60 seconds and all four services lost every ready replica for about 27 seconds. That is the only real evidence so far: start with one worker and a short hold.
 
 **Publish (maintainer).** The version is the tag; use semver (`0.1.0-beta.1`, then `0.1.0-beta.2`, and so on). Build from a clean commit so the
 image's revision label is a real commit:
