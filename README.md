@@ -8,8 +8,7 @@ deployment changes, and validates them after a developer-approved apply.
 Workflow → Service → Pod → Node → Failure Domain
 ```
 
-**Project ID:** J26-SE-311 · **Topic:** Dependency Aware Failure Domain Risk Assessment for Kubernetes Deployed Microservice Architectures
-· **Stack:** FastAPI, Jinja2/HTML/CSS/vanilla JS, SQLite (extension) or PostgreSQL
+**Stack:** FastAPI, Jinja2/HTML/CSS/vanilla JS, SQLite (extension) or PostgreSQL
 
 ## Install the Docker Desktop extension
 
@@ -90,7 +89,7 @@ are tested on in-memory doubles. **No Apply, node failure or controlled experime
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Copyright 2026 K8s Resilience Engine Contributors. Licensed under the Apache License, Version 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Docs
 
