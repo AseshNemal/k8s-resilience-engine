@@ -58,7 +58,7 @@ def test_pages_use_relative_paths_only(built, name):
     "name, key, title",
     [
         ("index.html", "overview", "Assessment"),
-        ("workflows.html", "workflows", "Workflow dependencies"),
+        ("workflows.html", "workflows", "Workflow Discovery"),
         ("deployments.html", "deployments", "Deployment topology"),
         ("failure-impacts.html", "failure-impacts", "Failure impact"),
         ("fail-a-node.html", "fail-a-node", "Fail a node"),

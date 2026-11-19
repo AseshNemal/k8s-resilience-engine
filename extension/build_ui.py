@@ -28,7 +28,7 @@ INDEX_PAGE = "index.html"
 # route -> (file, page key used by the CSS, header title in Docker's sentence case)
 PAGES = {
     "/": (INDEX_PAGE, "overview", "Assessment"),
-    "/components/workflows": ("workflows.html", "workflows", "Workflow dependencies"),
+    "/components/workflows": ("workflows.html", "workflows", "Workflow Discovery"),
     "/components/deployments": ("deployments.html", "deployments", "Deployment topology"),
     "/components/failure-impacts": ("failure-impacts.html", "failure-impacts", "Failure impact"),
     "/components/fail-a-node": ("fail-a-node.html", "fail-a-node", "Fail a node"),

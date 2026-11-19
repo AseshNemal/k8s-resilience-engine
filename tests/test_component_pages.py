@@ -14,7 +14,7 @@ PAGE_CASES = [
     ("/", "Assessment", "pages/assessment.css", "components/assessment.js"),
     (
         "/components/workflows",
-        "Workflow dependencies",
+        "Workflow Discovery",
         "pages/workflows.css",
         "components/workflows.js",
     ),

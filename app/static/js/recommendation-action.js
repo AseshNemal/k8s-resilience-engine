@@ -64,7 +64,7 @@
                 primary: action("busy", run.resetting ? "Restoring…" : "Running…", { disabled: true, reason: "A run is in progress." }) };
         }
         if (run && run.canReset && run.finished) {
-            return { ...out, phase: "decide", title: facts.runIsOther ? "A different change is still applied. Keep it or reset it first."
+            return { ...out, phase: "decide", title: facts.runIsOther ? "A change you applied is still on the cluster. Keep it or reset it."
                     : run.failed ? "The run stopped with the change in place" : "The change is on the cluster. Keep it or put it back?",
                 text: run.canKeep ? "Reset restores the saved configuration. Keep leaves it as it is and records that you decided so. Results stay in history either way."
                     : "Reset restores the saved configuration. Results stay in history.",

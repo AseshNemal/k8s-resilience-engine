@@ -281,3 +281,16 @@ test("the availability chart draws the stretch between the stop and Kubernetes n
     assert.ok(tones.indexOf("stale") > tones.indexOf("ok"), "the cells before the stop are still plain up");
     assert.match(text(holder), /stopped, Kubernetes had not noticed yet/);
 });
+
+test("the workflow editor places a new service on a free slot and never on top of another", () => {
+    const src = readFileSync(new URL("../../app/static/js/workflow-editor.js", import.meta.url), "utf8");
+    const body = src.slice(src.indexOf("function freeSpot()"), src.indexOf("function keepInView()"));
+    const freeSpot = new Function("model", `${body}; return freeSpot;`);
+    const nodes = [];
+    const model = { state: () => ({ nodes }) };
+    const place = freeSpot(model);
+    const seen = [];
+    for (let i = 0; i < 7; i += 1) { const p = place(); nodes.push({ service: `s${i}`, ...p }); seen.push(`${p.x},${p.y}`); }
+    assert.equal(new Set(seen).size, 7, "seven services, seven different places");
+    assert.deepEqual(seen.slice(0, 4), ["35,100", "285,100", "535,100", "35,230"]);
+});

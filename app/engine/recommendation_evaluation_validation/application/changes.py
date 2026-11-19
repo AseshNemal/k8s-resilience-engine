@@ -113,7 +113,7 @@ def describe(before: Sequence[Any], after: Sequence[Any] | None) -> list[dict[st
 def summarise(name: str, fields: Sequence[Mapping[str, Any]]) -> str:
     changed = [f for f in fields if f["changed"]]
     if any(f["changed"] is None for f in fields):
-        return f"{name}: what was set was not recorded"
+        return f"{name}: the values now on the cluster could not be read"
     if not changed:
         return f"{name}: no owned field changed"
     return f"{name}: " + "; ".join(f"{f['label'].lower()} {f['fromText']} → {f['toText']}" for f in changed)

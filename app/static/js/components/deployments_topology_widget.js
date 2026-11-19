@@ -17,7 +17,7 @@ window.DeploymentsTopologyWidget = (function () {
     // One fixed colour per service (by sorted name), so a service, its pods and its wires share a colour.
     const SERVICE_HUES = [212, 152, 32, 280, 350, 190, 95, 255, 15, 320];
     let serviceHue = {};
-    const shortNode = (node) => node.replace(/^.*-(worker\d*|control-plane)$/, "$1");
+    const shortNode = (node) => node;      // the full node name, as every other page shows it
 
     function assignServiceColours(services) {
         serviceHue = {};
@@ -269,7 +269,7 @@ window.DeploymentsTopologyWidget = (function () {
         if (!result) return;
         if (!failedNode) {
             result.className = "failure-sim";
-            result.textContent = "👆 Hover a service to trace its pods. Click a worker node to see what happens if it fails.";
+            result.textContent = "Hover a service to trace its pods. Click a worker node to see what happens if it fails.";
             return;
         }
         const sim = simulateFailure(lastData.services, failedNode);

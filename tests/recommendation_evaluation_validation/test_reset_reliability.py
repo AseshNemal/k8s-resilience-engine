@@ -71,7 +71,7 @@ def test_a_change_whose_read_back_failed_says_unknown_never_a_guess(ready, clust
     assert "after-not-recorded" in [e["event"] for e in change.events]
     row = change_view.describe(change.before, change.after)[0]
     assert all(f["changed"] is None and f["toText"] is None for f in row["fields"])
-    assert row["summary"] == "db: what was set was not recorded"
+    assert row["summary"] == "db: the values now on the cluster could not be read"
 
 
 # -- external drift --------------------------------------------------------------------------------------------------------

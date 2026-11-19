@@ -38,7 +38,7 @@ test("one Apply click sends one POST and polling never repeats it", async () => 
     await env.panel.start();
     assert.equal(env.calls.filter(([, m]) => m === "POST").length, 1);
     assert.equal(env.panel.state().run.status, "COMPLETED_WITH_GAPS");
-    assert.ok(text(env.root).includes("NOT_CONFIGURED"));
+    assert.ok(text(env.root).includes("No check set"));
     assert.ok(text(env.root).includes("unavailable"));
 });
 

@@ -431,7 +431,9 @@
         if (noGain.length) container.append(el(doc, "h4", "Feasible alternatives with no predicted gain", "rx-subhead"),
             el(doc, "p", "Select to inspect their limits. Feasibility alone does not make a change approvable.", "rx-fineprint"), listOf(noGain));
         fold(groups.ruledOut, groups.ruledOut.length === 1 ? "option ruled out" : "options ruled out", null);
-        if (!all.length) container.append(el(doc, "p", "The engine generated no candidate change. That is not a finding that the application is resilient.", "rx-empty"));
+        if (!all.length) container.append(el(doc, "p", o.appliedChangeOnCluster
+            ? "No further change is suggested now that your applied change is on the cluster. Keep it or reset it above."
+            : "The engine generated no candidate change. That is not a finding that the application is resilient.", "rx-empty"));
         return { useful: groups.useful.length, noGain: groups.noGain.length, ruledOut: groups.ruledOut.length, selected: selected ? selected.id : null };
     }
 
