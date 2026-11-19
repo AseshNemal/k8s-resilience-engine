@@ -3,6 +3,7 @@
 ## 2026-11-19 (release): extension icon is the product logo
 
 - `extension/icon.svg` now shows the product logo (the blue gear, same artwork as `app/static/img/logo.png`, scaled to 256 px and embedded in the SVG) instead of the earlier teal hexagon. Docker Desktop shows the icon baked into an image, so it appears with the next published version. The logo's trademark and provenance question remains open (`docs/LICENSING.md`).
+- Added `extension/screenshots/0-docker-desktop.png`, a real screenshot of the extension inside Docker Desktop (it still shows the earlier hexagon icon in the sidebar; retake after the new icon ships), as the first screenshot label and the Hub overview image.
 
 ## 2026-11-19 (license): NOTICE and third-party notices
 
