@@ -483,7 +483,7 @@ package.
 
 ## Beta from Docker Hub
 
-`0.1.0-beta.1` is the first public beta. It is the same extension this document describes, built for `linux/amd64` and `linux/arm64`
+`0.1.0-beta.1` was the first public beta and `0.1.0-beta.2` is the current one (metadata and documentation only; the same extension). It is the same extension this document describes, built for `linux/amd64` and `linux/arm64`
 (the host helper inside each image is built for the same architecture, so Intel and Apple-silicon Macs, Windows and Linux each get a
 matching one). It is **verified only on macOS (Apple silicon)**; the Windows and Linux builds compile and their logic is tested, but no real
 Windows or Linux machine has run them.
@@ -491,7 +491,7 @@ Windows or Linux machine has run them.
 **Install (testers):**
 
 ```bash
-docker extension install aseshnemal/k8s-resilience-engine:0.1.0-beta.1
+docker extension install aseshnemal/k8s-resilience-engine:0.1.0-beta.2
 # later versions:   docker extension update aseshnemal/k8s-resilience-engine:<new tag>
 # remove:           docker extension uninstall aseshnemal/k8s-resilience-engine
 ```
@@ -515,8 +515,10 @@ docker login
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f extension/Dockerfile \
   --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) --build-arg GIT_BRANCH=$(git branch --show-current) \
-  -t aseshnemal/k8s-resilience-engine:0.1.0-beta.1 --push .
-docker extension validate aseshnemal/k8s-resilience-engine:0.1.0-beta.1
+  --build-arg VERSION=0.1.0-beta.2 \
+  -t aseshnemal/k8s-resilience-engine:0.1.0-beta.2 --push .
+docker extension validate aseshnemal/k8s-resilience-engine:0.1.0-beta.2
+docker scout cves --only-fixed aseshnemal/k8s-resilience-engine:0.1.0-beta.2   # base-image fixes must be picked up before each release
 ```
 
 `--push` is the step that publishes. A pre-release tag is never "latest" for the Hub page, so do not also push `:latest` until a stable release.

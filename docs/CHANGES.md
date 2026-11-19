@@ -1,5 +1,11 @@
 # Changes other members should know about
 
+## 2026-11-19 (release): 0.1.0-beta.2, image metadata and Docker Hub overview
+
+- `extension/Dockerfile` labels only: `org.opencontainers.image.version` (build argument `VERSION`), `.source`, `.url`, `.documentation`, and a changelog for beta.2. No functional change from beta.1.
+- `docs/DOCKERHUB.md`: the overview text for the Docker Hub repository page. `docs/EXTENSION.md`: publish steps now pass `VERSION` and run `docker scout cves --only-fixed` first.
+- Docker Scout on beta.1: 0 findings in our layers; 6 high / 8 medium / 26 low, all Debian packages of the `python:3.13-slim` base, none with a fix available yet.
+
 ## 2026-11-19 (license): Apache License 2.0
 
 - Added `LICENSE` (Apache-2.0, unmodified official text), the `org.opencontainers.image.licenses` label and a copy at `/licenses/LICENSE` in the extension image, and a README line. No code changed.
