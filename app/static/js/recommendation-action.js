@@ -173,12 +173,8 @@
             box.append(chip, change);
             return box;
         }
-        if (!facts.editingName) {
-            // Only where a name will be needed: it is asked once, in the dialog, and is a label for the record, not a login.
-            if (!["review", "pending", "approved"].includes(model.phase)) return null;
-            box.append(el("span", "Your name is asked once, for the audit record. It is a label, not a login.", "rx-dock__fine"));
-            return box;
-        }
+        // No name is asked for: this is the person's own device, and the record says "developer" when none was given.
+        if (!facts.editingName) return null;
         const label = el("label", "Your name, for the audit record", "rx-dock__chip-label", { for: "rx-dock-name" });
         const input = el("input", undefined, "form-input rx-dock__input", { type: "text", id: "rx-dock-name", autocomplete: "name", placeholder: "Your name" });
         input.value = name;

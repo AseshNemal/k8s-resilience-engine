@@ -5,6 +5,7 @@
 {% block page_css %}
 <link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/failure_impacts.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/failure-monitor.css') }}?v=monitor-20261120">
 {% endblock %}
 
 {% block content %}
@@ -88,6 +89,14 @@
     </details>
 </template>
 
+<section class="card fl-card" aria-labelledby="fl-title">
+    <div class="section-header">
+        <h3 class="section-header__title" id="fl-title">Stop nodes and watch what happens</h3>
+        <a class="action-button" href="/components/fail-a-node">Open Fail a Node</a>
+    </div>
+    <p class="ui-note">Pick workers, stop them for a while, watch your application and get a readable report. It has its own page now.</p>
+</section>
+
 <section class="card fo-card" aria-labelledby="fo-title">
     <div class="section-header">
         <h3 class="section-header__title" id="fo-title">Watch a real failure</h3>
@@ -121,6 +130,7 @@
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/placement-map.js') }}?v=placement-20261117" defer></script>
 <script src="{{ url_for('static', path='/js/failure-impact-view.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/failure-observation.js') }}?v=observation-20261117" defer></script>
+<script src="{{ url_for('static', path='/js/failure-observation.js') }}?v=observation-20261125" defer></script>
+<script src="{{ url_for('static', path='/js/failure-monitor.js') }}?v=monitor-20261120" defer></script>
 <script src="{{ url_for('static', path='/js/components/failure_impacts.js') }}" defer></script>
 {% endblock %}

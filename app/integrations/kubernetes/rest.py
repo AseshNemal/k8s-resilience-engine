@@ -302,6 +302,17 @@ class RestClient:
     def post_json(self, path: str, body: dict) -> Any:
         return self._request("POST", path, body)
 
+    def get_text(self, path: str, *, limit: int = 65536) -> str:
+        """A plain-text answer (a pod's log), cut to ``limit`` characters. Same transport rules as every other call."""
+        extensions = {"sni_hostname": self._server_name} if self._server_name else None
+        try:
+            response = self._http.request("GET", path, headers={"Accept": "text/plain"}, extensions=extensions)
+        except (httpx.TransportError, ssl.SSLError, OSError) as error:
+            raise TransportFailure(type(error).__name__) from None
+        if not 200 <= response.status_code < 300:
+            raise HttpStatusError(response.status_code)
+        return response.text[-limit:]
+
     def _request(self, method: str, path: str, body: dict | None = None) -> Any:
         # tls-server-name is the name the certificate is checked against, sent as the TLS server name.
         extensions = {"sni_hostname": self._server_name} if self._server_name else None

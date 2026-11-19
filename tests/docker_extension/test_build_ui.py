@@ -10,7 +10,7 @@ from app.main import BASE_DIR
 from extension import build_ui
 
 UI_SRC = Path(__file__).resolve().parents[2] / "extension" / "ui-src"
-PAGE_FILES = ["index.html", "workflows.html", "deployments.html", "failure-impacts.html", "recommendations.html", "connect.html"]
+PAGE_FILES = ["index.html", "workflows.html", "deployments.html", "failure-impacts.html", "fail-a-node.html", "recommendations.html", "connect.html"]
 
 
 @pytest.fixture(scope="module")
@@ -24,7 +24,7 @@ def html(built, name):
     return (built / name).read_text(encoding="utf-8")
 
 
-def test_all_six_pages_are_rendered(built):
+def test_all_pages_are_rendered(built):
     assert sorted(p.name for p in built.glob("*.html")) == sorted(PAGE_FILES)
 
 
@@ -61,6 +61,7 @@ def test_pages_use_relative_paths_only(built, name):
         ("workflows.html", "workflows", "Workflow dependencies"),
         ("deployments.html", "deployments", "Deployment topology"),
         ("failure-impacts.html", "failure-impacts", "Failure impact"),
+        ("fail-a-node.html", "fail-a-node", "Fail a node"),
         ("recommendations.html", "recommendations", "Recommendations"),
         ("connect.html", "connect", "Connect cluster"),
     ],
@@ -72,10 +73,10 @@ def test_each_page_has_a_key_and_a_readable_sentence_case_title(built, name, key
 
 
 @pytest.mark.parametrize("name", PAGE_FILES)
-def test_navigation_has_six_sentence_case_labels_and_one_active_item(built, name):
+def test_navigation_has_every_label_and_one_active_item(built, name):
     page = html(built, name)
     labels = re.findall(r'<span class="sidebar__link-label">([^<]+)</span>', page)
-    assert labels == ["Assessment", "Workflow Discovery", "Deployment Topology", "Failure Impact", "Recommendations", "Connect cluster"]
+    assert labels == ["Assessment", "Workflow Discovery", "Deployment Topology", "Failure Impact", "Fail a Node", "Recommendations", "Connect cluster"]
     assert len(re.findall(r"sidebar__link is-active", page)) == 1
 
 
@@ -369,7 +370,7 @@ def test_the_connect_page_has_every_hook_the_bookinfo_script_uses(built):
 
 
 def test_only_the_connect_page_carries_the_bookinfo_card_and_script(built):
-    for name in ("index.html", "workflows.html", "deployments.html", "failure-impacts.html", "recommendations.html", "connect.html"):
+    for name in ("index.html", "workflows.html", "deployments.html", "failure-impacts.html", "fail-a-node.html", "recommendations.html", "connect.html"):
         page = (built / name).read_text(encoding="utf-8")
         assert ('data-role="bookinfo-card"' in page) == (name == "connect.html"), name
         assert ('src="bookinfo-tracing.js"' in page) == (name == "connect.html"), name

@@ -17,12 +17,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.engine.recommendation_evaluation_validation.validation.models import ValidationRefusedError
-from app.engine.recommendation_evaluation_validation.validation_loop.disruption import make_guard
+from app.engine.recommendation_evaluation_validation.validation_loop.disruption import PodFact, analyse, make_guard
 from app.engine.recommendation_evaluation_validation.validation_loop.environment import (
     DOCKER_DESKTOP,
     ProbeDefinition,
     ProofEnvironment,
 )
+from app.engine.recommendation_evaluation_validation.validation_loop.lab import placement_impact
 from app.engine.recommendation_evaluation_validation.validation_loop.grant import (
     GrantAuthority,
     GrantedCandidate,
@@ -58,6 +59,8 @@ class PlanRequest:
     candidates: int | None = None
     repeats: int | None = None
     smoke_worker: str | None = None
+    nodes: tuple[str, ...] | None = None        # LAB: the workers the person chose to stop together
+    hold_s: float | None = None                  # LAB: how long to hold them down
 
 
 @dataclass
@@ -70,7 +73,8 @@ class ApprovalInput:
 class ValidationLoopService:
     def __init__(self, environment: ProofEnvironment, repository: LoopRepository, worker: LoopWorker, *,
                  settings: LoopSettings | None = None, application_active: Callable[[], bool] = lambda: False,
-                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc), sleep: Callable[[float], None] | None = None) -> None:
+        self._sleep = sleep
         self._env, self._repo, self._worker = environment, repository, worker
         self._settings, self._application_active, self._clock = settings or LoopSettings(), application_active, clock
 
@@ -89,6 +93,9 @@ class ValidationLoopService:
         if not identity.cluster_uid:
             issues.append(Issue("CLUSTER_IDENTITY_UNVERIFIED", "The identity of the cluster (the UID of its kube-system namespace) "
                                 "could not be read, so it is not assumed to be the one you mean."))
+
+        if request.mode is Mode.LAB:
+            return self._plan_lab(request, identity, issues)
 
         loaded = self._env.load(request.workflow_id, request.namespace)       # refuses with a coded error when it cannot
         graph = loaded.graph
@@ -145,12 +152,48 @@ class ValidationLoopService:
         plan = LoopPlan(mode_plan, identity, request.namespace, request.workflow_id, loaded.workflow_basis, request.probe, candidates,
                         disruption, readiness, issues, observed_estimate(self._repo.observed_durations(), mode_plan.planned_failures())
                         if self._repo.observed_durations() else None,
-                        plan_digest(parts), riskiest, skipped, list(loaded.notes))
+                        plan_digest(parts), riskiest, skipped, list(loaded.notes), eligible_workers=tuple(workers))
         plan.workflow_evidence = evidence
         if request.probe is None:
             plan.notes.append("No workflow check was given: a candidate passes on Kubernetes readiness alone (evidence level L1).")
         if mode_plan.preliminary:
             plan.notes.append("This mode gives preliminary evidence. Full Research Validation repeats each test for reproducible results.")
+        return plan
+
+    def _plan_lab(self, request: PlanRequest, identity, issues: list[Issue]) -> LoopPlan:
+        """The Failure lab: no workflow, no candidate. Which workers, what that does to every service, and what else would go down."""
+        graph = self._env.read_graph(request.namespace)
+        workers = self._env.eligible_workers(graph)
+        mode_plan = resolve_mode(Mode.LAB, workers, lab_workers=list(request.nodes or ()), hold_s=request.hold_s, settings=self._settings)
+        nodes = list(mode_plan.workers)
+        impact = placement_impact(graph, nodes)
+        disruption = {}
+        try:
+            facts = [PodFact.from_dict(item) for item in self._env.read_pods()]
+            report = analyse(tuple(nodes), facts, request.namespace, self._settings.critical_namespaces, allow_essential=True)
+            disruption = {report.worker: report}
+        except Exception as error:      # noqa: BLE001  (fail closed: unknown disruption is not "none")
+            issues.append(Issue("EVIDENCE_INCOMPLETE", f"What else runs on the workers could not be read: {error}"))
+        for report in disruption.values():
+            for finding in report.blocks:
+                issues.append(Issue("ESSENTIAL_WORKLOAD", f"{finding.workload} cannot be judged ({finding.reason}), so these workers will not be stopped."))
+            for problem in report.problems:
+                issues.append(Issue("EVIDENCE_INCOMPLETE", problem))
+        readiness = self._env.fault_readiness(nodes, self._repo.window_verified(identity.cluster_uid or ""))
+        if readiness is not None and (not readiness.identifiable or not readiness.controllable or readiness.window == "UNREADABLE"):
+            issues.append(Issue("WORKERS_NOT_CONTROLLABLE", "The worker containers cannot all be identified as kind workers of this cluster, "
+                                "found running, and inspected. No node failure will be attempted."))
+        survivors = [n for n in workers if n not in nodes]
+        parts = digest_parts(identity=identity, namespace=request.namespace, workflow_id="lab", mode_plan=mode_plan, candidates=[],
+                             probe=request.probe, disruption=disruption, critical_namespaces=self._settings.critical_namespaces)
+        plan = LoopPlan(mode_plan, identity, request.namespace, "lab", "NONE", request.probe, [], disruption, readiness, issues, None,
+                        plan_digest(parts), None, [], [], eligible_workers=tuple(workers))
+        plan.lab = {"nodes": nodes, "holdS": mode_plan.hold_s, "impact": impact, "survivingWorkers": survivors,
+                    "allWorkersStopped": not survivors}
+        plan.notes.append("Failure lab: an experiment, not a proof. Nothing is applied to the cluster; the workers are stopped together, held "
+                          "down for the time chosen, then started again and checked.")
+        if not survivors:
+            plan.notes.append("Every worker would be stopped. Nothing is left to run the application until they are started again.")
         return plan
 
     def probe_test(self, probe: ProbeDefinition) -> dict[str, Any]:
@@ -186,8 +229,9 @@ class ValidationLoopService:
             candidates=tuple(GrantedCandidate(c.loop_candidate.candidate_id, c.loop_candidate.yaml_sha256) for c in plan.candidates),
             repeats=mode_plan.repeats, measure_baseline=mode_plan.measure_baseline, approved_at=self._clock(),
             desktop_ack=approval.desktop_acknowledged, acknowledged_workloads=tuple(approval.acknowledged_workloads))
-        loaded = self._env.load(request.workflow_id, request.namespace)
-        if plan_digest(workflow_evidence(loaded.workflow, loaded.live.evidence)) != plan_digest(plan.workflow_evidence):
+        lab = request.mode is Mode.LAB
+        loaded = None if lab else self._env.load(request.workflow_id, request.namespace)
+        if not lab and plan_digest(workflow_evidence(loaded.workflow, loaded.live.evidence)) != plan_digest(plan.workflow_evidence):
             raise ValidationRefusedError("PLAN_CHANGED", "The workflow definition or its review changed during approval. Review the new plan; no experiment was started.")
         self._repo.create_run(grant, mode=mode_plan.mode.value, target_kind=identity.kind, workflow_id=plan.workflow_id,
                               plan=plan.to_dict())
@@ -201,10 +245,13 @@ class ValidationLoopService:
                                acknowledged=frozenset(grant.acknowledged_workloads))
             factory = self._env.executor_factory(grant, authority, plan.probe,
                                                  lambda points: self._repo.save_restore_points(grant.run_id, points))
-            return ValidationLoop(workflow=loaded.workflow, plan=mode_plan, authority=authority, candidates=candidates,
+            make_monitor = getattr(self._env, "monitor_factory", None)
+            monitor = make_monitor(grant, plan.probe, settings) if callable(make_monitor) else None
+            return ValidationLoop(workflow=None if lab else loaded.workflow, plan=mode_plan, authority=authority, candidates=candidates,
                                   executor_factory=factory, probe_required=plan.probe is not None,
                                   arm=self._env.arm(grant, authority), before_kill=guard, node_ready=self._env.node_ready,
-                                  abort=abort, observer=observer)
+                                  abort=abort, observer=observer, monitor_factory=monitor,
+                                  **({"sleep": self._sleep} if self._sleep is not None else {}))
 
         self._worker.start(grant.run_id, build, self._env.recoverer(self._repo.get_run(grant.run_id)))
         return self.view(grant.run_id)
@@ -215,6 +262,20 @@ class ValidationLoopService:
         run = self._repo.get_run(run_key)
         return build_view(run, self._repo.experiments(run_key), self._repo.observed_durations(), now=self._clock(),
                           worker_alive=self._worker.is_working(run_key), research=research)
+
+    def report(self, run_key: str) -> str:
+        """The readable report of a run, as one standalone HTML page, from what the run stored. Reads only."""
+        from app.engine.recommendation_evaluation_validation.validation_loop.report import build_report
+        return build_report(self._repo.get_run(run_key), self._repo.experiments(run_key), now=self._clock())
+
+    def timeline(self, run_key: str, kind: str, candidate_id: str | None, worker: str, repeat: int) -> dict[str, Any]:
+        """The raw measured samples of one experiment, with their summary. 404-style refusal when none was recorded."""
+        from app.engine.recommendation_evaluation_validation.monitoring.summary import summarize
+        timeline = self._repo.experiment_timeline(run_key, kind, candidate_id, worker, repeat)
+        if timeline is None:
+            raise ValidationRefusedError("TIMELINE_NOT_RECORDED", "No measured timeline was recorded for that experiment.")
+        return {"runKey": run_key, "kind": kind, "candidateId": candidate_id, "worker": worker, "repeat": repeat,
+                "timeline": timeline, "summary": summarize(timeline)}
 
     def current(self, *, research: bool = False) -> dict[str, Any] | None:
         self.ensure_recovered()

@@ -229,3 +229,32 @@ def test_the_in_flight_rule_covers_applying_and_an_unfinished_rollout(monkeypatc
     assert active_for(SimpleNamespace(status="APPLYING", rollout=None)) is True
     assert active_for(SimpleNamespace(status="RESET", rollout={"state": "rolling-out"})) is True
     assert active_for(SimpleNamespace(status="APPLIED", rollout={"state": "completed"})) is False
+
+
+# --- the Failure lab and the report ---------------------------------------------------------------------------------------------
+
+LAB = {"targetKind": DISPOSABLE, "mode": "LAB", "namespace": NAMESPACE, "nodes": ["w1", "w2"], "holdSeconds": 10}
+
+
+def test_the_lab_plan_route_takes_the_workers_the_person_chose_and_needs_no_workflow(client):
+    body = client.post(f"{BASE}/plan", json=LAB).json()
+
+    assert body["mode"]["mode"] == "LAB" and body["lab"]["nodes"] == ["w1", "w2"] and body["candidates"] == []
+    assert body["mode"]["simultaneous"] is True and body["mode"]["holdS"] == 10
+    assert client.post(f"{BASE}/plan", json={**LAB, "nodes": []}).status_code == 409           # nothing chosen: refused with a code
+
+
+def test_a_lab_run_can_be_ended_early_and_then_read_as_a_report(client, worker):
+    plan = client.post(f"{BASE}/plan", json=LAB).json()
+    started = client.post(f"{BASE}/runs", json={"plan": LAB, "planDigest": plan["planDigest"], "acknowledgedWorkloads": plan["acknowledgementsNeeded"]})
+    assert started.status_code == 200, started.text
+    key = started.json()["runKey"]
+    client.post(f"{BASE}/runs/{key}/abort")
+    worker.join(30)
+
+    page = client.get(f"{BASE}/runs/{key}/report")
+    download = client.get(f"{BASE}/runs/{key}/report?download=true")
+
+    assert page.status_code == 200 and "Failure test report" in page.text and "<script" not in page.text
+    assert "attachment" in download.headers["content-disposition"]
+    assert client.get(f"{BASE}/runs/nope/report").status_code == 404

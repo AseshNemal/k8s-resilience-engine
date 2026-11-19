@@ -350,6 +350,63 @@ class KubernetesTestClusterGateway:
                 for c in p["containers"]) for p in result["pods"])
         return result
 
+    def read_node_usage(self) -> dict[str, Any]:
+        """Measured CPU (millicores) and memory (MiB) per node, tolerant of a node that cannot answer. Read only.
+
+        ``{"cpu": {node: m|None}, "mem": {node: MiB|None}, "source": "metrics.k8s.io"|"kubelet-summary"}``. A node whose kubelet is
+        down simply has ``None``: that is the point of reading it during a failure. Requests and capacity are never returned as usage.
+        """
+        cpu: dict[str, float | None] = {}
+        mem: dict[str, float | None] = {}
+        source = "kubelet-summary"
+        try:
+            for row in self._get("/apis/metrics.k8s.io/v1beta1/nodes", "node metrics")["items"]:
+                name = row.get("metadata", {}).get("name")
+                used_cpu, used_mem = parse_quantity((row.get("usage") or {}).get("cpu")), parse_quantity((row.get("usage") or {}).get("memory"))
+                cpu[name] = None if used_cpu is None else round(used_cpu * 1000, 1)
+                mem[name] = None if used_mem is None else round(used_mem / 1048576, 1)
+            source = "metrics.k8s.io"
+        except (ClusterAccessError, KeyError, TypeError):
+            cpu, mem = {}, {}
+        if source != "metrics.k8s.io":
+            for name in self.identity().node_names:
+                try:
+                    node = (self._get(f"/api/v1/nodes/{quote(name, safe='')}/proxy/stats/summary", "node resource statistics")).get("node") or {}
+                except ClusterAccessError:
+                    cpu[name] = mem[name] = None
+                    continue
+                nano = (node.get("cpu") or {}).get("usageNanoCores")
+                working_set = (node.get("memory") or {}).get("workingSetBytes")
+                cpu[name] = None if nano is None else round(float(nano) / 1e6, 1)
+                mem[name] = None if working_set is None else round(float(working_set) / 1048576, 1)
+        return {"cpu": cpu, "mem": mem, "source": source}
+
+    def read_warning_events(self, namespace: str) -> list[dict[str, Any]]:
+        """Warning events about this namespace's objects and about nodes, newest last. Read only; the message is the cluster's own."""
+        found = []
+        for item in self._items("events", "/api/v1/events?fieldSelector=type%3DWarning"):
+            ref = item.get("involvedObject") or {}
+            if ref.get("kind") != "Node" and ref.get("namespace") != namespace:
+                continue
+            stamp = item.get("lastTimestamp") or item.get("eventTime") or (_meta(item).get("creationTimestamp"))
+            found.append({"key": _meta(item).get("uid") or f"{ref.get('name')}/{item.get('reason')}/{stamp}", "at": stamp,
+                          "reason": item.get("reason"), "object": f"{ref.get('kind')}/{ref.get('name')}",
+                          "message": str(item.get("message") or "")[:240], "count": int(item.get("count") or 1)})
+        return sorted(found, key=lambda e: e["at"] or "")
+
+    def read_pod_log_tail(self, namespace: str, pod: str, lines: int = 12) -> list[str]:
+        """The last lines of a pod's log, as the kubelet returns them. Read only. A pod on a stopped node cannot answer: that raises."""
+        path = f"/api/v1/namespaces/{quote(namespace, safe='')}/pods/{quote(pod, safe='')}/log?tailLines={int(lines)}&limitBytes=16384"
+        http = self._client()
+        try:
+            return http.get_text(path).splitlines()[-lines:]
+        except rest.HttpStatusError as error:
+            raise ApiFailedError(error.status) from None
+        except rest.TransportFailure as error:
+            raise ConnectionFailedError(error.name) from None
+        finally:
+            http.close()
+
     def identity(self) -> ObservedIdentity:
         connection = rest.load_connection([self._path])
         context = rest.read_kubeconfig_file(self._path).get("current-context")

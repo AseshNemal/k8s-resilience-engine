@@ -1,0 +1,61 @@
+/* Fail a node: workers as small servers, one square per ready replica. State is always a word as well as a colour. */
+.fn-steps { display: flex; flex-wrap: wrap; gap: var(--space-sm) var(--space-lg); margin: 0 0 var(--space-md); padding: 0; list-style: none; counter-reset: fn; font-size: 14px; color: var(--color-text-muted); }
+.fn-steps li { counter-increment: fn; display: flex; align-items: center; gap: 8px; }
+.fn-steps li::before { content: counter(fn); width: 22px; height: 22px; border-radius: 50%; background: var(--tint-blue-bg); color: var(--tint-blue-fg); font-weight: 700; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+.fn-card { padding: var(--space-lg); max-width: 960px; }
+
+.fv-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--space-md); }
+.fv-node { display: grid; gap: 10px; align-content: start; text-align: left; padding: 14px; border: 2px solid var(--color-border); border-radius: var(--radius-large);
+    background: var(--color-surface); color: var(--color-text); font: inherit; min-height: 132px; }
+button.fv-node { cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+button.fv-node:hover { border-color: var(--color-primary); }
+button.fv-node:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.fv-node__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fv-node__icon { color: var(--color-text-muted); display: inline-flex; flex: none; }
+.fv-node__name { font-size: 14px; overflow-wrap: anywhere; }
+.fv-pods { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; min-height: 22px; }
+.fv-pod { width: 16px; height: 16px; border-radius: 4px; display: inline-block; flex: none; }
+.fv-pod--lost { opacity: 0.35; background-image: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255, 255, 255, 0.85) 3px 5px); }
+.fv-pods__none { font-size: 12px; color: var(--color-text-muted); }
+.fv-node__state { font-size: 12px; font-weight: 700; width: fit-content; padding: 2px 8px; border-radius: 999px; background: var(--color-surface-soft); color: var(--color-text-muted); }
+.fv-node--picked { border-color: var(--color-danger); background: var(--tint-red-bg); }
+.fv-node__state--picked, .fv-node__state--down { background: var(--color-danger); color: #fff; }
+.fv-node--down { border-color: var(--color-danger); background: var(--tint-red-bg); }
+.fv-node--up { border-color: var(--color-success); }
+.fv-node__state--up { background: var(--tint-green-bg); color: var(--tint-green-fg); }
+.fv-node--unknown { border-style: dashed; }
+.fv-node--locked { opacity: 0.6; background: var(--color-surface-soft); }
+
+.fv-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--color-text-muted); }
+.fv-legend li { display: inline-flex; align-items: center; gap: 6px; }
+
+.fv-chips { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin: 0; padding: 0; list-style: none; }
+.fv-chip { display: inline-flex; gap: 6px; align-items: baseline; padding: 6px 12px; border-radius: 999px; font-size: 13px; background: var(--color-surface-soft); border: 1px solid var(--color-border); }
+.fv-chip span { color: var(--color-text-muted); }
+.fv-chip--ok { background: var(--tint-green-bg); border-color: transparent; } .fv-chip--ok span { color: var(--tint-green-fg); }
+.fv-chip--degraded { background: var(--tint-amber-bg); border-color: transparent; } .fv-chip--degraded span { color: var(--tint-amber-fg); }
+.fv-chip--down { background: var(--tint-red-bg); border-color: transparent; } .fv-chip--down span { color: var(--tint-red-fg); font-weight: 700; }
+.fv-chip--unknown { border-style: dashed; }
+
+.fv-holds { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.fv-hold { padding: 8px 16px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface); font: inherit; font-size: 14px; cursor: pointer; color: var(--color-text); }
+.fv-hold:hover { border-color: var(--color-primary); }
+.fv-hold:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.fv-hold--on { background: var(--color-primary); border-color: var(--color-primary); color: #fff; font-weight: 700; }
+.fv-more { font-size: 13px; }
+.fv-more summary { cursor: pointer; color: var(--color-text-muted); }
+.fv-more .fl-field { margin-top: var(--space-sm); }
+
+@media (max-width: 520px) { .fv-nodes { grid-template-columns: 1fr 1fr; } }
+
+/* The two big buttons of the flow. Not defined globally, so defined here. */
+.fn-card .primary-button, .fn-card .danger-button { padding: 12px 22px; border: 0; border-radius: var(--radius-medium); font: inherit; font-weight: 700; font-size: 15px; color: #fff; cursor: pointer; width: fit-content; }
+.fn-card .primary-button { background: var(--color-primary); }
+.fn-card .primary-button:hover:not(:disabled) { background: var(--color-primary-dark); }
+.fn-card .danger-button { background: var(--color-danger); }
+.fn-card .danger-button:hover:not(:disabled) { background: #b91c1c; }
+.fn-card .primary-button:disabled, .fn-card .danger-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.fn-card .primary-button.fl-a { text-decoration: none; }
+.fn-steps { gap: var(--space-sm) var(--space-md); }
+
+.fv-node__state--keep { background: var(--tint-green-bg); color: var(--tint-green-fg); }

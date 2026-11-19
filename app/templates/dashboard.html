@@ -4,6 +4,7 @@
 {% block page_css %}
 <link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/assessment.css') }}?v=assessment-20261118">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/recommendation-visual.css') }}?v=visual-20261120">
 {% endblock %}
 
 {% block content %}
@@ -11,7 +12,7 @@
     <div class="page-header assess-top">
         <div>
             <h2 class="page-header__title">Resilience assessment</h2>
-            <p class="assess-lead" data-role="assess-lead">Pick an application. You get what breaks when a worker node stops, and the best fix.</p>
+            <p class="assess-lead" data-role="assess-lead">Choose an application to simulate a worker failure, compare placement changes, and review one for testing.</p>
         </div>
         <form class="assess-toolbar" data-role="assess-form">
             <label class="assess-field" for="assess-application">
@@ -23,6 +24,12 @@
             <button type="submit" class="secondary-button" data-role="assess-run" disabled>Reassess</button>
         </form>
     </div>
+
+    <ol class="assess-guide" data-role="assess-guide" aria-label="How to use this page">
+        <li class="assess-guide__step"><span class="assess-guide__n">1</span><span><strong>Pick a worker</strong><em>See what stops if it fails</em></span></li>
+        <li class="assess-guide__step"><span class="assess-guide__n">2</span><span><strong>Compare fixes</strong><em>Each shows the nodes before and after</em></span></li>
+        <li class="assess-guide__step"><span class="assess-guide__n">3</span><span><strong>Test your choice</strong><em>Review it, then prove it on a test cluster</em></span></li>
+    </ol>
 
     <div data-role="assess-error"></div>
 
@@ -41,18 +48,21 @@
                 <h3 class="assess-hero__title" data-role="assess-headline"></h3>
                 <p class="assess-hero__sub" data-role="assess-scope"></p>
             </div>
-            <dl class="assess-stats" data-role="assess-stats"></dl>
+            <div class="assess-hero__actions">
+                <dl class="assess-stats" data-role="assess-stats"></dl>
+                <a class="primary-button" data-role="assess-compare" href="#assessment-recommendations">Compare recommendations</a>
+            </div>
         </section>
 
         <section class="card assess-map" data-role="assess-map-card">
             <header class="assess-head">
                 <div>
-                    <h3>Where it runs</h3>
+                    <h3>Simulate a worker failure</h3>
                     <p class="assess-hint" data-role="assess-map-hint">Pick a worker to see what stops if it fails. This is a prediction; nothing is stopped.</p>
                 </div>
                 <div class="assess-seg" role="group" aria-label="Placement shown" data-role="assess-view" hidden>
                     <button type="button" class="assess-seg__btn" data-view="today" aria-pressed="true">Now</button>
-                    <button type="button" class="assess-seg__btn" data-view="after" aria-pressed="false">After the change</button>
+                    <button type="button" class="assess-seg__btn" data-view="after" aria-pressed="false">Proposed placement</button>
                 </div>
             </header>
             <div data-role="assess-nodes"></div>
@@ -60,9 +70,9 @@
             <p class="assess-consequence" data-role="assess-consequence" aria-live="polite"></p>
         </section>
 
-        <section class="card assess-fix" data-role="assess-fix">
+        <section class="card assess-fix" id="assessment-recommendations" data-role="assess-fix">
             <header class="assess-head">
-                <h3>Best fix</h3>
+                <h3>Compare recommendations</h3>
                 <span class="assess-tag" data-role="assess-fix-tag">Predicted</span>
             </header>
             <div data-role="assess-fix-body"></div>
@@ -78,5 +88,6 @@
 
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/placement-map.js') }}?v=placement-20261117" defer></script>
-<script src="{{ url_for('static', path='/js/components/assessment.js') }}?v=assessment-20261118" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-visual.js') }}?v=visual-20261120" defer></script>
+<script src="{{ url_for('static', path='/js/components/assessment.js') }}?v=assessment-20261120" defer></script>
 {% endblock %}

@@ -22,3 +22,13 @@ def recommendations_page(request: Request):
             "active_page": "recommendations",
         },
     )
+
+
+@router.get("/components/fail-a-node", response_class=HTMLResponse)
+def fail_node_page(request: Request):
+    """Fail a node (Member 4): a simple visual page over the Failure lab. The test itself runs through the validation-loop API."""
+    return templates.TemplateResponse(
+        request=request,
+        name="components/fail_node.html",
+        context={"page_title": "Fail a node", "active_page": "fail_node"},
+    )

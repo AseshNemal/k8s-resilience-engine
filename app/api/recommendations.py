@@ -54,7 +54,7 @@ from app.engine.recommendation_evaluation_validation.portfolio_pipeline import (
 )
 from app.engine.recommendation_evaluation_validation.yaml_proposal import GENERATED, build_yaml_proposal
 from app.shared.evidence_errors import EvidenceError, unavailable
-from app.integrations.kubernetes.client import NotConnectedError
+from app.integrations.kubernetes.client import AuthFailedError, ClusterAccessError, ConnectionFailedError, ForbiddenError, NotConnectedError
 from app.integrations.kubernetes.validation_gateway import AmbientCredentialsError, KubernetesTestClusterGateway
 from app.core.config import get_settings
 from app.core.database import get_engine
@@ -67,7 +67,7 @@ from app.shared.schemas.approval import (
     ApprovalResponse,
 )
 from app.shared.schemas.base import APIModel
-from app.api.validation_loop import require_no_validation_run, router as validation_loop_router
+from app.api.validation_loop import get_loop_runtime, require_no_validation_run, router as validation_loop_router
 
 
 def attributed_to(name: str | None) -> str:
@@ -347,6 +347,37 @@ def start_apply_test(request: ApplyTestRequest,
     return service.start(**request.model_dump())
 
 
+def read_cluster_status() -> dict:
+    """Is a cluster connected and answering RIGHT NOW? One identity read through the write-less gateway; nothing is cached or substituted.
+
+    ``state`` is ``connected`` (the cluster answered and was identified), ``not-connected`` (no credential), ``unreachable`` (a credential
+    exists but the cluster did not answer), ``access-denied`` (the cluster rejected it) or ``unidentified`` (it answered but its identity
+    could not be read). Every page asks this before it presents anything as live; saved records are compared with ``clusterUid``.
+    """
+    from datetime import datetime, timezone
+    base = {"checkedAt": datetime.now(timezone.utc).isoformat(), "clusterUid": None, "nodeCount": None}
+    first = next((p for p in (os.environ.get("KUBECONFIG") or "").split(os.pathsep) if p), "~/.kube/config")
+    try:
+        gateway = KubernetesTestClusterGateway(first, connected_cluster=True)
+        identity = gateway.identity()
+    except (AmbientCredentialsError, NotConnectedError):
+        return {**base, "state": "not-connected"}
+    except (AuthFailedError, ForbiddenError):
+        return {**base, "state": "access-denied"}
+    except (ConnectionFailedError, ClusterAccessError):
+        return {**base, "state": "unreachable"}
+    uid = getattr(identity, "cluster_uid", None) or None
+    return {**base, "state": "connected" if uid else "unidentified", "clusterUid": uid,
+            "context": getattr(identity, "context", None), "server": getattr(identity, "api_server", None),
+            "nodeCount": len(getattr(identity, "node_names", ()) or ())}
+
+
+@router.get("/cluster-status")
+def cluster_status() -> dict:
+    """What the pages ask before they call anything live. Reads only."""
+    return read_cluster_status()
+
+
 @router.get("/apply-tests/current")
 def current_apply_test(service: ApplyTestService = Depends(get_apply_test_service)) -> dict:
     return {"run": service.read()}
@@ -394,14 +425,44 @@ def read_cluster_uid() -> str | None:
         raise EvidenceError("CLUSTER_NOT_CONNECTED", "No Kubernetes cluster is connected.", http_status=503, component="recommendation") from None
 
 
+def read_watch_readers(namespace: str | None, request_url: str | None):
+    """The extra readings of a watch's check: CPU and memory, warning events, pod logs and (with an address) one real request to the
+    application. Every reader goes through a gateway that CANNOT write, and a request goes only to this machine's loopback."""
+    from app.engine.deployment_topology_modeling.discovery import discover
+    from app.engine.recommendation_evaluation_validation.monitoring.readers import gateway_readers
+    from app.engine.recommendation_evaluation_validation.validation.workflow_probe import ProbeSpec, WorkflowProbe
+    from app.integrations.probe.http_fetch import LoopbackHttpFetch
+    if not namespace:
+        return None
+    first = next((p for p in (os.environ.get("KUBECONFIG") or "").split(os.pathsep) if p), "~/.kube/config")
+    gateway = KubernetesTestClusterGateway(first, topology_reader=discover, connected_cluster=True)
+    probe = WorkflowProbe(ProbeSpec(workflow_id="watch", url=request_url, min_samples=1), LoopbackHttpFetch()) if request_url else None
+    return gateway_readers(gateway, namespace, probe=probe)
+
+
 def get_failure_observation_service(db: Session = Depends(get_db)) -> FailureObservationService:
     return FailureObservationService(db.get_bind(), lambda namespace: build_cluster_failure_overview(namespace),
-                                     lambda: read_node_states(), lambda: read_cluster_uid())
+                                     lambda: read_node_states(), lambda: read_cluster_uid(), monitor_readers=read_watch_readers)
+
+
+@router.get("/cluster-experiments")
+def cluster_experiments(limit: int = Query(20, ge=1, le=50), runtime=Depends(get_loop_runtime),
+                        observations: FailureObservationService = Depends(get_failure_observation_service)) -> dict:
+    """Node failures that were run on a cluster and recorded, with how the model's prediction compared. Reads only.
+
+    Rows of the CONNECTED cluster are the figures; rows of other clusters are only counted apart (see ``cluster_experiments.py``).
+    The cluster's identity is read now, so a disconnected cluster has no figures at all, only the count of what is saved elsewhere.
+    """
+    from app.engine.recommendation_evaluation_validation import cluster_experiments as experiments
+    repository = runtime[0]
+    runs = [(run, repository.experiments(run["runKey"])) for run in repository.history(limit)]
+    return experiments.build(read_cluster_status(), runs, observations.history(limit))
 
 
 class FailureObservationRequest(APIModel):
     namespace: str | None = None
     note: str | None = Field(default=None, max_length=300)
+    request_url: str | None = Field(default=None, max_length=300)      # optional: measure real requests to the application while watching
 
 
 @router.post("/failure-observations", status_code=201)
@@ -412,7 +473,13 @@ def start_failure_observation(
 ) -> dict:
     """Start WATCHING a failure the developer causes themselves. Read only: this app stops nothing, and the model's prediction
     for every worker node is recorded now, before anything fails."""
-    return service.start(request.namespace, attributed_to(operator), request.note)
+    if request.request_url:
+        from app.integrations.probe.http_fetch import require_loopback
+        try:
+            require_loopback(request.request_url)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail={"code": "REQUEST_URL_INVALID", "message": str(error)}) from None
+    return service.start(request.namespace, attributed_to(operator), request.note, request.request_url)
 
 
 @router.get("/failure-observations/current")

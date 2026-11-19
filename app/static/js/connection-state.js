@@ -217,6 +217,22 @@
         if (!container) return;
         const doc = options.document || window.document;
         container.removeAttribute("aria-busy");
+        // "No cluster", "cluster not answering" and "credential rejected" are states to recover from, not failures to alarm about: one
+        // friendly panel (shared with every page) says what is true, what still works, and the next action. The code is kept, folded away.
+        // "Evidence is missing" while the cluster itself is out of reach is the connection problem, not a separate one.
+        const known = window.ResilienceCluster && window.ResilienceCluster.current ? window.ResilienceCluster.current().state : null;
+        const outOfReach = ["not-connected", "unreachable", "access-denied"].includes(known) && /missing-evidence|evidence-unavailable/.test(descriptor.state) ? known : null;
+        const friendly = descriptor.code === "CLUSTER_NOT_CONNECTED" ? "not-connected"
+            : { "not-connected": "not-connected", "connection-failed": "unreachable", "access-denied": "access-denied" }[descriptor.state] || outOfReach;
+        if (friendly && window.ResilienceCluster && window.ResilienceCluster.renderPanel) {
+            window.ResilienceCluster.renderPanel(container, { state: friendly }, {
+                document: doc, onRetry: descriptor.retryable ? options.onRetry : null, details: descriptor.code || null,
+                whatStillWorks: options.whatStillWorks === undefined
+                    ? "Saved test results stay available under Recommendations and are marked as saved. Nothing on this page is live until the cluster is back."
+                    : options.whatStillWorks,
+            });
+            return;
+        }
         const card = element(doc, "div", undefined, {
             class: "state error-state", role: "alert", "aria-live": "assertive", "data-state": descriptor.state,
         });

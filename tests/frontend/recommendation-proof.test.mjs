@@ -173,6 +173,26 @@ test("the plan is drawn from the server's answer, with what stops it and what th
     assert.ok(t.text().includes("2 at most") && t.text().includes("every change is put back"));
 });
 
+test("changing the Smoke worker replaces the plan and clears the desktop acknowledgement", async () => {
+    const t = open();
+    await begin(t);
+    const smoke = t.root.querySelectorAll('input[name="prf-mode"]')[0];
+    smoke.listeners.change[0]();
+    await press(t, "btn-prf-plan");
+    const plan = { ...PLAN, mode: { ...PLAN.mode, mode: "SMOKE", workers: ["w1"] }, eligibleWorkers: ["w1", "w2"] };
+    t.network.respond("POST", `${BASE}/plan`, 200, plan);
+    await flush();
+    const picker = button(t, "prf-smoke-worker");
+    picker.value = "w2";
+    picker.listeners.change[0]();
+    assert.equal(t.network.calls.at(-1).body.smokeWorker, "w2");
+    assert.equal(button(t, "btn-prf-start"), null);
+    t.network.respond("POST", `${BASE}/plan`, 200, { ...plan, mode: { ...plan.mode, workers: ["w2"] }, planDigest: "new" });
+    await flush();
+    assert.equal(button(t, "btn-prf-start").disabled, true);
+    assert.equal(t.network.calls.filter(c => c.url.endsWith("/start")).length, 0);
+});
+
 test("with no earlier experiment there is no time estimate, and the page says so instead of promising one", async () => {
     const t = open();
     await begin(t);
@@ -376,7 +396,7 @@ test("a proven change is offered for approval, not applied, and the evidence is 
     const t = open();
     await begin(t, { run: PROVEN() });
 
-    assert.ok(t.text().includes("Proof summary") && t.text().includes("Resilient") && t.text().includes("held on every tested worker"));
+    assert.ok(t.text().includes("Proof summary") && t.text().includes("Readiness held") && t.text().includes("held on every tested worker"));
     assert.ok(t.text().includes("Preliminary evidence") && t.text().includes("not measured"));
     assert.ok(button(t, "btn-prf-continue").getAttribute("title").includes("Nothing has been applied"));
     assert.deepEqual(plain(t.facts.at(-1)), ["passed", "COMPLETED"]);

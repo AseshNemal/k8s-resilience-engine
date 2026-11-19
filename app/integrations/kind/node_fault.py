@@ -116,12 +116,14 @@ class KindWorkerFaultInjector:
 
     # -- the fault -----------------------------------------------------------------------------------------------------
 
-    def inject(self, node: str) -> None:
+    def inject(self, node: str, *, batch: Sequence[str] = ()) -> None:
+        """Stop one node. ``batch`` names nodes of THIS injector's own simultaneous failure that are already stopped: their pending
+        records are expected, and are the only pending records tolerated. Any other pending record still refuses."""
         grant = next((g for g in self._grants if g[0] == node), None)
         if grant is None:
             raise FaultRefused("NOT_ARMED", f"nothing authorizes stopping {node!r}: each injection needs an authorization of "
                                f"its own for that node")
-        pending = pending_records(self._dir)
+        pending = [r for r in pending_records(self._dir) if not (r["container"] in batch and r["cluster"] == self.cluster)]
         if pending:
             raise FaultRefused("RECOVERY_PENDING", f"{len(pending)} earlier recovery record(s) are not restored "
                                f"({pending[0]['container']}); restore them first with python -m app.integrations.kind.recovery")
@@ -147,6 +149,26 @@ class KindWorkerFaultInjector:
             raise FaultRefused("KILL_FAILED", f"docker kill {node} failed; the node's state is unknown, so the recovery record "
                                f"stays pending: {killed.stderr.strip()}")
         save_record(self._dir, {**record, "state": "STOPPED", "stoppedAt": now_iso()})
+
+    def inject_together(self, nodes: Sequence[str]) -> list[str]:
+        """Stop several workers at (almost) the same moment. Every node must be armed with an authorization of its own, and there must
+        be no pending recovery record at all before the first kill. Returns the nodes stopped; on a failure part-way it raises and the
+        nodes already stopped keep their pending records, so the caller restores them (``restore`` for each)."""
+        nodes = list(dict.fromkeys(nodes))
+        if not nodes:
+            raise FaultRefused("NO_NODES", "no node was named")
+        missing = [n for n in nodes if not any(g[0] == n for g in self._grants)]
+        if missing:
+            raise FaultRefused("NOT_ARMED", f"nothing authorizes stopping {missing[0]!r}: each injection needs an authorization of its own")
+        pending = pending_records(self._dir)
+        if pending:
+            raise FaultRefused("RECOVERY_PENDING", f"{len(pending)} earlier recovery record(s) are not restored ({pending[0]['container']}); "
+                               "restore them first with python -m app.integrations.kind.recovery")
+        done: list[str] = []
+        for node in nodes:
+            self.inject(node, batch=done)
+            done.append(node)
+        return done
 
     def restore(self, node: str) -> None:
         if node not in self._workers:

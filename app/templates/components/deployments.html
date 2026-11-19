@@ -85,7 +85,7 @@
         <button type="button" class="tab-nav-btn" id="tab-btn-live-experiments" role="tab" aria-selected="false" aria-controls="tab-live-experiments" data-target="tab-live-experiments">
             <span class="tab-icon">🧪</span> Experiments
         </button>
-        <button type="button" class="tab-nav-btn" id="tab-btn-output" role="tab" aria-selected="false" aria-controls="tab-output" data-target="tab-output">
+        <button type="button" class="tab-nav-btn" id="tab-btn-output" role="tab" aria-selected="false" aria-controls="tab-output" data-target="tab-output" hidden data-research-only="true">
             <span class="tab-icon">📦</span> Output
         </button>
         <button type="button" class="tab-nav-btn" id="tab-btn-accuracy" role="tab" aria-selected="false" aria-controls="tab-accuracy" data-target="tab-accuracy">
@@ -141,11 +141,16 @@
     <div class="tab-pane" id="tab-accuracy" role="tabpanel" aria-labelledby="tab-btn-accuracy" hidden>
         <div class="tab-pane__header">
             <div>
-                <h3 class="tab-pane__title">How accurate is the model?</h3>
-                <p class="tab-pane__desc">The model's answers checked against kubectl, including real node failures.</p>
+                <h3 class="tab-pane__title">How accurate was the model on your cluster?</h3>
+                <p class="tab-pane__desc">For each node failure recorded on the connected cluster: the services the model predicted would go down, next to the services that were measured down.</p>
             </div>
         </div>
+        <div data-role="ce-accuracy" aria-live="polite"><p class="cs-recorded__wait">Reading the experiments recorded on this cluster…</p></div>
+        <details class="cs-fold" data-role="recorded-fold">
+        <summary>Research results recorded earlier on a Kind test cluster (not your cluster)</summary>
+        {% include "partials/recorded_evidence.html" %}
         {% include "components/deployments_academic_panel.html" %}
+        </details>
     </div>
 </div>
 
@@ -157,11 +162,12 @@
 {% block page_js %}
 <script src="{{ url_for('static', path='/js/components/deployments_namespace.js') }}?v=5.61"></script>
 <script src="{{ url_for('static', path='/js/components/deployments_tab_router.js') }}?v=5.61"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/cluster-experiments.js') }}?v=ce-20261121"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_academic_widget.js') }}?v=5.62"></script>
 <script src="{{ url_for('static', path='/js/components/deployments_topology_widget.js') }}?v=5.61"></script>
 <script src="{{ url_for('static', path='/js/components/deployments_intent_widget.js') }}?v=5.61"></script>
 <script src="{{ url_for('static', path='/js/components/deployments_drift_widget.js') }}?v=5.61"></script>
-<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.61"></script>
+<script src="{{ url_for('static', path='/js/components/deployments_live_experiments_widget.js') }}?v=5.62"></script>
 <script src="{{ url_for('static', path='/js/components/deployments_modal_manager.js') }}?v=5.61"></script>
 <script src="{{ url_for('static', path='/js/components/deployments.js') }}?v=5.61"></script>
 {% endblock %}

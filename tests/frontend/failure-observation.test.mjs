@@ -122,3 +122,23 @@ test("a watch whose cluster is not the connected one says nothing is being recor
     assert.equal(model.tone, "warn");
     assert.equal(model.canStop, true, "the person can still end it");
 });
+
+test("a watch's measured timeline is the live failure while it runs and one finished failure afterwards, and is absent when nothing was measured", () => {
+    const timeline = { samples: [{ t: 0, ready: { a: 1 }, nodes: { w1: true } }], marks: [{ t: 0, kind: "begin" }], baseline: { a: 1 } };
+    const monitor = { timeline, summary: { servicesDown: [] }, requests: false };
+    const live = plain(panelModule.monitorModel({ ...watching, status: "NODE_DOWN", failedNode: "w1", monitor }));
+    assert.equal(live.live.kind, "watch"); assert.equal(live.live.worker, "w1"); assert.deepEqual(live.episodes, []);
+    const done = plain(panelModule.monitorModel({ ...finished, monitor }));
+    assert.equal(done.live, null); assert.equal(done.episodes[0].kind, "watch"); assert.equal(done.episodes[0].predictionCheck, null);
+    assert.equal(panelModule.monitorModel({ ...watching, monitor: { timeline: { samples: [] } } }), null);
+    assert.equal(panelModule.monitorModel(watching), null);
+});
+
+test("starting a watch sends the page address only when one was typed", async () => {
+    const sent = [];
+    const fetchImpl = async (url, init = {}) => { if (init.method === "POST") sent.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ ...watching }) }; };
+    const root = new Node("div");
+    const panel = panelModule.createPanel({ root, document: fakeDocument, fetchImpl, timers: { set: () => 1, clear: () => {} }, namespace: () => "bookinfo" });
+    await panel.start();
+    assert.equal(sent[0].requestUrl, null);
+});

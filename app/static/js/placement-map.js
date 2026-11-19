@@ -221,5 +221,41 @@
         }).sort((a, b) => String(a.service).localeCompare(String(b.service)));
     }
 
-    global.ResiliencePlacement = { hues, outcome, impact, draw, drawWorkflows, fromDeployment };
+    // Each column is one worker. Solid pods are observed, outlined pods are simulated.
+    function changeFigure(candidate, before, after) {
+        const figure = el("figure", "pm-change");
+        const parts = candidate.parts?.length ? candidate.parts : String(candidate.service || "").split("+").map(service => ({ service }));
+        for (const part of parts) {
+            const now = before?.find(row => row.service === part.service);
+            const next = after?.find(row => row.service === part.service);
+            if (!now || !next) continue;
+            const nodes = [...new Set([...now.nodes, ...next.nodes].map(entry => entry.node))].sort();
+            if (!nodes.length) continue;
+            const table = el("table", "pm-change__grid");
+            table.append(el("caption", "", part.service));
+            const head = el("tr");
+            head.append(el("th", "", "Ready pods"));
+            for (const node of nodes) head.append(el("th", "", node));
+            table.append(head);
+            for (const [label, row] of [["Now", now], ["Proposed", next]]) {
+                const line = el("tr");
+                line.append(el("th", "", label));
+                for (const node of nodes) {
+                    const count = podsOn(row, node);
+                    const cell = el("td");
+                    const dots = el("span", "pm-change__pods");
+                    dots.setAttribute("aria-hidden", "true");
+                    for (let i = 0; i < Math.min(count, 5); i++) dots.append(el("i"));
+                    cell.append(dots, el("span", "pm-change__count", String(count)));
+                    line.append(cell);
+                }
+                table.append(line);
+            }
+            figure.append(table);
+        }
+        if (!figure.children.length) figure.append(el("figcaption", "", "Placement comparison unavailable."));
+        return figure;
+    }
+
+    global.ResiliencePlacement = { changeFigure, hues, outcome, impact, draw, drawWorkflows, fromDeployment };
 })(typeof window !== "undefined" ? window : globalThis);

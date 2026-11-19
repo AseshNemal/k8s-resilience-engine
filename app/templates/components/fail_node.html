@@ -1,0 +1,35 @@
+{# Fail a node. Owned by: Member 4. A simple, visual way to stop worker nodes on purpose and watch the application. #}
+{% extends "base.html" %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/failure-monitor.css') }}?v=monitor-20261120">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/fail-node.css') }}?v=failnode-20261124">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2 class="page-header__title">Fail a node</h2>
+    <p class="page-header__subtitle">
+        Stop worker nodes on purpose and watch what your application does. Pick, stop, watch, restore.
+    </p>
+</div>
+
+<ol class="fn-steps" aria-label="How it works">
+    <li><strong>Pick</strong> the workers</li>
+    <li><strong>Stop</strong> them for a while</li>
+    <li><strong>Watch</strong> your application</li>
+    <li><strong>Restore</strong> and read the report</li>
+</ol>
+
+<section class="card fn-card" aria-label="Fail a node">
+    <div data-role="lab-panel" data-visual="true"></div>
+</section>
+{% endblock %}
+
+{% block page_js %}
+<script src="{{ url_for('static', path='/js/placement-map.js') }}?v=placement-20261117" defer></script>
+<script src="{{ url_for('static', path='/js/failure-monitor.js') }}?v=monitor-20261120" defer></script>
+<script src="{{ url_for('static', path='/js/fail-visual.js') }}?v=failnode-20261124" defer></script>
+<script src="{{ url_for('static', path='/js/failure-lab.js') }}?v=lab-20261125" defer></script>
+{% endblock %}

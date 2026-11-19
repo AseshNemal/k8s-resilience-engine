@@ -132,6 +132,7 @@
             phase: "loading", targets: null, blockingRun: null, plan: null, run: null, probeTest: null, entry: null, message: null, alert: false,
             acknowledged: new Set(), desktopAcknowledged: false, confirmAbort: false, busy: false,
             lastOkAt: null, failing: false, backoff: 1, assessment: null, researchIndex: 0, researchTab: "charts",
+            monitorKey: null, timelines: {}, timelineAsked: new Set(),
         };
         let issued = 0;
         let shown = 0;
@@ -395,6 +396,7 @@
         }
 
         function again() {
+            form.smokeWorker = "";
             state.phase = "setup";
             state.plan = null;
             state.confirmAbort = false;
@@ -566,6 +568,22 @@
             item("Check", plan.probe ? `${plan.probe.url} → ${plan.probe.expectedStatus}` : "readiness only");
             if (plan.estimate) item("Time", `about ${formatSeconds(plan.estimate.estimatedSeconds)} (from ${plan.estimate.basedOnExperiments} earlier experiments)`);
             container.append(summary);
+            if (mode.mode === "SMOKE" && plan.eligibleWorkers?.length > 1) {
+                const picker = make(doc, "select", null, "form-input");
+                for (const worker of plan.eligibleWorkers) {
+                    const option = make(doc, "option", worker, null, { value: worker });
+                    option.selected = mode.workers.includes(worker);
+                    picker.append(option);
+                }
+                picker.disabled = state.busy;
+                picker.addEventListener("change", () => {
+                    form.smokeWorker = picker.value;
+                    state.plan = null;
+                    state.phase = "setup";
+                    reviewPlan();
+                });
+                container.append(field("Worker for this Smoke test", picker, "prf-smoke-worker"));
+            }
             container.append(make(doc, "p", "Afterwards every worker is started and every change is put back.", "prf-caption"));
 
             const issues = make(doc, "ul", undefined, "prf-issues", { "aria-label": "What stops or affects this run" });
@@ -805,8 +823,73 @@
                 }
             }
             if (run.status === "NEEDS_MANUAL_RESTORE") actions.append(button("Try recovery again", "primary-button", recoverRun, state.busy, "btn-prf-recover"));
-            if (run.canStartAnother) actions.append(button("Plan another run", "secondary-button", again, state.busy, "btn-prf-again"));
+            if (run.canStartAnother) {
+                const report = `${BASE}/runs/${encodeURIComponent(run.runKey)}/report`;
+                actions.append(make(doc, "a", "Open report", "secondary-button", { href: report, target: "_blank", rel: "noopener", "data-role": "prf-report" }),
+                    make(doc, "a", "Download report", "secondary-button", { href: `${report}?download=true`, "data-role": "prf-report-download" }),
+                    button("Plan another run", "secondary-button", again, state.busy, "btn-prf-again"));
+            }
             return actions;
+        }
+
+        // ---- saved or live: the run is read from the database, so it is labelled by where it came from ----------------------------------
+
+        /** A run that is going on right now, on the cluster that is connected now, is live. Everything else is a saved record. */
+        function runIsLive(run) {
+            const cluster = window.ResilienceCluster;
+            if (!cluster || !run) return true;                    // without the cluster module (tests, a bare page) nothing is claimed either way
+            const status = cluster.current();
+            const going = run.status === "RUNNING" || run.status === "ABORTING";
+            const same = status.state === "connected" && (!run.target || !run.target.clusterUid || run.target.clusterUid === status.clusterUid);
+            return going && same && !run.stale;
+        }
+
+        function drawProvenance(container, run) {
+            const cluster = window.ResilienceCluster;
+            if (!cluster || runIsLive(run)) return;
+            const saved = cluster.describeSaved(cluster.current(), { clusterUid: run.target && run.target.clusterUid, at: run.finishedAt || run.startedAt,
+                clusterName: run.target && run.target.name });
+            const box = make(doc, "div", undefined, `prf-saved prf-saved--${saved.tone}`, { role: "status", "data-role": "prf-saved" });
+            box.append(cluster.savedChip(doc, cluster.current(), { clusterUid: run.target && run.target.clusterUid, at: run.finishedAt || run.startedAt,
+                clusterName: run.target && run.target.name }), make(doc, "span", saved.detail, "prf-saved__text"));
+            if (run.status === "RUNNING" || run.status === "ABORTING") {
+                box.append(make(doc, "span", "This run was last recorded as still going. With the cluster out of reach its progress cannot be confirmed.", "prf-saved__text"));
+            }
+            container.append(box);
+        }
+
+        // ---- the measured behaviour of each failure (failure-monitor.js) -----------------------------------------------------------------
+
+        function wantTimeline(run, episode) {
+            const key = window.ResilienceFailureMonitor.episodeKey(episode);
+            if (state.timelines[key] || state.timelineAsked.has(key)) return;
+            state.timelineAsked.add(key);
+            const query = `kind=${encodeURIComponent(episode.kind)}&worker=${encodeURIComponent(episode.worker)}&repeat=${episode.repeat}` +
+                (episode.candidateId ? `&candidateId=${encodeURIComponent(episode.candidateId)}` : "");
+            request("GET", `/runs/${encodeURIComponent(run.runKey)}/timeline?${query}`).then((result) => {
+                if (destroyed) return;
+                if (result.ok && result.payload && result.payload.timeline) state.timelines[key] = result.payload.timeline;
+                else state.timelineAsked.delete(key);
+                draw();
+            }).catch(() => { state.timelineAsked.delete(key); });
+        }
+
+        function drawMonitor(container, run) {
+            const monitor = window.ResilienceFailureMonitor;
+            if (!monitor || !run.monitor) return;
+            const picks = monitor.choices(run.monitor);
+            if (!picks.length && !(run.status === "RUNNING" || run.status === "ABORTING")) return;
+            // Follow the failure in progress; otherwise stay on what the person chose, else the newest finished one.
+            const chosen = picks.find((p) => p.key === state.monitorKey) || picks[picks.length - 1] || null;
+            if (chosen && chosen.episode) wantTimeline(run, chosen.episode);
+            const live = runIsLive(run);
+            const holder = make(doc, "div", undefined, live ? "" : "cs-dim-offline");
+            monitor.render(doc, holder, live ? run.monitor : { ...run.monitor, live: null }, {
+                selected: chosen && chosen.key, running: live,
+                onSelect: (key) => { state.monitorKey = key; draw(); },
+                timelineFor: (episode) => state.timelines[monitor.episodeKey(episode)] || null,
+            });
+            container.append(holder);
         }
 
         function drawRun(container) {
@@ -814,6 +897,7 @@
             drawHead(container, "Prove it on a test cluster", null);
             if (!run) { container.append(make(doc, "p", "No run recorded yet.", "prf-caption")); return; }
             drawStrip(container, run);
+            drawProvenance(container, run);
             if (state.failing || run.stale) {
                 const since = state.lastOkAt ? `Last update ${Math.max(0, Math.round((now() - state.lastOkAt) / 1000))} s ago.` : "";
                 container.append(make(doc, "p", `${run.stale ? "The run has not reported for a while; it may have stopped." : "The backend cannot be reached."} ${since} What is shown may be out of date.`,
@@ -824,6 +908,7 @@
             if (run.result) drawResult(container, run);
             drawFigures(container, run);
             drawMatrix(container, run);
+            drawMonitor(container, run);
             const grid = make(doc, "div", undefined, "prf-opgrid");
             const operation = drawOperation(container, run);
             const safety = drawSafety(run);
@@ -847,10 +932,10 @@
             const tiles = make(doc, "div", undefined, "prf-figures");
             const winnerRow = result.winner ? (run.matrix.rows.find((r) => r.candidateId === result.winner) || {}) : null;
             tiles.append(
-                figure(result.winner ? "✓" : "✕", "Observed outcome", result.winner ? "Resilient" : "Not proven",
-                    result.winner ? `${HUMAN(winnerRow.strategy || result.winner)} on ${winnerRow.service || "the service"} held on every tested worker` : (run.status === "COMPLETED" ? "No change held on every worker" : "The run ended before a change was fully proven")),
-                figure(mismatches.length ? "!" : "≈", "Matches prediction", mismatches.length ? "Mismatch" : (run.safety.predictionCheck === "pending" ? "—" : "Match"),
-                    mismatches.length ? mismatches.map((m) => `${m.worker}: model said ${m.predictedSurvives ? "survives" : "fails"}, readiness ${m.readinessHolds ? "held" : "did not"}`).join("; ") : "Model and readiness agree"),
+                figure(result.winner ? "✓" : "✕", "Observed outcome", result.winner ? (run.evidenceLevel === "L2_PROBE" ? "Workflow check passed" : "Readiness held") : "Not proven",
+                    result.winner ? `${HUMAN(winnerRow.strategy || result.winner)} on ${winnerRow.service || "the service"} held on every tested worker` : (run.status === "COMPLETED" ? "No candidate passed all planned checks" : "The run ended before a change was fully proven")),
+                figure(mismatches.length ? "!" : "≈", "Matches prediction", mismatches.length ? "Mismatch" : (run.safety.predictionCheck === "matches" ? "Match" : "Unconfirmed"),
+                    mismatches.length ? mismatches.map((m) => `${m.worker}: model said ${m.predictedSurvives ? "survives" : "fails"}, readiness ${m.readinessHolds ? "held" : "did not"}`).join("; ") : (run.safety.predictionCheck === "matches" ? "Model and readiness agree" : "No conclusive comparison was recorded")),
                 figure("▤", "Evidence", run.evidenceLevel === "L2_PROBE" ? "Probe + readiness" : "Readiness only", checks.total ? `${checks.passed} of ${checks.total} checks passed` : "No workflow check was set"),
                 figure("▮", "Improvement", result.improvement ? `${result.improvement.observedBefore}% → ${result.improvement.worstObservedBlastRadiusAfter}%` : "—", result.improvement ? result.improvement.basisNote : "Not measured"));
             proof.append(tiles);
@@ -1044,7 +1129,7 @@
         return {
             start, reviewPlan, startRun, abortRun, recoverRun, testProbe, checkMachine, poll, destroy, draw, again,
             form, state: () => state, current: () => state.run,
-            reset() { shown = 0; state.run = null; state.plan = null; state.phase = "loading"; unwatch(); return start(); },
+            reset() { form.smokeWorker = ""; shown = 0; state.run = null; state.plan = null; state.phase = "loading"; unwatch(); return start(); },
         };
     }
 

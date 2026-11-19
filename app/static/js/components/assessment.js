@@ -32,6 +32,7 @@
     let request = 0;
     let current = null;
     let selectedNode = null;
+    let selectedFix = null;
 
     function showState(title, text, busy) {
         result.hidden = true;
@@ -52,7 +53,12 @@
             run.disabled = true;
             return;
         }
-        if (apps.length > 1 && !selected) select.append(el("option", "", "Choose an application"));
+        if (apps.length > 1 && !selected) {
+            const placeholder = el("option", "", "Choose an application");
+            placeholder.value = "";
+            placeholder.disabled = true;
+            select.append(placeholder);
+        }
         for (const app of apps) {
             const option = el("option", "", app.services && app.services.length ? `${app.namespace} · ${plural(app.services.length, "service")}` : app.namespace);
             option.value = app.namespace;
@@ -66,17 +72,8 @@
     /* ---------- hero ---------- */
 
     function heroTitle(body) {
-        const rows = body.nodes || [];
-        const hurting = rows.filter((row) => row.servicesDown.length || (typeof row.blastRadius === "number" && row.blastRadius > 0));
-        const workflow = body.risk.scope === "workflow";
-        if (!hurting.length) return "No single worker failure takes a service offline.";
-        const all = hurting.length === rows.length;
-        const lead = all ? `Any one of your ${rows.length} workers` : `${hurting.length} of your ${rows.length} workers`;
-        if (workflow) {
-            const worst = typeof body.risk.blastRadius === "number" ? ` The worst one breaks ${percent(body.risk.blastRadius)} of the weighted workflows.` : "";
-            return `${lead} can break a business workflow.${worst}`;
-        }
-        return `${lead} stopping takes a service offline.`;
+        if (!body.nodes?.length) return "No worker node was assessed.";
+        return body.risk.headline || "Inspect the predicted impact of each worker failure.";
     }
 
     function drawStats(body) {
@@ -85,7 +82,7 @@
         const exposed = (body.vulnerableServices || []).filter((row) => row.lostOn.length).length;
         const evaluated = (body.evidence.workflowsEvaluated || []).length;
         const items = [
-            [String((body.nodes || []).length), "workers tested"],
+            [String((body.nodes || []).length), "workers modeled"],
             [String(exposed), exposed === 1 ? "service exposed" : "services exposed"],
             evaluated ? [String(evaluated), evaluated === 1 ? "workflow scored" : "workflows scored"] : ["–", "no workflow to score"],
         ];
@@ -102,7 +99,7 @@
     let view = "today";
 
     function afterPlacement(body) {
-        const best = body.recommendation && body.recommendation.best;
+        const best = selectedFix;
         return best && Array.isArray(best.afterPlacement) ? best.afterPlacement : null;
     }
 
@@ -124,7 +121,7 @@
             : "Observed placement. Pick a worker to see what stops if it fails; this is a prediction, nothing is stopped.";
         Placement.draw(holder, {
             nodes: rows, placement: body.placement || [], after, view, failedNode: selectedNode,
-            onSelect(node) { selectedNode = node; drawNodes(body); drawConsequence(body); },
+            onSelect(node) { selectedNode = node; drawNodes(body); drawConsequence(body); drawFix(body); },
         });
         const picked = rows.find((row) => row.node === selectedNode);
         Placement.drawWorkflows($("assess-workflows"), view === "today" ? picked && picked.workflows : null);
@@ -150,29 +147,13 @@
         const effect = after ? Placement.impact(after, row.node) : { down: row.servicesDown, degraded: row.servicesDegraded };
         const parts = describe(row.node, effect.down, effect.degraded, placement);
         const lead = after ? `After the change (simulated), if ${row.node} stops` : `If ${row.node} stops`;
-        let text = parts.length ? `${lead}, ${parts.join("; ")}.` : `${lead}, every service keeps running.`;
+        let text = parts.length ? `${lead}, ${parts.join("; ")}.` : `${lead}, no additional assessed service loses a ready replica.`;
         if (!after && typeof row.blastRadius === "number") text += ` Weighted workflow loss: ${percent(row.blastRadius)}.`;
-        else if (!after && body.risk.scope !== "workflow") text += " Workflow impact is not scored without a reviewed workflow.";
+        else if (!after && body.risk.scope !== "workflow") text += " Workflow impact is unknown for this assessment.";
         line.textContent = text;
     }
 
     /* ---------- fix ---------- */
-
-    function meter(metric) {
-        const box = el("div", "assess-meter");
-        box.append(el("p", "assess-meter__label", metric.label));
-        for (const [name, value, kind] of [["Now", metric.before, "before"], ["After", metric.after, "after"]]) {
-            const rowEl = el("div", "assess-meter__row");
-            const track = el("div", "assess-meter__track");
-            const fill = el("span", "assess-meter__fill");
-            fill.dataset.kind = kind;
-            fill.style.width = `${Math.max(2, Math.min(100, value))}%`;
-            track.append(fill);
-            rowEl.append(el("span", "assess-meter__name", name), track, el("strong", "assess-meter__value", percent(value)));
-            box.append(rowEl);
-        }
-        return box;
-    }
 
     /* The sidebar already knows how pages are addressed (/components/x on the web, x.html in the Docker extension). */
     function pageHref(key, fallback) {
@@ -184,12 +165,14 @@
         const next = body.continuation;
         const link = el("a", primary ? "primary-button" : "secondary-button", label);
         link.href = pageHref("recommendations", (next && next.href) || "/components/recommendations");
+        if (body.namespace) link.href += `?namespace=${encodeURIComponent(body.namespace)}`;
         link.addEventListener("click", () => {
             if (!next || !next.fingerprint || !next.failedNode) return;
             try {
                 const record = { namespace: next.namespace || "", failedNode: next.failedNode, fingerprint: next.fingerprint, at: Date.now() };
-                const candidate = next.candidate;
+                const candidate = selectedFix;
                 if (candidate && candidate.service && candidate.type) {
+                    record.id = candidate.id;
                     record.service = candidate.service;
                     record.type = candidate.type;
                 }
@@ -201,58 +184,80 @@
 
     function drawFix(body) {
         const recommendation = body.recommendation || {};
-        const best = recommendation.best;
-        const tag = $("assess-fix-tag");
         const holder = $("assess-fix-body");
-        tag.textContent = recommendation.mode === "deployment" ? "Predicted · service level" : "Predicted";
         holder.replaceChildren();
-        if (!best) {
-            holder.append(el("p", "assess-fix__why", recommendation.note || "No feasible improvement was produced."));
-            for (const item of recommendation.blocked || []) holder.append(el("p", "assess-hint", `${item.title}: ${item.limitation}`));
-            const actions = el("div", "assess-actions");
-            actions.append(handoff(body, "Open recommendations", false));
-            holder.append(actions);
+        $("assess-fix-tag").textContent = recommendation.mode === "workflow" ? "Workflow prediction" : "Service prediction";
+        const options = recommendation.options || [];
+        if (!options.length) {
+            holder.append(el("p", "assess-option__effect", "No feasible recommendation is available."),
+                el("p", "assess-hint", recommendation.note || "Refresh the assessment to check the evidence."),
+                handoff(body, "Inspect recommendation evidence", false));
             return;
         }
-        const grid = el("div", "assess-fix__grid");
-        const copy = el("div", "assess-fix__copy");
-        copy.append(el("h4", "assess-fix__title", best.title));
-        if (best.why) copy.append(el("p", "assess-fix__why", best.why));
-        const costs = el("p", "assess-fix__cost");
-        costs.append(el("span", "assess-pill", `Cost: ${best.cost ? best.cost.toLowerCase() : "unknown"}`), el("span", "assess-hint", best.costDetail || ""));
-        copy.append(costs);
-        grid.append(copy);
-        if (best.metric) grid.append(meter(best.metric));
-        holder.append(grid);
-
-        const follow = recommendation.followUps || [];
-        if (follow.length) {
-            const box = el("div", "assess-follow");
-            box.append(el("p", "assess-follow__title", `This does not protect everything. ${plural(follow.length, "other service")} still go${follow.length === 1 ? "es" : ""} offline on a different worker:`));
-            const list = el("ul", "assess-follow__list");
-            for (const item of follow) {
-                const entry = el("li");
-                entry.append(el("strong", "", item.service), el("span", "", ` if ${item.node} stops — ${item.title.replace(/ for .*$/, "").toLowerCase()}`));
-                list.append(entry);
+        holder.append(el("p", "assess-hint", `Evaluated for the loss of ${recommendation.failedNode || "the assessed worker"}. Outlined pods show simulated placement.`));
+        const list = el("ol", "assess-options");
+        for (const option of options) {
+            const active = selectedFix?.id === option.id;
+            const item = el("li", window.ResilienceVisual ? "assess-option assess-option--visual" : "assess-option");
+            item.dataset.active = String(active);
+            const heading = el("div", "assess-option__head");
+            const rank = option.rank == null ? "Unranked" : `#${option.rank}`;
+            heading.append(el("strong", "assess-option__rank", rank), el("h4", "", option.title));
+            if (option.id === recommendation.best?.id) heading.append(el("span", "assess-pill", "Engine choice"));
+            const Visual = window.ResilienceVisual;
+            if (Visual) {
+                const workers = [...new Set([...(body.nodes || []).map((row) => row.node), ...((option.afterPlacement || []).flatMap((row) => row.nodes.map((entry) => entry.node)))])].sort();
+                item.append(heading, Visual.strategyHead(document, option), Visual.changeCard(document, option, body.placement, workers, selectedNode));
+            } else item.append(heading, Placement.changeFigure(option, body.placement, option.afterPlacement));
+            if (option.metric) {
+                item.append(el("p", "assess-option__effect", `${option.metric.label} · ${percent(option.metric.before)} → ${percent(option.metric.after)}`));
+            } else if (option.benefit) item.append(el("p", "assess-option__effect", option.benefit));
+            item.append(el("p", "assess-hint", `Feasible in simulation · ${option.cost || "Unreported"} resource cost`));
+            const showReason = option.id === recommendation.best?.id && option.why;
+            if (showReason) item.append(el("p", "assess-hint", option.why));
+            if (option.costDetail || (!showReason && option.why)) {
+                const more = el("details", "assess-reason");
+                more.append(el("summary", "", showReason ? "Rollout details" : "Reason and rollout cost"));
+                if (!showReason && option.why) more.append(el("p", "", option.why));
+                if (option.costDetail) more.append(el("p", "", option.costDetail));
+                for (const part of option.parts || []) {
+                    if (option.type === "COMBINATION") more.append(el("p", "", `${part.service} · ${part.type.replaceAll("_", " ").toLowerCase()}`));
+                }
+                item.append(more);
             }
-            box.append(list);
-            holder.append(box);
+            const actions = el("div", "assess-actions");
+            const pick = el("button", "secondary-button", active ? "Preview selected" : "Preview change");
+            pick.type = "button";
+            pick.setAttribute("aria-pressed", String(active));
+            pick.addEventListener("click", () => {
+                selectedFix = option;
+                view = option.afterPlacement ? "after" : "today";
+                drawNodes(body);
+                drawConsequence(body);
+                drawFix(body);
+                holder.querySelector('[aria-pressed="true"]')?.focus();
+            });
+            actions.append(pick);
+            if (active) {
+                actions.append(handoff(body, recommendation.mode === "workflow" ? "Review YAML and approval" : "Review service recommendation", true));
+                if (recommendation.mode === "deployment") {
+                    const link = el("a", "secondary-button", "Review workflow evidence");
+                    link.href = pageHref("workflows", "/components/workflows") + `?namespace=${encodeURIComponent(body.namespace)}&purpose=recommendations`;
+                    actions.append(link);
+                }
+            }
+            item.append(actions);
+            list.append(item);
         }
-
-        const alts = recommendation.alternatives || [];
-        if (alts.length) holder.append(el("p", "assess-hint", `Also possible: ${alts.map((item) => item.title.replace(/ for .*$/, "").toLowerCase()).join("; ")}.`));
-
-        const actions = el("div", "assess-actions");
-        actions.append(handoff(body, (body.continuation && body.continuation.label) || "Open recommendations", true));
-        if (recommendation.mode === "deployment") {
-            const link = el("a", "secondary-button", "Add a workflow for business impact");
-            link.href = pageHref("workflows", "/components/workflows");
-            actions.append(link);
+        holder.append(list);
+        if (recommendation.blocked?.length) {
+            const reasons = el("details", "assess-reason");
+            reasons.append(el("summary", "", "Why other changes were ruled out"));
+            for (const entry of recommendation.blocked) reasons.append(el("p", "", `${entry.title}. ${entry.limitation}`));
+            holder.append(reasons);
         }
-        holder.append(actions);
-        holder.append(el("p", "assess-hint", recommendation.mode === "deployment"
-            ? "Nothing is changed. Without a reviewed workflow this stays a service-level prediction, so it cannot be approved here."
-            : "Nothing is changed. Approval is a separate step that checks the change again."));
+        if (recommendation.mode === "deployment") holder.append(el("p", "assess-hint", "Approval requires a reviewed workflow. Service predictions alone cannot establish business impact."));
+
     }
 
     /* ---------- evidence ---------- */
@@ -263,7 +268,7 @@
         const evidence = body.evidence || {};
         const list = el("ul", "assess-evidence__list");
         const add = (text) => { if (text) list.append(el("li", "", text)); };
-        add(body.capturedAt ? `Placement read from the cluster at ${new Date(body.capturedAt).toLocaleString()}; every worker was tested against that one snapshot.` : "Placement read from the cluster.");
+        add(body.capturedAt ? `Placement read from the cluster at ${new Date(body.capturedAt).toLocaleString()}; each worker failure was modeled from this snapshot.` : "Placement read from the cluster.");
         add(evidence.workflowText);
         const names = (evidence.workflowsEvaluated || []).map((item) => item.name || item.workflowId).filter(Boolean);
         if (names.length) add(`Workflows scored: ${names.join(", ")}.`);
@@ -288,6 +293,7 @@
         result.hidden = false;
         const risk = body.risk;
         selectedNode = risk.worstNode || null;
+        selectedFix = body.recommendation?.best || body.recommendation?.options?.[0] || null;
         view = "today";
         $("assess-verdict").dataset.level = risk.level || "unknown";
         $("assess-level").textContent = LEVEL[risk.level] || "Unknown";
@@ -295,7 +301,13 @@
         $("assess-headline").textContent = heroTitle(body);
         $("assess-scope").textContent = risk.scope === "workflow"
             ? `${body.namespace} · scored against ${plural((body.evidence.workflowsEvaluated || []).length, "reviewed workflow")}`
-            : `${body.namespace} · no reviewed workflow yet, so business impact is not guessed`;
+            : `${body.namespace} · business impact is unknown with the available workflow evidence`;
+        if (body.capturedAt) {
+            const captured = new Date(body.capturedAt);
+            if (Number.isFinite(captured.getTime())) $("assess-scope").textContent += ` · Cluster read ${captured.toLocaleTimeString()}`;
+        }
+        const options = body.recommendation?.options || [];
+        $("assess-compare").textContent = options.length ? `Compare ${plural(options.length, "feasible change")}` : "Inspect recommendation evidence";
         drawStats(body);
         drawNodes(body);
         drawConsequence(body);
@@ -318,7 +330,8 @@
                 return await fetchJson(url, { timeout: 120000 });
             } catch (error) {
                 lastError = error;
-                const transient = RETRYABLE.has(error && error.status) || !(error && error.status);
+                // A coded refusal (no cluster, credential rejected, nothing to assess) will not change in a second: answer at once.
+                const transient = !(error && error.code) && (RETRYABLE.has(error && error.status) || !(error && error.status));
                 if (!transient) throw error;
                 await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
             }
@@ -337,7 +350,11 @@
             draw(body);
         } catch (error) {
             if (mine !== request) return;
-            showState("Assessment unavailable", "The assessment could not be read.");
+            // One message, not two: the state panel replaces the "Assessing…" card instead of sitting beneath it.
+            empty.hidden = true;
+            result.hidden = true;
+            select.replaceChildren(el("option", "", "No cluster"));
+            select.disabled = true;
             renderStateCard(errorRegion, describeError(error), { onRetry: () => load(select.value || namespace) });
         } finally {
             if (mine === request) run.disabled = select.disabled;
@@ -349,6 +366,8 @@
         if (select.value) load(select.value);
     });
     select.addEventListener("change", () => { if (select.value) load(select.value); });
+    // When the cluster comes back (or is connected for the first time) and nothing is on screen yet, assess it without being asked.
+    if (window.ResilienceCluster) window.ResilienceCluster.onChange((status) => { if (status.state === "connected" && !current) load(select.value || undefined); });
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => load());
     else load();
 })();

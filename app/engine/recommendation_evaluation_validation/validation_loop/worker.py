@@ -16,6 +16,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from app.engine.recommendation_evaluation_validation.monitoring.timeline import compact
 from app.engine.recommendation_evaluation_validation.validation.models import ValidationRefusedError
 from app.engine.recommendation_evaluation_validation.validation_loop.loop import (
     LoopObserver,
@@ -45,6 +46,12 @@ class DbObserver(LoopObserver):
 
     def __init__(self, repository: LoopRepository, run_key: str, clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
         self._repo, self._run, self._clock = repository, run_key, clock
+        # The stage the loop is in and the measured timeline of the failure in progress. The sampler's thread and the loop's thread both
+        # write "current", so the two parts are kept here and written together.
+        self._lock = threading.Lock()
+        self._stage: dict[str, Any] | None = None
+        self._live: dict[str, Any] | None = None
+        self._live_key: tuple | None = None
 
     def run_started(self, plan, candidates) -> None:
         self._repo.add_event(self._run, "RUN_STARTED", f"{plan.mode.value}: {len(candidates)} candidate(s), {len(plan.workers)} worker(s)")
@@ -60,9 +67,25 @@ class DbObserver(LoopObserver):
                 self._repo.start_experiment(self._run, key)
         elif detail:
             current["candidateId"] = detail.replace("candidate ", "")
-        self._repo.set_current(self._run, current)
+        with self._lock:
+            self._stage = current
+            self._repo.set_current(self._run, self._with_live(current))
+
+    def _with_live(self, current: dict[str, Any]) -> dict[str, Any]:
+        """The stage, plus the live timeline when it belongs to the experiment the stage is about."""
+        if self._live is not None and self._live_key == (current.get("kind"), current.get("candidateId"), current.get("worker"), current.get("repeat")):
+            return {**current, "timeline": self._live}
+        return current
+
+    def timeline_update(self, key: ExperimentKey, timeline: dict[str, Any]) -> None:
+        with self._lock:
+            self._live, self._live_key = compact(timeline), (key.kind, key.candidate_id, key.worker, key.repeat)
+            if self._stage is not None:
+                self._repo.set_current(self._run, self._with_live(self._stage))
 
     def experiment_finished(self, outcome: ExperimentOutcome) -> None:
+        with self._lock:
+            self._live, self._live_key = None, None
         self._repo.finish_experiment(self._run, outcome)
 
     def candidate_finished(self, outcome) -> None:

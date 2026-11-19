@@ -5,10 +5,13 @@
 {% block page_css %}
 <link rel="stylesheet" href="{{ url_for('static', path='/css/placement-map.css') }}?v=placement-20261117">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/pages/recommendations.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/pages/failure-monitor.css') }}?v=monitor-20261120">
 {% endblock %}
 
 {% block content %}
 <div class="rx" data-role="rec-flow" data-all-workflows="true" data-pane="current">
+
+<div class="rx-offline" data-role="rec-offline-banner" hidden></div>
 
 <header class="rx-head">
     <div class="rx-head__title">
@@ -21,7 +24,7 @@
             <select class="rx-scope__input" id="rec-namespace-select" data-role="rec-namespace-select" disabled></select>
         </label>
         <label class="rx-scope__field" for="rec-node-select">
-            <span>If this node stops</span>
+            <span>Simulated worker failure</span>
             <select class="rx-scope__input" id="rec-node-select" data-role="rec-node-select" disabled></select>
         </label>
         <button type="button" class="secondary-button rx-scope__refresh" data-role="reload-button">Refresh</button>
@@ -29,7 +32,7 @@
 </header>
 
 <div class="rx-tabs" role="tablist" aria-label="Recommendations">
-    <button type="button" role="tab" class="rx-tabs__tab" id="rec-tab-current" data-pane-tab="current" aria-selected="true" aria-controls="rec-pane-current">Current recommendation</button>
+    <button type="button" role="tab" class="rx-tabs__tab" id="rec-tab-current" data-pane-tab="current" aria-selected="true" aria-controls="rec-pane-current">Ranked recommendations</button>
     <button type="button" role="tab" class="rx-tabs__tab" id="rec-tab-history" data-pane-tab="history" aria-selected="false" aria-controls="rec-pane-history" tabindex="-1">Past tests <span class="rx-tabs__count" data-role="rec-history-count" hidden></span></button>
     <span class="status-badge status-badge--muted status-badge--no-dot rx-tabs__basis" data-role="source-badge">Not loaded</span>
 </div>
@@ -307,9 +310,10 @@
 <script src="{{ url_for('static', path='/js/recommendation-action.js') }}?v=action-20261118" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-topology.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-journey.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/recommendation-proof.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/failure-monitor.js') }}?v=monitor-20261120" defer></script>
+<script src="{{ url_for('static', path='/js/recommendation-proof.js') }}?v=proof-20261121" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-context.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-operation.js') }}" defer></script>
 <script src="{{ url_for('static', path='/js/recommendation-apply-test.js') }}" defer></script>
-<script src="{{ url_for('static', path='/js/components/recommendations.js') }}" defer></script>
+<script src="{{ url_for('static', path='/js/components/recommendations.js') }}?v=rec-20261122" defer></script>
 {% endblock %}

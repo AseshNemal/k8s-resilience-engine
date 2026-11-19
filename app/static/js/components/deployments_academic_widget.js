@@ -107,8 +107,8 @@ window.DeploymentsAcademicWidget = (function () {
         const outages = counts.exposure;
         const allRight = Boolean(outages?.compared && outages.correct === outages.compared);
         let text = `⚠️ ${outages?.correct ?? 0} of ${outages?.compared ?? 0} predictions came true · ${failureRuns(evaluation)}`;
-        if (!evaluation.failure_experiments) text = "No real node failure has been recorded yet.";
-        else if (allRight) text = `✅ The model predicted every outage correctly · ${failureRuns(evaluation)} on Bookinfo`;
+        if (!evaluation.failure_experiments) text = "No node failure has been recorded yet.";
+        else if (allRight) text = `✅ In the recorded runs, the model predicted every outage correctly · ${failureRuns(evaluation)} on Bookinfo`;
         line.textContent = text;
         line.dataset.tone = allRight ? "ok" : "warn";
     }
@@ -214,7 +214,7 @@ window.DeploymentsAcademicWidget = (function () {
         card.append(
             make("h4", "proof-card__title", `💥 ${failure.node.split(", ").map(shortNode).join(" + ")} switched off`),
             downList("🧩 Predicted to go down", predicted),
-            downList("🖥️ Really went down", observed),
+            downList("🖥️ Went down in the recorded run", observed),
             make("span", "proof-card__verdict", allMatch ? "✅ Prediction came true" : "❌ Prediction was wrong"),
             more,
             rows,

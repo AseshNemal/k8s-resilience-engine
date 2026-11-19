@@ -65,3 +65,16 @@
 .pm-meter__fill { display: block; height: 100%; border-radius: 99px; }
 .pm-meter__fill[data-kind="before"] { background: var(--color-danger); }
 .pm-meter__fill[data-kind="after"] { background: var(--color-success); }
+
+.pm-change { margin: .6rem 0; max-width: 100%; overflow-x: auto; }
+.pm-change__grid { width: auto; border-collapse: collapse; font-size: .77rem; color: var(--color-text); }
+.pm-change__grid caption { text-align: left; font-weight: 650; padding: .25rem 0; }
+.pm-change__grid th, .pm-change__grid td { padding: .2rem .6rem; text-align: left; border-left: 1px solid var(--color-border); }
+.pm-change__grid th:first-child { border: 0; padding-left: 0; }
+.pm-change__grid th { color: var(--color-text-muted); font-weight: 500; }
+.pm-change__grid td { white-space: nowrap; }
+.pm-change__pods { display: inline-flex; gap: 2px; vertical-align: middle; }
+.pm-change__pods i { width: .65rem; height: .65rem; border-radius: 2px; border: 1px solid currentColor; background: currentColor; }
+.pm-change__grid tr:last-child td { color: var(--color-primary); }
+.pm-change__grid tr:last-child i { border-style: dashed; background: transparent; }
+.pm-change__count { margin-left: .25rem; font-variant-numeric: tabular-nums; }

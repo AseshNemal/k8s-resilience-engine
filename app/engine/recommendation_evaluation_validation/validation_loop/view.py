@@ -16,6 +16,7 @@ The rules this module enforces on what the page may say:
 from datetime import datetime, timezone
 from typing import Any
 
+from app.engine.recommendation_evaluation_validation.monitoring.summary import compare_episodes, summarize
 from app.engine.recommendation_evaluation_validation.validation_loop.loop import STAGES, observed_estimate
 
 STALE_AFTER_S = 180.0
@@ -86,7 +87,7 @@ def _matrix(plan: dict[str, Any], experiments: list[dict[str, Any]]) -> dict[str
 def _metrics(plan: dict[str, Any], experiments: list[dict[str, Any]], run: dict[str, Any]) -> dict[str, Any]:
     mode = plan.get("mode") or {}
     workers, repeats = mode.get("workers") or [], int(mode.get("repeats") or 1)
-    planned = len(plan.get("candidates") or []) * len(workers) * repeats + (len(workers) if mode.get("measureBaseline") else 0)
+    planned = 1 if mode.get("mode") == "LAB" else len(plan.get("candidates") or []) * len(workers) * repeats + (len(workers) if mode.get("measureBaseline") else 0)
     counts: dict[str, int] = {}
     for e in experiments:
         counts[e["status"]] = counts.get(e["status"], 0) + 1
@@ -181,6 +182,75 @@ def _result(run: dict[str, Any], experiments: list[dict[str, Any]]) -> dict[str,
             "improvement": improvement, "modelMismatches": mismatches, "probeFindings": probe_findings}
 
 
+def _prediction_check(outcome: dict[str, Any], summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The model's prediction for this failure set against what the timeline measured. Only for services of the workflow."""
+    predicted = outcome.get("predicted") or {}
+    if summary is None or "servicesDown" not in predicted:
+        return None
+    in_workflow = set(predicted.get("workflowServices") or [])
+    observed = set(summary.get("servicesDown") or [])
+    expected = set(predicted.get("servicesDown") or [])
+    inside = observed & in_workflow if in_workflow else observed
+    return {"predictedDown": sorted(expected), "observedDown": sorted(inside),
+            "predictedButStayedUp": sorted(expected - inside), "wentDownButNotPredicted": sorted(inside - expected),
+            "otherServicesDown": sorted(observed - inside), "matches": expected == inside,
+            "workflowSurvivesPredicted": predicted.get("workflowSurvives"),
+            "requestsFailed": ((summary.get("requests") or {}).get("windowFailed")),
+            "note": ("The requests were judged by your workflow check; the model predicts service readiness. A page can keep "
+                     "answering while a service is down, and fail while every service is Ready.")}
+
+
+def _monitor(run: dict[str, Any], experiments: list[dict[str, Any]], status: str) -> dict[str, Any]:
+    """The measured behaviour: the failure in progress (live) and a summary of each finished one, with before/after for a node.
+
+    Raw samples are not returned here (a poll must stay small); ``GET .../timeline`` returns them for one experiment. A summary is
+    computed from the recorded samples only. Nothing in this section is a prediction.
+    """
+    current = run.get("current") or {}
+    live_timeline = current.get("timeline") if status in RUNNING_STATES else None
+    episodes: list[dict[str, Any]] = []
+    for e in experiments:
+        outcome = e.get("outcome") or {}
+        timeline = outcome.get("timeline")
+        if not timeline:
+            continue
+        summary = summarize(timeline)
+        episodes.append({"kind": e["kind"], "candidateId": e["candidateId"], "worker": e["worker"], "repeat": e["repeat"],
+                         "status": e["status"], "summary": summary, "marks": timeline.get("marks"),
+                         "predictionCheck": _prediction_check(outcome, summary)})
+    baselines = {ep["worker"]: ep["summary"] for ep in episodes if ep["kind"] == "baseline"}
+    comparisons = []
+    for ep in episodes:
+        if ep["kind"] != "candidate":
+            continue
+        comparisons.append({"candidateId": ep["candidateId"], "worker": ep["worker"], "repeat": ep["repeat"],
+                            **compare_episodes(baselines.get(ep["worker"]), ep["summary"])})
+    live = None
+    if live_timeline:
+        live = {"worker": current.get("worker"), "kind": current.get("kind"), "candidateId": current.get("candidateId"),
+                "repeat": current.get("repeat"), "stage": current.get("stage"), "timeline": live_timeline,
+                "summary": summarize(live_timeline)}
+    return {"live": live, "episodes": episodes, "comparisons": comparisons, "evidence": "MEASURED",
+            "note": "Measured from the cluster and from real requests while a worker was stopped. Not a prediction."}
+
+
+def _lab(plan: dict[str, Any], experiments: list[dict[str, Any]], status: str, run: dict[str, Any]) -> dict[str, Any] | None:
+    """The Failure lab's own picture of a run: which workers, what the placement rule said, what was held and measured. None for other modes."""
+    mode = plan.get("mode") or {}
+    if mode.get("mode") != "LAB":
+        return None
+    finished = next((e for e in experiments if e["kind"] == "baseline" and e["status"] in FINISHED), None)
+    outcome = (finished or {}).get("outcome") or {}
+    predicted = outcome.get("predicted") or {}
+    current = run.get("current") or {}
+    return {"nodes": list(mode.get("workers") or []), "holdS": mode.get("holdS"), "planned": plan.get("lab"),
+            "stage": current.get("stage") if status in RUNNING_STATES else None, "detail": current.get("detail") if status in RUNNING_STATES else None,
+            "heldS": predicted.get("heldS"), "placementImpact": predicted.get("placementImpact"),
+            "observed": (outcome.get("readiness") or {}).get("observed"), "recovery": outcome.get("recovery"),
+            "reasons": outcome.get("reasons") or [], "finished": finished is not None,
+            "canRestoreNow": status == "RUNNING"}
+
+
 def _timing(run: dict[str, Any], now: datetime) -> dict[str, Any]:
     """Seconds since the run started, and its length once it has ended. From the stored timestamps only."""
     started, finished = _parse(run.get("startedAt")), _parse(run.get("finishedAt"))
@@ -221,9 +291,14 @@ def build_view(run: dict[str, Any], experiments: list[dict[str, Any]], durations
         "startedAt": run.get("startedAt"), "finishedAt": run.get("finishedAt"), "timing": _timing(run, now),
         "baselineMeasured": bool(mode.get("measureBaseline")),
         "evidenceLevel": "L2_PROBE" if plan.get("probe") else "L1_READINESS",
+        "monitor": _monitor(run, experiments, status),
+        "lab": _lab(plan, experiments, status, run),
         "canStartAnother": status in ("COMPLETED", "INTERRUPTED", "FAILED") and not (run.get("recovery") and not run["recovery"].get("complete")),
     }
     if research:
-        view["research"] = {"experiments": experiments, "events": run.get("events"), "approval": run.get("approval"),
+        # The raw samples are large; the Research view gets their count, and ``GET .../timeline`` returns them for one experiment.
+        light = [{**e, "outcome": {**e["outcome"], "timeline": {"samples": len(e["outcome"]["timeline"].get("samples") or [])}}
+                  if (e.get("outcome") or {}).get("timeline") else e.get("outcome")} for e in experiments]
+        view["research"] = {"experiments": light, "events": run.get("events"), "approval": run.get("approval"),
                             "plan": plan, "recovery": run.get("recovery")}
     return view

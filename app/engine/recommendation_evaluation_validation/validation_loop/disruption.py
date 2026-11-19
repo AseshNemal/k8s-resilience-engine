@@ -93,10 +93,17 @@ class DisruptionReport:
                 "blocked": bool(self.blocks or self.problems), "needsAcknowledgement": [f.workload for f in self.to_acknowledge]}
 
 
-def analyse(worker: str, pods: list[PodFact], app_namespace: str, critical_namespaces: tuple[str, ...] = DEFAULT_CRITICAL_NAMESPACES) -> DisruptionReport:
-    """Per workload with a pod on ``worker`` (outside the application's namespace): BLOCK, ACKNOWLEDGE or NODE_LOCAL."""
-    report = DisruptionReport(worker)
-    if not worker:
+def analyse(worker: "str | tuple[str, ...] | list[str]", pods: list[PodFact], app_namespace: str,
+            critical_namespaces: tuple[str, ...] = DEFAULT_CRITICAL_NAMESPACES, *, allow_essential: bool = False) -> DisruptionReport:
+    """Per workload with a pod on ``worker`` (outside the application's namespace): BLOCK, ACKNOWLEDGE or NODE_LOCAL.
+
+    ``worker`` may be several workers stopped together: "elsewhere" then means on a node that is not stopped. ``allow_essential`` is for the
+    Failure lab only: an essential workload that would become unavailable is then an ACKNOWLEDGE (the person must accept it by name, and the
+    reason says it is essential) instead of a BLOCK. A workload whose state cannot be read is still a BLOCK.
+    """
+    nodes = {worker} if isinstance(worker, str) else set(worker)
+    report = DisruptionReport(worker if isinstance(worker, str) else "+".join(sorted(nodes)))
+    if not nodes or "" in nodes:
         report.problems.append("no worker was named")
         return report
     ready_elsewhere: dict[tuple[str, str, str], int] = defaultdict(int)
@@ -104,7 +111,7 @@ def analyse(worker: str, pods: list[PodFact], app_namespace: str, critical_names
     for pod in pods:
         if pod.node is None and pod.phase in (None, "Pending"):
             continue      # not scheduled anywhere: not on this worker, and not a replica that is up
-        if pod.node == worker:
+        if pod.node in nodes:
             on_worker[pod.workload()].append(pod)
         elif pod.ready is True:
             ready_elsewhere[pod.workload()] += 1
@@ -122,10 +129,10 @@ def analyse(worker: str, pods: list[PodFact], app_namespace: str, critical_names
             continue
         is_critical = namespace in critical
         if kind == "Pod":
-            severity = BLOCK if is_critical else ACKNOWLEDGE
+            severity = (ACKNOWLEDGE if allow_essential else BLOCK) if is_critical else ACKNOWLEDGE
             reason = "a bare pod: nothing recreates it" + (" and it is in a critical namespace" if is_critical else "")
         elif elsewhere == 0:
-            severity = BLOCK if is_critical else ACKNOWLEDGE
+            severity = (ACKNOWLEDGE if allow_essential else BLOCK) if is_critical else ACKNOWLEDGE
             reason = ("no Ready pod would remain on another node" + (" for an essential service" if is_critical else ""))
         elif kind == "DaemonSet":
             severity, reason = NODE_LOCAL, "a node-local DaemonSet pod; Ready pods of it remain on other nodes"
@@ -154,12 +161,14 @@ def make_guard(*, read_pods: Callable[[], list[dict[str, Any]]], read_graph: Cal
     Called before EVERY kill, so it reads the cluster each time. A read that fails refuses. ``acknowledged`` holds the
     ``namespace/Kind/name`` of the non-critical workloads the person accepted at approval; it never covers a BLOCK.
     """
-    def guard(worker: str, candidate_id: str | None) -> None:
+    def guard(worker: "str | tuple[str, ...] | list[str]", candidate_id: str | None, *, allow_essential: bool = False) -> None:
+        many = not isinstance(worker, str)
+        label = "+".join(worker) if many else worker
         try:
             graph = read_graph()
             pods = [PodFact.from_dict(item) for item in read_pods()] if check_outside_namespace else []
         except Exception as error:      # noqa: BLE001  (fail closed)
-            raise KillBlocked("EVIDENCE_INCOMPLETE", f"the cluster could not be read before stopping {worker}: {error}") from error
+            raise KillBlocked("EVIDENCE_INCOMPLETE", f"the cluster could not be read before stopping {label}: {error}") from error
         unhealthy = health_problems(graph, namespace)
         if unhealthy:
             raise KillBlocked("CLUSTER_NOT_HEALTHY", "; ".join(unhealthy[:4]))
@@ -167,11 +176,11 @@ def make_guard(*, read_pods: Callable[[], list[dict[str, Any]]], read_graph: Cal
             return
         if not pods:
             raise KillBlocked("EVIDENCE_INCOMPLETE", "the pods of the cluster could not be listed")
-        report = analyse(worker, pods, namespace, critical_namespaces)
+        report = analyse(worker, pods, namespace, critical_namespaces, allow_essential=allow_essential)
         if report.problems:
             raise KillBlocked("EVIDENCE_INCOMPLETE", "; ".join(report.problems))
         if report.blocks:
-            raise KillBlocked("ESSENTIAL_WORKLOAD", "stopping " + worker + " would make unavailable: "
+            raise KillBlocked("ESSENTIAL_WORKLOAD", "stopping " + label + " would make unavailable: "
                               + "; ".join(f"{f.workload} ({f.reason})" for f in report.blocks[:4]))
         missing = [f.workload for f in report.to_acknowledge if f.workload not in acknowledged]
         if missing:

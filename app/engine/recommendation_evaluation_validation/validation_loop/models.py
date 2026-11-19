@@ -16,6 +16,7 @@ class Mode(str, Enum):
     SMOKE = "SMOKE"        # 1 candidate x 1 worker x 1 repeat: does the machinery work at all?
     QUICK = "QUICK"        # top 1 x every eligible worker x 1 repeat: preliminary evidence
     FULL = "FULL"          # top 2 x every eligible worker x 2 repeats (configurable), measured baseline: repeatable evidence
+    LAB = "LAB"            # the person's own choice of workers, stopped together, held for a chosen time: an exploratory experiment, no change applied
 
 
 class ExperimentStatus(str, Enum):
@@ -68,6 +69,14 @@ class LoopSettings:
     full_repeats: int = 2
     # Namespaces whose workloads must not be taken down with a worker (Docker Desktop target); extend through configuration.
     critical_namespaces: tuple[str, ...] = ("kube-system", "local-path-storage")
+    # The measured timeline of each failure (monitoring/): how often to read the application, how many readings to take before the
+    # stop, and the longest the loop waits after the node is back for every service to return to its starting replica count.
+    monitor_interval_s: float = 2.0
+    monitor_pre_roll: int = 3
+    monitor_tail_max_s: float = 60.0
+    # The Failure lab: the longest a chosen set of workers may be held down in one run, and the shortest.
+    lab_hold_min_s: float = 10.0
+    lab_hold_max_s: float = 900.0
 
 
 @dataclass(frozen=True)
@@ -79,6 +88,8 @@ class ModePlan:
     workers: tuple[str, ...]
     repeats: int
     measure_baseline: bool
+    simultaneous: bool = False       # LAB: every worker is stopped at the same moment, not one after the other
+    hold_s: float | None = None      # LAB: how long they are held down once the failure is observed
 
     @property
     def baseline_failures(self) -> int:
@@ -96,12 +107,13 @@ class ModePlan:
     def to_dict(self) -> dict[str, Any]:
         return {"mode": self.mode.value, "candidates": self.candidates, "workers": list(self.workers), "repeats": self.repeats,
                 "measureBaseline": self.measure_baseline, "plannedFailures": self.planned_failures(),
-                "preliminary": self.preliminary}
+                "preliminary": self.preliminary, "simultaneous": self.simultaneous, "holdS": self.hold_s}
 
 
 def resolve_mode(mode: Mode, eligible_workers: list[str], *, riskiest_worker: str | None = None,
                  smoke_worker: str | None = None, candidates: int | None = None, repeats: int | None = None,
-                 measure_baseline: bool | None = None, settings: LoopSettings | None = None) -> ModePlan:
+                 measure_baseline: bool | None = None, settings: LoopSettings | None = None,
+                 lab_workers: list[str] | None = None, hold_s: float | None = None) -> ModePlan:
     """The plan a mode stands for. Full always measures a baseline; Smoke and Quick may, when asked.
 
     ``candidates`` and ``repeats`` are honoured for Full only (and capped); Smoke and Quick are fixed shapes.
@@ -110,6 +122,18 @@ def resolve_mode(mode: Mode, eligible_workers: list[str], *, riskiest_worker: st
     workers = tuple(sorted(dict.fromkeys(eligible_workers)))
     if not workers:
         raise ValidationRefusedError("NO_ELIGIBLE_WORKER", "There is no worker node that can be taken down for the test.")
+    if mode is Mode.LAB:
+        chosen = tuple(sorted(dict.fromkeys(lab_workers or ())))
+        if not chosen:
+            raise ValidationRefusedError("NO_WORKER_CHOSEN", "Choose at least one worker to stop.")
+        outside = [w for w in chosen if w not in workers]
+        if outside:
+            raise ValidationRefusedError("WORKER_NOT_ELIGIBLE", f"{outside[0]!r} is not a worker that can be stopped (it must be a Ready worker, never a control plane).")
+        hold = float(hold_s if hold_s is not None else 60.0)
+        if not settings.lab_hold_min_s <= hold <= settings.lab_hold_max_s:
+            raise ValidationRefusedError("HOLD_OUT_OF_RANGE", f"Hold the workers down for {settings.lab_hold_min_s:.0f}-{settings.lab_hold_max_s:.0f} seconds.")
+        # One kill per worker, counted against the grant like every other kill; the grant carries them as baseline failures.
+        return ModePlan(mode, 0, chosen, 1, True, simultaneous=True, hold_s=hold)
     if mode is Mode.SMOKE:
         chosen = smoke_worker or riskiest_worker or workers[0]
         if chosen not in workers:
@@ -153,6 +177,7 @@ class ExperimentOutcome:
     recovery: dict[str, Any] = field(default_factory=dict)
     duration_s: float | None = None
     experiment_id: str | None = None
+    timeline: dict[str, Any] | None = None    # MEASURED samples of this failure (monitoring/timeline.py); None when none was recorded
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.key.kind, "candidateId": self.key.candidate_id, "worker": self.key.worker, "repeat": self.key.repeat,
@@ -160,7 +185,7 @@ class ExperimentOutcome:
                 "readiness": self.readiness, "probe": self.probe, "predicted": self.predicted, "comparison": self.comparison,
                 "predictionError": self.prediction_error, "modelAgrees": self.model_agrees,
                 "probeDisagreesWithReadiness": self.probe_disagrees_with_readiness, "recovery": self.recovery,
-                "durationS": self.duration_s, "experimentId": self.experiment_id}
+                "durationS": self.duration_s, "experimentId": self.experiment_id, "timeline": self.timeline}
 
 
 @dataclass
