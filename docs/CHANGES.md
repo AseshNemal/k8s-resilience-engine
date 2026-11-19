@@ -2,7 +2,7 @@
 
 ## 2026-11-19 (release): 0.1.0-beta.3
 
-- Fail a Node page truth and clarity (stopped workers drawn as stopped, counts marked not updated until Kubernetes notices, banner with Restore, summary and next step on top, hold presets from 2 minutes), plus the Workflow editor, Recommendations, Topology and wording fixes in the commit "Fix the open UI bugs found walking the real flow", and the product-logo extension icon and Docker Desktop screenshot. Version labels and docs bumped to beta.3. No schema, route or research-logic change.
+- Fail a Node page truth and clarity (stopped workers drawn as stopped, counts marked not updated until Kubernetes notices, banner with Restore, summary and next step on top, hold presets from 2 minutes), plus the Workflow editor and Recommendations fixes and Topology dark-mode styling (done in the extension stylesheet; Member 2's page files are untouched), and the product-logo extension icon and Docker Desktop screenshot. Version labels and docs bumped to beta.3. No schema, route or research-logic change.
 
 ## 2026-11-19 (release): extension icon is the product logo
 
