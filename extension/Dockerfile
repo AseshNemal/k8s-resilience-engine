@@ -79,6 +79,7 @@ RUN python -m pip uninstall -y pip setuptools
 LABEL org.opencontainers.image.title="K8s Resilience Engine" \
       org.opencontainers.image.description="Dependency-aware resilience assessment for Kubernetes deployments, inside Docker Desktop. Nothing is applied or stopped without your approval of exactly what will happen." \
       org.opencontainers.image.vendor="K8s Resilience Engine" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       com.docker.desktop.extension.api.version=">= 0.2.3" \
       com.docker.extension.detailed-description="Reads a local Kubernetes cluster and shows which workflows survive worker-node failures. A change is applied, or a worker node stopped on a test run, only after you approve exactly what will happen; everything is put back afterwards." \
       com.docker.extension.changelog="First public beta. Read-only assessment of the Docker Desktop Kubernetes cluster, ranked recommendations, and an optional approved Apply, Reset and node-failure test. Verified on macOS (Apple silicon); Windows and Linux are built but not yet tested on real machines." \
@@ -89,6 +90,7 @@ LABEL org.opencontainers.image.title="K8s Resilience Engine" \
       com.docker.extension.categories="kubernetes,utility-tools"
 
 COPY extension/metadata.json extension/compose.yaml extension/icon.svg /
+COPY LICENSE /licenses/LICENSE
 COPY --from=render /out /ui
 COPY extension/ui-src/shim.js extension/ui-src/chrome.js extension/ui-src/autoconnect.js extension/ui-src/namespaces.js extension/ui-src/trace-service.js extension/ui-src/tracing-panel.js extension/ui-src/bookinfo-tracing.js extension/ui-src/outstanding.js extension/ui-src/connect.js extension/ui-src/connect-auto.js extension/ui-src/docker.css /ui/
 COPY --from=helper --chmod=0755 /out/darwin/resilience-helper /darwin/resilience-helper
