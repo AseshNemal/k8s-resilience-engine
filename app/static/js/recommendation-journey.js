@@ -17,8 +17,8 @@
 
     const STRATEGY = {
         TOPOLOGY_SPREAD: "Spread replicas across nodes",
-        REPLICA_INCREASE: "Add a replica",
-        REPLICA_INCREASE_PLUS_2: "Add two replicas",
+        REPLICA_INCREASE: "Add a replica and spread replicas",
+        REPLICA_INCREASE_PLUS_2: "Add two replicas and spread replicas",
         REPLICA_INCREASE_ANTI_AFFINITY: "Add a replica, kept on another node",
         POD_ANTI_AFFINITY: "Keep replicas on different nodes",
         COMBINATION: "Combined fix",
@@ -50,7 +50,7 @@
         const services = String((candidate && candidate.service) || "").split("+").filter(Boolean);
         const parts = (candidate && Array.isArray(candidate.parts) && candidate.parts) || [];
         const kinds = [...new Set(parts.map((part) => part.type))];
-        const title = candidate && candidate.type === "COMBINATION" && kinds.length === 1 ? `${strategyTitle(kinds[0])} to each` : strategyTitle(candidate && candidate.type);
+        const title = candidate && candidate.type === "COMBINATION" && kinds.length === 1 ? `${strategyTitle(kinds[0])} for each service` : strategyTitle(candidate && candidate.type);
         return { title, services, target: services.join(" + ") };
     }
 
@@ -334,6 +334,8 @@
         const o = options || {};
         container.replaceChildren();
         const groups = partition(detail);
+        const placement = global.ResiliencePlacement;
+        const before = placement?.fromDeployment(detail.currentDeployment);
         const all = [...groups.useful, ...groups.noGain, ...groups.ruledOut];
         const selected = all.find((c) => c.id === o.selectedId) || null;
         const total = exposure(detail, null).workflows.length;
@@ -371,6 +373,9 @@
                 lead.append(el(doc, "p", `If ${o.failedNode} stops: ${percent(n.node.before)} → ${percent(n.node.after)}.`
                     + (n.after > 0 ? " Another node then becomes the worst case; the table above shows which workflows it still stops." : ""), "rx-lead__note"));
             }
+            if (placement) lead.append(placement.changeFigure(selected, before, placement.fromDeployment(selected.simulatedDeployment)));
+            if (selected.ranking?.rank != null) tags.append(el(doc, "span", `Rank ${selected.ranking.rank} · feasible`, "rx-tag"));
+            if (selected.rootCause) lead.append(el(doc, "p", selected.rootCause, "rx-lead__note"));
             lead.append(facts(selected));
             container.append(lead);
         }
@@ -385,6 +390,7 @@
             text.append(heading, el(doc, "span", name.target, "rx-fix__target"));
             item.append(text);
             if (c.feasible) {
+                if (placement) text.append(placement.changeFigure(c, before, placement.fromDeployment(c.simulatedDeployment)));
                 item.append(meter(doc, numbers(c)), facts(c));
                 const allowed = !o.canSelect || o.canSelect(c);
                 const choose = el(doc, "button", "Select", "secondary-button rx-fix__choose", { type: "button", "data-select": c.id });

@@ -58,6 +58,15 @@ def test_anti_affinity_cannot_hold_more_replicas_than_there_are_nodes_and_says_s
 
 # --- +2 replicas under a spread ------------------------------------------------------------------------------------------------
 
+def test_missing_hostname_evidence_cannot_authorize_hard_anti_affinity():
+    g = graph(["n1", "n1", "n1"])
+    for node in g.nodes:
+        node.labels.pop(HOSTNAME)
+    result = check_replica_increase_anti_affinity_feasibility(g, "svc", no_taints(g))
+    assert result.status is not FEASIBLE
+    assert any(HOSTNAME in missing for missing in result.missing_evidence)
+
+
 def test_two_more_replicas_are_spread_over_the_nodes():
     g = graph(["n1", "n1"])
 

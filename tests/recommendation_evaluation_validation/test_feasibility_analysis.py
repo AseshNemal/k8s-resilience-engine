@@ -786,6 +786,14 @@ def test_holding_the_placement_refuses_a_skewed_spread():
     assert hold(graph).status is INFEASIBLE
 
 
+def test_spread_counts_hostname_domains_when_two_workers_share_a_label():
+    nodes = three_nodes()
+    nodes[1].labels[HOSTNAME] = nodes[0].labels[HOSTNAME]
+    # Both replicas are in the same labelled domain and the third worker's domain is empty.
+    graph = make_graph(nodes, make_service(placement=("n1", "n2")))
+    assert hold(graph).status is INFEASIBLE
+
+
 def test_holding_the_placement_counts_the_pods_already_there_in_the_nodes_capacity():
     # n2 has no CPU left because the two replicas on it already use it; keeping them there must be accepted.
     nodes = [make_node("n1"), make_node("n2", cpu=0.0, memory=0.0), make_node("n3")]

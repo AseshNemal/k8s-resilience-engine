@@ -111,13 +111,14 @@ from app.shared.schemas.deployment import DeploymentGraph, NodeModel, PodModel, 
 
 # The graph builder gives a pod the scheduler has not placed this node name.
 UNSCHEDULED_NODE = "unscheduled"
+HOSTNAME_LABEL = "kubernetes.io/hostname"
 DEFAULT_MAX_SKEW = 1
 # How many partial placements the search may expand per question before it gives up (and says so).
 DEFAULT_SEARCH_BUDGET = 20_000
 
 # The strategy a TOPOLOGY_SPREAD verdict is reached under. Changing how the proposal is modelled must change this,
 # so an approval made under the old model is not read as one made under the new.
-STRATEGY_MODEL = "topology-spread/kubernetes.io-hostname/DoNotSchedule/taints-Honor/v2"
+STRATEGY_MODEL = "topology-spread/kubernetes.io-hostname/DoNotSchedule/taints-Honor/v3"
 
 ASSUMPTIONS = (
     "The proposal is modelled as a topologySpreadConstraint on kubernetes.io/hostname with "
@@ -490,6 +491,10 @@ class _Context:
         self._check_taints(node, block)
         if self.request is not None:
             cap = self._check_capacity(node, resident, block)
+        if domain is not False:
+            for key in {HOSTNAME_LABEL, *self.self_anti_keys}:
+                if _label(node, key) is None:
+                    self.need(f"node label {key} for the proposed placement", node.name)
         self._check_pod_rules(node, block)
         return _NodeState(node, blockers, domain, cap, self.evidence.node_taints.get(node.name) is not None)
 
@@ -589,7 +594,15 @@ def _rejection(ctx: _Context, state: _NodeState, counts: Counter, planned: Count
         floor = 0 if spread.min_domains and len(totals) < spread.min_domains else min(totals.values())
         if totals[_label(state.node, spread.key)] + 1 - floor > spread.max_skew:
             return "TOPOLOGY_SPREAD"
-    if counts[name] + 1 - min(counts[d] for d in proposed | {name}) > ctx.max_skew:
+    # Hostname label values, not node object names, define the patch's spread domains.
+    # An unknown value is optimistic for the search and is recorded as missing evidence above.
+    domains: Counter = Counter()
+    for worker in proposed | {name}:
+        # Tuple keys distinguish unknown domains from all observed label strings.
+        domain_key = _label(states[worker].node, HOSTNAME_LABEL) or (worker,)
+        domains[domain_key] += counts[worker]
+    target = _label(state.node, HOSTNAME_LABEL) or (name,)
+    if domains[target] + 1 - min(domains.values()) > ctx.max_skew:
         return "TOPOLOGY_SPREAD"
     return None
 

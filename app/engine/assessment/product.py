@@ -100,22 +100,31 @@ def _card_from_live(candidate: dict) -> dict[str, Any]:
         benefit = f"Predicted workflow loss falls by {reduction:g} percentage points."
     elif before is not None and after is not None and candidate.get("feasible"):
         benefit = f"Predicted blast radius moves from {before:g}% to {after:g}%."
+    metric = None
+    coverage = candidate.get("coverage") or {}
+    worst_before, worst_after = _number(coverage.get("worstCaseBefore")), _number(coverage.get("worstCaseAfter"))
+    if worst_before is not None and worst_after is not None:
+        metric = {"label": "Worst predicted workflow loss across workers", "before": worst_before, "after": worst_after}
+    elif before is not None and after is not None:
+        metric = {"label": "Predicted workflow loss on the assessed node", "before": before, "after": after}
     notes = candidate.get("notes") or []
     feasibility = (candidate.get("feasibility") or {}).get("explanation")
     return {
         "id": candidate.get("id"),
+        "rank": (candidate.get("ranking") or {}).get("rank"),
+        "parts": [{"service": part["service"], "type": part["type"]} for part in candidate.get("parts") or []],
         "title": _title(candidate.get("type"), candidate.get("service")),
         "service": candidate.get("service"),
         "type": candidate.get("type"),
         "why": candidate.get("selectionJustification") or candidate.get("rootCause"),
         "benefit": benefit,
         "cost": (candidate.get("cost") or {}).get("resource"),
-        "costDetail": COST.get((candidate.get("cost") or {}).get("resource"), "Resource cost was not reported."),
+        "costDetail": ((candidate.get("cost") or {}).get("configuration") if candidate.get("type") == "COMBINATION"
+                       else COST.get((candidate.get("cost") or {}).get("resource"), "Resource cost was not reported.")),
         "limitation": notes[0] if notes else feasibility,
         "feasible": bool(candidate.get("feasible")),
         "selected": bool(candidate.get("selected")),
-        "metric": {"label": "Predicted workflow loss, worst case", "before": before, "after": after}
-        if before is not None and after is not None else None,
+        "metric": metric,
         "afterPlacement": placement_view(candidate.get("simulatedDeployment")) if candidate.get("feasible") else None,
     }
 
@@ -156,6 +165,7 @@ def _card_from_deployment(row: dict) -> dict[str, Any]:
     why = row.get("rootCause") if not detail or detail.lower().startswith("ranked") else detail
     return {
         "id": row.get("id"),
+        "rank": ranking.get("rank"),
         "title": _title(row.get("type"), row.get("service")),
         "service": row.get("service"),
         "type": row.get("type"),
@@ -187,7 +197,8 @@ def _pack(cards: list[dict], *, mode: str, failed_node: str | None, note: str, a
     """
     selected = next((card for card in cards if card["selected"] and card["feasible"]), None)
     if selected is None:
-        selected = next((card for card in cards if card["feasible"]), None)
+        ranked = [card for card in cards if card["feasible"] and card["rank"] is not None]
+        selected = min(ranked, key=lambda card: card["rank"], default=None)
     feasible = [card for card in cards if card["feasible"] and card is not selected]
     alternatives = [card for card in feasible
                     if selected and card["service"] == selected["service"] and _cost_rank(card) <= _cost_rank(selected)][:3]
@@ -210,6 +221,7 @@ def _pack(cards: list[dict], *, mode: str, failed_node: str | None, note: str, a
         "failedNode": failed_node,
         "best": selected,
         "alternatives": alternatives,
+        "options": sorted((c for c in cards if c["feasible"]), key=lambda c: (c["rank"] is None, c["rank"] or 0)),
         "followUps": follow_ups,
         "blocked": blocked,
         "considered": len(cards),
@@ -218,7 +230,7 @@ def _pack(cards: list[dict], *, mode: str, failed_node: str | None, note: str, a
 
 
 def _workflow_recommendation(snapshot) -> dict[str, Any]:
-    from app.engine.recommendation_evaluation_validation.explanation import describe_live_recommendation
+    from app.engine.recommendation_evaluation_validation.portfolio_pipeline import describe_portfolio
     from app.engine.recommendation_evaluation_validation.live_pipeline import (
         EvidenceProvenance,
         enrich_scheduling_facts,
@@ -229,7 +241,7 @@ def _workflow_recommendation(snapshot) -> dict[str, Any]:
 
     overview = snapshot.public
     graphs = snapshot.evaluated_workflows
-    subject = WorkflowPortfolio(tuple(graphs)) if len(graphs) > 1 else graphs[0]
+    subject = WorkflowPortfolio(tuple(graphs))
     deployment, _facts = enrich_scheduling_facts(snapshot.discovery.graph.model_copy(deep=True), overview["namespace"])
     live = evaluate_recommendation(
         subject, deployment,
@@ -237,7 +249,7 @@ def _workflow_recommendation(snapshot) -> dict[str, Any]:
                            (overview.get("topology") or {}).get("status"), None),
         scheduling_evidence=scheduling_evidence_for(deployment),
     )
-    described = describe_live_recommendation(live)
+    described = describe_portfolio(live)
     cards = [_card_from_live(candidate) for candidate in described.get("candidates") or []]
     evidence = described.get("evidence") or {}
     return _pack(
@@ -257,6 +269,8 @@ def _deployment_recommendation(snapshot, failed_node: str | None = None) -> dict
     selected = findings.get("selectedCandidateId")
     for card in cards:
         card["selected"] = card["id"] == selected
+        if card["selected"] and findings.get("selectionNote"):
+            card["why"] = findings["selectionNote"]
     exposed = {name: node["node"] for node in snapshot.public.get("nodes") or []
                for name in node.get("servicesDown") or []}
     return _pack(cards, mode="deployment", failed_node=findings.get("failedNode"), approval_allowed=False, note=NOTE,

@@ -11,6 +11,45 @@ Workflow → Service → Pod → Node → Failure Domain
 **Project ID:** J26-SE-311 · **Topic:** Dependency Aware Failure Domain Risk Assessment for Kubernetes Deployed Microservice Architectures
 · **Stack:** FastAPI, Jinja2/HTML/CSS/vanilla JS, SQLite (extension) or PostgreSQL
 
+## Install the Docker Desktop extension
+
+The installer builds Resilience Engine from this checkout and adds it to the Docker Desktop sidebar. You can install it before connecting a Kubernetes cluster.
+
+1. Install and start Docker Desktop for your operating system. On Windows, use Linux containers. The project has verified a native installation on an Apple silicon Mac. Native Windows and Linux installations await verification. The Windows helper currently supports x64 only. [Mac setup](https://docs.docker.com/desktop/setup/install/mac-install/) · [Windows setup](https://docs.docker.com/desktop/setup/install/windows-install/) · [Linux setup](https://docs.docker.com/desktop/setup/install/linux/)
+2. In **Docker Desktop → Settings → Extensions**, select **Enable Docker Extensions**, clear **Allow only extensions distributed through the Docker Marketplace**, and select **Apply**. This permits installation from the locally built image. [Docker extension settings](https://docs.docker.com/extensions/settings-feedback/)
+3. For the default install with tests, put Python 3.13, Node.js 22 and Go 1.26.11 on your PATH. Open a terminal in the repository root, where `requirements.txt` and `scripts/` are located. To get a fresh copy, use the following commands.
+
+   ```sh
+   git clone https://github.com/AseshNemal/k8s-resilience-engine.git
+   cd k8s-resilience-engine
+   ```
+
+### macOS and Linux
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+./scripts/extension-manage.sh install
+./scripts/extension-manage.sh status
+```
+
+### Windows (PowerShell or Command Prompt)
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\scripts\extension-manage.cmd install
+.\scripts\extension-manage.cmd status
+```
+
+Both launchers run the Python, Go and JavaScript tests, build the image, and install it. To build without the host-side tests, use `install --skip-checks` with your platform's launcher. That path needs only Docker Desktop and Python 3.9+ on the host and skips the virtual environment and dependency setup above.
+
+### Open and update
+
+When `status` reports the extension is running, open **Resilience Engine** in Docker Desktop’s sidebar. To assess an application, open **Connect cluster**, review the access request for your test cluster, then select the application in **Assessment**.
+
+After pulling new code, run `./scripts/extension-manage.sh update` on macOS or Linux, or `.\scripts\extension-manage.cmd update` on Windows. Add `--dry-run` to preview an install or update. [Extension troubleshooting](docs/EXTENSION.md#troubleshooting) · [Test-cluster setup](docs/DOCKER.md)
+
 ## Team and components
 
 Four sequential components; each consumes only the previous one's JSON output (contracts in `app/shared/schemas/`).
@@ -22,7 +61,7 @@ Four sequential components; each consumes only the previous one's JSON output (c
 | K.V.D.Y.R. Karawita | IT23236882 | 3. Cross-Layer Failure Prediction | `failure_impact_prediction/` |
 | L.A. Nemal | IT23236264 | 4. Recommendation and Validation | `recommendation_evaluation_validation/` |
 
-## Run it
+## Run the standalone web app
 
 Python 3.11+ (developed on 3.13).
 
@@ -37,9 +76,6 @@ node --test tests/frontend/*.test.mjs extension/ui-src/*.test.mjs
 The app reads the cluster your kubeconfig points at, read-only. It never serves sample data in place of live evidence;
 if the cluster can't be read it says so. Writes (Apply, Reset) happen only on a named person's explicit request and need
 `RESILIENCE_ALLOW_CLUSTER_WRITES=1`.
-
-**Docker Desktop extension** (the normal way to use it): `./scripts/extension-manage.sh update` (Windows:
-`scripts\extension-manage.cmd update`; add `--dry-run` to preview). See `docs/EXTENSION.md` and `docs/DOCKER.md`.
 
 ## Rules that matter
 

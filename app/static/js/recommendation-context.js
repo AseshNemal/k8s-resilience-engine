@@ -281,6 +281,7 @@
                 // none. No recommendation is ever requested from a context that does not match its cluster.
                 s.namespace = ""; s.workflowId = ""; s.workflowKind = "frozen"; s.failedNode = ""; s.ctx = null;
                 s.fingerprint = ctx.cluster.fingerprint;
+                if (env.onClusterChange) env.onClusterChange();
                 return start();
             }
             s.fingerprint = ctx.cluster.fingerprint;

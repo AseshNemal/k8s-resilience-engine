@@ -105,6 +105,12 @@ def test_service_level_answer_is_consistent_across_the_page_and_the_recommendati
     assert recommendation["failedNode"] == body["risk"]["worstNode"] == body["continuation"]["failedNode"]
     # A change that removes the same predicted risk for more resources never leads.
     assert all(option["cost"] != "HIGH" for option in [best, *recommendation["alternatives"]]) or best["cost"] == "HIGH"
+    options = recommendation["options"]
+    assert {card["service"] for card in options} >= {"details", "ratings", "page"}
+    ranks = [card["rank"] for card in options if card["rank"] is not None]
+    assert ranks == sorted(ranks)
+    assert all(card["feasible"] and card["afterPlacement"] for card in options)
+    assert len(options) > len(recommendation["alternatives"]) + 1
     assert best["cost"] in ("LOW", "MEDIUM")
     assert all(option["service"] == best["service"] for option in recommendation["alternatives"])
     # One service fixed does not fix the others: the rest are named with the worker that takes them down.
