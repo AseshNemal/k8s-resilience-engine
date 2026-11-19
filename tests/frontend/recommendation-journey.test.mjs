@@ -20,7 +20,7 @@ test('the selected combined fix is drawn once and selection invokes the page cal
     journey.renderFixes(root, { candidates: [candidate('one'), candidate('two')] }, { document: doc, selectedId: 'one', onSelect: id => selected.push(id) });
     assert.equal(root.querySelectorAll('[data-candidate="one"]').length, 1);
     root.querySelector('[data-select="two"]').click(); assert.equal(selected[0], 'two');
-    assert.ok(root.textContent.includes('Add a replica to each'));
+    assert.ok(root.textContent.includes('Add a replica and spread replicas for each service'));
 });
 test('approval alone never claims the proposal was applied or tested', () => {
     const model = journey.stages({ status: 'ready', selected: true, approval: 'APPROVED' });

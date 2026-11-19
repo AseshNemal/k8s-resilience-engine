@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.api.validation_loop_common import (  # noqa: F401  (re-exported for the other modules and the tests)
@@ -64,7 +65,7 @@ class ProbeBody(APIModel):
 class PlanBody(APIModel):
     target_kind: str = DOCKER_DESKTOP
     mode: str = Mode.QUICK.value
-    workflow_id: str
+    workflow_id: str = "lab"
     workflow_source: str = "FROZEN"
     namespace: str
     probe: ProbeBody | None = None
@@ -72,6 +73,8 @@ class PlanBody(APIModel):
     candidates: int | None = None
     repeats: int | None = None
     smoke_worker: str | None = None
+    nodes: list[str] | None = None            # Failure lab: the workers to stop together
+    hold_seconds: float | None = None         # Failure lab: how long to hold them down
 
 
 class RunBody(APIModel):
@@ -186,7 +189,7 @@ def _plan_request(body: PlanBody) -> PlanRequest:
         raise HTTPException(status_code=422, detail={"code": "UNKNOWN_MODE", "message": f"{body.mode!r} is not a validation mode."}) from None
     return PlanRequest(mode=mode, workflow_id=body.workflow_id, namespace=body.namespace, probe=_probe(body.probe),
                        measure_baseline=body.measure_baseline, candidates=body.candidates, repeats=body.repeats,
-                       smoke_worker=body.smoke_worker)
+                       smoke_worker=body.smoke_worker, nodes=tuple(body.nodes) if body.nodes else None, hold_s=body.hold_seconds)
 
 
 def _service(kind: str, source: str, runtime, factory, active) -> ValidationLoopService:
@@ -304,6 +307,39 @@ def get_run(run_key: str, research: bool = Query(False), runtime: tuple[LoopRepo
         return {"run": _service(run["targetKind"], "FROZEN", runtime, factory, active).view(run_key, research=research)}
     except RunNotFoundError:
         raise HTTPException(status_code=404, detail={"code": "RUN_NOT_FOUND", "message": f"No validation run {run_key!r}."})
+
+
+@router.get("/runs/{run_key}/timeline")
+def timeline(run_key: str, kind: str = Query(..., pattern="^(baseline|candidate)$"), worker: str = Query(..., min_length=1),
+             repeat: int = Query(1, ge=1), candidate_id: str | None = Query(None, alias="candidateId"),
+             runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime),
+             factory: Callable[[str, str], ProofEnvironment] = Depends(get_environment_factory),
+             active: Callable[[], bool] = Depends(get_application_active)) -> dict:
+    """The measured samples of ONE finished failure (availability, requests, resource use, events), for the charts. Reads only the database."""
+    try:
+        run = runtime[0].get_run(run_key)
+        return _service(run["targetKind"], "FROZEN", runtime, factory, active).timeline(run_key, kind, candidate_id, worker, repeat)
+    except RunNotFoundError:
+        raise HTTPException(status_code=404, detail={"code": "RUN_NOT_FOUND", "message": f"No validation run {run_key!r}."})
+    except ValidationRefusedError as error:
+        raise _refused(error)
+
+
+@router.get("/runs/{run_key}/report", response_class=HTMLResponse)
+def report(run_key: str, download: bool = Query(False), runtime: tuple[LoopRepository, LoopWorker] = Depends(get_loop_runtime),
+           factory: Callable[[str, str], ProofEnvironment] = Depends(get_environment_factory),
+           active: Callable[[], bool] = Depends(get_application_active)) -> HTMLResponse:
+    """A readable report of the run (what was stopped, what was measured against what was predicted, whether everything was restored).
+
+    One standalone page the person can read, print to PDF or keep. Reads the stored record only; it never touches the cluster.
+    """
+    try:
+        run = runtime[0].get_run(run_key)
+        html = _service(run["targetKind"], "FROZEN", runtime, factory, active).report(run_key)
+    except RunNotFoundError:
+        raise HTTPException(status_code=404, detail={"code": "RUN_NOT_FOUND", "message": f"No validation run {run_key!r}."})
+    headers = {"Content-Disposition": f'attachment; filename="failure-test-report-{run_key}.html"'} if download else {}
+    return HTMLResponse(html, headers=headers)
 
 
 @router.post("/runs/{run_key}/abort")

@@ -289,3 +289,9 @@
 .fo-expect, .fo-timeline { list-style: disc; }
 .fo-expect li, .fo-timeline li { margin: 3px 0; line-height: 1.4; }
 .fo-note { color: var(--color-text-muted); }
+
+/* Watch a real failure: the optional page address, and the measured monitor under the headline. */
+.fo-field { display: grid; gap: 4px; max-width: 460px; margin: 10px 0 0; font-size: 0.875rem; }
+.fo-field__label { font-weight: 600; }
+.fo-field__input { padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-small); font: inherit; }
+.fo-monitor { margin: 12px 0; }

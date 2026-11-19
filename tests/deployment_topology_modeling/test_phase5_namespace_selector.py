@@ -85,4 +85,4 @@ def test_main_output_is_labelled_and_sits_before_the_accuracy_panel(client):
     assert "Main output: DeploymentGraph" in html
     assert 'id="deployment-raw-json"' in html
     assert 'data-role="output-snapshot"' in html
-    assert html.index("Main output: DeploymentGraph") < html.index("How accurate is the model?")
+    assert html.index("Main output: DeploymentGraph") < html.index("How accurate was the model on your cluster?")

@@ -71,7 +71,19 @@
         if (c.workflows && c.workflows.message && observation.failedNode) notes.push(c.workflows.message);
         const reads = observation.reads || {};
         if (active && reads.failed && reads.lastError) notes.push(`The cluster could not be read on ${reads.failed} check${reads.failed === 1 ? "" : "s"} (last: ${reads.lastError}). Those moments are unknown, not healthy.`);
-        return { state: observation.status, headline, tone, rows, expectations, timeline: list(observation.timeline).slice(-8).reverse(), canStart: !active, canStop: active, notes, limits: list(observation.limits) };
+        return { monitor: monitorModel(observation), requestsOn: !!(observation.monitor && observation.monitor.requests), record: { clusterUid: (observation.cluster || {}).clusterUid || null, at: observation.endedAt || observation.startedAt || null }, active, state: observation.status, headline, tone, rows, expectations, timeline: list(observation.timeline).slice(-8).reverse(), canStart: !active, canStop: active, notes, limits: list(observation.limits) };
+    }
+
+    /**
+     * The measured timeline of a watch as the failure monitor takes it. While the watch is active it is the live failure; afterwards it
+     * is one finished failure. Null while nothing was measured. A pure function of the server's record.
+     */
+    function monitorModel(observation) {
+        const m = observation && observation.monitor;
+        if (!m || !m.timeline || !(m.timeline.samples || []).length) return null;
+        const worker = observation.failedNode || null;
+        if (observation.active) return { live: { worker, kind: "watch", stage: observation.status, timeline: m.timeline, summary: m.summary }, episodes: [], comparisons: [] };
+        return { live: null, comparisons: [], episodes: [{ kind: "watch", candidateId: null, worker: worker || "no worker", repeat: 1, status: observation.status, summary: m.summary, marks: m.timeline.marks, timeline: m.timeline, predictionCheck: null }] };
     }
 
     /** The moment in the person's own time zone (the server stores UTC). */
@@ -88,9 +100,14 @@
         return node;
     }
 
-    function draw(doc, root, model, handlers, busy, message) {
+    function draw(doc, root, model, handlers, busy, message, view) {
         const parts = [];
         const focused = doc.activeElement && root.contains && root.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-role") : null;
+        // A watch that has ended, or one whose cluster is not the one connected now, is a saved record: say so, with when and where from.
+        const cluster = typeof window !== "undefined" ? window.ResilienceCluster : null;
+        if (cluster && model.record && model.record.at && (!model.active || !cluster.isLive())) {
+            parts.push(cluster.savedChip(doc, cluster.current(), model.record));
+        }
         parts.push(el(doc, "p", model.headline, `fo-headline fo-headline--${model.tone}`, { role: "status" }));
         if (model.expectations && model.expectations.length) {
             parts.push(el(doc, "p", "What the model predicts for each worker, recorded when you started:", "fo-note"));
@@ -112,10 +129,29 @@
             parts.push(table);
         }
         for (const note of model.notes) if (note) parts.push(el(doc, "p", note, "fo-note"));
+        const M = global.ResilienceFailureMonitor;
+        if (M && model.monitor) {
+            const holder = el(doc, "div", null, "fo-monitor", { "data-role": "fo-monitor" });
+            const picks = M.choices(model.monitor);
+            const chosen = picks.find((p) => p.key === (view && view.pick)) || picks[0];
+            M.render(doc, holder, model.monitor, { selected: chosen && chosen.key, running: model.active, onSelect: (key) => view && view.select && view.select(key),
+                timelineFor: (episode) => episode.timeline || null });
+            parts.push(holder);
+        }
         if (model.timeline.length) {
             const ul = el(doc, "ul", null, "fo-timeline");
             for (const entry of model.timeline) ul.append(el(doc, "li", `${clock(entry.at)}  ${entry.detail || entry.kind}`));
             parts.push(ul);
+        }
+        if (model.canStart) {
+            const field = el(doc, "label", null, "fo-field");
+            field.append(el(doc, "span", "Page address (optional)", "fo-field__label"));
+            const input = el(doc, "input", null, "fo-field__input", { type: "url", "data-role": "fo-request-url", autocomplete: "off", placeholder: "http://localhost:8080/productpage",
+                "aria-describedby": "fo-request-hint" });
+            input.value = (view && view.requestUrl) || "";
+            input.addEventListener("input", () => { if (view && view.setRequestUrl) view.setRequestUrl(input.value); });
+            field.append(input, el(doc, "span", "Sends one real request to this page on every check (about every 5 seconds) so you can see what a user would have felt while the worker was down. Only an address on this computer is allowed. Leave it empty to skip.", "fo-note", { id: "fo-request-hint" }));
+            parts.push(field);
         }
         const actions = el(doc, "div", null, "fo-actions");
         if (model.canStart) {
@@ -146,9 +182,10 @@
     }
 
     /** Mounts the panel into `root`. `fetchImpl` and `timers` are injectable so the logic runs without a browser. */
-    function createPanel({ root, document: doc = global.document, fetchImpl = (...a) => global.fetch(...a), timers = { set: global.setTimeout, clear: global.clearTimeout },
+    function createPanel({ root, document: doc = global.document, fetchImpl = (...a) => global.fetch(...a), timers = { set: (fn, ms) => global.setTimeout(fn, ms), clear: (id) => global.clearTimeout(id) },
                           namespace = () => null, operator = () => { try { return global.localStorage.getItem(NAME_KEY) || ""; } catch (_e) { return ""; } } }) {
         let observation = null, busy = false, message = null, timer = null, destroyed = false, loaded = false, drawn = null;
+        const view = { pick: null, requestUrl: "", select: (key) => { view.pick = key; drawn = null; render(); }, setRequestUrl: (value) => { view.requestUrl = value; } };
 
         async function call(url, init) {
             const response = await fetchImpl(url, init);
@@ -165,10 +202,10 @@
             if (destroyed) return;
             const model = loaded ? describe(observation) : { state: "loading", headline: "Checking for a watch in progress…", tone: "muted", rows: [], expectations: [], timeline: [], canStart: false, canStop: false, notes: [] };
             // A poll that found nothing new draws nothing: the page does not flicker, and a screen reader is not read the same status again.
-            const signature = JSON.stringify([model, busy, message]);
+            const signature = JSON.stringify([model, busy, message, view.pick]);
             if (signature === drawn) return;
             drawn = signature;
-            draw(doc, root, model, { start, stop }, busy, message);
+            draw(doc, root, model, { start, stop }, busy, message, view);
         }
 
         function schedule() {
@@ -196,7 +233,7 @@
             try {
                 const who = operator();
                 observation = await call(BASE, { method: "POST", headers: { "Content-Type": "application/json", ...(who ? { "X-Operator-Name": encodeURIComponent(who) } : {}) },
-                    body: JSON.stringify({ namespace: namespace() }) });
+                    body: JSON.stringify({ namespace: namespace(), requestUrl: view.requestUrl.trim() || null }) });
             } catch (error) {
                 message = error.message;
             }
@@ -215,7 +252,7 @@
         return { refresh, start, stop, state: () => ({ observation, busy, message }), destroy: () => { destroyed = true; if (timer !== null) timers.clear(timer); } };
     }
 
-    global.ResilienceFailureObservation = { describe, createPanel, POLL_MS };
+    global.ResilienceFailureObservation = { describe, monitorModel, createPanel, POLL_MS };
 
     // On the page: mount into the card, using the application chosen above it. Nothing starts until the person presses Start.
     if (global.document && typeof global.document.querySelector === "function") {

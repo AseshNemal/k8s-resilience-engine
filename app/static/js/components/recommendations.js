@@ -47,6 +47,13 @@
     const evidenceList = document.querySelector('[data-role="rec-evidence"]');
     const contextModule = window.ResilienceRecommendationContext;
     let controller = null;
+    const offlineBanner = document.querySelector('[data-role="rec-offline-banner"]');
+    function paintOffline() {
+        const cluster = window.ResilienceCluster;
+        if (!cluster) return;
+        cluster.renderBanner(offlineBanner, cluster.current(), { document, onRetry: () => cluster.refresh(true) });
+    }
+    if (window.ResilienceCluster) window.ResilienceCluster.onChange(() => { paintOffline(); if (controller && controller.reload) controller.reload(); });
     // Compatibility with the earlier single-workflow template. The current page evaluates all workflows directly;
     // selecting a candidate keeps that candidate (including a whole combination) in the same approval flow.
     const portfolioModule = window.ResilienceRecommendationPortfolio;
@@ -809,7 +816,9 @@
         const rows = (report.after.workflows && report.after.workflows.rows) || [];
         if (rows.length) {
             const passed = rows.filter((row) => row.httpStatus === "PASSED").length;
-            parts.push(`Workflow checks passed: ${passed} of ${rows.length}.`);
+            const measured = rows.filter((row) => ["PASSED", "FAILED"].includes(row.httpStatus)).length;
+            if (measured) parts.push(`Workflow checks passed: ${passed} of ${measured}.`);
+            if (measured < rows.length) parts.push(`No measured workflow check for ${rows.length - measured} of ${rows.length}.`);
             if (passed < rows.length) tone = "warn";
         }
         return parts.length ? { text: parts.join(" "), tone } : null;
@@ -925,7 +934,7 @@
         if (note.required) note.minLength = 20;
         label.append(note);
         body.append(label);
-        return actionModule.dialog({ title: "Approve this exact change", body, confirmLabel: "Approve this change", askName: true, onConfirm: async () => {
+        return actionModule.dialog({ title: "Approve this exact change", body, confirmLabel: "Approve this change", onConfirm: async () => {
             if (!sameSelection(context)) return "The selection or evidence changed. Close this dialog and review the selected proposal again.";
             if (note.required && note.value.trim().length < 20) return "Explain why you chose this alternative (at least 20 characters).";
             const requestedFor = selected.id;
@@ -972,7 +981,7 @@
         const review = document.createElement("div");
         journey.renderReview(review, v.detail, selected);
         body.append(review);
-        return actionModule.dialog({ title: "Apply this change to the cluster?", body, confirmLabel: "Apply to cluster", danger: true, askName: true, onConfirm: () => {
+        return actionModule.dialog({ title: "Apply this change to the cluster?", body, confirmLabel: "Apply to cluster", danger: true, onConfirm: () => {
             if (!sameSelection(context)) return "The selection or evidence changed. Close this dialog and review the selected proposal again.";
             startApplyAndTest(selected);                    // not awaited: progress is shown on the page, not in this dialog
             return null;
@@ -1343,8 +1352,8 @@
     function chosenFromComparison(detail, report) {
         if (!preferredChange) return { recommendation: null, note: null };
         const wording = `${view.strategyName(preferredChange.type)} on ${preferredChange.service}`;
-        const wanted = (preferredChange.id && detail.candidates.find((c) => c.id === preferredChange.id))
-            || detail.candidates.find((c) => c.service === preferredChange.service && c.type === preferredChange.type);
+        const wanted = preferredChange.id ? detail.candidates.find((c) => c.id === preferredChange.id)
+            : detail.candidates.find((c) => c.service === preferredChange.service && c.type === preferredChange.type);
         const recommendation = wanted && wanted.feasible ? report.recommendations.find((r) => r.id === wanted.id) || null : null;
         if (!recommendation) {
             return { recommendation: null, note: `The change you chose (${wording}) is not an option for this workflow, so this workflow's own top-ranked change is shown.` };
@@ -1369,9 +1378,15 @@
             if (failuresButton) failuresButton.disabled = false;
         }
         if (clusterLine) {
-            clusterLine.textContent = v.cluster.identity
-                ? `Connected cluster: ${v.cluster.identity}`
-                : (v.evidence.length ? "Connected cluster" : "Looking for the connected cluster…");
+            // What the page says about the cluster comes from the cluster's own answer now, not from whether evidence rows exist: saved
+            // evidence can outlive the connection, and "Connected cluster" over it would be false.
+            const live = window.ResilienceCluster ? window.ResilienceCluster.current() : null;
+            const offline = live && live.state !== "connected" && live.state !== "checking";
+            clusterLine.textContent = offline
+                ? `${window.ResilienceCluster.words(live.state).title}. Saved results only.`
+                : v.cluster.identity
+                    ? `Connected cluster: ${v.cluster.identity}`
+                    : (v.evidence.length ? "Connected cluster" : "Looking for the connected cluster…");
         }
         fillSelect(namespaceSelect,
             v.namespaces.map((row) => ({ value: row.namespace, label: `${row.namespace} (${row.services.length} services)` })),
@@ -1938,9 +1953,10 @@
                 const record = JSON.parse(window.localStorage.getItem(key) || "null");
                 window.localStorage.removeItem(key);
                 const age = record && typeof record.at === "number" ? Date.now() - record.at : Infinity;
-                if (!(age <= 10 * 60 * 1000)) return null;
+                if (!(age >= 0 && age <= 10 * 60 * 1000)) return null;
                 if (record && typeof record.service === "string" && record.service && typeof record.type === "string" && record.type) {
-                    preferredChange = { service: record.service, type: record.type };
+                    preferredChange = { id: record.id, service: record.service, type: record.type };
+                    restoredPage = true;
                 }
                 return record;
             } catch (_error) { return null; }

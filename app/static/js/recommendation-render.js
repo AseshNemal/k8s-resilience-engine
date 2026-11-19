@@ -1022,8 +1022,11 @@
             }
             container.append(table);
         }
+        const placement = window.ResiliencePlacement;
+        const before = placement?.fromDeployment(findings.currentDeployment);
         for (const candidate of shown) {
             const card = candidateCard(doc, candidate, lead, Boolean(options.onSelect));
+            if (placement && options.onSelect) card.append(placement.changeFigure(candidate, before, candidate.afterPlacement));
             card.setAttribute("data-candidate", candidate.id);
             if (candidate === lead) card.setAttribute("data-picked", "true");
             card.append(element(doc, "p", candidate.ranking?.rank != null ? `Rank ${candidate.ranking.rank} · feasible` : "Feasible · no ranked improvement", "ui-note"),

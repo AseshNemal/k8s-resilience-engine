@@ -61,10 +61,10 @@ INFEASIBLE, INSUFFICIENT, FEASIBLE = (FeasibilityStatus.INFEASIBLE, FeasibilityS
 
 # Changing how a strategy is modelled must change this, so an approval made under the old model is not read as one
 # made under the new (it is part of ``scheduling_basis``).
-ANTI_AFFINITY_MODEL = "pod-anti-affinity/required/kubernetes.io-hostname/self-selector/v1"
-REPLICA_INCREASE_MODEL = "replica-increase/+1/with-hostname-spread/v2"
-REPLICA_INCREASE_ANTI_AFFINITY_MODEL = "replica-increase/+1/with-required-anti-affinity/v2"
-REPLICA_INCREASE_PLUS_2_MODEL = "replica-increase/+2/with-hostname-spread/v2"
+ANTI_AFFINITY_MODEL = "pod-anti-affinity/required/kubernetes.io-hostname/self-selector/v2"
+REPLICA_INCREASE_MODEL = "replica-increase/+1/with-hostname-spread/v3"
+REPLICA_INCREASE_ANTI_AFFINITY_MODEL = "replica-increase/+1/with-required-anti-affinity/v3"
+REPLICA_INCREASE_PLUS_2_MODEL = "replica-increase/+2/with-hostname-spread/v3"
 
 # The name given to a replica the change would add. It is never a pod that exists.
 ADDED_MARKER = "-added-"

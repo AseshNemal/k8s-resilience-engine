@@ -18,7 +18,7 @@ from app.integrations.kubernetes.models import ClusterReplicaSet, ClusterService
 def node(name: str, zone: str | None = "zone-a", *, cpu: str | None = "4", memory: str | None = "8Gi",
          control_plane: bool = False) -> ClusterNode:
     return ClusterNode(name=name, zone=zone, cpu_available=cpu, memory_available=memory,
-                       control_plane=control_plane)
+                       control_plane=control_plane, labels={"kubernetes.io/hostname": name})
 
 
 def pod(name: str, on: str | None, *, app: str, ready: bool = True, restarts: int | None = 0,

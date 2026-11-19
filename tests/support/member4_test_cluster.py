@@ -111,6 +111,24 @@ class FakeTestCluster:
             service.ready_replicas = sum(1 for pod in service.pods if pod.ready)
         return failed
 
+    def fail_nodes(self, nodes: list[str]) -> DeploymentGraph:
+        self.calls.append("fail:" + "+".join(nodes))
+        self.down.update(nodes)
+        self._maybe_break("failure")
+        failed = self.graph.model_copy(deep=True)
+        for service in failed.services:
+            for pod in service.pods:
+                if pod.node in nodes:
+                    pod.ready = False
+            service.ready_replicas = sum(1 for pod in service.pods if pod.ready)
+        return failed
+
+    def restore_nodes(self, nodes: list[str]) -> None:
+        self.calls.append("restore:" + "+".join(nodes))
+        if self.restore_fails:
+            raise RuntimeError("could not bring the nodes back")
+        self.down.difference_update(nodes)
+
     def restore_node(self, node: str) -> None:
         self.calls.append(f"restore:{node}")
         if self.restore_fails:

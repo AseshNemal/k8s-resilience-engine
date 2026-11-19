@@ -258,6 +258,74 @@ class KubernetesValidationExecutor:
                                f"restarted by its restart policy), so the failure window is not valid and nothing was measured")
         return graph
 
+    def fail_nodes(self, nodes: list[str]) -> DeploymentGraph:
+        """Stop SEVERAL workers at once and observe the result. The same checks as ``fail_node`` for every node, plus: the injector must
+        support a simultaneous stop (it needs an authorization per node and no pending recovery record), and every node must still be down
+        at the end of the failure window. One node is exactly ``fail_node``."""
+        nodes = list(dict.fromkeys(nodes))
+        if len(nodes) == 1:
+            return self.fail_node(nodes[0])
+        self._require_writes()
+        self._assert_same_cluster()
+        require_node_failure(self._injector)
+        together = getattr(self._injector, "inject_together", None)
+        if together is None:
+            raise ValidationRefusedError("SIMULTANEOUS_NOT_SUPPORTED", "This fault injector can stop one node at a time only.")
+        self._probe = None
+        known = {n.name: n for n in self.baseline_graph.nodes}
+        for node in nodes:
+            if node not in known or not _is_worker(known[node]):
+                raise ValidationRefusedError("NODE_NOT_ELIGIBLE", f"{node!r} is not a worker node of the baseline.")
+            if self._gateway.node_ready(node) is not True:
+                raise ValidationRefusedError("NODE_NOT_ELIGIBLE", f"{node!r} is not Ready now, so failing it proves nothing.")
+        if self._probe_factory is not None:
+            self._probe = self._probe_factory()
+            self._probes["afterChange" if self._applied else "baselineFailure"] = self._probe
+            self._sample_for(0.0, self._pre_samples)
+            self._probe.mark("stop-issued")
+        together(nodes)
+
+        def all_down() -> bool:
+            return all(self._gateway.node_ready(n) is False for n in nodes)
+        if not self._wait(all_down, self._detect_s, sample=True):
+            raise RuntimeError(f"not every node became NotReady within {self._detect_s:.0f}s of the stop, so the failure was not produced "
+                               "as asked and nothing was measured")
+
+        def pods_unready() -> bool:
+            graph = self._gateway.read_graph(self.namespace)
+            return all(not pod.ready for svc in graph.services for pod in svc.pods if pod.node in nodes)
+        if not self._wait(pods_unready, self._unready_s, sample=True):
+            raise RuntimeError(f"pods on the stopped nodes were still Ready {self._unready_s:.0f}s after they went NotReady, so the effect "
+                               "of the failure cannot be observed")
+        if self._probe is not None:
+            self._probe.mark("pods-unready")
+            self._sample_for(self._failure_window_s)
+        graph = self._gateway.read_graph(self.namespace)
+        if not all_down():
+            raise RuntimeError("a stopped node reported Ready again before the failure window ended (its restart policy may have restarted "
+                               "it), so the failure was not held for the whole window and nothing was measured")
+        return graph
+
+    def restore_nodes(self, nodes: list[str]) -> None:
+        """Start every node again and wait for each to be Ready. A node that cannot be started does not stop the others being tried;
+        the failure lists every one that could not be restored."""
+        nodes = list(dict.fromkeys(nodes))
+        if self._probe is not None:
+            self._probe.mark("restore-issued")
+        failed: list[str] = []
+        for node in nodes:
+            try:
+                self._injector.restore(node)
+            except Exception as error:      # noqa: BLE001
+                failed.append(f"{node}: {error}")
+        if failed:
+            raise RuntimeError("these nodes could not be started: " + "; ".join(failed))
+        if not self._wait(lambda: all(self._gateway.node_ready(n) is True for n in nodes), self._restore_s, sample=True):
+            raise RuntimeError(f"not every node became Ready within {self._restore_s:.0f}s of being started")
+        if self._probe is not None:
+            self._probe.mark("node-ready")
+            self._sample_for(0.0, self._post_samples)
+
     def restore_node(self, node: str) -> None:
         if self._probe is not None:
             self._probe.mark("restore-issued")

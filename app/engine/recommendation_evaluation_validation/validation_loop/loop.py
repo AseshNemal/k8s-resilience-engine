@@ -37,6 +37,7 @@ from app.engine.recommendation_evaluation_validation.validation.models import (
 )
 from app.engine.recommendation_evaluation_validation.validation.run import ValidationExecutor
 from app.engine.recommendation_evaluation_validation.validation_loop.grant import GrantAuthority
+from app.engine.recommendation_evaluation_validation.validation_loop.lab import group_label, observed_state, placement_impact
 from app.engine.recommendation_evaluation_validation.validation_loop.models import (
     BASELINE,
     CANDIDATE,
@@ -45,6 +46,7 @@ from app.engine.recommendation_evaluation_validation.validation_loop.models impo
     ExperimentKey,
     ExperimentOutcome,
     ExperimentStatus,
+    Mode,
     ModePlan,
     RunStatus,
 )
@@ -88,6 +90,13 @@ class LoopObserver:
     def stage(self, key: ExperimentKey | None, stage: str, detail: str = "") -> None: ...
     def experiment_finished(self, outcome: ExperimentOutcome) -> None: ...
     def candidate_finished(self, outcome: CandidateOutcome) -> None: ...
+    def timeline_update(self, key: ExperimentKey, timeline: dict[str, Any]) -> None:
+        """The measured timeline of the failure in progress, as it stands. Called from the sampler's thread, a few seconds apart."""
+
+
+class MonitorFactory(Protocol):
+    def __call__(self, key: ExperimentKey, on_update: Callable[[dict[str, Any]], None]) -> Any:
+        """An episode monitor (``monitoring.episode.EpisodeMonitor``) for one failure, or None for none."""
 
 
 class ExecutorFactory(Protocol):
@@ -139,12 +148,14 @@ class ValidationLoop:
                  thresholds: ValidationThresholds | None = None, arm: Callable[[Authorization, str, str], None] | None = None,
                  before_kill: Callable[[str, str | None], None] | None = None, node_ready: Callable[[str], bool | None] | None = None,
                  abort: Callable[[], bool] = lambda: False, observer: LoopObserver | None = None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic, monitor_factory: MonitorFactory | None = None,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
         self.workflow, self.plan, self.authority, self.candidates = workflow, plan, authority, list(candidates)[:plan.candidates]
         self._factory, self._probe_required = executor_factory, probe_required
         self._thresholds = thresholds or ValidationThresholds()
         self._arm, self._before_kill, self._node_ready = arm, before_kill, node_ready
         self._abort, self._observer, self._clock = abort, observer or LoopObserver(), clock
+        self._monitor_factory, self._sleep = monitor_factory, sleep
         self._manual_restore = False
         self._finished: list[CandidateOutcome] = []
         self._baseline_outcomes: list[ExperimentOutcome] = []
@@ -169,8 +180,38 @@ class ValidationLoop:
         self._observer.experiment_finished(outcome)
         return outcome
 
-    def _inject(self, executor: ValidationExecutor, key: ExperimentKey, worker: str, *, baseline: bool) -> tuple[DeploymentGraph | None, dict | None, list[str], dict]:
-        """One authorized node failure with its recovery. Returns (graph after failure, probe report, problems, recovery)."""
+    def _open_monitor(self, key: ExperimentKey) -> Any:
+        """The episode monitor for this failure, started. A monitor that cannot start means no timeline, never a failed experiment."""
+        if self._monitor_factory is None:
+            return None
+        try:
+            monitor = self._monitor_factory(key, lambda timeline: self._observer.timeline_update(key, timeline))
+            if monitor is not None:
+                monitor.begin()
+            return monitor
+        except Exception as error:      # noqa: BLE001
+            self._log("MONITOR_UNAVAILABLE", f"{key.worker}: {error}")
+            return None
+
+    def _close_monitor(self, monitor: Any, key: ExperimentKey) -> dict | None:
+        if monitor is None:
+            return None
+        try:
+            return monitor.finish()
+        except Exception as error:      # noqa: BLE001
+            self._log("MONITOR_FAILED", f"{key.worker}: {error}")
+            return None
+
+    @staticmethod
+    def _mark(monitor: Any, kind: str, detail: str = "") -> None:
+        if monitor is not None:
+            try:
+                monitor.mark(kind, detail)
+            except Exception:      # noqa: BLE001  (a mark that could not be written is not worth an experiment)
+                pass
+
+    def _inject(self, executor: ValidationExecutor, key: ExperimentKey, worker: str, *, baseline: bool) -> tuple[DeploymentGraph | None, dict | None, list[str], dict, dict | None]:
+        """One authorized node failure with its recovery. Returns (graph after failure, probe report, problems, recovery, timeline)."""
         try:
             step, stop = self.authority.authorize_failure(executor.target, worker, baseline=baseline)
         except ValidationRefusedError as error:
@@ -180,8 +221,10 @@ class ValidationLoop:
             self._arm(stop, worker, step.plan_digest)
         problems: list[str] = []
         graph: DeploymentGraph | None = None
+        monitor = self._open_monitor(key)      # after the authorization, so a refused kill records nothing; before the stop, for a "before"
         self._observer.stage(key, "INJECT_FAILURE", f"stopping {worker}")
         try:
+            self._mark(monitor, "stop", worker)
             graph = executor.fail_node(worker)
         except ValidationRefusedError as error:
             problems.append(f"{error.code}: {error.message}")
@@ -190,12 +233,16 @@ class ValidationLoop:
         except Exception as error:      # noqa: BLE001  (the failure may not have been produced; say so, then restore regardless)
             problems.append(f"the failure was not produced or observed: {error}")
         finally:
+            self._mark(monitor, "restore", worker)
             recovery = self._recover(executor, key, worker)
+            if recovery.get("restored"):
+                self._mark(monitor, "node-ready", worker)
+            timeline = self._close_monitor(monitor, key)
         probe = None
         reports = getattr(executor, "probe_reports", None)
         if callable(reports):
             probe = (reports() or {}).get("baselineFailure" if baseline else "afterChange")
-        return graph, probe, problems, recovery
+        return graph, probe, problems, recovery, timeline
 
     def _recover(self, executor: ValidationExecutor, key: ExperimentKey, worker: str) -> dict[str, Any]:
         """Bring the worker back and VERIFY it. A restore that fails or is not confirmed is flagged, never swallowed."""
@@ -232,9 +279,9 @@ class ValidationLoop:
             if blocked:
                 outcomes.append(self._skip(key, blocked))
                 raise _RunStop(RunStatus.INTERRUPTED, blocked)
-            graph, probe, problems, recovery = self._inject(executor, key, worker, baseline=True)
+            graph, probe, problems, recovery, timeline = self._inject(executor, key, worker, baseline=True)
             if self._manual_restore:
-                outcome = ExperimentOutcome(key=key, status=ExperimentStatus.INCONCLUSIVE, recovery=recovery,
+                outcome = ExperimentOutcome(key=key, status=ExperimentStatus.INCONCLUSIVE, recovery=recovery, timeline=timeline,
                                             reasons=problems + [f"{worker} could not be restored."])
                 self._observer.experiment_finished(outcome)
                 outcomes.append(outcome)
@@ -246,6 +293,7 @@ class ValidationLoop:
                 self._baselines[worker] = ObservedOutcome(predict_failure_impact(self.workflow, graph, worker), MEASURED)
                 outcome = judge_experiment(key, readiness, probe, probe_required=self._probe_required)
                 outcome.recovery = recovery
+            outcome.timeline = timeline
             outcome.duration_s = round(self._clock() - started, 3)
             self._observer.experiment_finished(outcome)
             outcomes.append(outcome)
@@ -295,6 +343,8 @@ class ValidationLoop:
                     if outcome.status is not ExperimentStatus.PASS:
                         stop_reason = (f"Stopped after {key.worker} (repeat {key.repeat}): this candidate "
                                        f"{'failed' if outcome.status is ExperimentStatus.FAIL else 'could not be fully validated'}.")
+                        if outcome.reasons:
+                            stop_reason += " " + " ".join(outcome.reasons)
                 result.reason = stop_reason
         except _RunStop as stop:
             run_stop, result.reason = stop, stop.reason      # the candidate is still put back below before the run ends
@@ -345,9 +395,9 @@ class ValidationLoop:
                                         reasons=[f"No prediction was made for {key.worker}, so nothing can be compared."])
             self._observer.experiment_finished(outcome)
             return outcome
-        graph, probe, problems, recovery = self._inject(executor, key, key.worker, baseline=False)
+        graph, probe, problems, recovery, timeline = self._inject(executor, key, key.worker, baseline=False)
         if self._manual_restore:
-            outcome = ExperimentOutcome(key=key, status=ExperimentStatus.INCONCLUSIVE, recovery=recovery,
+            outcome = ExperimentOutcome(key=key, status=ExperimentStatus.INCONCLUSIVE, recovery=recovery, timeline=timeline,
                                         reasons=problems + [f"{key.worker} could not be restored."])
             self._observer.experiment_finished(outcome)
             return outcome      # the candidate loop sees the flag, puts the candidate back and ends the run
@@ -371,15 +421,119 @@ class ValidationLoop:
             outcome = judge_experiment(key, readiness, probe, probe_required=self._probe_required, comparison=comparison,
                                        prediction_error=error, predicted={"failedNode": predicted.failed_node,
                                        "blastRadiusAfter": predicted.after.blast_radius,
-                                       "workflowSurvives": predicted.workflow_id not in predicted.after.failed_workflows})
+                                       "workflowSurvives": predicted.workflow_id not in predicted.after.failed_workflows,
+                                       # What the model said would lose every ready replica, with and without the change, and which
+                                       # services the workflow uses: the dashboard sets these against what the timeline measured.
+                                       "servicesDown": sorted(predicted.after.failed_services),
+                                       "servicesDownBefore": sorted(predicted.before.failed_services),
+                                       "workflowServices": sorted({*self.workflow.mandatory_services, *self.workflow.optional_services})})
             if problems:
                 outcome.reasons += problems
                 if outcome.status is ExperimentStatus.PASS:
                     outcome.status = ExperimentStatus.INCONCLUSIVE
             outcome.recovery = recovery
+        outcome.timeline = timeline
         outcome.duration_s = round(self._clock() - started, 3)
         self._observer.experiment_finished(outcome)
         return outcome
+
+    # -- the Failure lab -----------------------------------------------------------------------------------------
+
+    def _run_lab(self) -> None:
+        """Stop the chosen workers TOGETHER, hold them down for the chosen time, restore every one and verify, recording what happened.
+
+        No candidate is applied and no verdict about a change is made. Every worker is authorized and armed one by one against the durable
+        kill budget before the first is stopped, so a refusal part-way stops nothing; the same guard that protects every other kill runs
+        for the whole set first (essential workloads are then acknowledgements, never silent); and the workers are restored even if the
+        failure was not produced as asked.
+        """
+        nodes = list(self.plan.workers)
+        key = ExperimentKey(BASELINE, None, group_label(nodes), 1)
+        self._observer.experiment_planned(key)
+        started = self._clock()
+        executor = self._factory(None)
+        blocked = None
+        if self._before_kill is not None:
+            try:
+                self._before_kill(tuple(nodes), None, allow_essential=True)
+            except KillBlocked as error:
+                blocked = f"{error.code}: {error.message}"
+            except Exception as error:      # noqa: BLE001  (a check that could not complete refuses: fail closed)
+                blocked = f"KILL_CHECK_FAILED: {error}"
+        if blocked:
+            outcome = ExperimentOutcome(key=key, status=ExperimentStatus.SKIPPED, reasons=[f"Blocked before the stop: {blocked}"])
+            self._observer.experiment_finished(outcome)
+            self._baseline_outcomes.append(outcome)
+            raise _RunStop(RunStatus.INTERRUPTED, blocked)
+        before = executor.observe()
+        impact = placement_impact(before, nodes)
+        stops = []
+        try:
+            for node in nodes:      # every authorization first: a refusal here means nothing was stopped
+                step, stop = self.authority.authorize_failure(executor.target, node, baseline=True)
+                stops.append((stop, node, step.plan_digest))
+        except ValidationRefusedError as error:
+            raise _RunStop(RunStatus.INTERRUPTED, f"{error.code}: {error.message}") from error
+        if self._arm is not None:
+            for stop, node, digest in stops:
+                self._arm(stop, node, digest)
+        monitor = self._open_monitor(key)
+        problems: list[str] = []
+        graph: DeploymentGraph | None = None
+        self._observer.stage(key, "INJECT_FAILURE", f"stopping {', '.join(nodes)}")
+        held = 0.0
+        try:
+            self._mark(monitor, "stop", ", ".join(nodes))
+            graph = executor.fail_nodes(nodes)
+            hold = float(self.plan.hold_s or 0.0)
+            self._observer.stage(key, "PROBE", f"holding {', '.join(nodes)} down for {hold:.0f} s")
+            while held < hold and not self._abort():
+                step_s = min(1.0, hold - held)
+                self._sleep(step_s)
+                held += step_s
+        except ValidationRefusedError as error:
+            problems.append(f"{error.code}: {error.message}")
+        except ValidationInterrupted as error:
+            problems.append(f"interrupted: {error}")
+        except Exception as error:      # noqa: BLE001  (the failure may not have been produced as asked; say so, then restore regardless)
+            problems.append(f"the failure was not produced or observed: {error}")
+        finally:
+            self._mark(monitor, "restore", ", ".join(nodes))
+            self._observer.stage(key, "RECOVER_WORKER", f"starting {', '.join(nodes)} and waiting for Ready")
+            recovery = {"workers": nodes, "restored": False, "verified": False}
+            try:
+                executor.restore_nodes(nodes)
+                recovery["restored"] = True
+            except Exception as error:      # noqa: BLE001
+                recovery["error"] = str(error)
+            if recovery["restored"]:
+                checks = {n: (self._node_ready(n) if self._node_ready is not None else None) for n in nodes}
+                recovery["independentCheck"] = checks
+                recovery["verified"] = all(v is True or v is None for v in checks.values())
+                if recovery["verified"]:
+                    self._mark(monitor, "node-ready", ", ".join(nodes))
+                else:
+                    recovery["error"] = "started but not Ready: " + ", ".join(n for n, v in checks.items() if v is False)
+            if not recovery["verified"]:
+                self._manual_restore = True
+            timeline = self._close_monitor(monitor, key)
+        measured = observed_state(graph, nodes) if graph is not None else None
+        if graph is None:
+            status = ExperimentStatus.INCONCLUSIVE
+        else:
+            status = ExperimentStatus.PASS      # the failure was produced, held and observed; a lab run gives no verdict on a change
+        outcome = ExperimentOutcome(key=key, status=status, reasons=problems, recovery=recovery, timeline=timeline,
+                                    predicted={"lab": True, "nodes": nodes, "servicesDown": impact["down"], "servicesDownBefore": impact["down"],
+                                               "workflowServices": [s["service"] for s in impact["services"]], "placementImpact": impact,
+                                               "holdRequestedS": self.plan.hold_s, "heldS": round(held, 1)},
+                                    readiness={"worker": group_label(nodes), "lab": True, "observed": measured, "holds": None, "services": {}})
+        outcome.duration_s = round(self._clock() - started, 3)
+        self._observer.experiment_finished(outcome)
+        self._baseline_outcomes.append(outcome)
+        if self._manual_restore:
+            raise _RunStop(RunStatus.NEEDS_MANUAL_RESTORE, "A worker could not be restored.")
+        if self._abort():
+            raise _RunStop(RunStatus.INTERRUPTED, "The hold was ended early on request; every worker was restored.")
 
     # -- the run -------------------------------------------------------------------------------------------------
 
@@ -387,12 +541,15 @@ class ValidationLoop:
         result = LoopResult(RunStatus.RUNNING)
         self._observer.run_started(self.plan, [c.candidate_id for c in self.candidates])
         try:
-            self._run_baselines()
-            for candidate in self.candidates:
-                self._check_abort()
-                self._run_candidate(candidate)
-                if self._manual_restore:
-                    raise _RunStop(RunStatus.NEEDS_MANUAL_RESTORE, "A worker or a Deployment could not be restored.")
+            if self.plan.mode is Mode.LAB:
+                self._run_lab()
+            else:
+                self._run_baselines()
+                for candidate in self.candidates:
+                    self._check_abort()
+                    self._run_candidate(candidate)
+                    if self._manual_restore:
+                        raise _RunStop(RunStatus.NEEDS_MANUAL_RESTORE, "A worker or a Deployment could not be restored.")
             result.status = RunStatus.COMPLETED
         except _RunStop as stop:
             result.status, result.stop_reason = stop.status, stop.reason

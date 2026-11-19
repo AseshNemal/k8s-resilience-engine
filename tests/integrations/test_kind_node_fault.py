@@ -302,3 +302,52 @@ def test_the_kind_integration_imports_nothing_from_the_engine_and_never_runs_a_s
             a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
         assert not [m for m in modules if m.startswith("app.engine")], (name, modules)
         assert "shell=True" not in source and "os.system" not in source and "kubectl" not in source
+
+
+# --- several workers at once (the Failure lab) ----------------------------------------------------------------------------------
+
+def armed_both(docker, tmp_path):
+    fault = injector(docker, tmp_path)
+    for node in (f"{CLUSTER}-worker", f"{CLUSTER}-worker2"):
+        fault.arm(grant(), plan_digest=DIGEST, target=TARGET, failed_node=node)
+    return fault
+
+
+def test_two_workers_are_stopped_together_each_with_its_own_record_and_both_can_be_restored(tmp_path):
+    docker = FakeDocker()
+    fault = armed_both(docker, tmp_path)
+
+    stopped = fault.inject_together([f"{CLUSTER}-worker", f"{CLUSTER}-worker2"])
+
+    assert stopped == [f"{CLUSTER}-worker", f"{CLUSTER}-worker2"] and docker.verbs().count("kill") == 2
+    assert sorted(r["container"] for r in pending_records(tmp_path / "recovery")) == [f"{CLUSTER}-worker", f"{CLUSTER}-worker2"]
+    for node in stopped:
+        fault.restore(node)
+    assert pending_records(tmp_path / "recovery") == []
+
+
+def test_every_worker_needs_its_own_authorization_or_none_is_stopped(tmp_path):
+    docker = FakeDocker()
+    fault = armed(docker, tmp_path)                                         # armed for worker only
+
+    with pytest.raises(FaultRefused) as raised:
+        fault.inject_together([f"{CLUSTER}-worker", f"{CLUSTER}-worker2"])
+
+    assert raised.value.code == "NOT_ARMED" and docker.verbs().count("kill") == 0
+
+
+def test_a_pending_record_of_an_earlier_failure_still_blocks_a_simultaneous_one(tmp_path):
+    docker = FakeDocker()
+    armed(docker, tmp_path).inject(f"{CLUSTER}-worker")                    # an earlier stop, never restored
+
+    with pytest.raises(FaultRefused) as raised:
+        armed_both(docker, tmp_path).inject_together([f"{CLUSTER}-worker", f"{CLUSTER}-worker2"])
+
+    assert raised.value.code == "RECOVERY_PENDING" and docker.verbs().count("kill") == 1
+
+
+def test_the_same_node_named_twice_is_stopped_once(tmp_path):
+    docker = FakeDocker()
+    fault = armed(docker, tmp_path)
+
+    assert fault.inject_together([f"{CLUSTER}-worker", f"{CLUSTER}-worker"]) == [f"{CLUSTER}-worker"] and docker.verbs().count("kill") == 1

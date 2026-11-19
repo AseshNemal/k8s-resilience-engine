@@ -31,6 +31,7 @@ PAGES = {
     "/components/workflows": ("workflows.html", "workflows", "Workflow dependencies"),
     "/components/deployments": ("deployments.html", "deployments", "Deployment topology"),
     "/components/failure-impacts": ("failure-impacts.html", "failure-impacts", "Failure impact"),
+    "/components/fail-a-node": ("fail-a-node.html", "fail-a-node", "Fail a node"),
     "/components/recommendations": ("recommendations.html", "recommendations", "Recommendations"),
 }
 # The app's navigation labels are Title Case; Docker Desktop uses sentence case.

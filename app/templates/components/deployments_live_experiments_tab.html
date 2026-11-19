@@ -3,10 +3,18 @@
 <div class="tab-pane" id="tab-live-experiments" role="tabpanel" aria-labelledby="tab-btn-live-experiments" hidden>
     <div class="tab-pane__header">
         <div>
-            <h3 class="tab-pane__title">What happened when we really disrupted the cluster?</h3>
-            <p class="tab-pane__desc">Pick an experiment to see where the pods were before and after a real Kubernetes action.</p>
+            <h3 class="tab-pane__title">What happened when a worker failed on your cluster?</h3>
+            <p class="tab-pane__desc">Node failures that were run on the connected cluster and recorded by this app, with what the model predicted for each.</p>
         </div>
     </div>
+
+    {# Filled by cluster-experiments.js from GET /api/recommendations/cluster-experiments: this cluster's own records only. #}
+    <div data-role="ce-experiments" aria-live="polite"><p class="cs-recorded__wait">Reading the experiments recorded on this cluster…</p></div>
+
+    {# The recordings bundled with the app. Real runs, but of another cluster, so they sit apart and closed. #}
+    <details class="cs-fold" data-role="recorded-fold">
+    <summary>Research results recorded earlier on a Kind test cluster (not your cluster)</summary>
+    {% include "partials/recorded_evidence.html" %}
 
     {# How much was run for the workload on show, counted from its stored results #}
     <dl class="exp-scale" data-role="live-exp-scale" hidden></dl>
@@ -136,5 +144,6 @@
                 </div>
             </div>
         </div>
+    </details>
     </details>
 </div>

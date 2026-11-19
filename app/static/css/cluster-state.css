@@ -1,0 +1,73 @@
+/* Connection state: the header chip, the "connect your cluster" panel, the offline banner and the label on saved records. */
+.cs-chip { white-space: nowrap; }
+.cs-chip--offline::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--color-warning); display: inline-block; margin-right: 6px; }
+.cs-chip--live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); display: inline-block; margin-right: 6px; }
+
+.cs-panel { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-lg); padding: var(--space-lg); border: 1px dashed var(--color-border); border-radius: var(--radius-large); background: var(--color-surface); }
+.cs-panel__text { flex: 1 1 280px; min-width: 0; display: grid; gap: var(--space-sm); }
+.cs-panel__title { margin: 0; font-size: 18px; }
+.cs-panel__body { margin: 0; color: var(--color-text-muted); }
+.cs-panel__actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.cs-panel__actions a.primary-button { text-decoration: none; display: inline-flex; align-items: center; }
+.cs-panel__steps { margin: 0; padding-left: 20px; list-style: decimal; color: var(--color-text); font-size: 13px; display: grid; gap: 4px; }
+.cs-panel__still { margin: 0; padding: var(--space-sm) var(--space-md); border-radius: var(--radius-medium); background: var(--tint-blue-bg); color: var(--tint-blue-fg); font-size: 13px; }
+.cs-panel__details { font-size: 12px; color: var(--color-text-muted); }
+.cs-panel__details code { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.cs-art { width: 200px; max-width: 100%; height: auto; flex: none; }
+.cs-art__node { fill: var(--color-surface-soft); stroke: var(--color-border); stroke-width: 2; stroke-dasharray: 5 4; }
+.cs-art__pod { fill: none; stroke: var(--color-border); stroke-width: 2; stroke-dasharray: 3 3; }
+.cs-art__cable { stroke: var(--color-text-muted); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 2 6; }
+.cs-art__plug { fill: var(--color-warning); }
+
+.cs-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); padding: 10px var(--space-md); border-radius: var(--radius-medium); background: var(--tint-amber-bg); color: var(--tint-amber-fg); font-size: 13px; font-weight: 600; margin-bottom: var(--space-md); }
+.cs-banner__dot { font-size: 10px; }
+.cs-banner__text { flex: 1 1 240px; }
+.cs-banner__link, .cs-banner__btn { padding: 4px 12px; border-radius: 999px; border: 1px solid currentColor; background: transparent; color: inherit; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+
+.cs-saved { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--tint-amber-bg); color: var(--tint-amber-fg); border: 1px dashed currentColor; }
+.cs-saved--other { background: var(--tint-purple-bg); color: var(--tint-purple-fg); }
+.cs-saved--saved { background: var(--color-surface-soft); color: var(--color-text-muted); }
+
+/* While nothing is live, saved panels read as a record, not a dashboard. */
+body[data-cluster="not-connected"] .cs-dim-offline,
+body[data-cluster="unreachable"] .cs-dim-offline,
+body[data-cluster="access-denied"] .cs-dim-offline { opacity: 0.72; filter: grayscale(0.35); }
+
+/* Stored research results: visibly a record, never a live reading. */
+.cs-recorded { display: flex; gap: var(--space-md); align-items: flex-start; padding: var(--space-md); margin: 0 0 var(--space-md); border: 1px dashed var(--tint-purple-fg); border-radius: var(--radius-medium); background: var(--tint-purple-bg); color: var(--tint-purple-fg); font-size: 13px; }
+.cs-recorded p { margin: 2px 0 0; color: var(--color-text); }
+.cs-recorded__ico { font-size: 20px; }
+
+/* Experiments and Accuracy of the connected cluster. */
+.cs-fold { margin-top: var(--space-lg); border: 1px dashed var(--color-border); border-radius: var(--radius-medium); padding: var(--space-sm) var(--space-md); }
+.cs-fold > summary { cursor: pointer; font-weight: 600; color: var(--color-text-muted); font-size: 13px; }
+.cs-fold[open] > summary { margin-bottom: var(--space-md); }
+.ce-wrap { display: grid; gap: var(--space-md); }
+.ce-lead { margin: 0; font-weight: 600; }
+.ce-note { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.ce-sub { margin: 0; font-size: 14px; }
+.ce-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--space-md); }
+.ce-card { display: grid; gap: 6px; padding: var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-large); background: var(--color-surface); border-top: 3px solid var(--color-primary); min-width: 0; }
+.ce-card__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ce-card__meta, .ce-card__facts { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.ce-row { display: grid; gap: 4px; font-size: 13px; }
+.ce-row__label { color: var(--color-text-muted); font-size: 12px; }
+.ce-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ce-chip { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--color-surface-soft); }
+.ce-chip--down { background: var(--tint-red-bg); color: var(--tint-red-fg); }
+.ce-chip--predicted { background: var(--tint-purple-bg); color: var(--tint-purple-fg); }
+.ce-chip--ok { background: var(--tint-green-bg); color: var(--tint-green-fg); }
+.ce-pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--color-surface-soft); color: var(--color-text-muted); }
+.ce-pill--pass { background: var(--tint-green-bg); color: var(--tint-green-fg); }
+.ce-pill--warn { background: var(--tint-amber-bg); color: var(--tint-amber-fg); }
+.ce-empty { padding: var(--space-lg); border: 1px dashed var(--color-border); border-radius: var(--radius-large); background: var(--color-surface); }
+.ce-empty__title { margin: 0 0 4px; }
+.ce-empty__body { margin: 0 0 var(--space-sm); color: var(--color-text-muted); }
+.ce-empty__ways { margin: 0 0 var(--space-sm); padding-left: 18px; display: grid; gap: 6px; font-size: 13px; }
+.ce-link { font-weight: 700; }
+.ce-big { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-md); padding: var(--space-md); border-radius: var(--radius-large); background: var(--color-surface-soft); }
+.ce-big__value { font-size: 34px; line-height: 1; }
+.ce-big__text { flex: 1 1 240px; color: var(--color-text-muted); }
+.cs-recorded__wait { color: var(--color-text-muted); font-size: 13px; }
+
+.tab-nav-btn[hidden] { display: none; }

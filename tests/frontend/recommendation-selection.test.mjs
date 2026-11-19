@@ -33,15 +33,14 @@ function findings() {
     return { scope: 'deployment', currentDeployment: deployment, failedNode: 'w1', nodes: [{ node: 'w1' }, { node: 'w2' }], selectedCandidateId: 'first',
         note: 'Service predictions only; workflow survival unknown.', recommendations: candidates().map(c => ({ ...c, resourceCost: c.cost.resource,
             averageServiceExposureBefore: 50, averageServiceExposureAfter: c.id === 'second' ? 25 : 37.5,
-            afterPlacement: [{ service: c.service, node: 'w2', ready: 1 }] })) };
+            afterPlacement: [{ service: c.service, nodes: [{ node: 'w2', readyPods: 1 }] }] })) };
 }
 async function open({ findings: found = null, storage = store(), approval = () => null, run = null, post = null } = {}) {
     const doc = new Document();
     parseInto(doc, doc.body, read('templates/components/recommendations.html'));
     const calls = [], maps = [], dialogs = [], events = {};
     const window = { document: doc, localStorage: storage, sessionStorage: store(), location: { search: '' }, scrollY: 0,
-        addEventListener: (name, fn) => { events[name] = fn; }, ResilienceUi: { formatCodeLabel: x => x, updateLastRefreshed() {} },
-        ResiliencePlacement: { fromDeployment: d => d.services, draw: (_, value) => maps.push(value) } };
+        addEventListener: (name, fn) => { events[name] = fn; }, ResilienceUi: { formatCodeLabel: x => x, updateLastRefreshed() {} } };
     const fetch = async (url, init = {}) => {
         calls.push({ url, method: init.method || 'GET', body: init.body && JSON.parse(init.body) });
         let body = {}, status = 200;
@@ -59,8 +58,9 @@ async function open({ findings: found = null, storage = store(), approval = () =
     const timers = (fn, ms) => { const t = setTimeout(fn, ms); t.unref(); return t; };
     const sandbox = { window, document: doc, fetch, URLSearchParams, AbortController, setTimeout: timers, clearTimeout, console };
     vm.createContext(sandbox);
-    for (const name of ['api', 'connection-state', 'recommendation-render', 'recommendation-context', 'recommendation-journey', 'recommendation-action', 'recommendation-apply-test'])
+    for (const name of ['placement-map', 'api', 'connection-state', 'recommendation-render', 'recommendation-context', 'recommendation-journey', 'recommendation-action', 'recommendation-apply-test'])
         vm.runInContext(read(`static/js/${name}.js`), sandbox, { filename: name });
+    window.ResiliencePlacement.draw = (_, value) => maps.push(value);
     window.ResilienceAction.dialog = options => { dialogs.push(options); return Promise.resolve({ confirmed: false }); };
     vm.runInContext(read('static/js/components/recommendations.js'), sandbox);
     for (const fn of doc.listeners.DOMContentLoaded) fn();
@@ -97,7 +97,7 @@ test('workflow candidate switching synchronizes patch and map; a feasible unappr
     await t.select('second');
     assert.match(t.find('rec-dock').textContent, /ratings/);
     assert.match(t.find('rec-review').textContent, /name: ratings/);
-    assert.equal(t.maps.at(-1).after[0].name, 'ratings');
+    assert.equal(t.maps.at(-1).after[0].service, 'ratings');
     assert.equal(t.doc.querySelector('[data-action="apply"]'), null, 'first candidate approval is not reused');
     await t.select('preview');
     assert.match(t.find('rec-dock').textContent, /productpage/);

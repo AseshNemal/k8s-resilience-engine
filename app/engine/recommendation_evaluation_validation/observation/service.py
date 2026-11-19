@@ -16,6 +16,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from app.engine.recommendation_evaluation_validation.monitoring import watch
+from app.engine.recommendation_evaluation_validation.monitoring.sampler import Readers
+from app.engine.recommendation_evaluation_validation.monitoring.summary import summarize
+from app.engine.recommendation_evaluation_validation.monitoring.timeline import compact
 from app.engine.recommendation_evaluation_validation.observation.repository import (
     ObservationAlreadyActive, ObservationRepository,
 )
@@ -30,6 +34,7 @@ ACTIVE = frozenset({WATCHING, NODE_DOWN})
 
 EXPIRES_AFTER = timedelta(hours=2)
 MAX_TIMELINE = 200
+SHOWN_SAMPLES = 360          # the newest samples a read returns (about 30 minutes of checks); older ones stay stored
 
 
 class ObservationRefused(EvidenceError):
@@ -108,14 +113,19 @@ def compare(record: dict[str, Any]) -> dict[str, Any]:
 class FailureObservationService:
     def __init__(self, engine: Any, overview: Callable[[str | None], dict[str, Any]],
                  node_states: Callable[[], dict[str, dict[str, Any]]], cluster_uid: Callable[[], str | None], *,
-                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc), expires_after: timedelta = EXPIRES_AFTER) -> None:
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc), expires_after: timedelta = EXPIRES_AFTER,
+                 monitor_readers: Callable[[str | None, str | None], Readers | None] | None = None) -> None:
+        """``monitor_readers(namespace, request_url)``: the optional extra readings of a check (CPU and memory, warning events, pod
+        logs, a real request). Without it the timeline still records availability and node state, which every check reads anyway."""
         self.repo = ObservationRepository(engine)
+        self._monitor_readers = monitor_readers
         self._overview, self._node_states, self._cluster_uid = overview, node_states, cluster_uid
         self._clock, self._expires_after = clock, expires_after
 
     # -- lifecycle ---------------------------------------------------------------------------------------------------
 
-    def start(self, namespace: str | None, started_by: str | None = None, note: str | None = None) -> dict[str, Any]:
+    def start(self, namespace: str | None, started_by: str | None = None, note: str | None = None,
+              request_url: str | None = None) -> dict[str, Any]:
         """Fix the prediction and the starting state, then watch. One watch at a time."""
         if self.repo.active() is not None:
             raise ObservationRefused("OBSERVATION_ACTIVE", "A failure is already being watched. Stop it before starting another.")
@@ -135,6 +145,8 @@ class FailureObservationService:
             "startedBy": (started_by or "").strip() or None, "note": (note or "").strip() or None, "startedAt": _iso(started),
             "predicted": _predicted(snapshot), "predictionScope": snapshot.get("scope"),
             "baseline": {"services": _ready_services(snapshot), "nodes": baseline_nodes},
+            "requestUrl": (request_url or "").strip() or None,
+            "monitor": watch.new_timeline(started, _ready_services(snapshot)),
             "watched": watched, "failedNode": None, "multipleFailures": False, "observed": {"leastReady": {}},
             "timeline": [{"at": _iso(started), "kind": "started", "detail": f"Watching {', '.join(watched)}."}],
             "reads": {"ok": 1, "failed": 0, "lastError": None, "lastReadAt": _iso(started)}, "endedAt": None,
@@ -164,7 +176,7 @@ class FailureObservationService:
         return self._public(row)
 
     def history(self, limit: int = 10) -> list[dict[str, Any]]:
-        return [self._public(row) for row in self.repo.history(limit=limit)]
+        return [self._public(row, samples=False) for row in self.repo.history(limit=limit)]
 
     # -- advancing ---------------------------------------------------------------------------------------------------
 
@@ -190,6 +202,7 @@ class FailureObservationService:
             return self._unreadable(row, getattr(error, "code", type(error).__name__), "same")
         reads = {**row["reads"], "ok": row["reads"]["ok"] + 1, "lastError": None, "lastReadAt": _iso(now)}
         timeline = list(row["timeline"])
+        marks: list[tuple[str, str]] = []
         status, failed, multiple = row["status"], row["failedNode"], row["multipleFailures"]
         least = dict(row["observed"]["leastReady"])
         nodes, services = _ready_nodes(snapshot, states), _ready_services(snapshot)
@@ -198,6 +211,7 @@ class FailureObservationService:
         if status == WATCHING and down:
             failed, status = down[0], NODE_DOWN
             timeline.append({"at": _iso(now), "kind": "node-not-ready", "node": failed, "detail": f"{failed} is no longer Ready."})
+            marks.append(("node-not-ready", failed))
             multiple = len(down) > 1
         elif status == NODE_DOWN:
             if len([n for n in down if n != failed]) and not multiple:
@@ -207,6 +221,7 @@ class FailureObservationService:
             if nodes.get(failed) is True:
                 status = RECOVERED
                 timeline.append({"at": _iso(now), "kind": "node-ready", "node": failed, "detail": f"{failed} is Ready again."})
+                marks.append(("node-ready", failed))
         if status in (NODE_DOWN, RECOVERED) and row["status"] != RECOVERED:
             for service, ready in services.items():          # the fewest ready replicas seen while the node was down
                 before = least.get(service)
@@ -215,20 +230,42 @@ class FailureObservationService:
                     if row["baseline"]["services"].get(service, 0) > 0 and ready < row["baseline"]["services"][service]:
                         timeline.append({"at": _iso(now), "kind": "service-replicas-lower", "service": service,
                                          "detail": f"{service}: {ready} of {row['baseline']['services'][service]} replicas ready."})
-        changes = {"reads": reads, "clusterMatch": "same", "failedNode": failed, "multipleFailures": multiple, "observed": {"leastReady": least},
+        started = datetime.fromisoformat(row["startedAt"])
+        monitor = self._measure(row, started, now, services, nodes, marks)
+        if status == RECOVERED:
+            monitor = watch.finish(monitor, started=started, now=now)
+        changes = {"monitor": monitor, "reads": reads, "clusterMatch": "same", "failedNode": failed, "multipleFailures": multiple, "observed": {"leastReady": least},
                    "timeline": timeline[-MAX_TIMELINE:]}
         if status == RECOVERED:
             changes["endedAt"] = _iso(now)
         return self._save(row, status, changes)
 
+    def _measure(self, row: dict[str, Any], started: datetime, now: datetime, ready: dict[str, int] | None,
+                 nodes: dict[str, bool | None] | None, marks: list[tuple[str, str]]) -> dict[str, Any] | None:
+        """One more sample on the watch's timeline. The timeline is extra evidence: if recording it fails, the watch itself goes on."""
+        try:
+            readers = None
+            if ready is not None and self._monitor_readers is not None:
+                try:
+                    readers = self._monitor_readers(row["namespace"] or None, row.get("requestUrl"))
+                except Exception:      # noqa: BLE001  (no extra readers this time: availability and nodes are still recorded)
+                    readers = None
+            return watch.record(row.get("monitor"), started=started, now=now, ready=ready, nodes=nodes, readers=readers,
+                                since_iso=_iso(started), marks=marks)
+        except Exception:      # noqa: BLE001
+            return row.get("monitor")
+
     def _unreadable(self, row: dict[str, Any], code: str, match: str) -> dict[str, Any]:
         reads = {**row["reads"], "failed": row["reads"]["failed"] + 1, "lastError": code}
-        return self._save(row, row["status"], {"reads": reads, "clusterMatch": match})
+        # The cluster could not be read at this check: that moment goes on the timeline as unknown, never as healthy.
+        monitor = self._measure(row, datetime.fromisoformat(row["startedAt"]), self._clock(), None, None, [])
+        return self._save(row, row["status"], {"reads": reads, "clusterMatch": match, "monitor": monitor})
 
     def _finish(self, row: dict[str, Any], status: str, kind: str, detail: str) -> dict[str, Any]:
         now = self._clock()
         timeline = [*row["timeline"], {"at": _iso(now), "kind": kind, "detail": detail}][-MAX_TIMELINE:]
-        return self._save(row, status, {"timeline": timeline, "endedAt": _iso(now)})
+        monitor = watch.finish(row.get("monitor"), started=datetime.fromisoformat(row["startedAt"]), now=now)
+        return self._save(row, status, {"timeline": timeline, "endedAt": _iso(now), "monitor": monitor})
 
     def _save(self, row: dict[str, Any], status: str, changes: dict[str, Any]) -> dict[str, Any]:
         keep = {k: v for k, v in row.items() if k not in ("observationId", "status", "namespace", "createdAt", "updatedAt")}
@@ -238,8 +275,14 @@ class FailureObservationService:
                 "createdAt": row["createdAt"]}
 
     @staticmethod
-    def _public(row: dict[str, Any]) -> dict[str, Any]:
-        return {**row, "comparison": compare(row), "active": row["status"] in ACTIVE,
+    def _public(row: dict[str, Any], *, samples: bool = True) -> dict[str, Any]:
+        """The record for the page. ``samples=False`` (the history list) keeps the measured summary and leaves the samples out."""
+        stored = row.get("monitor")
+        monitor = None
+        if stored and stored.get("samples"):
+            monitor = {"evidence": "MEASURED", "summary": summarize(stored), "timeline": compact(stored, last=SHOWN_SAMPLES) if samples else None,
+                       "checkEveryS": watch.INTERVAL_S, "requests": bool(row.get("requestUrl"))}
+        return {**{k: v for k, v in row.items() if k != "monitor"}, "monitor": monitor, "comparison": compare(row), "active": row["status"] in ACTIVE,
                 "limits": ["This app stopped nothing: the failure, if any, was caused by the developer.",
                            "Service readiness is read from the cluster when asked. Between two reads a state can be missed, "
                            "and a stopped node's pods can stay Ready until Kubernetes marks them NotReady.",

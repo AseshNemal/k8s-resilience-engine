@@ -236,6 +236,15 @@ class LoopRepository:
                      "status": r.status, "experimentId": r.experiment_id, "outcome": r.outcome, "durationS": r.duration_s,
                      "startedAt": _iso(r.started_at), "finishedAt": _iso(r.finished_at)} for r in rows]
 
+    def experiment_timeline(self, run_key: str, kind: str, candidate_id: str | None, worker: str, repeat: int) -> dict[str, Any] | None:
+        """The measured timeline stored with one finished experiment, or None when there is none."""
+        with self._session() as session:
+            row = session.scalars(select(ValidationLoopExperimentRecord).where(
+                ValidationLoopExperimentRecord.run_key == run_key, ValidationLoopExperimentRecord.kind == kind,
+                ValidationLoopExperimentRecord.candidate_id == candidate_id, ValidationLoopExperimentRecord.worker == worker,
+                ValidationLoopExperimentRecord.repeat == repeat)).first()
+            return None if row is None or not row.outcome else row.outcome.get("timeline")
+
     def observed_durations(self, *, limit: int = 50) -> list[float]:
         """Durations of experiments that actually ran to a verdict (any past run), for estimates. Empty when none did."""
         with self._session() as session:

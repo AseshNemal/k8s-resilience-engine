@@ -1,0 +1,51 @@
+/* Pictures of recommendations: nodes as boxes, ready replicas as coloured squares, the failed node broken. */
+.rv-card { margin: 0; display: grid; gap: var(--space-sm); }
+.rv-panes { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: var(--space-sm); align-items: center; }
+@media (max-width: 720px) { .rv-panes { grid-template-columns: 1fr; } .rv-arrow { transform: rotate(90deg); justify-self: center; } }
+.rv-pane { display: grid; gap: 6px; padding: var(--space-sm); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface-soft); min-width: 0; }
+.rv-pane--simulated { border-style: dashed; background: var(--color-surface); }
+.rv-pane__head { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 13px; }
+.rv-tag { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+.rv-tag--observed { background: var(--tint-teal-bg); color: var(--tint-teal-fg); }
+.rv-tag--simulated { background: var(--tint-purple-bg); color: var(--tint-purple-fg); }
+.rv-arrow { font-size: 26px; color: var(--color-primary); font-weight: 700; }
+.rv-empty { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+
+.rv-scene { width: 100%; height: auto; display: block; }
+.rv-node__box { fill: var(--color-surface); stroke: var(--color-border); stroke-width: 1.5; }
+.rv-node__name { fill: var(--color-text-muted); font-size: 11px; font-weight: 600; }
+.rv-node--failed .rv-node__box { fill: var(--tint-red-bg); stroke: var(--color-danger); stroke-dasharray: 5 4; stroke-width: 2; }
+.rv-node--failed .rv-node__name { fill: var(--tint-red-fg); }
+.rv-pod { fill: hsl(var(--rv-hue, 210) 70% 52%); stroke: hsl(var(--rv-hue, 210) 70% 38%); stroke-width: 1; }
+.rv-pod--sim { fill: hsl(var(--rv-hue, 210) 70% 52% / 0.28); stroke-dasharray: 3 2; stroke-width: 1.5; }
+.rv-pod--ctx { fill: var(--color-border); stroke: var(--color-text-muted); stroke-width: 0.5; opacity: 0.7; }
+.rv-pod--lost { opacity: 0.45; }
+.rv-cross { stroke: var(--color-danger); stroke-width: 2.5; stroke-linecap: round; opacity: 0.85; }
+
+.rv-chips { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rv-chip { display: flex; gap: 6px; align-items: center; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: var(--radius-small); background: var(--color-surface); border: 1px solid var(--color-border); }
+.rv-chip--down { background: var(--tint-red-bg); color: var(--tint-red-fg); border-color: transparent; }
+.rv-chip--degraded { background: var(--tint-amber-bg); color: var(--tint-amber-fg); border-color: transparent; }
+.rv-chip--ok { background: var(--tint-green-bg); color: var(--tint-green-fg); border-color: transparent; }
+.rv-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--color-text-muted); }
+.rv-legend li { display: inline-flex; align-items: center; gap: 5px; }
+.rv-legend__dot { width: 11px; height: 11px; border-radius: 3px; background: hsl(var(--rv-hue, 210) 70% 52%); display: inline-block; }
+.rv-note { font-size: 12px; color: var(--color-text-muted); }
+
+.rv-strategy { display: flex; gap: var(--space-sm); align-items: center; margin: 4px 0; }
+.rv-strategy > div { display: grid; }
+.rv-strategy__name { font-size: 13px; }
+.rv-strategy__what { font-size: 12px; color: var(--color-text-muted); }
+.rv-icon { width: 30px; height: 30px; padding: 5px; flex: none; border-radius: var(--radius-medium); background: var(--tint-blue-bg); }
+.rv-icon__path { stroke: var(--tint-blue-fg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Where to begin: three steps under the page header. */
+.assess-guide { list-style: none; margin: 0 0 var(--space-md); padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-sm); }
+.assess-guide__step { display: flex; gap: 10px; align-items: center; padding: 10px var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface); }
+.assess-guide__step > span:last-child { display: grid; }
+.assess-guide__step em { font-style: normal; font-size: 12px; color: var(--color-text-muted); }
+.assess-guide__n { width: 26px; height: 26px; flex: none; display: inline-grid; place-items: center; border-radius: 50%; background: var(--color-primary); color: #fff; font-weight: 700; font-size: 13px; }
+
+/* A recommendation card with a picture uses the full width: title, what it does, the picture, then the numbers and actions. */
+.assess-option--visual { display: block; }
+.assess-option--visual > * + * { margin-top: var(--space-sm); }

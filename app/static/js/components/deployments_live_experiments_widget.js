@@ -481,7 +481,7 @@ window.DeploymentsLiveExperimentsWidget = (function () {
         const configs = new Set(conds.map((c) => c.config)).size;
         const reps = conds.length ? Math.max(...conds.map((c) => c.runs)) : 0;
         return [
-            { value: data.total_runs, label: "real runs on a live cluster" },
+            { value: data.total_runs, label: "recorded runs on a test cluster" },
             { value: scenarios, label: "disruptions" },
             { value: configs, label: "placement configs" },
             { value: reps, label: "repetitions each" },

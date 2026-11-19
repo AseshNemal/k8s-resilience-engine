@@ -23,6 +23,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,9 @@ from app.engine.recommendation_evaluation_validation.live_pipeline import (
     evaluate_recommendation,
 )
 from app.engine.recommendation_evaluation_validation.live_scheduling_evidence import enrich_scheduling_facts, live_scheduling_evidence
+from app.engine.recommendation_evaluation_validation.monitoring.episode import EpisodeMonitor
+from app.engine.recommendation_evaluation_validation.monitoring.readers import gateway_readers
+from app.engine.recommendation_evaluation_validation.monitoring.sampler import TimelineSampler
 from app.engine.recommendation_evaluation_validation.validation.cluster_identity import DisposableClusterDesignation
 from app.engine.recommendation_evaluation_validation.validation.kubernetes_executor import KubernetesValidationExecutor
 from app.engine.recommendation_evaluation_validation.validation.cluster_gateway import fresh_restore_snapshot
@@ -187,8 +191,11 @@ class ClusterProofEnvironment:
                  probe_transport: httpx.BaseTransport | None = None, sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic, executor_options: dict[str, Any] | None = None,
                  recovery_timeout_s: float = 300.0, poll_s: float = 2.0, workflow_basis: str = "FROZEN",
-                 writes_enabled: bool | None = None) -> None:
+                 writes_enabled: bool | None = None, monitor: bool | None = None) -> None:
         self.config, self.kind = config, config.kind
+        # The measured timeline of each failure. On by default for a real cluster (no injected transport); a test double must ask for
+        # it, because the sampler runs on a real thread with a real clock and a double's scripted sleep would make it spin.
+        self.monitor_enabled = (transport is None) if monitor is None else monitor
         self.runner: Runner = runner or DockerEngineRunner()
         self._transport, self._probe_transport = transport, probe_transport
         self.sleep, self._clock, self._executor_options = sleep, clock, dict(executor_options or {})
@@ -276,6 +283,19 @@ class ClusterProofEnvironment:
                 options["probe_factory"] = ProbeFactory(probe_spec(probe, "validation-loop"), self._probe_transport, self._clock)
             return KubernetesValidationExecutor(gateway, injector, designation, research_override=research, writes_enabled=self.writes_enabled,
                                                 sleep=self.sleep, clock=self._clock, on_restore_points=on_restore_points, **options)
+        return factory
+
+    def monitor_factory(self, grant: RunGrant, probe: ProbeDefinition | None, settings: Any) -> Callable[..., Any] | None:
+        """Episode monitors for a run: one read-only gateway, and (with a workflow check) real requests to the application. Writes nothing."""
+        if not self.monitor_enabled:
+            return None
+        gateway = self._gateway(writes=False)
+
+        def factory(key: Any, on_update: Callable[[dict[str, Any]], None]) -> EpisodeMonitor:
+            probe_instance = ProbeFactory(probe_spec(probe, "monitor"), self._probe_transport, self._clock)() if probe is not None else None
+            readers = gateway_readers(gateway, grant.namespace, probe=probe_instance, since_iso=datetime.now(timezone.utc).isoformat())
+            sampler = TimelineSampler(readers, interval_s=settings.monitor_interval_s, on_update=on_update)
+            return EpisodeMonitor(sampler, pre_roll=settings.monitor_pre_roll, tail_max_s=settings.monitor_tail_max_s)
         return factory
 
     def arm(self, grant: RunGrant, authority: GrantAuthority) -> Callable[[Authorization, str, str], None]:

@@ -77,7 +77,9 @@ class LoopPlan:
     riskiest_worker: str | None
     skipped_candidates: list[dict[str, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    eligible_workers: tuple[str, ...] = ()
     workflow_evidence: dict[str, Any] = field(default_factory=dict)
+    lab: dict[str, Any] | None = None       # the Failure lab: the chosen workers, what stopping them does to each service
 
     @property
     def blocking(self) -> list[Issue]:
@@ -104,7 +106,8 @@ class LoopPlan:
                 "acknowledgementsNeeded": self.acknowledgements_needed,
                 "faultReadiness": self.readiness.to_dict() if self.readiness else None,
                 "issues": [i.to_dict() for i in self.issues], "canApprove": self.can_approve, "estimate": self.estimate,
-                "riskiestWorker": self.riskiest_worker, "planDigest": self.digest, "notes": self.notes}
+                "eligibleWorkers": list(self.eligible_workers), "riskiestWorker": self.riskiest_worker, "planDigest": self.digest, "notes": self.notes,
+                "lab": self.lab}
 
 
 def select_candidates(live: LiveRecommendation, workflow: WorkflowGraph, workers: list[str], limit: int

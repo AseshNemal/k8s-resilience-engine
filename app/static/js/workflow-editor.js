@@ -259,8 +259,10 @@
     const reviewHelp = q("recommendation-review-help");
     if (reviewHelp) reviewHelp.hidden = !fromRecommendations;
     const recommendationsLink = q("recommendations-return");
-    if (recommendationsLink && handoff.get("namespace"))
-        recommendationsLink.setAttribute("href", `/components/recommendations?namespace=${encodeURIComponent(handoff.get("namespace"))}`);
+    if (recommendationsLink && handoff.get("namespace")) {
+        const base = recommendationsLink.getAttribute("href");
+        recommendationsLink.setAttribute("href", `${base}?namespace=${encodeURIComponent(handoff.get("namespace"))}`);
+    }
     const BASE = "/api/workflows/management",
         model = createModel();
     const labels = {

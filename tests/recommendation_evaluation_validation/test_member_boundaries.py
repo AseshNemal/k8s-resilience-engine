@@ -57,6 +57,11 @@ AUTHORIZED_INTEGRATION_PATHS = {
     # The product Assessment is the integrated entry point, so its router is mounted in app/main.py. That one file is
     # shared, so it is allowed ONLY for the two lines below (see test_main_changes_only_mount_the_assessment_router).
     "app/main.py",
+    # 2026-11-19 request to stop stored research results reading as live evidence: Member 2's Experiments and Accuracy tabs now say
+    # they are RECORDED results from a test cluster, with a shared "not your cluster, not live" note. Wording only; no figure or
+    # algorithm changed.
+    "app/static/js/components/deployments_academic_widget.js", "app/static/js/components/deployments_live_experiments_widget.js",
+    "app/templates/components/deployments.html", "app/templates/components/deployments_live_experiments_tab.html",
 }
 
 # The only lines the integration may add to app/main.py (an import and the router mount). Anything else needs team sign-off.

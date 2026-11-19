@@ -129,7 +129,7 @@ function carryQueryString() {
 // a known local page name, and always use the current SDK query string when restoring it.
 function restoreNavigation() {
     if (!window.ddClient || !window.document || !window.location.search) return;
-    const pages = ["index.html", "workflows.html", "deployments.html", "failure-impacts.html", "recommendations.html", "connect.html"];
+    const pages = ["index.html", "workflows.html", "deployments.html", "failure-impacts.html", "fail-a-node.html", "recommendations.html", "connect.html"];
     const key = "resilience.extension.page.v1";
     const current = window.location.pathname.split("/").pop();
     if (!pages.includes(current)) return;
