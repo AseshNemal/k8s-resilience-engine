@@ -477,9 +477,50 @@ package.
   useful from the extension backend. Jaeger-dependent features report that Jaeger is unreachable.
 - The container healthcheck runs as root, which cannot enter the app-private socket directory, so it
   drops to the app user with `setpriv` (this was a bug in the first build: health stayed "starting").
-- Not ready for the Marketplace: `docker extension validate` still reports the missing icon URL,
-  screenshots, publisher URL, a multi-platform build, and that the tag must be semver (use one).
-  Only the host architecture was built.
+- Not in the Docker Marketplace. The beta is published to Docker Hub and installed by name (see "Beta from Docker Hub" below).
+  The labels `docker extension validate` requires (icon, publisher URL, screenshots, semver tag, multi-platform) are in the
+  Dockerfile; the icon and screenshots are loaded from this repository's `main` branch, so they appear only once those files are on `main`.
+
+## Beta from Docker Hub
+
+`0.1.0-beta.1` is the first public beta. It is the same extension this document describes, built for `linux/amd64` and `linux/arm64`
+(the host helper inside each image is built for the same architecture, so Intel and Apple-silicon Macs, Windows and Linux each get a
+matching one). It is **verified only on macOS (Apple silicon)**; the Windows and Linux builds compile and their logic is tested, but no real
+Windows or Linux machine has run them.
+
+**Install (testers):**
+
+```bash
+docker extension install aseshnemal/k8s-resilience-engine:0.1.0-beta.1
+# later versions:   docker extension update aseshnemal/k8s-resilience-engine:<new tag>
+# remove:           docker extension uninstall aseshnemal/k8s-resilience-engine
+```
+
+Needs Docker Desktop with extensions enabled (tested on 4.95.0) and Kubernetes enabled (Settings, Kubernetes). Because the beta is not in the Marketplace,
+**untick Settings, Extensions, "Allow only extensions distributed through the Docker Marketplace"** first, or Docker Desktop refuses the install (on a managed
+machine that setting may be locked by policy). Then open **Resilience Engine** in the sidebar and choose **Connect cluster**.
+What a tester should know before using it:
+
+- Reading the cluster is the default. **Apply**, **Reset** and **Fail a Node** change the cluster, and each asks first, naming exactly what will happen.
+  A node is stopped only on a run you approve, for a time you choose, and is restored afterwards (and after a restart of the backend).
+- The extension's role on the connected cluster is full access (`*/*/*`) so Apply and Reset can write; see "Security model".
+- The backend keeps the cluster credential and results in a Docker volume, not in the image. Nothing private is packaged in the image.
+- Fail a Node has been run for real once (one worker of the Docker Desktop cluster, ended early; the worker came back and nothing else changed). That is the only real evidence so far: start with one worker and a short hold.
+
+**Publish (maintainer).** The version is the tag; use semver (`0.1.0-beta.1`, then `0.1.0-beta.2`, and so on). Build from a clean commit so the
+image's revision label is a real commit:
+
+```bash
+docker login
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f extension/Dockerfile \
+  --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) --build-arg GIT_BRANCH=$(git branch --show-current) \
+  -t aseshnemal/k8s-resilience-engine:0.1.0-beta.1 --push .
+docker extension validate aseshnemal/k8s-resilience-engine:0.1.0-beta.1
+```
+
+`--push` is the step that publishes. A pre-release tag is never "latest" for the Hub page, so do not also push `:latest` until a stable release.
+`extension-manage` only recognises plain `X.Y.Z` tags, so it does not list or prune beta tags; install beta tags with the commands above.
 
 ## Verification status
 

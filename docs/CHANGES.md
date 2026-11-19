@@ -1,5 +1,16 @@
 # Changes other members should know about
 
+## 2026-11-19 (release): first public beta `0.1.0-beta.1` prepared for Docker Hub
+
+- `extension/Dockerfile` labels only: added the icon, publisher URL, additional URLs and screenshots labels that `docker extension validate` requires, and
+  a changelog that no longer says "not published". Screenshots are in `extension/screenshots/` (taken from the real Bookinfo cluster, read-only) and are
+  not copied into the image; the labels point at `main` on GitHub. No application, research logic, route or schema changed.
+- `docs/EXTENSION.md`: "Beta from Docker Hub" (tester install, limits, maintainer publish commands).
+- Product naming: the "Research Environment" badge and the sidebar "Project ID" footer are gone from every page (they were project-course labels), and the image vendor label is now "K8s Resilience Engine".
+  Feature names such as the Research view and the research approval tier are unchanged.
+- Checked against the installed beta: all pages load through the extension's own adapter with real cluster data; Fail a Node keeps its stop button disabled until the
+  "really stopped on my everyday cluster" box is ticked. One earlier real run (one worker, ended early, restored) is recorded in the app's own store.
+
 ## 2026-11-19 (later): Fail a Node follow-ups (Member 4)
 
 - **Custom time**: the hold time can be typed (seconds or minutes), validated as it is typed, and the server's bound is now 10 seconds to 30 minutes
